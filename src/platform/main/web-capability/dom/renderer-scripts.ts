@@ -34,7 +34,62 @@ export const RENDERER_SCRIPTS = {
   translateMount: 'renderer.translate-mount' as ScriptId,
   /** 翻译:暗色 color-scheme meta(零参数) */
   translateDarkMeta: 'renderer.translate-dark-meta' as ScriptId,
+
+  // ── 双开同步的「应用动作」(C 组,步 3)——⭐ 都带运行时值 ──
+  /** 按增量滚动(deltaY) */
+  syncScrollDelta: 'renderer.sync-scroll-delta' as ScriptId,
+  /** 滚到锚点元素(tag + index + offsetRatio) */
+  syncScrollAnchor: 'renderer.sync-scroll-anchor' as ScriptId,
+  /** 按百分比滚动(pctY) */
+  syncScrollPct: 'renderer.sync-scroll-pct' as ScriptId,
+  /** 同步点击(selector + 可选 toggleState) */
+  syncClick: 'renderer.sync-click' as ScriptId,
+  /** 同步输入(selector + value / checked) */
+  syncInput: 'renderer.sync-input' as ScriptId,
+  /** 同步表单提交(selector + formData) */
+  syncSubmit: 'renderer.sync-submit' as ScriptId,
+  /** 选区高亮(blocks) */
+  syncHighlight: 'renderer.sync-highlight' as ScriptId,
+  /** 输入框回车(写值 + 派发事件 + 提交表单) */
+  syncInputEnter: 'renderer.sync-input-enter' as ScriptId,
 } as const;
+
+/**
+ * ⚠️⚠️ **数字必须用 `Number.isFinite` 校验,不能只看 typeof** ——
+ * `JSON.stringify(NaN)` === `'null'`,浏览器把 `scrollBy(0, null)` 当 `0`,
+ * **静默滚了个寂寞而不报错**。2026-09-30 在 mail 那一刀实测过这个坑。
+ * ⭐ `JSON.stringify` 对数字**不是安全网**,挡坏数字只能靠校验。
+ *
+ * C 组的 deltaY / pctY 都来自滚动事件回调,NaN 是真实可能。
+ */
+function requireFiniteNumber(params: ScriptParams, key: string): number {
+  const v = params[key];
+  if (typeof v !== 'number' || !Number.isFinite(v)) {
+    throw new Error(
+      `[web.dom] ${key} 必须是有限数字,收到 ${typeof v}: ${String(v)}`
+      + '(NaN/Infinity 经 JSON.stringify 变 null,浏览器当 0 → 静默做错事)',
+    );
+  }
+  return v;
+}
+
+/** 取一个 JSON 串参数(调用方已 stringify 过的结构) */
+function requireJson(params: ScriptParams, key: string): string {
+  const v = params[key];
+  if (typeof v !== 'string' || v.length === 0) {
+    throw new Error(`[web.dom] ${key} 必须是非空 JSON 字符串,收到 ${typeof v}`);
+  }
+  return v;
+}
+
+/** 取一个字符串参数 */
+function requireStr(params: ScriptParams, key: string): string {
+  const v = params[key];
+  if (typeof v !== 'string') {
+    throw new Error(`[web.dom] ${key} 必须是 string,收到 ${typeof v}`);
+  }
+  return v;
+}
 
 /** 缺参数就抛,不静默用默认值(那会把「忘了传」变成静默错误) */
 function requireLang(params: ScriptParams): string {
@@ -124,6 +179,221 @@ export const RENDERER_SCRIPT_DEFINITIONS: readonly RegisteredScript[] = [
         document.documentElement.style.colorScheme = 'dark';
       })();
     `,
+  },
+  {
+    id: RENDERER_SCRIPTS.syncInputEnter,
+    purpose: '同步:输入框回车 —— 写值 + 派发 input/change/keydown + 提交表单',
+    build: (p) => {
+      const selector = requireStr(p, 'selector');
+      const value = requireStr(p, 'value');
+      return `
+      (function() {
+        window.__krigInputLock = true;
+        try {
+          var el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return;
+          el.value = ${JSON.stringify(value)};
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+          el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          var form = el.closest('form');
+          if (form) {
+            if (form.requestSubmit) form.requestSubmit();
+            else form.submit();
+          }
+        } catch(e) {}
+        setTimeout(function() { window.__krigInputLock = false; }, 200);
+      })();
+    `;
+    },
+  },
+  // ── C 组:双开同步的「应用动作」(步 3)──
+  // ⭐ 脚本体逐字搬自 sync-driver 的 apply* 方法,**一个字没改**;
+  //    只把 `${运行时值}` 换成绑定值。
+  {
+    id: RENDERER_SCRIPTS.syncScrollDelta,
+    purpose: '同步:按增量滚动(deltaY)',
+    build: (p) => {
+      const deltaY = requireFiniteNumber(p, 'deltaY');
+      return `
+      (function() {
+        var D = ${JSON.stringify(deltaY)};
+        var targetY = Math.round(window.scrollY + D);
+        window.__krigProgramScrollY = targetY;
+        window.scrollBy(0, D);
+      })();
+    `;
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.syncScrollAnchor,
+    purpose: '同步:滚到锚点元素(tag + index + offsetRatio)',
+    build: (p) => {
+      const anchorJson = requireJson(p, 'anchor');
+      return `
+      (function() {
+        try {
+          var anchor = ${anchorJson};
+          var els = document.getElementsByTagName(anchor.tag);
+          var el = els[anchor.index];
+          if (el) {
+            var rect = el.getBoundingClientRect();
+            var targetY = window.scrollY + rect.top + (anchor.offsetRatio * rect.height);
+            window.__krigSmoothScrolling = true;
+            window.scrollTo({ top: targetY, behavior: 'smooth' });
+            setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
+          }
+        } catch(e) {}
+      })();
+    `;
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.syncScrollPct,
+    purpose: '同步:按百分比滚动(pctY)',
+    build: (p) => {
+      const pctY = requireFiniteNumber(p, 'pctY');
+      return `
+      (function() {
+        var P = ${JSON.stringify(pctY)};
+        var maxY = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+        window.__krigSmoothScrolling = true;
+        window.scrollTo({ top: P * maxY, behavior: 'smooth' });
+        setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
+      })();
+    `;
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.syncClick,
+    purpose: '同步:点击某元素(带 toggleState 防重复开合)',
+    build: (p) => {
+      const selector = requireStr(p, 'selector');
+      const toggleState = requireJson(p, 'toggleState');   // 'null' 也是合法 JSON
+      return `
+      (function() {
+        window.__krigClickLock = true;
+        try {
+          var el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return;
+          var toggleState = ${toggleState};
+          var shouldClick = true;
+          if (toggleState) {
+            if (toggleState.attr === 'aria-expanded' && toggleState.value !== null) {
+              var toggle = el.closest ? (el.closest('[aria-expanded]') || el) : el;
+              var current = toggle.getAttribute('aria-expanded');
+              if (current === toggleState.value) shouldClick = false;
+            } else if (toggleState.controlledSelector && toggleState.visible !== undefined) {
+              var controlled = document.querySelector(toggleState.controlledSelector);
+              if (controlled) {
+                var style = window.getComputedStyle(controlled);
+                var isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
+                if (isVisible === toggleState.visible) shouldClick = false;
+              }
+            }
+          }
+          if (shouldClick) el.click();
+        } catch(e) {}
+        setTimeout(function() { window.__krigClickLock = false; }, 100);
+      })();
+    `;
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.syncInput,
+    purpose: '同步:写输入框 / select / contenteditable 的值',
+    build: (p) => {
+      const selector = requireStr(p, 'selector');
+      const value = requireStr(p, 'value');
+      /** ⚠️ checked 是布尔 —— 单独校验,不混进数字那条 */
+      const checkedRaw = p['checked'];
+      if (typeof checkedRaw !== 'boolean') {
+        throw new Error(`[web.dom] sync-input 的 checked 必须是 boolean,收到 ${typeof checkedRaw}`);
+      }
+      return `
+      (function() {
+        window.__krigInputLock = true;
+        try {
+          var el = document.querySelector(${JSON.stringify(selector)});
+          if (!el) return;
+          var tag = el.tagName.toLowerCase();
+          if (tag === 'input' || tag === 'textarea') {
+            if (el.type === 'checkbox' || el.type === 'radio') {
+              el.checked = ${JSON.stringify(checkedRaw)};
+            } else {
+              el.value = ${JSON.stringify(value)};
+            }
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (tag === 'select') {
+            el.value = ${JSON.stringify(value)};
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (el.isContentEditable) {
+            el.textContent = ${JSON.stringify(value)};
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          }
+        } catch(e) {}
+        setTimeout(function() { window.__krigInputLock = false; }, 50);
+      })();
+    `;
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.syncSubmit,
+    purpose: '同步:回填表单并提交',
+    build: (p) => {
+      const selector = requireStr(p, 'selector');
+      const formData = requireJson(p, 'formData');
+      return `
+      (function() {
+        window.__krigInputLock = true;
+        try {
+          var form = document.querySelector(${JSON.stringify(selector)});
+          if (!form) return;
+          var formData = ${formData};
+          for (var name in formData) {
+            var input = form.querySelector('[name="' + name + '"], #' + name);
+            if (!input) continue;
+            if (input.type === 'checkbox' || input.type === 'radio') {
+              input.checked = formData[name].checked;
+            } else {
+              input.value = formData[name].value;
+            }
+          }
+          form.submit();
+        } catch(e) {}
+        setTimeout(function() { window.__krigInputLock = false; }, 200);
+      })();
+    `;
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.syncHighlight,
+    purpose: '同步:给对面选中的块加高亮',
+    build: (p) => {
+      const blocks = requireJson(p, 'blocks');
+      return `
+      (function() {
+        if (!document.getElementById('__krigHighlightStyle')) {
+          var style = document.createElement('style');
+          style.id = '__krigHighlightStyle';
+          style.textContent = '.__krig-highlight { background-color: rgba(138,180,248,0.15) !important; outline: 2px solid rgba(138,180,248,0.5) !important; outline-offset: 2px !important; border-radius: 4px !important; }';
+          document.head.appendChild(style);
+        }
+        var old = document.querySelectorAll('.__krig-highlight');
+        for (var i = 0; i < old.length; i++) old[i].classList.remove('__krig-highlight');
+        var blocks = ${blocks};
+        if (!blocks) return;
+        for (var j = 0; j < blocks.length; j++) {
+          try {
+            var els = document.getElementsByTagName(blocks[j].tag);
+            var el = els[blocks[j].index];
+            if (el) el.classList.add('__krig-highlight');
+          } catch(e) {}
+        }
+      })();
+    `;
+    },
   },
 ];
 
