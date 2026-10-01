@@ -84,6 +84,16 @@ import '@views/mail';   // Mail View self-register(NavSide tab 📧 order=7;网�
  * 底层能力(采集/判断/备料)不在这里,工作台那条编排链不受影响。 */
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
+/**
+ * ⭐⭐ **X 模块的渲染进程入口 —— 就这一行。**
+ *
+ * ⚠️ X 是第一个**两个进程都要有入口**的模块:
+ * main 侧那行在 `main/index.ts`(push 语义页面表/锚点表给底座),
+ * 本行注册 view 与 navSide tab。
+ * 判据:**每个进程 ≤ 1 处,且必须是自注册行** ——
+ * 删 X = 删一个目录 + 删这两行。守卫 `tests/modules/x-module-detachable.test.ts`。
+ */
+import '@modules/x/renderer';
 import './app.css';
 
 // S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。

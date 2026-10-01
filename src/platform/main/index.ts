@@ -84,7 +84,7 @@ import { registerWebDomIpc } from './web-capability/wiring/ipc-dom';
  * 所以守卫 `tests/modules/x-module-detachable.test.ts` 钉住
  * 「X 目录之外认识 X 的地方 ≤ 1」,而那 1 处就是这里。
  */
-import '@modules/x';
+import '@modules/x/main';
 import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
 /** ⚠️ X 模块已彻底归零(2026-09-29 用户定)—— 接线一并摘掉,重建时重新接 */
 /** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */

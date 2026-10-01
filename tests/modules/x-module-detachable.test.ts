@@ -169,41 +169,54 @@ describe('⭐⭐ X 目录之外,认识 X 的地方 ≤ 1(那一行注册)', () =
     }
   });
 
-  it('⭐⭐ 引用处 ≤ 1 —— 删 X 只需删一个目录 + 删一行', () => {
+  it('⭐⭐ **每个进程** ≤ 1 处,且必须是自注册行', () => {
     /**
-     * ⚠️ 本条第一版写的是 `toHaveLength(0)` —— 那是 X **还没建**时的状态。
-     * 2026-10-01 X 模块落地,`main/index.ts` 多了那**唯一一行**
-     * `import '@modules/x'`,于是它当场变红。
-     * ⭐ 改成钉**原则本身**:≤ 1,且那一处必须是注册行。
+     * ── 判据的两次精确化(都记下来,免得被当成放宽)──
+     *
+     * ① 初版 `toHaveLength(0)` —— 那是 X **还没建**时的状态,X 一落地就红
+     * ② 改成「全仓 ≤ 1」—— 2026-10-01 又红:X 是第一个
+     *    **主进程与渲染进程都要有入口**的模块
+     *    (页面表要给 main 侧底座,view 注册只能在 renderer 跑;
+     *     别的 view 只有 renderer 一个入口,所以它们看起来是「一行」)。
+     *
+     * ⭐ 终版:**每个进程 ≤ 1 处**。删 X 仍是「删一个目录 + 删两行」——
+     * 原则未破,只是说清了它在两个进程里各有一行。
+     * ⚠️ 否决过「让 main 通过 IPC 通知 renderer 注册 view」:
+     * 宿主确实只剩一行,但多一层间接、与其它 view 做法不一致,
+     * 代价是多一条调试路径。
      */
     const refs = xReferrers();
-    expect(
-      refs.map((r) => `${r.path}  ←  ${r.hit}`),
-      '\n⭐ 原则(用户 2026-09-30):X 必须能「删一个目录 + 删一行注册」就卸载干净。\n'
-      + 'X 目录之外认识它的地方超过 1 处 —— 每多一处就多一个删不掉的点。\n'
-      + '改法:X 自带视图/IPC/repo/schema,启动时**推**给底座(registerPageTable 的模式),\n'
-      + '宿主只保留唯一一行 `import \'@modules/x\'`。\n'
-      + '⚠️ 别把它们加进白名单 —— 本仓的 KNOWN_DEBT 从来没有被清掉过。\n',
-    ).toHaveLength(refs.length === 0 ? 0 : 1);
+
+    /** ⭐ 按进程分组 —— `platform/renderer/` 与 `views/` 算渲染进程,其余算主进程 */
+    const sideOf = (p: string): 'renderer' | 'main' =>
+      /^src\/(platform\/renderer|views|capabilities|drivers|workspace|shell|slot)\//.test(p)
+        ? 'renderer' : 'main';
+
+    const byside: Record<string, { path: string; hit: string }[]> = { main: [], renderer: [] };
+    for (const r of refs) byside[sideOf(r.path)].push(r);
+
+    for (const [side, list] of Object.entries(byside)) {
+      expect(
+        list.map((r) => `${r.path}  ←  ${r.hit}`),
+        `\n⭐ 原则(用户 2026-09-30):X 必须能「删一个目录 + 删注册行」就卸载干净。\n`
+        + `**${side} 侧**认识 X 的地方超过 1 处 —— 每多一处就多一个删不掉的点。\n`
+        + '改法:X 自带视图/IPC/repo/schema,启动时**推**给底座(registerPageTable 的模式),\n'
+        + `宿主每个进程只保留唯一一行自注册 import。\n`
+        + '⚠️ 别把它们加进白名单 —— 本仓的 KNOWN_DEBT 从来没有被清掉过。\n',
+      ).toHaveLength(list.length === 0 ? 0 : 1);
+    }
 
     /**
-     * ⭐ 不止数量 —— 那一处必须是**副作用 import 的注册行**,
-     * 不能是「从 X 里拿东西」。
-     * ⚠️ 数字达标不代表没耦合:`import { something } from '@modules/x/...'`
+     * ⭐ 不止数量 —— 每一处都必须是**副作用 import 的自注册行**。
+     * ⚠️ 数字达标不代表没耦合:`import { a } from '@modules/x/...'`
      * 同样只有 1 处,但那是宿主在用 X 的内部实现。
      */
-    if (refs.length === 1) {
+    for (const r of refs) {
       expect(
-        refs[0].hit,
+        r.hit,
         `那一处不是自注册 import,而是在取 X 的内部实现 —— 宿主不该知道 X 有什么:\n  `
-        + `${refs[0].path}  ←  ${refs[0].hit}`,
-      /**
-       * ⚠️ `hit` 是**判据正则捕获的片段**,末尾那个引号被 lookahead 排除在外
-       * (`X_SEG` 用 `(?=['"])` 收尾)—— 所以这里不钉闭合引号,
-       * 只钉「以 `import '@modules/x` 开头」即可区分
-       * 自注册(`import '@modules/x'`)与取内部实现(`import { a } from '@modules/x/...'`)。
-       */
-      ).toMatch(/^import\s+['"]@modules\/x/);
+        + `${r.path}  ←  ${r.hit}`,
+      ).toMatch(/^import\s+['"]@modules\/x(\/(main|renderer))?/);
     }
   });
 });
@@ -215,15 +228,32 @@ describe('⭐ 装卸不只是代码:四类残留必须跟着模块走', () => {
    */
   const find = (p: string) => allSources.find((s) => s.path === p);
 
-  it('② X 的视图不许注册在 renderer 里', () => {
+  it('② X 的视图注册**只能**经那一行自注册入口', () => {
     /**
-     * 实测:推倒前 `renderer/index.tsx` 有 3 处引用 X,
+     * ⚠️ 本条原意是「renderer 里零处 X」—— 2026-10-01 X 的 view 落地后要改:
+     * view 注册**本来就只能在 renderer 跑**,躲不掉。
+     *
+     * ⭐ 真正要防的不是「renderer 认识 X」,而是「**散落**」——
+     * 推倒前实测 `renderer/index.tsx` 有 **3 处**引用 X,
      * 删代码后右栏仍显示「x-workbench-view(待 L5 component)」。
+     *
+     * → 改成钉:renderer 侧**有且只有那一行自注册**,
+     *   且**不许从 X 里取任何具体东西**(view id / 组件 / 常量都不行)。
      */
     const f = find('src/platform/renderer/index.tsx');
     expect(f, 'renderer/index.tsx 不见了 —— 路径变了要改守卫').toBeDefined();
-    const hit = X_REF.some((re) => re.test(f!.code));
-    expect(hit, 'X 的视图注册散在 renderer 里 —— 删目录后会留残影').toBe(false);
+    const hits = Array.from(f!.code.matchAll(/^\s*import\s+[^;]*@modules\/x[^;]*/gm))
+      .map((m) => m[0].trim());
+    expect(
+      hits.length,
+      `renderer 里认识 X 的地方不是 1 处(实际 ${hits.length}):\n  ` + hits.join('\n  '),
+    ).toBeLessThanOrEqual(1);
+    if (hits.length === 1) {
+      expect(
+        hits[0],
+        'renderer 在从 X 里取东西 —— 应当只是自注册 import:\n  ' + hits[0],
+      ).toMatch(/^import\s+['"]@modules\/x\/renderer['"]/);
+    }
   });
 
   it('③ X 的 IPC 类型不许住在 shared/ipc', () => {
