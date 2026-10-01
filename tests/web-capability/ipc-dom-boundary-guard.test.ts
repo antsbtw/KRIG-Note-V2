@@ -260,4 +260,36 @@ describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', ()
       + 'driver 只给 scriptId + 参数:\n  ' + offenders.join('\n  '),
     ).toEqual([]);
   });
+
+  it('⭐⭐ 失败必须在**主进程**也出声(不能只打在 renderer)', () => {
+    /**
+     * ⚠️ 2026-10-01 步 2b 调试时发现的真实障碍:
+     * 调用方的 `console.warn` 打在 **renderer 进程**,只存在于那个 webview 的
+     * DevTools 里;而人看的是启动终端。于是「我加了日志」与
+     * 「人能看到日志」是两回事 —— 查了四轮静态证据仍定不了因,
+     * 就卡在拿不到那一行上。
+     *
+     * ⭐ 这是 feedback-maintainability-over-feature-completion 的同一种形态:
+     * 记了,但记在人看不到的地方。
+     */
+    const i = ipcDom.indexOf('function failed(');
+    expect(i, 'failed 不再是函数 —— 本条要重写').toBeGreaterThan(-1);
+    const body = ipcDom.slice(i, ipcDom.indexOf('\n}', i));
+    expect(body.length, 'slice 空了 —— 断言会恒真').toBeGreaterThan(30);
+    expect(body, 'failed() 不出声 —— 真因只会留在 renderer 的 DevTools 里')
+      .toMatch(/console\.(warn|error)/);
+  });
+
+  it('⭐ 启动时报一次脚本表 —— 「没登记上」要在启动就看得见', () => {
+    /**
+     * ⭐ 「成功路径也要留痕」:不是等出事才查,而是平时就把判断依据摆出来。
+     * 脚本数量/名字不对,终端里直接能看见,不必等用户点翻译才暴露。
+     */
+    const i = ipcDom.indexOf('export function registerWebDomIpc');
+    const body = ipcDom.slice(i, i + 900);
+    expect(body, '启动时不报脚本表').toMatch(/scriptRegistry\.list\(\)/);
+    expect(body, '没把 renderer.* 单独列出来 —— 那才是 renderer 侧调用的依据')
+      .toMatch(/renderer\./);
+  });
 });
+

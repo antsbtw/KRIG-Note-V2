@@ -30,7 +30,7 @@ import type {
   WebDomPageRef,
   WebDomResult,
 } from '@shared/ipc/web-dom-types';
-import { domRunner, pageRegistry } from './runtime';
+import { domRunner, pageRegistry, scriptRegistry } from './runtime';
 import { bindPageHost } from './page-hosts';
 import type { PageId } from '../page/types';
 import type { ScriptId } from '../dom/types';
@@ -89,7 +89,21 @@ function readPartition(wc: WebContents): string {
   }
 }
 
-const failed = (reason: string): WebDomResult => ({ status: 'failed', reason, retryable: false });
+/**
+ * ⭐ 失败一律**在主进程也打一行** —— 2026-10-01 加。
+ *
+ * ⚠️ 起因:步 2b 真机失败时,调用方的 `console.warn` 打在 **renderer 进程**,
+ * 只存在于那个 webview 的 DevTools 里;而人看的是终端。
+ * 于是「我加了日志」与「人能看到日志」是两回事 ——
+ * 正是 `feedback-maintainability-over-feature-completion` 说的
+ * 「**你不记录如何做验证**」的同一种形态:记了,但记在人看不到的地方。
+ *
+ * ⭐ 主进程这一行让真因直接出现在启动终端里,不必让人去翻 DevTools。
+ */
+function failed(reason: string): WebDomResult {
+  console.warn('[web.dom ipc] ' + reason);
+  return { status: 'failed', reason, retryable: false };
+}
 
 /** 把能力层的 Result 原样转成 IPC 形状(两者同构,只是跨了分层边界) */
 function toIpc(r: { status: string; [k: string]: unknown }): WebDomResult {
@@ -97,15 +111,36 @@ function toIpc(r: { status: string; [k: string]: unknown }): WebDomResult {
   if (r.status === 'degraded') {
     return { status: 'degraded', value: r.value, missing: (r.missing as string[]) ?? [] };
   }
-  return {
-    status: 'failed',
-    reason: String(r.reason ?? '(未给原因)'),
-    retryable: Boolean(r.retryable),
-  };
+  const reason = String(r.reason ?? '(未给原因)');
+  // ⚠️ 这条路径此前**不出声** —— 能力层回的 Failed(如「未注册的脚本 id」)
+  //    只回给 renderer,主进程终端一个字都没有。
+  console.warn('[web.dom ipc] ' + reason);
+  return { status: 'failed', reason, retryable: Boolean(r.retryable) };
 }
 
 /** 注册 IPC handler。由 `main/index.ts` 在启动时调一次 */
 export function registerWebDomIpc(): void {
+  /**
+   * ⭐ 启动时报一次「登记了哪些脚本」—— 2026-10-01 加。
+   *
+   * ⚠️ 起因:步 2b 真机失败,我查了四轮静态证据(链路实跑通过、
+   * handler 注册时机对、preload 暴露了、脚本进了 bundle)仍定不了因,
+   * 卡在「拿不到那一行报错」上。
+   *
+   * ⭐ 而最可能的一种真因 ——「脚本没登记上」—— 本来**启动时就能看出来**,
+   * 只是没人说。这一行让它变成启动自检:
+   * 数量不对或名字不对,终端里直接能看见,不必等到用户点翻译。
+   *
+   * 这正是用户定的「成功路径也要留痕」:
+   * 不是等出事才查,而是**平时就把判断依据摆出来**。
+   */
+  const ids = scriptRegistry.list().map((x) => x.id);
+  const rendererIds = ids.filter((id) => String(id).startsWith('renderer.'));
+  console.log(
+    `[web.dom ipc] 已就绪 —— 脚本表共 ${ids.length} 个,其中 renderer.* ${rendererIds.length} 个: `
+    + (rendererIds.join(', ') || '(⚠️ 一个都没有 —— renderer 侧调用必然全失败)'),
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.WEB_DOM_INVOKE,
     async (_e, payload: unknown): Promise<WebDomResult> => {
