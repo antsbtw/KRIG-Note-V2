@@ -24,6 +24,7 @@ export default defineConfig({
       '@workspace':    path.resolve(__dirname, 'src/workspace'),
       '@slot':         path.resolve(__dirname, 'src/slot'),
       '@shared':       path.resolve(__dirname, 'src/shared'),
+      '@modules':      path.resolve(__dirname, 'src/modules'),
     },
   },
 });

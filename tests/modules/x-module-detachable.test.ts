@@ -170,15 +170,41 @@ describe('⭐⭐ X 目录之外,认识 X 的地方 ≤ 1(那一行注册)', () =
   });
 
   it('⭐⭐ 引用处 ≤ 1 —— 删 X 只需删一个目录 + 删一行', () => {
+    /**
+     * ⚠️ 本条第一版写的是 `toHaveLength(0)` —— 那是 X **还没建**时的状态。
+     * 2026-10-01 X 模块落地,`main/index.ts` 多了那**唯一一行**
+     * `import '@modules/x'`,于是它当场变红。
+     * ⭐ 改成钉**原则本身**:≤ 1,且那一处必须是注册行。
+     */
     const refs = xReferrers();
     expect(
       refs.map((r) => `${r.path}  ←  ${r.hit}`),
       '\n⭐ 原则(用户 2026-09-30):X 必须能「删一个目录 + 删一行注册」就卸载干净。\n'
-      + '这些地方把 X 焊在了宿主里,每多一处就多一个删不掉的点。\n'
-      + '改法:X 自带视图/IPC/repo/schema,启动时**推**给底座(registerAnchorTable 的模式),\n'
-      + '宿主只保留唯一一行注册调用。\n'
+      + 'X 目录之外认识它的地方超过 1 处 —— 每多一处就多一个删不掉的点。\n'
+      + '改法:X 自带视图/IPC/repo/schema,启动时**推**给底座(registerPageTable 的模式),\n'
+      + '宿主只保留唯一一行 `import \'@modules/x\'`。\n'
       + '⚠️ 别把它们加进白名单 —— 本仓的 KNOWN_DEBT 从来没有被清掉过。\n',
-    ).toHaveLength(0);
+    ).toHaveLength(refs.length === 0 ? 0 : 1);
+
+    /**
+     * ⭐ 不止数量 —— 那一处必须是**副作用 import 的注册行**,
+     * 不能是「从 X 里拿东西」。
+     * ⚠️ 数字达标不代表没耦合:`import { something } from '@modules/x/...'`
+     * 同样只有 1 处,但那是宿主在用 X 的内部实现。
+     */
+    if (refs.length === 1) {
+      expect(
+        refs[0].hit,
+        `那一处不是自注册 import,而是在取 X 的内部实现 —— 宿主不该知道 X 有什么:\n  `
+        + `${refs[0].path}  ←  ${refs[0].hit}`,
+      /**
+       * ⚠️ `hit` 是**判据正则捕获的片段**,末尾那个引号被 lookahead 排除在外
+       * (`X_SEG` 用 `(?=['"])` 收尾)—— 所以这里不钉闭合引号,
+       * 只钉「以 `import '@modules/x` 开头」即可区分
+       * 自注册(`import '@modules/x'`)与取内部实现(`import { a } from '@modules/x/...'`)。
+       */
+      ).toMatch(/^import\s+['"]@modules\/x/);
+    }
   });
 });
 
@@ -208,11 +234,49 @@ describe('⭐ 装卸不只是代码:四类残留必须跟着模块走', () => {
   });
 
   it('④ X 的东西不许住在 shared/', () => {
-    /** 实测残留:`src/shared/x/x-media-selection.ts` */
+    /**
+     * ⚠️⚠️ 本条第一版**只查 `shared/x/` 这个目录名**,于是
+     * `shared/types/x-*.ts` 整整 **8 个文件**全部逃过
+     * (2026-10-01 建 X 模块时发现 —— 我自己写的守卫太窄)。
+     * ⭐ 又一次「守卫钉的是我想到的那一种写法」。
+     */
     expect(
       existsSync(join(SRC, 'shared/x')),
       'src/shared/x/ 还在 —— X 的东西住在共用目录里,拔不掉',
     ).toBe(false);
+
+    /**
+     * ⚠️ 已知债(2026-10-01 发现,**不是本次引入**):
+     * `shared/types/` 下 8 个 X 专属类型文件,其中 4 个还有消费者
+     * (`web-shared/should-handle` / `main-window` / `web-shortcuts` /
+     *  `storage/x-schema` / `db/search-recipe-repo`)——
+     * **X 的平台知识仍然织在共用层与存储层里**。
+     *
+     * ⭐ 清掉是 X 重建的一部分(类型跟着模块走),不是一刀能完:
+     * 动 `storage/x-schema` 要连带库表,动 `should-handle` 要改 webview 分流。
+     * 按 KNOWN_DEBT 范式锁住**只减不增**。
+     */
+    const KNOWN_SHARED_X = [
+      'x-claude-advice.ts', 'x-collect-strategy.ts', 'x-reply-facts.ts',
+      'x-reply-types.ts', 'x-service-types.ts', 'x-task.ts',
+      'x-timeline-types.ts', 'x-ws-role-types.ts',
+    ];
+    const actual = existsSync(join(SRC, 'shared/types'))
+      ? readdirSync(join(SRC, 'shared/types')).filter((f) => /^x-.*\.ts$/.test(f))
+      : [];
+    const unexpected = actual.filter((f) => !KNOWN_SHARED_X.includes(f));
+    expect(
+      unexpected,
+      'shared/types/ 下新增了 X 专属类型 —— X 的东西要跟着模块走(src/modules/x/):\n  '
+      + unexpected.join('\n  '),
+    ).toEqual([]);
+
+    const stale = KNOWN_SHARED_X.filter((f) => !actual.includes(f));
+    expect(
+      stale,
+      '⭐ 这些已经搬走了,请从 KNOWN_SHARED_X 删掉(清单必须与现实精确对齐,\n'
+      + '否则下一处真违规出现时它会误放行):\n  ' + stale.join('\n  '),
+    ).toEqual([]);
   });
 
   it('⑤ 共用层不许认识 X 这个平台', () => {

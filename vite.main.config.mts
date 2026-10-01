@@ -35,6 +35,7 @@ export default defineConfig({
       '@workspace':    fileURLToPath(new URL('./src/workspace', import.meta.url)),
       '@slot':         fileURLToPath(new URL('./src/slot', import.meta.url)),
       '@shared':       fileURLToPath(new URL('./src/shared', import.meta.url)),
+      '@modules':     fileURLToPath(new URL('./src/modules', import.meta.url)),
     },
   },
 });

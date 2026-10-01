@@ -74,6 +74,17 @@ import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-
 // ⭐ 步 3:web.net 健康巡检 —— 探针是拉取式的,必须有人定期查,否则通道哑了没人知道
 import { startHealthWatch, stopHealthWatch, startTraceSweep, stopTraceSweep } from './web-capability/wiring/health-watch';
 import { registerWebDomIpc } from './web-capability/wiring/ipc-dom';
+/**
+ * ⭐⭐ **X 模块 —— 就这一行。**
+ *
+ * 用户 2026-09-30 定的判据:**删掉 X = 删一个目录 + 删一行注册**。
+ * 这是那「一行」。模块 import 即自注册(把语义页面表与锚点表 push 给底座)。
+ *
+ * ⚠️ 这是**副作用 import**(无 from)—— tsc 查不出来它被删,
+ * 所以守卫 `tests/modules/x-module-detachable.test.ts` 钉住
+ * 「X 目录之外认识 X 的地方 ≤ 1」,而那 1 处就是这里。
+ */
+import '@modules/x';
 import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
 /** ⚠️ X 模块已彻底归零(2026-09-29 用户定)—— 接线一并摘掉,重建时重新接 */
 /** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
