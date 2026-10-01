@@ -390,3 +390,92 @@ X 把未登录页面的 `data-testid` **全部去掉了**（真机探针实测�
    （实测 1878 条全绿而真机 payloads 直接 0）
 
 ⚠️ 第 3 条正是这次交接的由来：**我一直在拿单测交差，而它证明不了运行时**。
+
+---
+
+## 五、⭐ 交接:fake-dom 换 jsdom 的收尾(5 条待判)
+
+> 用户 2026-09-30 拍板选 A(交给 jsdom),并同意**这 5 条交给你们判**。
+> 理由:核心问题是「原来的绿是真的吗」——而我既写代码又写测试,
+> 前五轮已经证明这个角色我做不好。
+
+### 现状
+
+```
+tsc 0 错
+tests/web-capability: 531 通过 / 5 失败
+```
+
+⭐ **jsdom 本身是成功的**:R1/R2 那类 selector 语义错**整类消失**
+(CSS 匹配、后代组合、属性算子、`closest`、文档顺序全交给 jsdom)。
+附带收益:`:nth-child` 这类高级语法现在能用,手写时代用不了。
+
+### 换引擎时已修的 8 处行为差异(供参考)
+
+| # | 差异 | 修法 |
+|---|---|---|
+| 1 | jsdom 无 url → opaque origin,碰 `localStorage` 抛 SecurityError | 给 `url: 'https://fake.test/page'` |
+| 2 | ⭐ `getBoundingClientRect` **恒返回全 0**(无布局引擎) | 在 `Element.prototype` 上接管;给了 rect 的返我们的几何,没给的**抛** |
+| 3 | `contenteditable` 属性不反射成 `el.contentEditable` | `defineProperty` 补上 |
+| 4 | 脚本读 `window.HTMLTextAreaElement.prototype`(不是裸全局) | 挂到 `dom.window` |
+| 5 | `document.activeElement` 不随 `.focus()` 变 | 自己维护 `activeEl` |
+| 6 | ⭐ 脚本调**真节点**的 `dispatchEvent`,绕过句柄留痕 | 在真节点上接管四个动作,`Reflect.apply` 转原生 |
+| 7 | `elementFromPoint` jsdom 没有这个 API | 自己实现(只考虑显式给 rect 的) |
+| 8 | 测试断言比的是 `FakeEl`,而脚本侧现在拿到真 `Element` | 自检里改比 `.node` |
+
+### ⚠️ 剩下 5 条,我的成因判断(**请你们复核这个判断本身**)
+
+**A 组:3 条 `via` / `landed` 判定**(`input-landing.test.ts`)
+
+```
+⭐ 主路径成功 → via = synthetic-paste,attempts = 1     实际 via='os-paste'
+⭐ 走到第三级 JS 直写 → via 区分 native-setter/exec-command
+⭐ check:none 时即使内容真进去了也仍报 landed:false
+```
+
+⭐ **我的判断:这 3 条原来可能是假绿。**
+手写版的 `dispatchEvent` 只记一笔就返回 true,脚本以为合成 paste 成功了;
+jsdom **真的派发事件**,而测试里**没有任何 paste handler**,
+于是脚本正确地判断「没进去」并降级到 `os-paste`。
+
+→ 真浏览器里 X 的 DraftJS **有** paste handler,jsdom 里没有。
+要让它诚实地绿,应当在测试里**给元素装一个真的 paste handler**(模拟 DraftJS:
+收到 `paste` 事件就把 `clipboardData` 的文本写进去)。
+
+⚠️ **请你们判断:这个说法对吗?** 如果对,那这 3 条测试原来证明的是
+「手写假 DOM 会配合被测代码」而不是「via 判定正确」。
+
+**B 组:2 条超时**(`input-actions.test.ts`)
+
+```
+⭐ anchorGone 满足 → settled:true        超时 4s
+⭐ 缩略图出现 → Ok(landed:true)          超时 10s
+```
+
+⭐ **成因已定位**:`modalScene`(第 82 行)靠
+`modal.children = modal.children.filter(...)` 摘掉 marker ——
+那是**句柄数组**,不是真 DOM。换 jsdom 后真实 DOM 树才是权威,
+元素从未真正离开文档,所以 `anchorGone` 永远不满足。
+
+→ 修法明确:改成 `marker.node.remove()`(操作真 DOM)。
+⚠️ 这条我**没有顺手改**,因为它和 A 组一起交给你们判 ——
+且它也提出一个问题:`FakeEl.children` 这个字段在 jsdom 版里
+**应不应该继续存在**?保留它就是保留一个会与真 DOM 不同步的影子状态。
+
+### 请你们做的
+
+1. **判断 A 组那 3 条原来是不是假绿**(这是核心,比修好它更重要)
+2. B 组 2 条:确认 `marker.node.remove()` 是正解,并判断 `FakeEl.children` 该留该删
+3. 复核我修的那 8 处差异有没有新引入语义错(⚠️ 第 2 处「接管
+   `getBoundingClientRect`」尤其值得看:它改的是 jsdom 原型)
+4. ⭐ 回答一个更大的问题:**换 jsdom 之后,现有 19 条自检还够吗?**
+   有些条目(如「属性算子各自正确」)现在是在测 jsdom 而不是测我们的代码 ——
+   该精简掉,还是留着当「jsdom 版本升级的回归网」?
+
+### 代码位置
+
+- `tests/web-capability/helpers/fake-dom.ts`(已全文改写为 jsdom 版)
+- jsdom 24.1.3 **已在 node_modules**(vitest / defuddle 的传递依赖),
+  ⚠️ **尚未加进 `devDependencies`** —— 靠别人的传递依赖是隐患,
+  要不要加由用户拍板(本次未加)。
+

@@ -44,22 +44,28 @@ describe('⭐⭐ fake-dom 自检:布局与命中', () => {
     const real = el('div', { id: 'real' }, { rect: rect(0, 500, 100, 50) });
     const dom = makeDom([ghost, real]);
     const doc = dom.document as { elementFromPoint(x: number, y: number): unknown; body: unknown };
+    /**
+     * ⚠️ 2026-09-30 换 jsdom 引擎后:`document` 是给**脚本**用的,
+     * 返回的是真 jsdom `Element`;测试持有的是 `FakeEl` 句柄。
+     * 故断言比 `.node` —— 这个区分是**有意的**:
+     * 脚本看到的必须是真元素(selector/closest 才有真语义)。
+     */
     // ⭐ 不抽查固定几点 —— 扫一片,任何一点命中 ghost 都算违规
     for (let x = 0; x <= 200; x += 25) {
       for (let y = 0; y <= 200; y += 25) {
-        expect(doc.elementFromPoint(x, y), `(${x},${y}) 命中了未布局元素`).not.toBe(ghost);
+        expect(doc.elementFromPoint(x, y), `(${x},${y}) 命中了未布局元素`).not.toBe(ghost.node);
       }
     }
-    expect(doc.elementFromPoint(50, 520), '给了 rect 的反而没命中').toBe(real);
+    expect(doc.elementFromPoint(50, 520), '给了 rect 的反而没命中').toBe(real.node);
   });
 
   it('⭐ 给了 rect 的元素按矩形命中,边界含端点', () => {
     const box = el('div', {}, { rect: rect(10, 20, 100, 50) });
     const doc = makeDom([box]).document as { elementFromPoint(x: number, y: number): unknown };
-    expect(doc.elementFromPoint(60, 40), '矩形内没命中').toBe(box);
-    expect(doc.elementFromPoint(10, 20), '左上角端点没命中(真 DOM 左/上边界是闭的)').toBe(box);
-    expect(doc.elementFromPoint(9, 40), '矩形左外侧竟然命中').not.toBe(box);
-    expect(doc.elementFromPoint(60, 71), '矩形下外侧竟然命中').not.toBe(box);
+    expect(doc.elementFromPoint(60, 40), '矩形内没命中').toBe(box.node);
+    expect(doc.elementFromPoint(10, 20), '左上角端点没命中(真 DOM 左/上边界是闭的)').toBe(box.node);
+    expect(doc.elementFromPoint(9, 40), '矩形左外侧竟然命中').not.toBe(box.node);
+    expect(doc.elementFromPoint(60, 71), '矩形下外侧竟然命中').not.toBe(box.node);
     /**
      * ⚠️ 复核指正:真 DOM 的**右/下边界是开的**(`[left,right)` / `[top,bottom)`),
      * 我原来钉「右下角端点也命中」是**非真实语义**。
@@ -124,10 +130,10 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
   it('⭐ 属性算子 = / *= / ^= / $= 各自正确', () => {
     const n = el('a', { href: 'mailto:a@b.com', title: 'hi @you' });
     const doc = makeDom([n]).document as { querySelector(s: string): unknown };
-    expect(doc.querySelector('[href="mailto:a@b.com"]'), '= 不对').toBe(n);
-    expect(doc.querySelector('[title*="@"]'), '*= 不对').toBe(n);
-    expect(doc.querySelector('[href^="mailto:"]'), '^= 不对').toBe(n);
-    expect(doc.querySelector('[href$=".com"]'), '$= 不对').toBe(n);
+    expect(doc.querySelector('[href="mailto:a@b.com"]'), '= 不对').toBe(n.node);
+    expect(doc.querySelector('[title*="@"]'), '*= 不对').toBe(n.node);
+    expect(doc.querySelector('[href^="mailto:"]'), '^= 不对').toBe(n.node);
+    expect(doc.querySelector('[href$=".com"]'), '$= 不对').toBe(n.node);
     expect(doc.querySelector('[title*="nope"]'), '*= 误匹配').toBeNull();
     /**
      * ⚠️ 复核指出原来缺**反例**:删掉 `^=` 或 `$=` 的判断照样全绿
@@ -226,12 +232,23 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
     ).toBeNull();
   });
 
-  it('⭐⭐ 不支持的 selector 语法必须**抛错**,不许静默返回空', () => {
+  it('⭐⭐ 非法 selector 必须**抛错**,不许静默返回空', () => {
+    /**
+     * ⚠️ 这条原来钉的是 `:nth-child(2)` —— 手写引擎不支持它所以会抛。
+     * 换 jsdom 之后**它是合法且被支持的**,断言随之失效。
+     * ⭐ 这正是换引擎的收益:支持面从「我实现了的那几种」
+     * 变成「浏览器真支持的」。
+     *
+     * 改钉**真正非法**的语法:jsdom 会抛 `SyntaxError`,
+     * 与真浏览器一致 —— 静默返回空才是危险的。
+     */
     const doc = makeDom([el('div', {})]).document as { querySelectorAll(s: string): unknown };
     expect(
-      () => doc.querySelectorAll('div:nth-child(2)'),
-      '不支持的语法被静默放行 —— 测试会「绿得毫无意义」',
-    ).toThrow(/不支持/);
+      () => doc.querySelectorAll('div[[[bad'),
+      '非法 selector 被静默放行 —— 测试会「绿得毫无意义」',
+    ).toThrow();
+    // ⭐ 反面:jsdom 支持的高级语法现在**能用**(手写引擎时代用不了)
+    expect(() => doc.querySelectorAll('div:nth-child(2)'), ':nth-child 应当被支持').not.toThrow();
   });
 });
 
