@@ -76,6 +76,37 @@ describe('⭐⭐ fake-dom 自检:布局与命中', () => {
      */
   });
 
+  it('⭐⭐ offsetTop/Height 等同族几何也要接管(jsdom 静默返 0)', () => {
+    /**
+     * ⚠️ 第六轮复核点名的遗留风险:`getBoundingClientRect` 接管了,
+     * 但 `offsetTop` / `offsetHeight` 仍**静默返回 0** ——
+     * 同一类「幻影几何」:读到 0 不报错,依赖它的判据恒成立/恒不成立。
+     *
+     * ⭐ 实测 `sync-driver.ts:332` 用
+     * `documentElement.scrollHeight - window.innerHeight` ——
+     * renderer 那批(L2 剩下 18 处)一接上来就会踩。
+     */
+    const box = el('div', {}, { rect: rect(10, 20, 100, 50) });
+    makeDom([box]);
+    const n = box.node as unknown as {
+      offsetTop: number; offsetLeft: number; offsetWidth: number; offsetHeight: number;
+    };
+    expect(n.offsetTop, 'offsetTop 没跟 rect 对上').toBe(20);
+    expect(n.offsetLeft, 'offsetLeft 没跟 rect 对上').toBe(10);
+    expect(n.offsetWidth, 'offsetWidth 没跟 rect 对上').toBe(100);
+    expect(n.offsetHeight, 'offsetHeight 没跟 rect 对上').toBe(50);
+  });
+
+  it('⭐ 没给 rect 的元素读 offset* 也要抛(与 rect 同一条原则)', () => {
+    const ghost = el('div', {}, { textContent: 'G' });
+    makeDom([ghost]);
+    const n = ghost.node as unknown as { offsetTop: number };
+    expect(
+      () => n.offsetTop,
+      '没给 rect 却能读出 offsetTop —— 静默 0 是幻影几何,会让判据悄悄失真',
+    ).toThrow(/没有 rect/);
+  });
+
   it('⭐ 点在空白处返回 body(真 DOM 语义),不是 null', () => {
     const box = el('div', {}, { rect: rect(0, 0, 10, 10) });
     const dom = makeDom([box]);

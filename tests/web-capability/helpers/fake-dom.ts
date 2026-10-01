@@ -118,6 +118,34 @@ function makeJsdomDoc(): Document {
   const proto = win.Element.prototype as unknown as {
     getBoundingClientRect(): unknown;
   };
+  /**
+   * ⭐⭐ 同族的其它几何属性也要接管 —— jsdom **静默返回 0**(没有布局引擎)。
+   *
+   * ⚠️ 2026-09-30 第六轮复核点名的遗留风险:`getBoundingClientRect` 接管了,
+   * 但 `offsetTop` / `offsetHeight` 仍静默 0 —— 那是**同一类「幻影几何」**:
+   * 读到 0 不报错,于是依赖它的判据恒成立/恒不成立。
+   *
+   * ⭐ 实测 `sync-driver.ts:332` 就用
+   * `document.documentElement.scrollHeight - window.innerHeight` ——
+   * renderer 那批(L2 剩下的 18 处)一接上来就会踩。
+   *
+   * 做法与 rect 一致:**给了 rect 的从 rect 推导,没给的抛错**。
+   */
+  for (const prop of ['offsetTop', 'offsetLeft', 'offsetWidth', 'offsetHeight'] as const) {
+    Object.defineProperty(win.HTMLElement.prototype, prop, {
+      configurable: true,
+      get(this: Element) {
+        const h = handles.get(this);
+        if (!h) return 0;                       // 非 el() 建的(如 body):明确给 0
+        const r = h.getBoundingClientRect();    // ⭐ 没 rect 时它会抛,这是有意的
+        return prop === 'offsetTop' ? r.top
+          : prop === 'offsetLeft' ? r.left
+            : prop === 'offsetWidth' ? r.width
+              : r.height;
+      },
+    });
+  }
+
   proto.getBoundingClientRect = function getRect(this: Element) {
     const h = handles.get(this);
     // body 等非 el() 建的元素:给一个明确的「整页」矩形,不抛
