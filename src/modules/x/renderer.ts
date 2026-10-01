@@ -54,10 +54,18 @@ registerView({
    * ⚠️ 暂不 install 任何 capability —— 本步零业务。
    * 接 webview 时才需要(参照 AI / Mail 的 `web-rendering`)。
    */
-  install: [],
+  install: ['web-rendering'],
   component: XWebView,
   navSideTab: {
-    label: 'X',
+    /**
+     * ⚠️ label 是 **SlotPicker 里也要显示的那个名字** —— 2026-10-01 实测踩到:
+     * 原来左栏叫「X」、右栏叫「X 操作台」,用户在 picker 里点了「X」,
+     * 结果右栏开出**第二个网页 view**(两栏都是「𝕏 网页」)。
+     * ⭐ 两项都以 X 开头、一眼分不出谁是谁 —— 名字没把用途说清楚。
+     * → 改成「X 网页」,与右栏的「X 操作台」并列时一眼可辨。
+     * 守卫钉住「两个 label 互不为前缀」。
+     */
+    label: 'X 网页',
     icon: '𝕏',
     /** order 6 —— 实测 1/2/3/4/5/7/99 已被占用,6 是空位 */
     order: 6,

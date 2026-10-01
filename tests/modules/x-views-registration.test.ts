@@ -43,7 +43,7 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
   it('⭐ 左栏「网页」:上 navSide 切换条', () => {
     const v = byId('x-web-view');
     expect(v, 'x-web-view 没注册 —— navSide 上不会出现 𝕏').toBeDefined();
-    expect(v!.navSideTab?.label).toBe('X');
+    expect(v!.navSideTab?.label).toBe('X 网页');
     expect(v!.navSideTab?.order, 'order 变了 —— 会与别的 tab 争位置').toBe(6);
     /**
      * ⚠️ webview 类 view 要全宽:切过来收起 navSide,
@@ -113,6 +113,44 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
       src,
       '没把本 view 的命令注入 slotPickerContext —— popup 选中后不知道该调谁',
     ).toMatch(/slotPickerContext\.setCommandId\(\s*['"]x-view\.open-right-slot['"]/);
+  });
+
+  it('⭐⭐ 两个入口在 SlotPicker 里必须**一眼分得出**', () => {
+    /**
+     * ⚠️ **实测踩到(2026-10-01)**:左栏叫「X」、右栏叫「X 操作台」,
+     * 而 SlotPicker **两个都列**(一个有 navSideTab、一个有 slotPickerEntry)。
+     * 用户点了「X」→ 右栏开出**第二个网页 view**,两栏都是「𝕏 网页」。
+     *
+     * ⭐ 不是功能坏了,是**名字没把用途说清楚** ——
+     * 两项都以 X 开头、长得像,人只能靠猜。
+     *
+     * 判据:两个 label **互不为前缀**(光靠前缀分不出就等于没分)。
+     */
+    const web = byId('x-web-view')!.navSideTab!.label;
+    const wb = byId('x-workbench-view')!.slotPickerEntry!.label;
+    expect(web, 'label 为空').toBeTruthy();
+    expect(wb, 'label 为空').toBeTruthy();
+    expect(web).not.toBe(wb);
+    expect(
+      wb.startsWith(web) || web.startsWith(wb),
+      `两个入口的名字互为前缀,SlotPicker 里分不出谁是谁:\n`
+      + `  左栏「${web}」  右栏「${wb}」\n`
+      + '⚠️ 实测后果:点错一个,右栏开出第二个网页 view',
+    ).toBe(false);
+  });
+
+  it('⭐⭐ 左栏声明了 web-rendering —— 漏了会白屏', () => {
+    /**
+     * ⚠️ `XWebView` 里 `requireCapabilityApi('web-rendering')` 取不到会**抛**。
+     * install 漏声明的表现是「切过去白屏 + 控制台一行报错」——
+     * 而**测试照样全绿**(组件没渲染就不会抛)。
+     * ⭐ 所以这条钉声明,不钉组件行为。
+     */
+    const v = byId('x-web-view');
+    expect(
+      v!.install,
+      '左栏没声明 web-rendering —— webview 取不到 Host,切过去会白屏',
+    ).toContain('web-rendering');
   });
 });
 
