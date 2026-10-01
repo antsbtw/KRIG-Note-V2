@@ -152,5 +152,36 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
       '左栏没声明 web-rendering —— webview 取不到 Host,切过去会白屏',
     ).toContain('web-rendering');
   });
+
+  it('⭐⭐ 左栏有「操作台」专用按钮,且 view id 两处一致', () => {
+    /**
+     * 用户 2026-10-01:「右栏叫『X 操作台』—— 这个应该通过 x 的 toolbar
+     * 设置一个 button 来调出来?」
+     *
+     * ⭐ 理由实测过:picker 里「X 网页」与「X 操作台」并排,
+     * 用户点错开出第二个网页 view。**最常用的动作不该靠认名字。**
+     *
+     * ⚠️ 代价是 `x-workbench-view` 这个字面量**出现在两个文件**
+     * (注册处 + 按钮处)。漂了的表现是「点按钮没反应」且不报错 ——
+     * 本条用**两边对照**钉住,不钉单个字面量
+     * (`project-x-field-four-place-registration` 的做法)。
+     */
+    const src = readFileSync(
+      join(process.cwd(), 'src/modules/x/XWebView.tsx'),
+      'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+    // ① 真的有开/关操作台的调用
+    expect(src, '没有 openRight —— 按钮点了不会开').toMatch(/bus\.slot\.openRight\(/);
+    expect(src, '没有 closeRight —— 开了关不掉').toMatch(/bus\.slot\.closeRight\(/);
+
+    // ② ⭐ 按钮用的 id 必须与注册表里真实存在的 id 一致
+    const registeredId = byId('x-workbench-view')!.id;
+    expect(
+      src.includes(`'${registeredId}'`),
+      `按钮里的 view id 与注册的不一致 —— 点了会静默无反应。\n`
+      + `  注册的是 '${registeredId}',但 XWebView 里找不到这个字面量`,
+    ).toBe(true);
+  });
 });
 
