@@ -17,10 +17,28 @@
  * (note / eBook / web 各踩过一次,见记忆「别猜自己在哪一栏」)。
  */
 
-import type { ReactElement } from 'react';
+import { useCallback, type ReactElement } from 'react';
+import { popupController } from '@slot/triggers/popup-controller';
+import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
 
 export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElement {
+  /**
+   * ⊞ 右栏视图切换 —— ⭐ 复用**全局 SlotPicker**,不自造 toggle 逻辑
+   * (与 Note / AI / Mail 同一套机制;铁律:同功能同逻辑)。
+   *
+   * 点击先把本 view 的 `open-right-slot` 命令注入 `slotPickerContext`,
+   * 再弹 popup;popup 从 `viewTypeRegistry` **动态列出**所有 view ——
+   * 所以「X 操作台」会自动出现在里面,不必在这里写死它。
+   *
+   * ⚠️ 没有这个按钮,右栏那个独立 view 就**召不出来** ——
+   * 实测第一版漏了它(别的 view 都有),于是用户看到左栏却开不出面板。
+   */
+  const handleOpenSlotPicker = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    slotPickerContext.setCommandId('x-view.open-right-slot');
+    popupController.toggle(SLOT_PICKER_POPUP_ID, e.currentTarget);
+  }, []);
+
   return (
     <div
       style={{
@@ -35,7 +53,30 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         lineHeight: 1.7,
       }}
     >
-      <div style={{ fontSize: 15, color: 'var(--text-primary, #ddd)' }}>𝕏 网页</div>
+      <div
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}
+      >
+        <div style={{ fontSize: 15, color: 'var(--text-primary, #ddd)' }}>𝕏 网页</div>
+        {/* ⭐ 召出右栏:操作台从这里开(与别的 view 同一个 SlotPicker) */}
+        <button
+          type="button"
+          onClick={handleOpenSlotPicker}
+          title="打开右栏视图(含 X 操作台)"
+          style={{
+            background: 'transparent',
+            border: '1px solid var(--border-color, #444)',
+            borderRadius: 4,
+            color: 'var(--text-secondary, #aaa)',
+            cursor: 'pointer',
+            fontSize: 13,
+            padding: '4px 10px',
+          }}
+        >
+          ⊞ 右栏
+        </button>
+      </div>
       <div>
         ⭐ 这一栏将来放 **X 的 webview**(人自己浏览、登录、右键提取)。
         底座的语义页面表已注册

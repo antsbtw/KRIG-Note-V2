@@ -19,6 +19,8 @@
  * 这里真的 import 模块、真的查注册表。
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { viewTypeRegistry } from '@slot/view-type-registry/view-type-registry';
 // ⭐ 真的触发自注册 —— 这一行本身就是在验「副作用 import 生效」
 import '@modules/x/renderer';
@@ -76,4 +78,41 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
     expect(dup, 'view id 重复 —— 后注册的会覆盖先注册的,且不报错:\n  ' + dup.join('\n  '))
       .toEqual([]);
   });
+
+  it('⭐⭐ 左栏必须有「召出右栏」的入口 —— 否则操作台开不出来', () => {
+    /**
+     * ⚠️ **实测踩到(2026-10-01)**:第一版只注册了两个 view,
+     * 但 `XWebView` 里**没有打开 SlotPicker 的按钮** ——
+     * 于是用户看到左栏、却**没有任何办法召出右栏那个独立 view**。
+     *
+     * ⭐ 别的 view(Note / AI / eBook / Mail)**都有**这个按钮,
+     * 是我漏了。这条钉住它别再漏。
+     *
+     * 判据分两层:
+     * ① 命令注册器挂上了(`commands` 字段)—— 没有它命令不存在
+     * ② 组件里真的调了 SlotPicker —— 有命令没按钮同样召不出来
+     */
+    const v = byId('x-web-view');
+    expect(
+      v!.commands,
+      '左栏 view 没挂 commands —— `x-view.open-right-slot` 不会被注册,\n'
+      + 'SlotPicker 选中后会静默无反应',
+    ).toBeTypeOf('function');
+
+    // ⚠️ 组件那层只能看源码(组件没渲染就没法查行为)——
+    //    但**命令那层是真查注册表的**,两层合起来才完整。
+    const src = readFileSync(
+      join(process.cwd(), 'src/modules/x/XWebView.tsx'),
+      'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(
+      src,
+      '左栏组件里没有打开 SlotPicker 的调用 —— 右栏那个独立 view 召不出来',
+    ).toMatch(/popupController\.toggle\s*\(\s*SLOT_PICKER_POPUP_ID/);
+    expect(
+      src,
+      '没把本 view 的命令注入 slotPickerContext —— popup 选中后不知道该调谁',
+    ).toMatch(/slotPickerContext\.setCommandId\(\s*['"]x-view\.open-right-slot['"]/);
+  });
 });
+

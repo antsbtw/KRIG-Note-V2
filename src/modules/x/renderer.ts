@@ -34,6 +34,7 @@
 import { registerView } from '@slot/view-type-registry/register-view';
 import { XWebView } from './XWebView';
 import { XWorkbenchView } from './XWorkbenchView';
+import { registerXCommands } from './x-commands';
 
 /** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
 export const X_WEB_VIEW_ID = 'x-web-view';
@@ -41,6 +42,13 @@ export const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
 
 /** ① 左栏:X 的网页 */
 registerView({
+  /**
+   * ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)。
+   * ⚠️ 必须走这个字段而不是直接调 —— 命令注册要本窗口真 wsId,
+   * 多窗口下用 snapshot.activeId 会注册到别人头上
+   * (见 project-module-self-register-commands)。
+   */
+  commands: registerXCommands,
   id: X_WEB_VIEW_ID,
   /**
    * ⚠️ 暂不 install 任何 capability —— 本步零业务。
