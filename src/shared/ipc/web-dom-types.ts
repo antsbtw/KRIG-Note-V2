@@ -8,7 +8,7 @@
  *
  * renderer 侧 18 处裸注入,实测四个缺陷:
  *  ① `sync-driver` 有 **26 处静默吞异常、零日志** —— 违反可靠性纲领 §44
- *  ② `replace(/__KRIG_SIDE__/g, …)` 把运行时值**文本替换进脚本源码**,
+ *  ② 对占位符做 regex 替换,把运行时值**文本替换进脚本源码**,
  *     与 `project-x-inject-template-escape` 同机制,**且已经咬过一次**
  *  ③ 9 处把运行时值拼进脚本(含数字 —— `JSON.stringify(NaN)` → `null` → 浏览器当 0)
  *  ④ 零留痕:完全绕过 `trace` / `raw`,出事查不到「往页面里塞了什么」

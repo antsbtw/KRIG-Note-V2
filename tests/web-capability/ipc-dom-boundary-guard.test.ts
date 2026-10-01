@@ -221,13 +221,43 @@ describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', ()
      * `replace(string,string)` 只换了注释 → sync 行为异常)。
      * ⭐ 改成绑定值之后,脚本本体里不该再有任何 `__XXX__` 式占位符。
      */
-    const inject = readFileSync(join(ROOT, 'src/drivers/web-sync-driver/sync-inject.js'), 'utf-8');
-    const placeholders = Array.from(inject.matchAll(/__[A-Z][A-Z0-9_]{2,}__/g)).map((m) => m[0]);
+    /**
+     * ⚠️ 两个 `?raw` 脚本都要扫 —— 2026-09-30 步 2b 发现
+     * `google-translate-inject.js` 有**完全同形**的占位符
+     * (同样 2 处:一处注释一处真实变量)。只扫一个文件就是漏。
+     */
+    const RAW_SCRIPTS = [
+      'src/drivers/web-sync-driver/sync-inject.js',
+      'src/drivers/web-translate-driver/google-translate-inject.js',
+    ];
+    const found: string[] = [];
+    for (const f of RAW_SCRIPTS) {
+      const code = readFileSync(join(ROOT, f), 'utf-8');
+      for (const m of code.matchAll(/__[A-Z][A-Z0-9_]{2,}__/g)) {
+        found.push(`${f}: ${m[0]}`);
+      }
+    }
     expect(
-      Array.from(new Set(placeholders)),
-      '脚本里还有占位符 —— 说明又在做文本替换而不是参数绑定:\n  '
-      + placeholders.join(', '),
+      found,
+      '脚本里还有占位符 —— 说明又在做文本替换而不是参数绑定:\n  ' + found.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⭐⭐ driver 侧不许再 `?raw` + replace —— 那是旧机制的指纹', () => {
+    /**
+     * ⭐ 脚本本体现在归 main 侧的 `renderer-scripts.ts`。
+     * driver 若又 `import x from './y.js?raw'` 并 `.replace(...)`,
+     * 说明旧机制复活了(把运行时值文本替换进脚本源码)。
+     */
+    const offenders: string[] = [];
+    for (const f of listSources(join(ROOT, 'src/drivers'))) {
+      const code = strip(readFileSync(f, 'utf-8'));
+      if (/\?raw/.test(code)) offenders.push(`${f.replace(ROOT + '/', '')} (?raw)`);
+    }
+    expect(
+      offenders,
+      'driver 又在 import ?raw 脚本 —— 脚本本体应登记在 main 侧的 renderer-scripts.ts,\n'
+      + 'driver 只给 scriptId + 参数:\n  ' + offenders.join('\n  '),
     ).toEqual([]);
   });
 });
-

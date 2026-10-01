@@ -1,8 +1,12 @@
 //# sourceURL=krig://google-translate-inject.js
 // L5-B4.2:Google Translate widget 启动器(从 V1 直迁,命名空间 __mirro → __krig)
-// 占位 __KRIG_TARGET_LANG__ 在注入前替换(translate-driver 内做)
+// ⭐ 2026-09-30:targetLang 不再用占位符文本替换,改由注册器在本段**之前**
+// 定义 window.__krigTargetLangBound(JSON.stringify 绑定值)。
+// ⚠️ 旧做法对一个占位符做 regex 全局替换 —— 把运行时值替换进脚本源码,
+// 与 project-x-inject-template-escape 同机制;而且那个占位符在本文件出现 2 处
+// (一处注释 + 一处真实变量),与 sync-inject 踩过的完全同形。
 (function() {
-  var TARGET_LANG = '__KRIG_TARGET_LANG__';
+  var TARGET_LANG = window.__krigTargetLangBound;
 
   // 已注入页面 — Google Translate widget 运行时切 lang 不可靠(已知限制 L5-B4.2 v1)
   // 用户切 lang 走 reload 路径(TranslateWebView 内 useEffect [targetLang]),

@@ -23,11 +23,27 @@ import type { RegisteredScript, ScriptId, ScriptParams } from './types';
 import type { ScriptRegistry } from './script-registry';
 // ⚠️ Vite `?raw`:把 .js 文件原文当字符串读(与 renderer 侧同一手法)
 import syncInjectRaw from '../../../../drivers/web-sync-driver/sync-inject.js?raw';
+import googleTranslateInjectRaw from '../../../../drivers/web-translate-driver/google-translate-inject.js?raw';
 
 export const RENDERER_SCRIPTS = {
   /** 双开 web view 的同步内核(guest 端事件队列 + 滚动/点击/输入采集) */
   syncInject: 'renderer.sync-inject' as ScriptId,
+  /** 翻译:剥 CSP meta + MutationObserver 防新加(零参数) */
+  translateStripCsp: 'renderer.translate-strip-csp' as ScriptId,
+  /** 翻译:Google Translate 挂载壳(targetLang 决定译成哪种语言) */
+  translateMount: 'renderer.translate-mount' as ScriptId,
+  /** 翻译:暗色 color-scheme meta(零参数) */
+  translateDarkMeta: 'renderer.translate-dark-meta' as ScriptId,
 } as const;
+
+/** 缺参数就抛,不静默用默认值(那会把「忘了传」变成静默错误) */
+function requireLang(params: ScriptParams): string {
+  const v = params['targetLang'];
+  if (typeof v !== 'string' || v.length === 0) {
+    throw new Error(`[web.dom] translate-mount 的 targetLang 必须是非空 string,收到 ${typeof v}`);
+  }
+  return v;
+}
 
 /** 缺参数就抛,不静默用默认值(那会把「忘了传」变成静默错误) */
 function requireSide(params: ScriptParams): 'left' | 'right' {
@@ -54,6 +70,60 @@ export const RENDERER_SCRIPT_DEFINITIONS: readonly RegisteredScript[] = [
       return `(function(){ window.__krigSyncSideBound = ${JSON.stringify(side)}; })();\n`
         + (syncInjectRaw as unknown as string);
     },
+  },
+  {
+    id: RENDERER_SCRIPTS.translateStripCsp,
+    purpose: '翻译:剥页面 CSP meta,并用 MutationObserver 防站点再加回来',
+    /** ⭐ 零参数 —— 纯字面量,照搬原实现一字未改 */
+    build: () => `
+      (function() {
+        document.querySelectorAll('meta[http-equiv]').forEach(function(m) {
+          if (/content-security-policy/i.test(m.getAttribute('http-equiv'))) m.remove();
+        });
+        new MutationObserver(function(mutations) {
+          mutations.forEach(function(mut) {
+            mut.addedNodes.forEach(function(node) {
+              if (node.nodeName === 'META' &&
+                  /content-security-policy/i.test(node.getAttribute('http-equiv') || ''))
+                node.remove();
+            });
+          });
+        }).observe(document.head || document.documentElement, { childList: true });
+      })();
+    `,
+  },
+  {
+    id: RENDERER_SCRIPTS.translateMount,
+    purpose: 'Google Translate 挂载壳(targetLang 决定译成哪种语言)',
+    /**
+     * ⭐ **绑定值,不是文本替换**:在脚本本体之前定义
+     * `window.__krigTargetLangBound`,脚本体读它。
+     * ⚠️ 旧做法是对占位符做 regex 全局替换,而那个占位符在
+     * `google-translate-inject.js` 出现 2 处(一处注释一处真实变量)——
+     * 与 sync-inject 踩过的完全同形。
+     */
+    build: (p) => {
+      const lang = requireLang(p);
+      return `(function(){ window.__krigTargetLangBound = ${JSON.stringify(lang)}; })();\n`
+        + (googleTranslateInjectRaw as unknown as string);
+    },
+  },
+  {
+    id: RENDERER_SCRIPTS.translateDarkMeta,
+    purpose: '翻译:写 color-scheme=dark meta(让 Google 的 widget 跟随暗色)',
+    /** ⭐ 零参数 —— 纯字面量,照搬原实现一字未改 */
+    build: () => `
+      (function() {
+        var meta = document.querySelector('meta[name="color-scheme"]');
+        if (!meta) {
+          meta = document.createElement('meta');
+          meta.setAttribute('name', 'color-scheme');
+          document.head.appendChild(meta);
+        }
+        meta.setAttribute('content', 'dark');
+        document.documentElement.style.colorScheme = 'dark';
+      })();
+    `,
   },
 ];
 
