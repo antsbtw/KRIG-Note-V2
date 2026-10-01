@@ -161,3 +161,73 @@ describe('⭐ IPC 面的失败语义:不许静默', () => {
       .toMatch(/bindPageHost\s*\(/);
   });
 });
+
+describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', () => {
+  /**
+   * ⭐ renderer 不许 import 能力层,所以 scriptId 在两边各写一份字面量。
+   * ⚠️ 那就必然有**漂移风险** —— 漂了的表现是「注入静默没生效」
+   * (main 侧查不到这个 id → Failed「未注册」,而 renderer 只看到一行 warn)。
+   * 本条用**两张清单对照**钉住它们一致,不钉单个字面量
+   * (`project-x-field-four-place-registration` 的做法)。
+   */
+  const mainScripts = strip(
+    readFileSync(join(ROOT, 'src/platform/main/web-capability/dom/renderer-scripts.ts'), 'utf-8'),
+  );
+
+  it('前提自检:两边都读到了', () => {
+    expect(mainScripts, 'main 侧脚本表读不到').toContain('RENDERER_SCRIPTS');
+  });
+
+  it('⭐⭐ main 侧登记的每个 id,renderer 侧都有对应字面量', () => {
+    // 从 main 侧真表取 id(⭐ 不自己抄一份清单 —— 抄的会漂)
+    const ids = Array.from(mainScripts.matchAll(/'(renderer\.[a-z0-9-]+)'\s+as\s+ScriptId/g))
+      .map((m) => m[1]);
+    expect(ids.length, '一个 renderer.* 脚本都没登记 —— 判据会空转').toBeGreaterThan(0);
+
+    const rendererSources = ['src/drivers', 'src/views', 'src/capabilities']
+      .flatMap((d) => listSources(join(ROOT, d)))
+      .map((f) => strip(readFileSync(f, 'utf-8')))
+      .join('\n');
+
+    const missing = ids.filter((id) => !rendererSources.includes(`'${id}'`));
+    expect(
+      missing,
+      'main 侧登记了这些脚本,但 renderer 侧找不到对应字面量 —— 要么是死脚本,\n'
+      + '要么是 renderer 写错了名字(表现为「注入静默没生效」):\n  ' + missing.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⭐⭐ renderer 侧用的每个 renderer.* id,main 侧都登记了', () => {
+    /** ⚠️ 反方向同样要钉:renderer 写了个 main 没登记的名字 = 注入永远失败 */
+    const used = new Set<string>();
+    for (const d of ['src/drivers', 'src/views', 'src/capabilities']) {
+      for (const f of listSources(join(ROOT, d))) {
+        const code = strip(readFileSync(f, 'utf-8'));
+        for (const m of code.matchAll(/'(renderer\.[a-z0-9-]+)'/g)) used.add(m[1]);
+      }
+    }
+    const unregistered = Array.from(used).filter((id) => !mainScripts.includes(`'${id}'`));
+    expect(
+      unregistered,
+      'renderer 用了 main 侧没登记的 scriptId —— 注入会永远失败(「未注册」):\n  '
+      + unregistered.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⭐ 脚本本体里不许再留占位符(文本替换的遗迹)', () => {
+    /**
+     * ⚠️ 旧做法是对占位符做 regex 文本替换,**已经咬过一次**
+     * (占位符在 sync-inject.js 出现 2 处:一处注释一处真实变量,
+     * `replace(string,string)` 只换了注释 → sync 行为异常)。
+     * ⭐ 改成绑定值之后,脚本本体里不该再有任何 `__XXX__` 式占位符。
+     */
+    const inject = readFileSync(join(ROOT, 'src/drivers/web-sync-driver/sync-inject.js'), 'utf-8');
+    const placeholders = Array.from(inject.matchAll(/__[A-Z][A-Z0-9_]{2,}__/g)).map((m) => m[0]);
+    expect(
+      Array.from(new Set(placeholders)),
+      '脚本里还有占位符 —— 说明又在做文本替换而不是参数绑定:\n  '
+      + placeholders.join(', '),
+    ).toEqual([]);
+  });
+});
+

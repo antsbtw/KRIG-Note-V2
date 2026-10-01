@@ -2,12 +2,19 @@
 // L5-B4.2:guest webview 端注入脚本(从 V1 直迁,命名空间 __mirro → __krig)
 // 将在 sync-driver.injectSyncScript 内通过 executeJavaScript 注入到 webview。
 //
-// 占位 __KRIG_SIDE__ 在注入前替换为 'left' 或 'right'。
+// ⭐ 2026-09-30:side 不再用占位符文本替换,改由注册器在本段**之前**
+// 定义 `window.__krigSyncSideBound`(JSON.stringify 绑定值)。
+//
+// ⚠️ 旧做法是对一个占位符做 regex 文本替换 —— 把运行时值**替换进脚本源码**,
+// 与 project-x-inject-template-escape 同机制,**而且已经咬过一次**:
+// 那个占位符在本文件出现 2 处(一处注释 + 一处真实变量),
+// 当初用 `replace(string, string)` 只替换第一个 → 改到了注释、真实变量没变 →
+// sync 行为异常。靠加 `/g` 修好,但机制没变,下一个占位符还会再来。
 (function() {
   if (window.__krigSyncSetup) return;
   window.__krigSyncSetup = true;
   window.__krigSyncQueue = [];
-  window.__krigSyncSide = '__KRIG_SIDE__';
+  window.__krigSyncSide = window.__krigSyncSideBound;
 
   // ── Shared helpers (used by scroll sync and selection highlight) ──
   var blockTags = ['P','LI','TD','TH','BLOCKQUOTE','PRE','H1','H2','H3','H4','H5','H6','FIGCAPTION','DT','DD'];

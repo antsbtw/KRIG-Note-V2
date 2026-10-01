@@ -8,7 +8,7 @@
 import { PageRegistry } from '../page';
 import { NetworkEventBus, CdpBodyProvider } from '../net';
 import { TraceRecorder, HealthProbe, NetMonitor } from '../trace';
-import { ScriptRegistry, registerAIScripts, registerLocateScripts } from '../dom';
+import { ScriptRegistry, registerAIScripts, registerLocateScripts, registerRendererScripts } from '../dom';
 import { ElectronDomRunner } from './electron-dom';
 import { FsTraceSink } from './fs-trace-sink';
 import { ControlEngine } from '../page';
@@ -51,6 +51,8 @@ export const scriptRegistry = new ScriptRegistry();
 registerAIScripts(scriptRegistry);
 // ⭐ 服务无关的定位脚本(三家 AI 提取器共用「按坐标定位第几条」)
 registerLocateScripts(scriptRegistry);
+// ⭐ renderer 侧注入脚本(双开同步内核等)—— 走 IPC 面由 renderer 触发
+registerRendererScripts(scriptRegistry);
 export const domRunner = new ElectronDomRunner(scriptRegistry, traceRecorder);
 
 /**
