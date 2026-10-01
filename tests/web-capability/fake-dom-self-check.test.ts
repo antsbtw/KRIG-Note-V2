@@ -268,3 +268,38 @@ describe('⭐ fake-dom 自检:求值', () => {
     expect(typeof out, 'location 没注入进去').toBe('string');
   });
 });
+
+describe('⭐⭐ fake-dom 自检:真 DOM 是唯一权威(换 jsdom 后的适配层)', () => {
+  it('⭐⭐ children / parentElement 由真 DOM 现算,不是存下来的影子数组', () => {
+    const a = el('span', { id: 'a' });
+    const b = el('span', { id: 'b' });
+    const parent = el('div', {}, {}, [a, b]);
+    makeDom([parent]);
+    expect(parent.children.map((c) => c.node.id)).toEqual(['a', 'b']);
+    a.node.remove();   // 走真 DOM 改结构
+    expect(parent.children.map((c) => c.node.id), 'children 没跟真 DOM 同步').toEqual(['b']);
+    expect(a.parentElement, '已摘除的元素 parentElement 仍非空 —— 「仍在文档里」的断言会恒真').toBeNull();
+    // 想绕开真 DOM 直接改数组要**响**,不许静默生效
+    expect(() => { (parent as { children: unknown }).children = []; }).toThrow();
+  });
+
+  it('⭐⭐ 每个新页面焦点归零 —— 不许跨测试泄漏', () => {
+    const d1 = makeDom([el('input', { id: 'x' })]);
+    evalInDom(d1, `(function(){ document.querySelector('#x').focus(); })()`);
+    const d2 = makeDom([el('div', { id: 'y' })]);
+    const ae = evalInDom(d2, `(function(){ return document.activeElement === document.body; })()`);
+    expect(ae, '上一页 focus 过的元素成了新页面的 activeElement —— press 会派发给一个已脱离文档的元素').toBe(true);
+  });
+
+  it('⭐⭐ 事件是真 jsdom Event,且留痕保留事件本身(含 clipboardData)', () => {
+    const box = el('div', { id: 'c' }, { contentEditable: 'true' });
+    const dom = makeDom([box]);
+    const out = evalInDom(dom, `(function(){ try {
+      var dt = new DataTransfer(); dt.setData('text/plain', 'hi');
+      document.querySelector('#c').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+      return 'ok'; } catch (e) { return 'THREW ' + e.message; } })()`);
+    expect(out, 'jsdom 拒收了我们的事件对象 —— 脚本 try 会把它吞成 false,合成 paste 静默降级').toBe('ok');
+    const evt = box.events.find((e) => e.type === 'paste') as { clipboardData?: { getData(t: string): string } } | undefined;
+    expect(evt?.clipboardData?.getData('text/plain'), '留痕丢了事件内容 —— FakeInputHost 取不到要粘的文本').toBe('hi');
+  });
+});

@@ -479,3 +479,61 @@ jsdom **真的派发事件**,而测试里**没有任何 paste handler**,
   ⚠️ **尚未加进 `devDependencies`** —— 靠别人的传递依赖是隐患,
   要不要加由用户拍板(本次未加)。
 
+
+### ✅ 复核结论(2026-09-30,regression-nj 侧)—— 5 条全部处置,web-capability + mail 36 文件 555 条全绿
+
+#### 1. A 组 3 条:**原来不是假绿,判断不成立** —— 失败是 jsdom 适配层引入的回归
+
+- 「手写版 dispatchEvent 只记一笔就返 true、脚本以为成功」—— 前半句对,**结论不对**。
+  脚本**不判断**落没落地:派发完就 `return true`,落地由**另一个校验脚本**读框内容判定。
+  模拟站点 paste handler 的是 **`FakeInputHost`**(`syntheticPasteWorks` 开关):从被测框的留痕里
+  取出 paste 事件的 `init.clipboardData` 文本写进框。这条链确实验证了
+  「在**对的元素**上派发了 paste、**带着对的文本**」—— 注入实测:派发到 body(J1)、文本换掉(J2)都红。
+- 真因是适配层**三处一起断**:
+  1. 手写 `FakeClipboardEvent` 不是 jsdom `Event` → 转原生 `dispatchEvent` **抛**
+     `parameter 1 is not of type 'Event'` → 脚本 try 吞成 `false` → 降级 os-paste
+  2. 接管的 `dispatchEvent` 只记 `{type}`,**丢了事件本身**
+  3. 改写时 `FakeEvent` 丢了 `init`、`FakeKeyboardEvent` 丢了 `key`
+- 修:事件类改为**继承 jsdom 的 `win.Event`**(保留 init/key/clipboardData);留痕记事件对象本身。
+  ⚠️ 没用 jsdom 自带 MouseEvent:脚本传 `view: window`(这里是普通对象)会被拒收并被 try 吞掉。
+- ⭐ 教训:「换引擎后变红」有两种解释 ——「原来是假绿」或「换引擎时改坏了」。
+  这次是后者;**先排除适配层回归,再下「原来是假绿」的结论**
+
+#### 2. B 组 2 条:`marker.node.remove()` **不够**;`children` 已删成只读现算
+
+- 覆盖的是**句柄**的 `update.click`,而脚本调的是**真节点**的 `click()` —— 覆盖根本不会被调到。
+  正解是挂真节点监听:`update.node.addEventListener('click', () => marker.node.remove())`(模拟站点的 click handler)。
+  缩略图那条改成 `container.node.appendChild(...)`
+- `FakeEl.children` / `parentElement`:**改为由真 DOM 现算的只读 getter**,赋值会抛。
+  ⭐ 顺带揪出一条**潜伏假绿**:`expect(marker.parentElement).not.toBeNull()`(input-actions:128)
+  在旧版**恒真**(parentElement 建时赋一次、永不更新)
+- 注入:settle 判据恒满足/恒不满足(J3/J4)、feed 落地恒真(J7)都红 ✅
+- ⚠️ 另有一处**与本批无关的缺口**:删掉 settle 里 `anchorAppears` 未满足的判定(J5)**全绿** ——
+  只测了「出现→settled」,没测「不出现→未 settled」
+
+#### 3. 8 处差异复核
+
+- **② 接管 `Element.prototype.getBoundingClientRect`:无外溢副作用** —— 打在 fake-dom **私有的 JSDOM 实例**上,
+  不是全局环境;用 `@vitest-environment jsdom` 的 5 个测试各有自己的 window,互不影响。
+  ⚠️ 但**只接管了这一个**:`offsetTop` / `offsetHeight` 等仍**静默返回 0**(实测 rect 给 50/10、读出 0/0),
+  与「读几何即抛」原则不一致。当前无消费者;**renderer 侧那批(sync-driver 的滚动)一定会读**,届时要一并接管
+- **⑥ `Reflect.apply` 转原生**:方向对,但见第 1 条 —— 转原生要求事件是真 Event
+- **⑤ `activeElement`**:实测**跨测试泄漏**(上一页 focus 过的、已脱离文档的元素成了新页面的 activeElement)→
+  已在 `makeDom` 重置,且无焦点时返回 body(真 DOM 初始态)
+- **`dom.root`**:是 `el('body')` **新建**的元素,不是真 body(`children` 恒 0)、全仓零使用 → **已删**
+- **① url**:去掉后**零测试变红** —— 当前没有消费者踩到 localStorage;无害,但「实测踩到」那句无法复现
+- ③ contentEditable / ④ HTMLTextAreaElement:去掉后业务测试会红(间接覆盖) ✅
+
+#### 4. 自检够不够 / 要不要精简
+
+- **不精简,但要分清两类**:
+  - **适配层契约**(我们自己写的代码:几何接管、命中、事件留痕、焦点、children 现算、ASI)——
+    这是真正会**静默漂**的地方,每一条都要有自检。本次补了 3 条(children/parentElement 现算、焦点归零、
+    事件是真 Event 且留痕含 clipboardData),逐条注入验证会红
+  - **jsdom 语义**(属性算子、逗号顺序、closest、后代组合)—— 不是在测我们的代码,但**只留被测脚本真用到的写法**
+    (mail 四家 profile、Gmail 后代组合、`[attr=""]`),当「jsdom 升级 / 有人换回手写引擎」的回归网。
+    通用 CSS 语义不必再加
+- 适配层仍缺自检的:① url(要么补自检,要么删掉那句「实测踩到」)
+
+#### 待用户拍板
+- jsdom 进 `devDependencies`(仍是传递依赖)—— **建议加**:fake-dom 现在硬依赖它

@@ -47,8 +47,14 @@ export type FakeEl = {
   readonly node: Element;
   readonly tagName: string;
   readonly attrs: Record<string, string>;
+  /**
+   * ⭐ 只读、由真 DOM 现算 —— **不是存下来的数组**。
+   * 换 jsdom 后真 DOM 是唯一权威;存一份句柄数组就是存一份会不同步的影子状态
+   * (实测:往数组里 push/filter 元素,脚本看到的 DOM 纹丝不动 → 2 条测试超时)。
+   * 要改结构请操作 `.node`(`node.remove()` / `appendChild`)。
+   */
   readonly children: FakeEl[];
-  parentElement: FakeEl | null;
+  readonly parentElement: FakeEl | null;
   textContent: string;
   innerText: string;
   value?: string;
@@ -172,8 +178,8 @@ export function el(
     node,
     tagName: tagName.toUpperCase(),
     attrs,
-    children,
-    parentElement: null,
+    get children() { return Array.from(node.children).map((n) => mustWrap(n)); },
+    get parentElement() { return wrap(node.parentElement); },
     events: [],
     clicked: 0,
     hasRect: props.rect !== undefined,
@@ -215,7 +221,7 @@ export function el(
   const nodeAny = node as unknown as Record<string, unknown>;
   const origDispatch = nodeAny.dispatchEvent as (e: unknown) => boolean;
   nodeAny.dispatchEvent = function tracked(this: unknown, e: { type?: string }): boolean {
-    handle.events.push({ type: String(e?.type ?? '') });
+    handle.events.push(e as { type: string });
     return Reflect.apply(origDispatch, this, [e]) as boolean;
   };
   const origFocus = nodeAny.focus as () => void;
@@ -235,7 +241,6 @@ export function el(
   };
   nodeAny.scrollIntoView = function tracked(): void { handle.scrolled = true; };
 
-  for (const c of children) c.parentElement = handle;
   return handle;
 }
 
@@ -254,7 +259,6 @@ function mustWrap(n: Element): FakeEl {
 }
 
 export type FakeDom = {
-  root: FakeEl;
   /** 脚本里的 `document` */
   document: Record<string, unknown>;
   /** 脚本里的 `window` */
@@ -273,12 +277,15 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
   while (body.firstChild) body.removeChild(body.firstChild);
   for (const n of topLevel) body.appendChild(n.node);
 
-  const rootHandle = handles.get(body) ?? el('body');
-  handles.set(body, rootHandle);
+  /**
+   * ⭐ 每个新页面焦点归零 —— `activeEl` 是模块级的,不重置就会**跨测试泄漏**:
+   * 上一个测试 focus 过的元素(已脱离文档)成了新页面的 activeElement,
+   * press 会把按键派发给它(2026-09-30 复核实测)。
+   */
+  activeEl = null;
 
   const execCommands: FakeDom['execCommands'] = [];
   const dom: FakeDom = {
-    root: rootHandle,
     execCommands,
     activeElement: null,
     document: {},
@@ -288,7 +295,8 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
 
   dom.document = {
     body,
-    get activeElement() { return dom.activeElement?.node ?? activeEl; },
+    // 真 DOM:没有焦点时 activeElement 是 body,不是 null
+    get activeElement() { return dom.activeElement?.node ?? activeEl ?? body; },
     // ⭐ 全部转给 jsdom
     querySelector: (sel: string) => jsdomDoc.querySelector(sel),
     querySelectorAll: (sel: string) => Array.from(jsdomDoc.querySelectorAll(sel)),
@@ -340,6 +348,7 @@ export function makeDom(topLevel: FakeEl[]): FakeDom {
  */
 export function evalInDom(dom: FakeDom, script: string): unknown {
   const win = activeWin();
+  const ev = makeEventClasses(win as unknown as { Event: typeof Event });
   const fn = new Function(
     'document', 'window', 'location',
     'DataTransfer', 'ClipboardEvent', 'Event', 'InputEvent', 'MouseEvent', 'KeyboardEvent',
@@ -348,7 +357,7 @@ export function evalInDom(dom: FakeDom, script: string): unknown {
   );
   return fn(
     dom.document, dom.window, dom.location,
-    FakeDataTransfer, FakeClipboardEvent, FakeEvent, FakeInputEvent, FakeMouseEvent, FakeKeyboardEvent,
+    FakeDataTransfer, ev.FakeClipboardEvent, ev.FakeEvent, ev.FakeInputEvent, ev.FakeMouseEvent, ev.FakeKeyboardEvent,
     // ⭐ 脚本里用 Node.DOCUMENT_POSITION_* 做文档顺序比较
     win.Node,
     Object,
@@ -368,17 +377,41 @@ class FakeDataTransfer {
   getData(type: string): string { return this.data[type] ?? ''; }
 }
 
-class FakeEvent {
-  type: string;
-  constructor(type: string, _init?: unknown) { this.type = type; }
-}
-class FakeInputEvent extends FakeEvent {}
-class FakeMouseEvent extends FakeEvent {}
-class FakeKeyboardEvent extends FakeEvent {}
-class FakeClipboardEvent extends FakeEvent {
-  clipboardData: FakeDataTransfer;
-  constructor(type: string, init?: { clipboardData?: FakeDataTransfer }) {
-    super(type);
-    this.clipboardData = init?.clipboardData ?? new FakeDataTransfer();
+/**
+ * ⭐ 事件类必须**继承 jsdom 自己的 `Event`** —— 换 jsdom 后脚本调的是真节点的
+ * `dispatchEvent`,它只收真 `Event`;传手写的普通对象会抛
+ * 「parameter 1 is not of type 'Event'」,而脚本的 try/catch 把它吞成 `false`
+ * → 合成 paste 被误判失败、静默降级到 os-paste(2026-09-30 复核实测,A 组 3 条的真因)。
+ *
+ * ⚠️ 仍保留 `init`(FakeInputHost 从它取 clipboardData 模拟站点 paste handler)
+ * 与 `key`(press 用)—— 手写版有这两个字段,改写时丢了。
+ *
+ * ⚠️ 不直接用 jsdom 的 MouseEvent/KeyboardEvent:脚本传 `view: window`,
+ * 而这里的 window 是普通对象,jsdom 会拒收并被脚本 try 吞掉 → 事件凭空消失。
+ */
+function makeEventClasses(win: { Event: typeof Event }) {
+  class FakeEvent extends win.Event {
+    init?: Record<string, unknown>;
+    constructor(type: string, init?: Record<string, unknown>) {
+      super(type, init as EventInit);
+      this.init = init;
+    }
   }
+  class FakeInputEvent extends FakeEvent {}
+  class FakeMouseEvent extends FakeEvent {}
+  class FakeKeyboardEvent extends FakeEvent {
+    key?: string;
+    constructor(type: string, init?: Record<string, unknown>) {
+      super(type, init);
+      this.key = init?.key as string | undefined;
+    }
+  }
+  class FakeClipboardEvent extends FakeEvent {
+    clipboardData: FakeDataTransfer;
+    constructor(type: string, init?: Record<string, unknown>) {
+      super(type, init);
+      this.clipboardData = (init?.clipboardData as FakeDataTransfer | undefined) ?? new FakeDataTransfer();
+    }
+  }
+  return { FakeEvent, FakeInputEvent, FakeMouseEvent, FakeKeyboardEvent, FakeClipboardEvent };
 }

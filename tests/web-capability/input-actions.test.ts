@@ -87,11 +87,9 @@ describe('⭐ tap.settle 生效(§10.3 —— 脏态在类型层面可被表达)
     const host = new FakeInputHost(dom);
     if (opts.closesOnClick) {
       // 点 update → 模态真的关(把 marker 从 DOM 里摘掉)
-      const origClick = update.click.bind(update);
-      update.click = () => {
-        origClick();
-        modal.children = modal.children.filter((c) => c !== marker);
-      };
+      // ⚠️ 必须挂在**真节点**的 click 监听上:脚本调的是 node.click(),
+      // 覆盖句柄的 click 方法根本不会被调到;改句柄数组也不改真 DOM。
+      update.node.addEventListener('click', () => marker.node.remove());
     }
     const engine = new InputEngine(host, new MapAnchorResolver(ANCHORS));
     return { engine, update, marker, modal };
@@ -180,7 +178,7 @@ describe('⭐ feed —— 喂文件与落地判据(§10.3)', () => {
   it('⭐ 缩略图出现 → Ok(landed:true)', async () => {
     const { engine, host, container } = feedScene();
     // 模拟站点接住文件后渲染出缩略图
-    host.onFeed = () => container.children.push(el('img', { class: 'thumb' }, {}));
+    host.onFeed = () => { container.node.appendChild(el('img', { class: 'thumb' }, {}).node); };
     const r = await engine.feed(PAGE, {
       anchor: 'fileInput',
       files: ['/tmp/a.png'],
