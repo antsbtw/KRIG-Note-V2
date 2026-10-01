@@ -87,11 +87,9 @@ describe('⭐ tap.settle 生效(§10.3 —— 脏态在类型层面可被表达)
     const host = new FakeInputHost(dom);
     if (opts.closesOnClick) {
       // 点 update → 模态真的关(把 marker 从 DOM 里摘掉)
-      const origClick = update.click.bind(update);
-      update.click = () => {
-        origClick();
-        modal.children = modal.children.filter((c) => c !== marker);
-      };
+      // ⚠️ 必须挂在**真节点**的 click 监听上:脚本调的是 node.click(),
+      // 覆盖句柄的 click 方法根本不会被调到;改句柄数组也不改真 DOM。
+      update.node.addEventListener('click', () => marker.node.remove());
     }
     const engine = new InputEngine(host, new MapAnchorResolver(ANCHORS));
     return { engine, update, marker, modal };
@@ -151,6 +149,36 @@ describe('⭐ tap.settle 生效(§10.3 —— 脏态在类型层面可被表达)
     expect(r.value.settled).toBe(true);
   });
 
+  it('⭐⭐ anchorAppears 未出现 → 报未 settled(Degraded,不是 Ok)', async () => {
+    /**
+     * ⚠️ 2026-09-30 独立复核指出的覆盖缺口:上面那条 `anchorAppears 判据同样生效`
+     * 只测了**已经在场**的情况(marker 本来就在 DOM 里),
+     * 而「等它出现、但它始终没出现」这条路**完全没有覆盖**。
+     *
+     * ⭐ 这正是 `anchorGone 未满足` 那条要治的病的镜像:
+     * 判据没满足却当 Ok,下一 step 就在脏态上启动。
+     */
+    const modal = el('div', { class: 'modal' }, {}, [
+      el('button', { id: 'update' }, { textContent: 'U' }),
+    ]);
+    const dom = makeDom([modal]);
+    const engine = new InputEngine(new FakeInputHost(dom), new MapAnchorResolver(ANCHORS));
+    const r = await engine.tap(PAGE, {
+      anchor: 'updateButton',
+      // modalMarker 在页面上**从不存在** —— 等它出现必然等不到
+      settle: { anchorAppears: 'modalMarker', timeoutMs: 10 },
+    });
+    expect(isDegraded(r), '等不到锚点却没报 Degraded').toBe(true);
+    if (!isDegraded(r)) throw new Error('unreachable');
+    expect(r.value.settled).toBe(false);
+    expect(r.value.waited).toBe(true);
+    expect(r.missing.join(), 'missing 里没说清是哪个锚点没出现').toContain('modalMarker');
+    // ⚠️ 不是 Ok —— 当 Ok 就是「点了就当成了」
+    expect((r as { status: string }).status).not.toBe('ok');
+    // 自检:断言的是**事实** —— 那个锚点真的不在页面上
+    expect(dom.document.querySelector, '自检前提:document 可查').toBeDefined();
+  });
+
   it('空 settle 对象直接 Failed(给了却什么也没说 = 恒 false,让人困惑)', async () => {
     const { engine } = modalScene({ closesOnClick: true });
     const r = await engine.tap(PAGE, { anchor: 'updateButton', settle: {} });
@@ -180,7 +208,7 @@ describe('⭐ feed —— 喂文件与落地判据(§10.3)', () => {
   it('⭐ 缩略图出现 → Ok(landed:true)', async () => {
     const { engine, host, container } = feedScene();
     // 模拟站点接住文件后渲染出缩略图
-    host.onFeed = () => container.children.push(el('img', { class: 'thumb' }, {}));
+    host.onFeed = () => { container.node.appendChild(el('img', { class: 'thumb' }, {}).node); };
     const r = await engine.feed(PAGE, {
       anchor: 'fileInput',
       files: ['/tmp/a.png'],

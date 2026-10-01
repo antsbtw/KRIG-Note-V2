@@ -44,22 +44,28 @@ describe('⭐⭐ fake-dom 自检:布局与命中', () => {
     const real = el('div', { id: 'real' }, { rect: rect(0, 500, 100, 50) });
     const dom = makeDom([ghost, real]);
     const doc = dom.document as { elementFromPoint(x: number, y: number): unknown; body: unknown };
+    /**
+     * ⚠️ 2026-09-30 换 jsdom 引擎后:`document` 是给**脚本**用的,
+     * 返回的是真 jsdom `Element`;测试持有的是 `FakeEl` 句柄。
+     * 故断言比 `.node` —— 这个区分是**有意的**:
+     * 脚本看到的必须是真元素(selector/closest 才有真语义)。
+     */
     // ⭐ 不抽查固定几点 —— 扫一片,任何一点命中 ghost 都算违规
     for (let x = 0; x <= 200; x += 25) {
       for (let y = 0; y <= 200; y += 25) {
-        expect(doc.elementFromPoint(x, y), `(${x},${y}) 命中了未布局元素`).not.toBe(ghost);
+        expect(doc.elementFromPoint(x, y), `(${x},${y}) 命中了未布局元素`).not.toBe(ghost.node);
       }
     }
-    expect(doc.elementFromPoint(50, 520), '给了 rect 的反而没命中').toBe(real);
+    expect(doc.elementFromPoint(50, 520), '给了 rect 的反而没命中').toBe(real.node);
   });
 
   it('⭐ 给了 rect 的元素按矩形命中,边界含端点', () => {
     const box = el('div', {}, { rect: rect(10, 20, 100, 50) });
     const doc = makeDom([box]).document as { elementFromPoint(x: number, y: number): unknown };
-    expect(doc.elementFromPoint(60, 40), '矩形内没命中').toBe(box);
-    expect(doc.elementFromPoint(10, 20), '左上角端点没命中(真 DOM 左/上边界是闭的)').toBe(box);
-    expect(doc.elementFromPoint(9, 40), '矩形左外侧竟然命中').not.toBe(box);
-    expect(doc.elementFromPoint(60, 71), '矩形下外侧竟然命中').not.toBe(box);
+    expect(doc.elementFromPoint(60, 40), '矩形内没命中').toBe(box.node);
+    expect(doc.elementFromPoint(10, 20), '左上角端点没命中(真 DOM 左/上边界是闭的)').toBe(box.node);
+    expect(doc.elementFromPoint(9, 40), '矩形左外侧竟然命中').not.toBe(box.node);
+    expect(doc.elementFromPoint(60, 71), '矩形下外侧竟然命中').not.toBe(box.node);
     /**
      * ⚠️ 复核指正:真 DOM 的**右/下边界是开的**(`[left,right)` / `[top,bottom)`),
      * 我原来钉「右下角端点也命中」是**非真实语义**。
@@ -68,6 +74,37 @@ describe('⭐⭐ fake-dom 自检:布局与命中', () => {
      * 左/上闭合必须成立;右/下是否闭合不钉(当前实现是闭的,偏宽松 1px,
      * 不影响任何现有判定,真要对齐需连同被测脚本一起改)。
      */
+  });
+
+  it('⭐⭐ offsetTop/Height 等同族几何也要接管(jsdom 静默返 0)', () => {
+    /**
+     * ⚠️ 第六轮复核点名的遗留风险:`getBoundingClientRect` 接管了,
+     * 但 `offsetTop` / `offsetHeight` 仍**静默返回 0** ——
+     * 同一类「幻影几何」:读到 0 不报错,依赖它的判据恒成立/恒不成立。
+     *
+     * ⭐ 实测 `sync-driver.ts:332` 用
+     * `documentElement.scrollHeight - window.innerHeight` ——
+     * renderer 那批(L2 剩下 18 处)一接上来就会踩。
+     */
+    const box = el('div', {}, { rect: rect(10, 20, 100, 50) });
+    makeDom([box]);
+    const n = box.node as unknown as {
+      offsetTop: number; offsetLeft: number; offsetWidth: number; offsetHeight: number;
+    };
+    expect(n.offsetTop, 'offsetTop 没跟 rect 对上').toBe(20);
+    expect(n.offsetLeft, 'offsetLeft 没跟 rect 对上').toBe(10);
+    expect(n.offsetWidth, 'offsetWidth 没跟 rect 对上').toBe(100);
+    expect(n.offsetHeight, 'offsetHeight 没跟 rect 对上').toBe(50);
+  });
+
+  it('⭐ 没给 rect 的元素读 offset* 也要抛(与 rect 同一条原则)', () => {
+    const ghost = el('div', {}, { textContent: 'G' });
+    makeDom([ghost]);
+    const n = ghost.node as unknown as { offsetTop: number };
+    expect(
+      () => n.offsetTop,
+      '没给 rect 却能读出 offsetTop —— 静默 0 是幻影几何,会让判据悄悄失真',
+    ).toThrow(/没有 rect/);
   });
 
   it('⭐ 点在空白处返回 body(真 DOM 语义),不是 null', () => {
@@ -124,10 +161,10 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
   it('⭐ 属性算子 = / *= / ^= / $= 各自正确', () => {
     const n = el('a', { href: 'mailto:a@b.com', title: 'hi @you' });
     const doc = makeDom([n]).document as { querySelector(s: string): unknown };
-    expect(doc.querySelector('[href="mailto:a@b.com"]'), '= 不对').toBe(n);
-    expect(doc.querySelector('[title*="@"]'), '*= 不对').toBe(n);
-    expect(doc.querySelector('[href^="mailto:"]'), '^= 不对').toBe(n);
-    expect(doc.querySelector('[href$=".com"]'), '$= 不对').toBe(n);
+    expect(doc.querySelector('[href="mailto:a@b.com"]'), '= 不对').toBe(n.node);
+    expect(doc.querySelector('[title*="@"]'), '*= 不对').toBe(n.node);
+    expect(doc.querySelector('[href^="mailto:"]'), '^= 不对').toBe(n.node);
+    expect(doc.querySelector('[href$=".com"]'), '$= 不对').toBe(n.node);
     expect(doc.querySelector('[title*="nope"]'), '*= 误匹配').toBeNull();
     /**
      * ⚠️ 复核指出原来缺**反例**:删掉 `^=` 或 `$=` 的判断照样全绿
@@ -226,12 +263,23 @@ describe('⭐⭐ fake-dom 自检:selector', () => {
     ).toBeNull();
   });
 
-  it('⭐⭐ 不支持的 selector 语法必须**抛错**,不许静默返回空', () => {
+  it('⭐⭐ 非法 selector 必须**抛错**,不许静默返回空', () => {
+    /**
+     * ⚠️ 这条原来钉的是 `:nth-child(2)` —— 手写引擎不支持它所以会抛。
+     * 换 jsdom 之后**它是合法且被支持的**,断言随之失效。
+     * ⭐ 这正是换引擎的收益:支持面从「我实现了的那几种」
+     * 变成「浏览器真支持的」。
+     *
+     * 改钉**真正非法**的语法:jsdom 会抛 `SyntaxError`,
+     * 与真浏览器一致 —— 静默返回空才是危险的。
+     */
     const doc = makeDom([el('div', {})]).document as { querySelectorAll(s: string): unknown };
     expect(
-      () => doc.querySelectorAll('div:nth-child(2)'),
-      '不支持的语法被静默放行 —— 测试会「绿得毫无意义」',
-    ).toThrow(/不支持/);
+      () => doc.querySelectorAll('div[[[bad'),
+      '非法 selector 被静默放行 —— 测试会「绿得毫无意义」',
+    ).toThrow();
+    // ⭐ 反面:jsdom 支持的高级语法现在**能用**(手写引擎时代用不了)
+    expect(() => doc.querySelectorAll('div:nth-child(2)'), ':nth-child 应当被支持').not.toThrow();
   });
 });
 
@@ -249,5 +297,40 @@ describe('⭐ fake-dom 自检:求值', () => {
   it('⭐ 脚本能拿到 location.href(提取类脚本靠它留痕)', () => {
     const out = evalInDom(makeDom([]), '\n(function(){ return location.href; })()\n');
     expect(typeof out, 'location 没注入进去').toBe('string');
+  });
+});
+
+describe('⭐⭐ fake-dom 自检:真 DOM 是唯一权威(换 jsdom 后的适配层)', () => {
+  it('⭐⭐ children / parentElement 由真 DOM 现算,不是存下来的影子数组', () => {
+    const a = el('span', { id: 'a' });
+    const b = el('span', { id: 'b' });
+    const parent = el('div', {}, {}, [a, b]);
+    makeDom([parent]);
+    expect(parent.children.map((c) => c.node.id)).toEqual(['a', 'b']);
+    a.node.remove();   // 走真 DOM 改结构
+    expect(parent.children.map((c) => c.node.id), 'children 没跟真 DOM 同步').toEqual(['b']);
+    expect(a.parentElement, '已摘除的元素 parentElement 仍非空 —— 「仍在文档里」的断言会恒真').toBeNull();
+    // 想绕开真 DOM 直接改数组要**响**,不许静默生效
+    expect(() => { (parent as { children: unknown }).children = []; }).toThrow();
+  });
+
+  it('⭐⭐ 每个新页面焦点归零 —— 不许跨测试泄漏', () => {
+    const d1 = makeDom([el('input', { id: 'x' })]);
+    evalInDom(d1, `(function(){ document.querySelector('#x').focus(); })()`);
+    const d2 = makeDom([el('div', { id: 'y' })]);
+    const ae = evalInDom(d2, `(function(){ return document.activeElement === document.body; })()`);
+    expect(ae, '上一页 focus 过的元素成了新页面的 activeElement —— press 会派发给一个已脱离文档的元素').toBe(true);
+  });
+
+  it('⭐⭐ 事件是真 jsdom Event,且留痕保留事件本身(含 clipboardData)', () => {
+    const box = el('div', { id: 'c' }, { contentEditable: 'true' });
+    const dom = makeDom([box]);
+    const out = evalInDom(dom, `(function(){ try {
+      var dt = new DataTransfer(); dt.setData('text/plain', 'hi');
+      document.querySelector('#c').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+      return 'ok'; } catch (e) { return 'THREW ' + e.message; } })()`);
+    expect(out, 'jsdom 拒收了我们的事件对象 —— 脚本 try 会把它吞成 false,合成 paste 静默降级').toBe('ok');
+    const evt = box.events.find((e) => e.type === 'paste') as { clipboardData?: { getData(t: string): string } } | undefined;
+    expect(evt?.clipboardData?.getData('text/plain'), '留痕丢了事件内容 —— FakeInputHost 取不到要粘的文本').toBe('hi');
   });
 });
