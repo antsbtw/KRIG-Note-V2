@@ -61,6 +61,28 @@ export const X_ANCHORS = {
   tweetArticle: 'x.tweetArticle' as AnchorName,
 } as const;
 
+/**
+ * ⭐⭐ **每个语义页面要哪些参数** —— 面板问它要,**不许自己抄一份**。
+ *
+ * ── 为什么要有这张表(旧实现的血泪,原文)──
+ *
+ * > 真因:面板有**四处写死的正则** `/^x\.(profile|withReplies|articles)$/`
+ * > 决定「要不要显示 handle 输入框、要不要传 handle」。新页面不在里面
+ * > → 框不显示 → 参数不传 → resolve 拿到空 handle 返回 null。
+ * > ⚠️ 又是「写死清单不会自己长」(同族第五刀)。
+ *
+ * ⭐ 2026-10-01 又验了一次:Console 第一版没有这张表,
+ * 用户点 `x.profile` 直接 failed「没传参数」—— **面板没办法知道该填什么**。
+ *
+ * ⚠️ 加页面时**只改这一处**,面板自动跟上。
+ */
+export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
+  'x.home': [],
+  'x.profile': ['handle'],
+  'x.withReplies': ['handle'],
+  'x.status': ['tweetId'],
+};
+
 type Resolved = { url: string; arrival: ReadyCriterion; describe: string };
 
 /**
@@ -148,8 +170,12 @@ function identify(url: string): { name: string; params: Record<string, string> }
 }
 
 /** ⭐ 本模块的页面表 —— 启动时 **push** 给底座,底座不认识 X */
-export const xPageResolver: PageResolver = {
+export const xPageResolver: PageResolver & {
+  paramsOf(name: string): readonly string[];
+} = {
   resolve: (name, params) => PAGES[name]?.(params ?? {}) ?? null,
   names: () => Object.keys(PAGES),
+  /** ⭐ 面板据此渲染输入框 —— 真表,不许抄 */
+  paramsOf: (name) => PAGE_PARAMS[name] ?? [],
   identify,
 };

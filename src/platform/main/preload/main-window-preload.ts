@@ -964,9 +964,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /** ⭐ 列已注册的语义页面名(Console 下拉用,**从真表读**) */
-  webPageListNames(): Promise<Array<{ owner: string; names: string[] }>> {
+  webPageListNames(): Promise<Array<{ owner: string; names: string[]; params: Record<string, string[]> }>> {
     return ipcRenderer.invoke(IPC_CHANNELS.WEB_PAGE_LIST_NAMES) as Promise<
-      Array<{ owner: string; names: string[] }>
+      Array<{ owner: string; names: string[]; params: Record<string, string[]> }>
     >;
   },
 

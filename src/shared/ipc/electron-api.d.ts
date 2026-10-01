@@ -916,7 +916,12 @@ declare global {
         payload: import('./web-dom-types').WebDomInvoke,
       ): Promise<import('./web-dom-types').WebDomResult>;
       /** ⭐ 列已注册的语义页面名(Console 下拉用,从真表读) */
-      webPageListNames(): Promise<Array<{ owner: string; names: string[] }>>;
+      webPageListNames(): Promise<Array<{
+        owner: string;
+        names: string[];
+        /** ⭐ 每个页面要哪些参数 —— 面板据此渲染输入框,不许抄一份 */
+        params: Record<string, string[]>;
+      }>>;
       webDomRun(
         pageRef: { wcId: number },
         scriptId: string,

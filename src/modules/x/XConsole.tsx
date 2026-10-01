@@ -27,7 +27,12 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 
-type PageTable = { owner: string; names: string[] };
+type PageTable = {
+  owner: string;
+  names: string[];
+  /** ⭐ 每个页面要哪些参数 —— **从真表来**,面板不抄 */
+  params: Record<string, string[]>;
+};
 
 /** 一次调用的留痕 —— ⭐ 存**整个 Result**,不只存成功与否 */
 type LogEntry = {
@@ -39,7 +44,8 @@ type LogEntry = {
 export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
   const [tables, setTables] = useState<PageTable[]>([]);
   const [pageName, setPageName] = useState('');
-  const [params, setParams] = useState('');
+  /** 参数值:`{ handle: 'elonmusk' }` —— ⭐ 字段**由真表决定**,不写死 */
+  const [paramVals, setParamVals] = useState<Record<string, string>>({});
   const [log, setLog] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -76,16 +82,19 @@ export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
     }
   }, []);
 
-  /** 参数框:`handle=elonmusk` 这样一行一个,解析成对象 */
-  const parsedParams = (): Record<string, string> => {
-    const out: Record<string, string> = {};
-    for (const line of params.split('\n')) {
-      const i = line.indexOf('=');
-      if (i <= 0) continue;
-      out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-    }
-    return out;
-  };
+  /**
+   * ⭐ 当前页面要哪些参数 —— **问真表**,不靠面板猜。
+   *
+   * ⚠️ 旧实现栽过(原文):面板有**四处写死的正则**决定「要不要显示 handle
+   * 输入框」,新页面不在里面 → 框不显示 → 参数不传 → resolve 返 null。
+   * ⚠️ 2026-10-01 Console 第一版没有这张表,用户点 x.profile 直接 failed
+   * 「没传参数」—— **面板没办法知道该填什么**。
+   */
+  const requiredParams: string[] =
+    tables.find((t) => t.names.includes(pageName))?.params[pageName] ?? [];
+
+  /** ⚠️ 必填参数没填满就禁用 —— 免得点下去只拿到一句「解析不出 URL」 */
+  const missing = requiredParams.filter((k) => !(paramVals[k] ?? '').trim());
 
   const disabled = busy || wcId == null;
 
@@ -115,22 +124,31 @@ export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
           </select>
           <button
             type="button"
-            disabled={disabled || !pageName}
+            disabled={disabled || !pageName || missing.length > 0}
+            title={missing.length > 0 ? `还缺参数：${missing.join('、')}` : undefined}
             onClick={() => call(`goto ${pageName}`, {
-              op: 'goto', pageRef: { wcId: wcId! }, name: pageName, params: parsedParams(),
+              op: 'goto', pageRef: { wcId: wcId! }, name: pageName, params: paramVals,
             })}
             style={S.btn}
           >
             goto
           </button>
         </div>
-        <textarea
-          value={params}
-          onChange={(e) => setParams(e.target.value)}
-          placeholder={'参数，一行一个：\nhandle=elonmusk'}
-          rows={2}
-          style={S.textarea}
-        />
+        {/* ⭐ 参数框**按真表渲染** —— 加页面时只改页面表,这里自动跟上 */}
+        {requiredParams.map((k) => (
+          <div key={k} style={S.row}>
+            <span style={{ width: 70, opacity: 0.8 }}>{k}</span>
+            <input
+              value={paramVals[k] ?? ''}
+              onChange={(e) => setParamVals((v) => ({ ...v, [k]: e.target.value }))}
+              placeholder={k === 'handle' ? 'elonmusk（不带 @）' : k}
+              style={S.input}
+            />
+          </div>
+        ))}
+        {pageName && requiredParams.length === 0 && (
+          <div style={S.todo}>这个页面不需要参数。</div>
+        )}
         <div style={S.row}>
           <button
             type="button"

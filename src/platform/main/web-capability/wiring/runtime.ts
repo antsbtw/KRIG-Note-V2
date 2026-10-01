@@ -176,11 +176,30 @@ export function registerPageTable(owner: string, resolver: PageResolver): void {
 }
 
 /** 已注册的语义页面名(按 owner 分组)—— 验收台列给人看,免得靠记忆猜 */
-export function listPageNames(): Array<{ owner: string; names: string[] }> {
-  return Array.from(pageTables.entries()).map(([owner, t]) => ({
-    owner,
-    names: typeof t.names === 'function' ? t.names() : [],
-  }));
+export function listPageNames(): Array<{
+  owner: string;
+  names: string[];
+  /**
+   * ⭐ 每个页面要哪些参数 —— **面板据此渲染输入框**,不许自己抄一份。
+   *
+   * ⚠️ 旧实现栽过(原文):面板有**四处写死的正则**决定「要不要显示 handle
+   * 输入框」,新页面不在里面 → 框不显示 → 参数不传 → resolve 返 null。
+   * 「写死清单不会自己长」同族第五刀。
+   *
+   * ⚠️ 解释器**不一定**实现 `paramsOf`(接口只要求 `resolve`)——
+   * 没有就给空表,而不是假装每个页面都零参数。
+   */
+  params: Record<string, string[]>;
+}> {
+  return Array.from(pageTables.entries()).map(([owner, t]) => {
+    const names = typeof t.names === 'function' ? t.names() : [];
+    const withParams = t as { paramsOf?: (n: string) => readonly string[] };
+    const params: Record<string, string[]> = {};
+    if (typeof withParams.paramsOf === 'function') {
+      for (const n of names) params[n] = [...withParams.paramsOf(n)];
+    }
+    return { owner, names, params };
+  });
 }
 
 /**
