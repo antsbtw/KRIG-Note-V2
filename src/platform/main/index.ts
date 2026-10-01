@@ -73,6 +73,7 @@ import { runMigration028IfNeeded } from '@storage/migrations/028-block-structure
 import { runMigration073IfNeeded } from '@storage/migrations/073-workspace-json-to-surreal';
 // ⭐ 步 3:web.net 健康巡检 —— 探针是拉取式的,必须有人定期查,否则通道哑了没人知道
 import { startHealthWatch, stopHealthWatch, startTraceSweep, stopTraceSweep } from './web-capability/wiring/health-watch';
+import { registerWebDomIpc } from './web-capability/wiring/ipc-dom';
 import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
 /** ⚠️ X 模块已彻底归零(2026-09-29 用户定)—— 接线一并摘掉,重建时重新接 */
 /** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
@@ -233,6 +234,11 @@ app.whenReady().then(async () => {
   startTraceSweep();
   // ⭐ 「当时在哪个页面」—— pageRegistry 一直在发事件,此前零订阅者
   startTraceLifecycle();
+  /**
+   * ⭐ renderer → web.dom 的 IPC 面(L2 收口最后一块)。
+   * ⚠️ 只开 `run`(预注册脚本),**不开 runDynamic** —— 见 wiring/ipc-dom.ts 的红线。
+   */
+  registerWebDomIpc();
 
   // S3-b — 主进程楼长（必须在 initStorage + migration073 之后，createMainWindow 之前）
   // renderer 加载后即可 invoke WORKSPACE_GET_STATE 拿到已初始化状态。

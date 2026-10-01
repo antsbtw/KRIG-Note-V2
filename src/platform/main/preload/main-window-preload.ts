@@ -30,6 +30,7 @@ import type {
   AuthActionResult,
 } from '@shared/auth/auth-types';
 import type { Profile, ProfileColor } from '@shared/types/profile-types';
+import type { WebDomResult } from '@shared/ipc/web-dom-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /**
@@ -945,6 +946,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── 邮箱模块(阶段 0:右键邮箱 webview 提取单封邮件 → note) ──
   /** 按坐标定位 + 抽该封邮件(返 { success, data?, error? });targetWcId 按活跃 ws 定向 */
+  /**
+   * ⭐ renderer → web.dom:跑一段**预注册脚本**(L2 收口最后一块)。
+   *
+   * ⚠️ 第二参是 **scriptId 不是脚本文本** —— 调用方给不了原始字符串,
+   * 也就拼不出坏脚本(`project-x-inject-template-escape` 的类型层面根治)。
+   * 参数由 main 侧 `JSON.stringify` 绑定。
+   *
+   * ⚠️⚠️ **没有 runDynamic**:求值任意脚本的口子不对 renderer 开放。
+   */
+  webDomRun(
+    pageRef: { wcId: number },
+    scriptId: string,
+    params?: Readonly<Record<string, string | number | boolean>>,
+  ): Promise<WebDomResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_DOM_INVOKE, {
+      op: 'run', pageRef, scriptId, params,
+    }) as Promise<WebDomResult>;
+  },
+
   mailExtract(serviceId: string, x: number, y: number, targetWcId?: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.MAIL_EXTRACT, { serviceId, x, y, targetWcId });
   },

@@ -367,6 +367,19 @@ export const IPC_CHANNELS = {
   WORKSPACE_PERSIST_STATE: 'workspace.persist-state', // renderer → main send(wsId, patch) 回写布局+pluginStates
   // main → renderer（on，广播）
   WORKSPACE_STATE_CHANGED: 'workspace.state-changed',
+
+  /**
+   * ── Web 能力层:renderer → web.dom(L2 收口最后一块)──
+   *
+   * ⭐ **一个通道带 `op`**,不给 WebDom 的每个方法各开一条 ——
+   * 逐个开意味着每加一个能力就要动本表,而「守卫写死的清单不会自己长」
+   * (feedback-guard-hardcoded-list-never-grows)已经栽过三次。
+   *
+   * ⚠️⚠️ **不开 `runDynamic`(求值任意脚本)**。它是 web.dom 的 dev-only 逃生口,
+   * 开给 renderer 等于把 web.dom 费力关掉的注入口重新打开。
+   * 守卫钉死这一条(`ipc-dom-boundary-guard`)。
+   */
+  WEB_DOM_INVOKE: 'web-dom.invoke',   // renderer → main invoke:{ op, pageRef, ... } → Result
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

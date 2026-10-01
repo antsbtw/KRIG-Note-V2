@@ -906,6 +906,16 @@ declare global {
 
       // ── 邮箱模块(阶段 0:右键邮箱 webview 提取单封邮件 → note) ──
       /** 按 guest viewport 坐标定位 + 抽该封邮件(主题/正文/发件人,纯文本) */
+      /**
+       * ⭐ renderer → web.dom:跑一段**预注册脚本**。
+       * ⚠️ 第二参是 scriptId **不是脚本文本** —— 拼不出坏脚本。
+       * ⚠️⚠️ 没有 runDynamic(求值任意脚本不对 renderer 开放)。
+       */
+      webDomRun(
+        pageRef: { wcId: number },
+        scriptId: string,
+        params?: Readonly<Record<string, string | number | boolean>>,
+      ): Promise<import('./web-dom-types').WebDomResult>;
       mailExtract(
         serviceId: MailServiceId,
         x: number,
