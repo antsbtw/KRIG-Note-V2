@@ -5,6 +5,100 @@
 
 ---
 
+## 〇、必要性：不做会留下什么（⭐ 先看这节）
+
+### ⭐⭐ 一、26 处静默吞异常，零日志
+
+实测（剥注释后统计）：
+
+| 文件 | 静默 catch | `console.warn/error` |
+|---|---|---|
+| `sync-driver.ts` | **26** | **0** |
+| `translate-driver.ts` | 1 | 2 |
+
+典型写法：
+
+```ts
+this.webviewEl.executeJavaScript(script).catch(() => {});   // ← 失败什么都不说
+```
+
+⚠️ 这直接违反可靠性纲领（`reliability-charter.md:44`）：
+
+> **任何异常不得被静默吞成默认值。** 捕获异常的唯一合法目的有三种，
+> 且必须显式选择其一……仅在**代码注释明确标注**的已知兼容场景才允许静默兜底。
+
+**不做的后果**：双开同步 / 网页翻译一旦失效，**日志里一个字都没有**。
+排查只能靠用户描述"它不工作了" —— 而这正是记忆里
+`feedback-maintainability-over-feature-completion` 被点破的那条：
+「**你不记录如何做验证**」。
+
+### ⭐⭐ 二、同一类转义事故的攻击面还在，而且已经咬过一次
+
+`sync-driver.ts:226`：
+
+```ts
+const script = (syncInjectRaw as string).replace(/__KRIG_SIDE__/g, this.side);
+```
+
+⚠️ 这是**把运行时值做文本替换塞进脚本源码** ——
+与 `project-x-inject-template-escape`（采集停摆一整天）**同一个机制**。
+
+⭐ 而且它**已经出过事**，代码注释自己记着：
+
+> 注意：用 `/regex/g` 全局替换 —— `replace(string,string)` 只替换第一个匹配，
+> inject 文件里 `__KRIG_SIDE__` 出现 2 处（注释+真实变量），
+> **只替换第一个会让 sync 行为异常**
+
+→ 当时靠加 `/g` 修好了。但**机制没变**：下一个占位符、下一个特殊字符，
+还会再来一次。而 `ScriptRegistry` 的设计恰恰是**从类型层面根治这件事**
+（`run` 只收 `ScriptId`，收不了脚本字符串 → 调用方拼不出坏脚本）。
+
+### 三、C 组有 9 处把运行时值拼进脚本
+
+实测清单：`${deltaY}` / `${event.pctY}` / `${event.checked}` /
+`${anchorJSON}` / `${toggleStateJSON}` / `${blocksJSON}` / `${fromSide}` / `${this.side}`
+
+⚠️ 其中 `${deltaY}` / `${event.pctY}` 是**数字**，而我们刚在 mail 那一刀实测过：
+`JSON.stringify(NaN)` → `null`，浏览器当 `0` —— **静默取错而不报错**。
+这些坐标/百分比同样来自事件回调，同样可能是 NaN。
+
+### 四、零留痕：这些注入在诊断系统里**不存在**
+
+`web.dom` 自带 `trace` / `raw` 落盘。而这 18 处是 renderer 直接调 `<webview>`，
+**完全绕过**诊断层 —— 出事时「往页面里塞了什么」查不到。
+
+⭐ 对比：main 侧收口后，`electron-dom.ts` 会把每次 `run` 的
+scriptId / 参数 / 结果都记进 trace。renderer 侧现在一片空白。
+
+### 五、社区论坛自动化会**放大**以上四条
+
+用户已确认的方向：「未来还需要做很多社区论坛的对应自动化功能」。
+
+⚠️ 那意味着**更多站点 × 更多 selector × 更多运行时参数**。
+而现在 renderer 侧：没有脚本登记、没有参数绑定、没有留痕、失败静默。
+→ **每接一个新论坛，就复制一遍这四个问题。**
+
+⭐ 这就是必要性的核心：**不是整齐，是不让这四个缺陷随新功能线性增长。**
+
+---
+
+## 〇之二、这层 IPC 面提供什么能力
+
+| 能力 | renderer 现在怎么做 | 走 IPC 之后 |
+|---|---|---|
+| **跑一段预注册脚本** | 自己拼字符串、`replace` 占位符 | `run(pageRef, scriptId, params)` —— ⭐ 拼不出坏脚本 |
+| **按语义锚点查元素** | 自己写 `querySelector` | `query(pageRef, anchor)` —— selector 收在锚点表 |
+| **取页面文字** | 自己注入脚本取 | `text(pageRef, anchor?)` |
+| **读结构化数据** | 自己写提取脚本 | `read(pageRef, extractId, params)` |
+| **取选区** | 自己注入 | `selection(pageRef)` |
+| **失败语义** | ⚠️ `.catch(() => {})` 静默 | ⭐ `Result` 三态，失败说得出原因 |
+| **留痕** | ⚠️ 无 | ⭐ 自动进 `trace` / `raw` |
+| **参数安全** | ⚠️ 文本替换 / 模板插值 | ⭐ `JSON.stringify` 绑定（类型层面强制） |
+
+⚠️ **不提供** `runDynamic`（求值任意脚本）—— 理由见 §三。
+
+---
+
 ## 一、⚠️ 实测先行：这 18 处不是同一种东西
 
 把它们按**调用频率**分开，结论就变了：
