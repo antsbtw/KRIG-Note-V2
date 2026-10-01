@@ -24,13 +24,16 @@
  * (note / eBook / web 各踩过一次,见记忆「别猜自己在哪一栏」)。
  */
 
-import { useCallback, useState, useSyncExternalStore, type ReactElement } from 'react';
+import {
+  useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement,
+} from 'react';
 import { popupController } from '@slot/triggers/popup-controller';
 import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
-import type { HostProps } from '@capabilities/web-rendering';
+import type { HostHandle, HostProps } from '@capabilities/web-rendering';
+import { setXHostWcId, clearXHostWcId } from './x-host-registry';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -38,7 +41,9 @@ const X_HOME = 'https://x.com/home';
 /** ⭐ 操作台的 view id —— 与 `renderer.ts` 的注册共用同一个字面量 */
 const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
 
-type WebRenderingApi = { Host: React.ComponentType<HostProps> };
+type WebRenderingApi = {
+  Host: React.ForwardRefExoticComponent<HostProps & React.RefAttributes<HostHandle>>;
+};
 
 export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElement {
   /**
@@ -50,6 +55,23 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
   const Host = webApi.Host;
 
   const [url, setUrl] = useState(X_HOME);
+  const hostRef = useRef<HostHandle | null>(null);
+
+  /**
+   * ⭐ 把 guest 的 wcId 登记给本模块 —— **右栏 Console 靠它调 goto**。
+   *
+   * ⚠️ 两个 view 是独立的、互相拿不到 ref,所以走模块自带的小注册表
+   * (`x-host-registry`)。⚠️ 按 ws 分:不分的话右栏会拿到**别的 ws** 的 wcId,
+   * 现象是「在 A 窗口点 goto,B 窗口的页面跳了」。
+   *
+   * ⚠️ 卸载时必须清 —— 不清的话右栏会拿着一个已销毁的 wcId 反复失败。
+   */
+  const registerWc = useCallback(() => {
+    const id = hostRef.current?.getWebContentsId() ?? null;
+    if (id != null) setXHostWcId(workspaceId, id);
+  }, [workspaceId]);
+
+  useEffect(() => () => clearXHostWcId(workspaceId), [workspaceId]);
 
   /**
    * ⊞ 右栏视图切换 —— ⭐ 复用**全局 SlotPicker**,不自造 toggle 逻辑
@@ -150,12 +172,14 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
 
       {/* ⭐ 真 webview —— 与同 ws 的内置浏览器同 partition(登录态共享) */}
       <Host
+        ref={hostRef}
         workspaceId={workspaceId}
         currentUrl={url}
         translateMode={false}
         partition={`persist:webview-${workspaceId}`}
         style={{ flex: 1, width: '100%' }}
-        onDisplayUrlChanged={setUrl}
+        onDisplayUrlChanged={(u) => { setUrl(u); registerWc(); }}
+        onLoadingChanged={registerWc}
       />
 
       {/* ⚠️ slot 只用于调试显示;真要关栏时由框架给的 slot 决定,不自己推导 */}

@@ -28,9 +28,15 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type {
   WebDomInvoke,
   WebDomPageRef,
+  WebDomReadyCriterion,
   WebDomResult,
+  WebDomScrollStop,
 } from '@shared/ipc/web-dom-types';
-import { domRunner, pageRegistry, scriptRegistry, listPageNames } from './runtime';
+import {
+  controlEngine, domRunner, pageRegistry, scriptRegistry, listPageNames,
+} from './runtime';
+import type { ReadyCriterion, ScrollStop } from '../page/control-types';
+import type { AnchorName } from '../dom/types';
 import { bindPageHost } from './page-hosts';
 import type { PageId } from '../page/types';
 import type { ScriptId } from '../dom/types';
@@ -105,6 +111,24 @@ function failed(reason: string): WebDomResult {
   return { status: 'failed', reason, retryable: false };
 }
 
+/**
+ * IPC 判据 → 底座判据。
+ *
+ * ⚠️ 锚点名要铸造成 `AnchorName`(带 brand 的类型)——
+ * 底座故意不收裸字符串,`dom/types.ts` 记着那次转义事故的理由。
+ * ⭐ 用 `as AnchorName` 而**不是 `as never`** —— 后者是「让编译器闭嘴」,
+ * 会连真正的类型错误一起吞掉。
+ */
+function toReadyCriterion(c: WebDomReadyCriterion): ReadyCriterion {
+  if (c.kind === 'urlIncludes') return { kind: 'urlIncludes', fragment: c.fragment };
+  return { kind: c.kind, anchor: c.anchor as AnchorName };
+}
+
+function toScrollStop(s: WebDomScrollStop): ScrollStop {
+  if (s.kind === 'anchorAppears') return { kind: 'anchorAppears', anchor: s.anchor as AnchorName };
+  return s;
+}
+
 /** 把能力层的 Result 原样转成 IPC 形状(两者同构,只是跨了分层边界) */
 function toIpc(r: { status: string; [k: string]: unknown }): WebDomResult {
   if (r.status === 'ok') return { status: 'ok', value: r.value };
@@ -163,6 +187,13 @@ export function registerWebDomIpc(): void {
     + (rendererIds.join(', ') || '(⚠️ 一个都没有 —— renderer 侧调用必然全失败)'),
   );
 
+  /**
+   * ⭐ 列语义页面名 —— Console 的下拉靠它,**不许面板自己抄一份**。
+   * ⚠️ 从 `listPageNames()` 真表读:抄一份就会漂,
+   * 漂的表现是「面板上有这个名字、点下去说没登记」。
+   */
+  ipcMain.handle(IPC_CHANNELS.WEB_PAGE_LIST_NAMES, () => listPageNames());
+
   ipcMain.handle(
     IPC_CHANNELS.WEB_DOM_INVOKE,
     async (_e, payload: unknown): Promise<WebDomResult> => {
@@ -181,7 +212,39 @@ export function registerWebDomIpc(): void {
             if (!p.scriptId) return failed('[web.dom ipc] run 缺 scriptId');
             return toIpc(await domRunner.run(wc, pageId, p.scriptId as ScriptId, p.params));
           /**
-           * ⚠️ 只有 `run` —— `read`/`query`/`text`/`selection` 在 `WebDom` 接口里
+           * ── 控制(`web.page`)—— 2026-10-01 为 X Console 开放 ──
+           *
+           * ⭐ `goto` 只收**语义页面名**不收 URL:
+           * ① 站点改版时变的是页面表,调用方不动
+           * ② 同时是一道闸 —— renderer 给不了任意 URL,
+           *    就导航不到计划外的地方(旧实现「把首页当搜索结果」整批入库的成因)
+           */
+          case 'goto': {
+            if (!p.name) return failed('[web.dom ipc] goto 缺语义页面名');
+            return toIpc(await controlEngine.goto(
+              pageId,
+              { kind: 'semantic', name: p.name, params: p.params },
+              { readyTimeoutMs: p.readyTimeoutMs },
+            ));
+          }
+          case 'ready': {
+            if (!p.criterion) return failed('[web.dom ipc] ready 缺判据');
+            return toIpc(await controlEngine.ready(
+              pageId,
+              toReadyCriterion(p.criterion),
+              p.timeoutMs,
+            ));
+          }
+          case 'scrollUntil': {
+            if (!p.stop) return failed('[web.dom ipc] scrollUntil 缺停止判据');
+            return toIpc(await controlEngine.scrollUntil(
+              pageId,
+              toScrollStop(p.stop),
+              { maxRounds: p.maxRounds, settleMs: p.settleMs },
+            ));
+          }
+          /**
+           * ⚠️ 没有 `read`/`query`/`text`/`selection` —— `WebDom` 接口里
            * 声明了但**全仓零实现**(只有 `ElectronDomRunner.run` 落地)。
            * ⭐ 开出去就是空头承诺:调了必然失败,而原因是「底座没实现」,
            * 会把排查方向完全带偏。等真实现了再加 op。

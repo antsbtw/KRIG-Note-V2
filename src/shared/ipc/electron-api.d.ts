@@ -911,6 +911,12 @@ declare global {
        * ⚠️ 第二参是 scriptId **不是脚本文本** —— 拼不出坏脚本。
        * ⚠️⚠️ 没有 runDynamic(求值任意脚本不对 renderer 开放)。
        */
+      /** ⭐ 调底座的一个原子能力(控制 / DOM)。goto 只收语义页面名不收 URL */
+      webDomInvoke(
+        payload: import('./web-dom-types').WebDomInvoke,
+      ): Promise<import('./web-dom-types').WebDomResult>;
+      /** ⭐ 列已注册的语义页面名(Console 下拉用,从真表读) */
+      webPageListNames(): Promise<Array<{ owner: string; names: string[] }>>;
       webDomRun(
         pageRef: { wcId: number },
         scriptId: string,

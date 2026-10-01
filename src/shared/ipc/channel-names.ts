@@ -379,7 +379,13 @@ export const IPC_CHANNELS = {
    * 开给 renderer 等于把 web.dom 费力关掉的注入口重新打开。
    * 守卫钉死这一条(`ipc-dom-boundary-guard`)。
    */
-  WEB_DOM_INVOKE: 'web-dom.invoke',   // renderer → main invoke:{ op, pageRef, ... } → Result
+  WEB_DOM_INVOKE: 'web-dom.invoke',
+  /**
+   * ⭐ 列出已注册的**语义页面名**(按 owner 分组)。
+   * ⚠️ Console 的下拉**必须从这里读** —— 面板自己抄一份就会漂,
+   * 而漂的表现是「面板上有这个名字、点下去说没登记」(旧实现的血泪)。
+   */
+  WEB_PAGE_LIST_NAMES: 'web-page.list-names',   // renderer → main invoke:{ op, pageRef, ... } → Result
 } as const;
 
 export type IpcChannelName = typeof IPC_CHANNELS[keyof typeof IPC_CHANNELS];

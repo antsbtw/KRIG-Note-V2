@@ -30,7 +30,7 @@ import type {
   AuthActionResult,
 } from '@shared/auth/auth-types';
 import type { Profile, ProfileColor } from '@shared/types/profile-types';
-import type { WebDomResult } from '@shared/ipc/web-dom-types';
+import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /**
@@ -955,6 +955,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
    *
    * ⚠️⚠️ **没有 runDynamic**:求值任意脚本的口子不对 renderer 开放。
    */
+  /**
+   * ⭐ 调底座的一个原子能力(控制 / DOM)。
+   * ⚠️ `goto` 只收**语义页面名**不收 URL —— URL 由各业务的页面表翻译。
+   */
+  webDomInvoke(payload: WebDomInvoke): Promise<WebDomResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_DOM_INVOKE, payload) as Promise<WebDomResult>;
+  },
+
+  /** ⭐ 列已注册的语义页面名(Console 下拉用,**从真表读**) */
+  webPageListNames(): Promise<Array<{ owner: string; names: string[] }>> {
+    return ipcRenderer.invoke(IPC_CHANNELS.WEB_PAGE_LIST_NAMES) as Promise<
+      Array<{ owner: string; names: string[] }>
+    >;
+  },
+
   webDomRun(
     pageRef: { wcId: number },
     scriptId: string,

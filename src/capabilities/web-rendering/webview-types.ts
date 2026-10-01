@@ -88,6 +88,14 @@ export interface HostHandle {
   stop(): void;
   /** 当前 webview 是否 loading 中 */
   isLoading(): boolean;
+  /**
+   * ⭐ guest 的 webContents id —— 走 `web.dom` IPC 面时用它**指认页面**。
+   *
+   * ⚠️ webview 未 attached 时返回 **null**(底层 `getWebContentsId()` 会抛)——
+   * 调用方据此知道「还没就绪」,而不是拿到一个假 id 去调用后静默失败。
+   * ⭐ 与 `MailHostHandle.getWebContentsId()` 同口径。
+   */
+  getWebContentsId(): number | null;
   /** 页内查找(P0)— 结果走 HostProps.onFoundInPage 回调 */
   findInPage(text: string, options?: WebFindInPageOptions): void;
   /** 停止页内查找(P0)*/

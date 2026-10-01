@@ -54,7 +54,53 @@ export type WebDomParams = Readonly<Record<string, string | number | boolean>>;
  * 等它们真的实现了再加 op,**那时本类型是唯一改动点**。
  */
 export type WebDomInvoke =
-  | { readonly op: 'run'; readonly pageRef: WebDomPageRef; readonly scriptId: string; readonly params?: WebDomParams };
+  | { readonly op: 'run'; readonly pageRef: WebDomPageRef; readonly scriptId: string; readonly params?: WebDomParams }
+  // ── 控制(`web.page`)—— 2026-10-01 为 X Console 开放 ──
+  /**
+   * ⭐ 导航到**语义页面**。
+   *
+   * ⚠️ 只收 `name` + `params`,**不收 URL** —— URL 由各业务的页面表翻译。
+   * 这是「改版只改一层」的前提:站点改版时变的是页面表,调用方不动。
+   * ⭐ 同时它也是一道闸:renderer 给不了任意 URL,就导航不到计划外的地方
+   * (旧实现 2026-09-07「把首页时间线当搜索结果」整批入库就是没这道闸)。
+   */
+  | {
+      readonly op: 'goto';
+      readonly pageRef: WebDomPageRef;
+      readonly name: string;
+      readonly params?: Readonly<Record<string, string>>;
+      readonly readyTimeoutMs?: number;
+    }
+  /** 等某个判据满足(锚点出现/消失、URL 含片段) */
+  | {
+      readonly op: 'ready';
+      readonly pageRef: WebDomPageRef;
+      readonly criterion: WebDomReadyCriterion;
+      readonly timeoutMs?: number;
+    }
+  /** 滚动直到某判据 —— ⭐ 只管滚,不管抓(抓是 `capture` 的事) */
+  | {
+      readonly op: 'scrollUntil';
+      readonly pageRef: WebDomPageRef;
+      readonly stop: WebDomScrollStop;
+      readonly maxRounds?: number;
+      readonly settleMs?: number;
+    };
+
+/**
+ * 到位判据 —— 与底座 `ReadyCriterion` 同构。
+ * ⚠️ 这里**不含** `custom`(要预注册脚本 id),Console 用不到。
+ */
+export type WebDomReadyCriterion =
+  | { readonly kind: 'anchorAppears'; readonly anchor: string }
+  | { readonly kind: 'anchorGone'; readonly anchor: string }
+  | { readonly kind: 'urlIncludes'; readonly fragment: string };
+
+/** 滚动停止判据 —— 与底座 `ScrollStop` 同构 */
+export type WebDomScrollStop =
+  | { readonly kind: 'atBottom' }
+  | { readonly kind: 'rounds'; readonly n: number }
+  | { readonly kind: 'anchorAppears'; readonly anchor: string };
 
 /**
  * 回传的三态结果 —— 与 `web-capability/result.ts` 同构。

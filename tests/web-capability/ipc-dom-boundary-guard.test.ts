@@ -291,5 +291,46 @@ describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', ()
     expect(body, '没把 renderer.* 单独列出来 —— 那才是 renderer 侧调用的依据')
       .toMatch(/renderer\./);
   });
+
+  it('⭐⭐ goto 只收**语义页面名**,不许开一个收 URL 的口子', () => {
+    /**
+     * ⚠️⚠️ 这是一道**闸**,不只是接口风格:
+     * renderer 给不了任意 URL,就导航不到计划外的地方。
+     *
+     * ⭐ 旧实现 2026-09-07 的「把首页时间线当搜索结果」**整批入库**
+     * 正是没有这道闸(`x-pages.ts` 的注释记着:
+     * 「解释不出来返回 null,绝不兜底 —— 兜底会导航到别的页面」)。
+     *
+     * 判据:契约里 `goto` 这一支**不许出现 url 字段**。
+     */
+    const types = strip(readFileSync(join(ROOT, 'src/shared/ipc/web-dom-types.ts'), 'utf-8'));
+    const i = types.indexOf("readonly op: 'goto'");
+    expect(i, '契约里没有 goto —— 本条要重写').toBeGreaterThan(-1);
+    const branch = types.slice(i, types.indexOf('}', i));
+    expect(branch.length, 'slice 空了 —— 断言会恒真').toBeGreaterThan(20);
+    expect(
+      branch,
+      'goto 开了收 URL 的口子 —— 那等于绕开页面表,\n'
+      + 'renderer 可以导航到任意地址(旧实现「把首页当搜索结果」整批入库的成因)',
+    ).not.toMatch(/readonly\s+url\s*:/);
+    expect(branch, 'goto 没收语义页面名').toMatch(/readonly\s+name\s*:\s*string/);
+  });
+
+  it('⭐ Console 的页面名下拉**从真表读**,不许面板抄一份', () => {
+    /**
+     * ⚠️ 旧实现的注释专门记了这条:面板抄一份清单就会漂,
+     * 而漂的表现是「**面板上有这个名字、点下去说没登记**」。
+     * ⭐ 本条钉:Console 里不许出现写死的 `x.` 页面名字面量。
+     */
+    const console = strip(readFileSync(join(ROOT, 'src/modules/x/XConsole.tsx'), 'utf-8'));
+    expect(console, 'Console 没调 webPageListNames —— 下拉是从哪来的?')
+      .toMatch(/webPageListNames/);
+    const hardcoded = console.match(/'x\.[a-zA-Z]+'/g) ?? [];
+    expect(
+      hardcoded,
+      'Console 里写死了语义页面名 —— 必须从 listPageNames() 真表读:\n  '
+      + hardcoded.join(', '),
+    ).toEqual([]);
+  });
 });
 

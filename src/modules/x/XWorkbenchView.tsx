@@ -27,27 +27,20 @@
 import type { ReactElement } from 'react';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
 
-export function XWorkbenchView({ workspaceId, slot }: ViewComponentProps): ReactElement {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 8,
-        padding: 24,
-        height: '100%',
-        boxSizing: 'border-box',
-        color: 'var(--text-secondary, #888)',
-        fontSize: 13,
-        lineHeight: 1.7,
-      }}
-    >
-      <div style={{ fontSize: 15, color: 'var(--text-primary, #ddd)' }}>𝕏 操作面板</div>
-      <div>⭐ 这一栏将来放**采集参数 / 结果列表 / 拟回复**。</div>
-      <div>⚠️ 本步**刻意零业务** —— 先确认两个 view 能各自独立开关。</div>
-      <div style={{ marginTop: 8, opacity: 0.7 }}>
-        ws={workspaceId} · slot={slot ?? '(未知)'}
-      </div>
-    </div>
+import { useSyncExternalStore } from 'react';
+import { XConsole } from './XConsole';
+import { getXHostWcId, subscribeXHost } from './x-host-registry';
+
+export function XWorkbenchView({ workspaceId }: ViewComponentProps): ReactElement {
+  /**
+   * ⭐ 取左栏 webview 的 wcId —— Console 调 `goto` 要用它指认页面。
+   * ⚠️ 订阅而不是读一次:左栏可能**后于**右栏挂载,
+   * 读一次会永远是 null(现象是「Console 上按钮一直灰着」)。
+   */
+  const wcId = useSyncExternalStore(
+    subscribeXHost,
+    () => getXHostWcId(workspaceId),
   );
+
+  return <XConsole wcId={wcId} />;
 }

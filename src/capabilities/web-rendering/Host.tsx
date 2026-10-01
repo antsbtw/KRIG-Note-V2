@@ -368,6 +368,17 @@ export const Host = forwardRef<HostHandle, HostProps>(function Host(props, ref):
       reload: () => webviewRef.current?.reload(),
       stop: () => webviewRef.current?.stop(),
       isLoading: () => webviewRef.current?.isLoading() ?? false,
+      /**
+       * ⚠️ webview 未 attached 时 `getWebContentsId()` 会**抛** —— 捕获后返 null,
+       * 让调用方知道「还没就绪」,而不是拿一个假 id 去调用后静默失败。
+       */
+      getWebContentsId: () => {
+        try {
+          return webviewRef.current?.getWebContentsId() ?? null;
+        } catch {
+          return null;
+        }
+      },
       findInPage: (text, options) => {
         const wv = webviewRef.current;
         if (!wv || !domReadyRef.current) return;
