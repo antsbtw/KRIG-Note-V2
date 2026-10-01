@@ -206,3 +206,40 @@ X 模块卸载后这条依然要在。
 **改动前就坏**（已在 HEAD 复现），Electron `app.getPath` 在 import 期被调用，
 与 X 无关 —— 但它意味着**全绿基线目前是 1734 通过 + 6 文件加载失败**，
 别把它当成自己改坏的。
+
+---
+
+## 八、✅ 第一步已落地并真机验证（2026-10-01）
+
+```
+src/modules/x/
+├─ x-pages.ts     语义页面表（x.home / x.profile / x.withReplies / x.status）
+├─ x-anchors.ts   锚点表
+└─ index.ts       ⭐ import 即自注册
+
+src/platform/main/index.ts
+└─ import '@modules/x';    ← 全仓唯一一处认识 X 的地方
+```
+
+**真机判据已通过**：
+
+```
+[web.page] 语义页面表 owner=x —— 4 个: x.home, x.profile, x.withReplies, x.status
+```
+
+⭐ 它证明了三件事：模块被加载执行、页面表推进了底座、`owner=x` 分组正确
+（将来加第二个业务时两边互不干扰）。
+
+### ⚠️ 这一步留下的三笔账
+
+| # | 账 | 性质 |
+|---|---|---|
+| 1 | `shared/types/x-*.ts` **8 个文件**仍在共用层，4 个有消费者 | ⭐ 守卫已锁 KNOWN_DEBT，只减不增。清它要连带动 `storage/x-schema` 与 `web-shared/should-handle` |
+| 2 | 锚点表用的 `data-testid` selector **当前是坏的** | X 已去掉未登录页的 testid。⭐ 刻意不改：登录态下可能还在，**只有真机能验**，是独立一刀 |
+| 3 | 页面表只有 4 个语义名 | 旧实现还有 `x.articles` / 搜索等；按需加，**不预先搬** |
+
+### 下一步可选
+
+- **接能力控制台跑 `goto x.home`** —— 验证页面表真能用（判据：导航到位且 `ready` 满足）
+- **清债 1** —— 把 `shared/types/x-*.ts` 搬进模块
+
