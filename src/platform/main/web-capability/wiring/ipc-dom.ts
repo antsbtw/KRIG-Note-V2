@@ -30,7 +30,7 @@ import type {
   WebDomPageRef,
   WebDomResult,
 } from '@shared/ipc/web-dom-types';
-import { domRunner, pageRegistry, scriptRegistry } from './runtime';
+import { domRunner, pageRegistry, scriptRegistry, listPageNames } from './runtime';
 import { bindPageHost } from './page-hosts';
 import type { PageId } from '../page/types';
 import type { ScriptId } from '../dom/types';
@@ -134,6 +134,28 @@ export function registerWebDomIpc(): void {
    * 这正是用户定的「成功路径也要留痕」:
    * 不是等出事才查,而是**平时就把判断依据摆出来**。
    */
+  /**
+   * ⭐ 一并报「谁注册了语义页面表」—— 2026-10-01 加。
+   *
+   * ⚠️ 起因:X 模块在**模块加载期**自注册并打日志,结果那行被埋在启动最开头、
+   * `[storage] initialized` 之前,用户翻日志自然截不到 → 「没看到」。
+   * ⭐⭐ 这是 feedback-log-where-the-human-looks 的**第二种形态**:
+   * 上次是「打错了进程」,这次是「**打早了时机**」——
+   * 判据同一条:**这行会出现在人看的那块屏幕上吗?** 位置对还不够,时机也要对。
+   *
+   * ⭐ 由**底座**报而不是让业务方报:底座本来就知道有哪些 owner,
+   * 而让业务方报就得让宿主多调一个函数 —— 那会破坏
+   * 「宿主只有一行 `import '@modules/x'`」的原则(守卫会红)。
+   */
+  const pageTables = listPageNames();
+  if (pageTables.length > 0) {
+    for (const t of pageTables) {
+      console.log(`[web.page] 语义页面表 owner=${t.owner} —— ${t.names.length} 个: ${t.names.join(', ')}`);
+    }
+  } else {
+    console.log('[web.page] ⚠️ 没有任何语义页面表注册 —— goto 语义名必然失败');
+  }
+
   const ids = scriptRegistry.list().map((x) => x.id);
   const rendererIds = ids.filter((id) => String(id).startsWith('renderer.'));
   console.log(

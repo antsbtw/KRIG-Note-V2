@@ -48,11 +48,27 @@ export function registerXModule(): void {
   registered = true;
   registerPageTable(OWNER, xPageResolver);
   registerAnchorTable(OWNER, xAnchorResolver);
-  console.log(
-    `[modules/x] 已注册 —— 语义页面 ${xPageResolver.names?.().length ?? 0} 个: `
-    + `${xPageResolver.names?.().join(', ')};锚点 ${xAnchorResolver.names().length} 个`,
-  );
 }
 
-// ⭐ 模块被 import 即自注册 —— 主程序那一行 `import '@modules/x'` 就够了
+
+/**
+ * ⭐ 模块被 import 即自注册 —— 主程序那一行 `import '@modules/x'` 就够了。
+ *
+ * ⚠️⚠️ **日志刻意不在这里打** —— 2026-10-01 实测踩到:
+ *
+ * 模块加载期(`import` 求值时)比 `app.whenReady()` **早得多**,
+ * 那一行会被埋在启动最开头、`[storage] initialized` **之前** ——
+ * 用户贴日志时自然从 storage 连接开始截,于是「看不到」。
+ * ⭐ 而 `[web.dom ipc] 已就绪` 看得到,正因为它在 `whenReady` 里打。
+ *
+ * ⭐⭐ 这是 feedback-log-where-the-human-looks 的**第二种形态**:
+ * 上次是「打错了进程」,这次是「**打早了时机**」——
+ * 判据同一条:**这行会出现在人看的那块屏幕上吗?**
+ * 位置对了还不够,**时机也要对**。
+ *
+ * → 注册照旧在模块加载期(越早越好,免得有人先 goto 再注册);
+ *   **报告由底座在 `whenReady` 里统一打** —— 它本来就知道哪些 owner 注册了表,
+ *   ⭐ 这样 X 不必为了「被看见」而让宿主多调一个函数
+ *   (那会破坏「宿主只有一行 import」的原则,守卫当场会红 —— 实测过)。
+ */
 registerXModule();
