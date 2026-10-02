@@ -110,3 +110,135 @@ describe('⭐ 页面表与参数表一致', () => {
     expect(got?.params.tweetId).toBe('2105861183614169438');
   });
 });
+
+/**
+ * ⭐⭐ 本轮(2026-10-02)补的 8 页 —— 重点不是 URL 拼得对,
+ * 而是**搬过来的实测规则真的生效**。
+ *
+ * ⚠️ 判据这么定的理由:只测「url 含 /search」那种,
+ * 会在规范化/时间窗被删掉后照样绿 —— 而那两条正是实测换来的。
+ */
+describe('x.search:三条实测规则', () => {
+  const url = (p: Record<string, string>): string => {
+    const r = xPageResolver.resolve('x.search', p);
+    expect(r, `resolve('x.search', ${JSON.stringify(p)}) 返回 null`).not.toBeNull();
+    return decodeURIComponent(r!.url);
+  };
+
+  it('⭐ 逗号串变 OR,不是一个短语(用户 2026-09-23:94 条全不相干)', () => {
+    /**
+     * ⚠️ X 把 `VPN,翻墙` 当成**一个短语**且**不报错** ——
+     * 「搜的不是你想搜的」与「这个词真没人发」长得一样。
+     */
+    const u = url({ q: 'VPN,翻墙' });
+    expect(u, '逗号串没被规范化成 OR').toContain('("VPN" OR "翻墙")');
+    expect(u, '原始逗号串还在 —— 规范化没生效').not.toContain('VPN,翻墙');
+  });
+
+  it('⭐ 单词也加引号(避免被分词)', () => {
+    expect(url({ q: 'VPN' })).toContain('"VPN"');
+  });
+
+  it('⚠️ 已带高级语法的原样放行 —— 不许把人写对的查询改坏', () => {
+    for (const q of ['from:elonmusk', '"a" OR "b"', 'VPN lang:zh', 'VPN since:2026-01-01']) {
+      const u = url({ q });
+      expect(u, `「${q}」被改写了`).toContain(q);
+    }
+  });
+
+  it('⭐⭐ 默认带时间窗(用户 2026-09-25:一次不超过 24 小时)', () => {
+    /**
+     * ⚠️ 这一条防的是「手填那套绕开规则」——
+     * 配方跑的时候一直有 since:,而手填这条路原来搜的是**全部历史**。
+     */
+    expect(url({ q: 'VPN' }), '没有 since: —— 会搜全部历史').toMatch(/since:\d{4}-\d{2}-\d{2}/);
+  });
+
+  it('⭐ days=0 是逃生口:搜全部历史', () => {
+    expect(url({ q: 'VPN', days: '0' }), 'days=0 仍加了时间窗').not.toContain('since:');
+  });
+
+  it('⭐⭐ since 盖过 days —— 两个都算会打架且看不出来', () => {
+    const u = url({ q: 'VPN', days: '7', since: '2026-09-01' });
+    expect(u, 'since 没生效').toContain('since:2026-09-01');
+    // ⚠️ 判据:**只有一个** since,不是「含有」—— 叠加了也会含有
+    expect(u.match(/since:/g)?.length, '叠了两个 since —— 窗口会比预期窄,而且不报错').toBe(1);
+  });
+
+  it('⚠️ 查询自带 since: 时不叠加', () => {
+    const u = url({ q: 'VPN since:2026-08-01' });
+    expect(u.match(/since:/g)?.length, '人自己写了时间条件,我们又塞了一个').toBe(1);
+  });
+
+  it('⭐ f 只认 live/top,乱填退回 live', () => {
+    expect(url({ q: 'VPN', f: 'top' })).toContain('f=top');
+    expect(url({ q: 'VPN', f: '乱填' }), '乱填的值被原样发给 X 了').toContain('f=live');
+  });
+
+  it('⚠️ q 空就返回 null —— 不拿默认值顶上', () => {
+    for (const p of [{}, { q: '' }, { q: '   ' }, { q: ',,，' }]) {
+      expect(xPageResolver.resolve('x.search', p), `${JSON.stringify(p)} 该返回 null`).toBeNull();
+    }
+  });
+
+  it('⭐ describe 里显示**最终发出去**的串', () => {
+    /** ⚠️ 人要看得见我们真正搜的是什么,不是他填的那个 */
+    const r = xPageResolver.resolve('x.search', { q: 'VPN,翻墙' });
+    expect(r!.describe, 'describe 没显示规范化后的串').toContain('OR');
+  });
+});
+
+describe('人的列表页:到位判据不能等推文', () => {
+  /**
+   * ⚠️⚠️ 这三页上**没有推文** —— 用 `byUrlAndTweets` 会必然超时。
+   * ⭐ 判据直接查 arrival 的结构,不查字符串。
+   */
+  for (const name of ['x.followers', 'x.verifiedFollowers', 'x.following']) {
+    it(`⭐ ${name} 的到位判据不含「有推文」`, () => {
+      const r = xPageResolver.resolve(name, { handle: 'elonmusk' });
+      expect(r, `${name} resolve 不出来`).not.toBeNull();
+      const json = JSON.stringify(r!.arrival);
+      expect(json, `${name} 在等推文锚点 —— 这几页没推文,会必然超时`)
+        .not.toContain('tweetArticle');
+      expect(json, `${name} 的判据该比 URL`).toContain('urlIncludes');
+    });
+  }
+});
+
+describe('identify:X 自己的路由不许被认成人', () => {
+  /**
+   * ⚠️⚠️ 不排除会怎样(旧实现原文):
+   * 把「设置页」认成「一个叫 settings 的人的主页」,然后采集跑到那儿去 ——
+   * **而现象是「采到 0 条」,指向完全错误的方向**。
+   */
+  it('⭐ 保留路由一个都不许认成 x.profile', () => {
+    const reserved = [
+      'settings', 'explore', 'messages', 'bookmarks', 'lists',
+      'communities', 'jobs', 'premium', 'login', 'signup', 'tos', 'privacy',
+      // ⭐ 这几个是**我们自己登记的页面**占掉的首段 —— 更容易漏
+      'search', 'home', 'notifications', 'compose',
+    ];
+    const wrong = reserved
+      .map((seg) => ({ seg, hit: xPageResolver.identify?.(`https://x.com/${seg}`) }))
+      .filter((x) => x.hit?.name === 'x.profile');
+    expect(
+      wrong.map((x) => x.seg),
+      '这些 X 自己的路由被认成了「某人的主页」:\n  ' + wrong.map((x) => x.seg).join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⭐ 大小写也要挡住', () => {
+    expect(xPageResolver.identify?.('https://x.com/Settings')?.name).not.toBe('x.profile');
+  });
+
+  it('⚠️ 但真账号名照样认得出 —— 别挡过头', () => {
+    expect(xPageResolver.identify?.('https://x.com/elonmusk')?.name).toBe('x.profile');
+    // ⭐ 名字里含保留词的账号不该被误挡
+    expect(xPageResolver.identify?.('https://x.com/searchbot')?.name).toBe('x.profile');
+  });
+
+  it('⭐ 末尾斜杠不影响识别', () => {
+    expect(xPageResolver.identify?.('https://x.com/home/')?.name).toBe('x.home');
+    expect(xPageResolver.identify?.('https://x.com/elonmusk/')?.name).toBe('x.profile');
+  });
+});

@@ -196,15 +196,34 @@ export function listPageNames(): Array<{
    * `k === 'handle' ? … : …` 就是「写死清单」的开端。
    */
   hints: Record<string, string>;
+  /**
+   * ⭐⭐ **哪些参数不填也能跑** —— 面板据此决定「缺不缺参数」。
+   *
+   * ⚠️ 2026-10-02 补。起因:`x.search` 的 `f`(live/top)与 `days`(时间窗)
+   * 都有默认值,但面板的判据是「`params` 里的全填满才让点」——
+   * 于是这两个成了事实上的必填,人不填就点不了,**而面板不说为什么**。
+   *
+   * ⚠️ 旧实现栽过同一刀(原文):
+   * > 面板原来把这个清单**写死成只有 `'f'`**,于是新增可选参数(如 `days`)
+   * > 会被当成必填 → 不填就禁用按钮,而人根本不知道该填什么。
+   *
+   * ⭐ 所以真源在**业务的页面表**里,面板问它要。
+   * ⚠️ 解释器不一定实现 `optionalOf` —— 没有就给空数组
+   * (= 全部必填,与改这版之前的行为一致,不会突然放宽)。
+   */
+  optional: Record<string, string[]>;
 }> {
   return Array.from(pageTables.entries()).map(([owner, t]) => {
     const names = typeof t.names === 'function' ? t.names() : [];
     const withParams = t as {
       paramsOf?: (n: string) => readonly string[];
       hintOf?: (p: string) => string;
+      /** ⭐ 可选参数 —— 与 `paramsOf` 同款鸭子类型,底座不认识任何业务 */
+      optionalOf?: (n: string) => readonly string[];
     };
     const params: Record<string, string[]> = {};
     const hints: Record<string, string> = {};
+    const optional: Record<string, string[]> = {};
     if (typeof withParams.paramsOf === 'function') {
       for (const n of names) {
         const ps = [...withParams.paramsOf(n)];
@@ -212,9 +231,21 @@ export function listPageNames(): Array<{
         if (typeof withParams.hintOf === 'function') {
           for (const k of ps) hints[k] = withParams.hintOf(k);
         }
+        /**
+         * ⚠️ 只收**本页真有的**可选参数 —— 业务方可能回一张全局表
+         * (如 `['f','days','since']`),直接透传会让面板以为
+         * `x.profile` 的 handle 也有个叫 `days` 的可选参数。
+         * ⭐ 与 `params[n]` 取交集,面板拿到的就一定是这一页的事。
+         */
+        if (typeof withParams.optionalOf === 'function') {
+          const opt = new Set(withParams.optionalOf(n));
+          optional[n] = ps.filter((k) => opt.has(k));
+        } else {
+          optional[n] = [];
+        }
       }
     }
-    return { owner, names, params, hints };
+    return { owner, names, params, hints, optional };
   });
 }
 

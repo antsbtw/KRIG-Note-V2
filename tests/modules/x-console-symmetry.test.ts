@@ -22,7 +22,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { xPageResolver, PAGE_PARAMS } from '@modules/x/x-pages';
+import { xPageResolver, PAGE_PARAMS, OPTIONAL_PAGE_PARAMS } from '@modules/x/x-pages';
 
 const ROOT = resolvePath(__dirname, '../..');
 const read = (p: string): string => readFileSync(resolvePath(ROOT, p), 'utf8');
@@ -69,39 +69,82 @@ describe('对称性:底座侧（identify 这条反向通路）', () => {
     expect(got).toEqual({ name: 'x.status', params: { tweetId: '2105861183614169438' } });
   });
 
+  /**
+   * ⭐⭐ **每个登记的页面都要有一条样本** —— 清单从**真表推导**。
+   *
+   * ⚠️⚠️ 上一版这里是一份**写死的 5 条样本**,而我这轮加了 8 页 ——
+   * 55 条测试照样全绿,因为新页面天然不在样本里。
+   * 正是 `feedback-guard-hardcoded-list-never-grows` 同族第六刀:
+   * **信息来源错了**,补清单治不了,要换成从 `names()` 推。
+   *
+   * ⭐ 现在加页面而不加样本 → 下面那条「每页都有样本」直接红。
+   */
+  const SAMPLE_URL: Readonly<Record<string, string>> = {
+    'x.home': 'https://x.com/home',
+    'x.profile': 'https://x.com/elonmusk',
+    'x.withReplies': 'https://x.com/elonmusk/with_replies',
+    'x.articles': 'https://x.com/elonmusk/articles',
+    'x.status': 'https://x.com/i/status/2105861183614169438',
+    'x.search': 'https://x.com/search?q=%22VPN%22&f=live',
+    'x.followers': 'https://x.com/elonmusk/followers',
+    'x.verifiedFollowers': 'https://x.com/elonmusk/verified_followers',
+    'x.following': 'https://x.com/elonmusk/following',
+    'x.notifications': 'https://x.com/notifications',
+    'x.compose': 'https://x.com/compose/post',
+    'x.composeArticles': 'https://x.com/compose/articles',
+  };
+
+  it('⭐⭐ 每个登记的页面都必须有一条反向样本(清单从真表推)', () => {
+    const names = xPageResolver.names?.() ?? [];
+    expect(names.length, '页面表是空的?').toBeGreaterThan(4);
+    const noSample = names.filter((n) => !SAMPLE_URL[n]);
+    expect(
+      noSample,
+      '这些页面登记了但没有反向样本 —— 加页面时请一起加:\n  ' + noSample.join('\n  '),
+    ).toEqual([]);
+    // ⭐ 反向也钉:样本里不许有已删除的页面
+    const stale = Object.keys(SAMPLE_URL).filter((n) => !names.includes(n));
+    expect(stale, '样本里有已删除的页面:\n  ' + stale.join('\n  ')).toEqual([]);
+  });
+
   it('⭐⭐ 反向认出的页面名与参数,必须在正向表里真能用', () => {
     /**
-     * ⭐ 这是「正反必须同一张表」的**真**判据:
+     * ⭐ 「正反必须同一张表」的**真**判据:
      * 不只比字符串,而是把 identify 的产出**喂回 resolve**,看能不能拼出 URL。
      * ⚠️ 只断言 `name === 'x.status'` 那种写法,表删了这页也照样绿。
      */
-    const samples = [
-      'https://x.com/home',
-      'https://x.com/elonmusk',
-      'https://x.com/elonmusk/with_replies',
-      'https://x.com/i/status/2105861183614169438',
-      'https://twitter.com/elonmusk/status/123',
-    ];
-    const recognized = samples
-      .map((u) => ({ u, hit: xPageResolver.identify?.(u) ?? null }))
-      .filter((x) => x.hit !== null);
+    const names = xPageResolver.names?.() ?? [];
+    const cases = names.map((n) => ({ name: n, u: SAMPLE_URL[n] })).filter((c) => c.u);
+    expect(cases.length, '一条样本都没有 —— 下面的循环会空转').toBeGreaterThan(8);
 
-    // ⚠️ 样本里必须真有认得出来的 —— 否则下面的循环空转,等于没测
-    // (`feedback-check-sample-contains-phenomenon`:别拿不含该现象的样本论证)
-    expect(recognized.length, '一个样本都认不出来 —— 循环会空转').toBeGreaterThan(2);
+    for (const { name, u } of cases) {
+      const hit = xPageResolver.identify?.(u) ?? null;
+      expect(hit, `identify('${u}') 认不出来 —— 这一页登记了却反向不认`).not.toBeNull();
+      expect(hit!.name, `identify('${u}') 认成了别的页`).toBe(name);
 
-    for (const { u, hit } of recognized) {
-      const names = xPageResolver.names?.() ?? [];
-      expect(names, `identify('${u}') 认出了 ${hit!.name},但正向表里没这个名字`)
-        .toContain(hit!.name);
+      /**
+       * ⚠️⚠️ **可选参数允许不回** —— 不是放宽,是必须如此:
+       * `x.search` 的 `PAGE_PARAMS` 含 `days`,而 `identify` **故意不回它** ——
+       * URL 里的 `since:` 已经在 `q` 里面了,再单独回一个 `days`,
+       * 「用它」之后重新 resolve 会**叠加第二个时间条件**,而且不报错。
+       * ⭐ 所以判据是:回的键 ⊆ 本页参数,且**必填的一个不少**。
+       */
+      const need = PAGE_PARAMS[name] ?? [];
+      const optional = new Set(OPTIONAL_PAGE_PARAMS);
+      const required = need.filter((k) => !optional.has(k));
+      const got = Object.keys(hit!.params);
 
-      // 认出的参数键必须正是这页要的参数
-      const need = PAGE_PARAMS[hit!.name] ?? [];
-      expect(Object.keys(hit!.params).sort(), `${hit!.name} 的参数键对不上正向表`)
-        .toEqual([...need].sort());
+      expect(
+        got.filter((k) => !need.includes(k)),
+        `${name} 反向回了本页不认的参数 —— 喂回 resolve 会被忽略或拼错`,
+      ).toEqual([]);
+      expect(
+        required.filter((k) => !got.includes(k)),
+        `${name} 反向漏了必填参数 —— 「用它」之后点 goto 会直接 failed`,
+      ).toEqual([]);
 
       // ⭐ 真喂回正向:拼得出 URL 才算同一张表的两面
-      const back = xPageResolver.resolve(hit!.name, hit!.params);
+      const back = xPageResolver.resolve(name, hit!.params);
       expect(back, `identify('${u}') 的产出喂回 resolve 拼不出 URL`).not.toBeNull();
     }
   });

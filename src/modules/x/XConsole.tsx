@@ -47,6 +47,12 @@ type PageTable = {
   params: Record<string, string[]>;
   /** ⭐ 每个参数该填什么 —— **从真表来**,面板不许自己写 `k === 'handle'` 分支 */
   hints: Record<string, string>;
+  /**
+   * ⭐⭐ 哪些参数不填也能跑 —— **从真表来**。
+   * ⚠️ 旧实现把这个清单写死成只有 `'f'`,于是新增的 `days` 被当成必填
+   * → 不填就点不了,而面板不说为什么。「清单不会自己长」同族。
+   */
+  optional: Record<string, string[]>;
 };
 
 /** 左栏当前页的识别结果(来自底座 `identify`,不是面板自己 parse 的) */
@@ -152,8 +158,17 @@ export function XConsole(
   const ownerTable = tables.find((t) => t.names.includes(pageName));
   const requiredParams: string[] = ownerTable?.params[pageName] ?? [];
 
-  /** ⚠️ 必填参数没填满就禁用 —— 免得点下去只拿到一句「解析不出 URL」 */
-  const missing = requiredParams.filter((k) => !(paramVals[k] ?? '').trim());
+  /**
+   * ⚠️ 必填参数没填满就禁用 —— 免得点下去只拿到一句「解析不出 URL」。
+   *
+   * ⭐⭐ 但**可选参数不算缺** —— 问真表要哪些可选,面板不写死。
+   * ⚠️ 不减掉可选会怎样:`x.search` 的 `f`/`days` 有默认值,
+   * 却成了事实上的必填 —— 人不填就点不了 goto,而按钮只说「还缺参数」。
+   */
+  const optionalParams: string[] = ownerTable?.optional[pageName] ?? [];
+  const missing = requiredParams
+    .filter((k) => !optionalParams.includes(k))
+    .filter((k) => !(paramVals[k] ?? '').trim());
 
   const disabled = busy || wcId == null;
 
@@ -236,7 +251,13 @@ export function XConsole(
         {/* ⭐ 参数框**按真表渲染** —— 加页面时只改页面表,这里自动跟上 */}
         {requiredParams.map((k) => (
           <div key={k} style={S.row}>
-            <span style={{ width: 70, opacity: 0.8 }}>{k}</span>
+            {/* ⭐ 可选参数标出来 —— 否则人会以为每个框都得填 */}
+            <span style={{ width: 70, opacity: 0.8 }}>
+              {k}
+              {optionalParams.includes(k) && (
+                <span style={{ opacity: 0.5, fontSize: 10 }}>　可选</span>
+              )}
+            </span>
             <input
               value={paramVals[k] ?? ''}
               onChange={(e) => setParamVals((v) => ({ ...v, [k]: e.target.value }))}

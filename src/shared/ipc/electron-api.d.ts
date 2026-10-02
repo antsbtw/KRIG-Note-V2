@@ -923,6 +923,14 @@ declare global {
         params: Record<string, string[]>;
         /** ⭐ 每个参数该填什么样的值 —— 面板当 placeholder,不许自己写分支 */
         hints: Record<string, string>;
+        /**
+         * ⭐ 哪些参数不填也能跑 —— 面板据此决定「缺不缺参数」。
+         * ⚠️⚠️ 本结构在仓里**手抄了三份**(这里 + preload 两处),
+         * 加字段必须三处一起改,漏一处就**静默丢失**
+         * (与 `project-x-field-four-place-registration` 同一形态)。
+         * ⭐ 真源是 `listPageNames()` 的返回类型。
+         */
+        optional: Record<string, string[]>;
       }>>;
       webDomRun(
         pageRef: { wcId: number },
