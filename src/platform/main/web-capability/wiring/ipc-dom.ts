@@ -540,6 +540,23 @@ export function registerWebDomIpc(): void {
            * ⭐ 只停翻页 —— 人可能**只滚不捕**,那时 `captureStop` 用不上,
            * 但翻页照样要能停(用户 2026-10-02:「两个动作」)。
            */
+          /**
+           * ⭐ 重载当前页 —— 为了避开「attach 与首次请求」的竞态。
+           * ⚠️ 用 `wc.reload()` 而不是 `loadURL(当前URL)`:
+           * 后者会丢掉 SPA 的路由状态,而且在 X 上会被重定向回首页。
+           */
+          case 'reload': {
+            const before = wc.getURL();
+            wc.reload();
+            traceRecorder.lifecycle({
+              layer: 'web.page',
+              event: 'reload-for-capture',
+              pageId: String(pageId),
+              detail: { url: before },
+            });
+            console.log(`[web.page] 已重载(捕获中)pageId=${pageId} ${before}`);
+            return { status: 'ok', value: { reloaded: true, url: before } };
+          }
           case 'scrollStop':
             scrollCancelled.add(pageId);
             console.log(`[web.page] 已请求停止翻页 pageId=${pageId}`);

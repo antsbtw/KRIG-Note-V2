@@ -141,6 +141,18 @@ export type WebDomInvoke =
    * 当前轮最多再等一个 settleMs。
    */
   | { readonly op: 'scrollStop'; readonly pageRef: WebDomPageRef }
+  /**
+   * ⭐⭐ 重载当前页 —— **为了避开 attach 竞态**,不是便利功能。
+   *
+   * ⚠️ 实测:`page-created` 与 `capture-start` 在同一秒,而 X 的
+   * `HomeTimeline` 首次请求在页面加载后 1–2 秒内发出 —— 两者是**竞态**。
+   * 错过首次就只能等后续分页,而首页分页要滚很深才触发。
+   * ⭐ 捕获已开着时重载,必然从第一条请求开始收。
+   *
+   * ⚠️ 它**不收 URL** —— 只重载当前页,给不了导航到别处的口子
+   * (与 `goto` 只收语义名同一道理)。
+   */
+  | { readonly op: 'reload'; readonly pageRef: WebDomPageRef }
   /** 滚动直到某判据 —— ⭐ 只管滚,不管抓(抓是 `capture` 的事) */
   | {
       readonly op: 'scrollUntil';

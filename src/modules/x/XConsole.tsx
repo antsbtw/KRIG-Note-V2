@@ -550,6 +550,26 @@ export function XConsole(
                 >
                   清空
                 </button>
+                {/*
+                  ⭐⭐ 「捕获中重载」—— ⚠️ 这是**时序**问题的解法,不是便利功能。
+                  实测:`page-created` 与 `capture-start` 在**同一秒**,
+                  而 X 的 `HomeTimeline` 首次请求在页面加载后 1–2 秒内发出 ——
+                  attach 与首次请求是**竞态**,错过了就再也等不到
+                  (首页的后续分页要滚到很深才触发)。
+                  ⭐ 捕获已经开着时重载,必然从**第一条请求**开始收。
+                  ⚠️ 不看 busy:重载是人要的动作,滚动期间也该能点。
+                */}
+                <button
+                  type="button"
+                  disabled={wcId == null || !stats?.running}
+                  onClick={() => void window.electronAPI?.webDomInvoke?.({
+                    op: 'reload', pageRef: { wcId: wcId! },
+                  })}
+                  style={S.btn}
+                  title="捕获开着时重载页面 —— 从第一条请求开始收，避开 attach 竞态"
+                >
+                  捕获中重载
+                </button>
             </div>
 
           {/*
