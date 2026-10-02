@@ -113,7 +113,15 @@ type PendingRequest = {
 export type BodyMissReporter = (miss: {
   readonly pageId: PageId;
   readonly url: string;
-  readonly reason: 'get-body-failed' | 'body-undecodable' | 'too-large' | 'correlate-failed';
+  /**
+   * ⚠️⚠️ `oversize-kept` 是**提醒,不是失败**:载荷已原样完整交出。
+   * 它在这里是为了「内存涨了」时能回头看是哪些页面带来的 ——
+   * **不表示任何数据被动过**。
+   * ⚠️ 没有 `too-large` / `truncated`:本层既不丢弃也不截断
+   * (用户 2026-10-02:「自废武功」/「要保持信息的完整性,而不是片段」)。
+   */
+  readonly reason:
+    | 'get-body-failed' | 'body-undecodable' | 'correlate-failed' | 'oversize-kept';
   readonly detail?: string;
 }) => void;
 
@@ -276,13 +284,46 @@ export class CdpBodyProvider {
       this.reportMiss?.({ pageId, url: pending.url, reason: 'body-undecodable' });
       return;
     }
+    /**
+     * ⭐⭐⭐ **本层不截断、不丢弃 —— 载荷一律原样整条交出** (2026-10-02)。
+     *
+     * ── 用户两句话,第二句推翻了我的第一次修法 ──
+     *
+     * ① 「被我们自己设的上限挡了…这个最不应该,**自废武功**。」
+     *    → 我把「超限丢弃」改成了「截断并标注」。
+     * ② 「什么叫截断并标注?我们要保持获取到的信息的**完整性**,
+     *    而不是片段哦。」
+     *    → ⭐ 对的,我停在了半道上:
+     *
+     * **截断只是比丢弃好,它仍然交出一条残缺的载荷。**
+     * 对 X 的 GraphQL 来说半条 JSON 等于没有 —— 下游 `JSON.parse` 必炸,
+     * 那条推文/那个人照样丢。标注只是让丢失**有记录**,不是让信息完整。
+     * (`project-x-article-body-lost`:16081 字的长文正文整片丢失那次,
+     *  正是这种「看着有、实际残」的形态。)
+     *
+     * ── ⚠️ 那内存怎么办(查证过,不是拍脑袋)──
+     *
+     * 总线按**条数**封顶(`MAX_RESPONSE_BODIES = 256`),不是按单条大小。
+     * 所以单条大并不会让内存无限涨 —— 容量是**总量**问题,
+     * 该由条数/总字节的配额管,**不该靠毁掉单条数据来解决**。
+     * 真要压内存,正确的做法是降低保留条数或改落盘(`raw-store` 那条路),
+     * 而不是把每条都切一刀。
+     *
+     * ⭐ `policy.maxBodyBytes` 仍保留在契约里,但本层**只用它报一声**
+     * (见下),绝不据此改动数据 —— 它从「会毁数据的闸门」降级为
+     * 「超大载荷的提醒」。
+     */
     if (policy.maxBodyBytes !== undefined && body.byteLength > policy.maxBodyBytes) {
-      // ⚠️ 原来也静默 —— 人会以为没捕到,实际是被自己设的上限挡了
+      /**
+       * ⚠️ 这不是失败,是**提醒**:载荷原样交出去了,只是比预期大。
+       * 留痕是为了「内存涨了」时能回头看是哪些页面带来的,
+       * 而**不是**为了说明某条数据被动过。
+       */
       this.reportMiss?.({
-        pageId, url: pending.url, reason: 'too-large',
-        detail: `${body.byteLength}B > ${policy.maxBodyBytes}B`,
+        pageId, url: pending.url, reason: 'oversize-kept',
+        detail: `${body.byteLength}B 超过提醒阈值 ${policy.maxBodyBytes}B —— `
+          + '⭐ 已**原样完整**交出,未截断',
       });
-      return;
     }
 
     const result = this.bus.attachProviderBody(pageId, providerRequestId, {
@@ -291,6 +332,7 @@ export class CdpBodyProvider {
       resourceType: pending.resourceType,
       mimeType: pending.mimeType,
       responseHeaders: pending.responseHeaders,
+      // ⭐ **原样整条** —— 本层不动数据
       body,
     });
     if (result.status === 'failed') {

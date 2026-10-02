@@ -31,7 +31,9 @@ export const netBus = new NetworkEventBus();
  * ⭐ 四种 reason 各指一个方向,混在一起就查不动:
  * · get-body-failed    CDP 取 body 报错(通道还活着,单条失败)
  * · body-undecodable   拿到了但解不出
- * · too-large          被 maxBodyBytes 挡了(**人自己设的上限**,最容易误判成没捕到)
+ * · oversize-kept      ⭐ **提醒,不是失败**:载荷比提醒阈值大,但已**原样完整**交出。
+ *                      ⚠️ 本层既不截断也不丢弃 —— 用户 2026-10-02:
+ *                      「要保持获取到的信息的完整性,而不是片段」
  * · correlate-failed   ⚠️ 配不上 webRequest 记录 —— 整条链最常见的死法
  *
  * ⚠️ 这里**不限流**:一条坏就记一条。刷屏本身就是信号
@@ -47,7 +49,14 @@ export const bodyProvider = new CdpBodyProvider(netBus, (miss) => {
    */
   const category = miss.reason === 'correlate-failed'
     ? 'systemic' as const
-    : miss.reason === 'too-large'
+    /**
+     * ⚠️ `oversize-kept` 归 `unexpected-format`:**它不是故障** ——
+     * 数据完好无损地交出去了,只是比预期大。
+     * ⭐ 不归 resource-failure(没有任何资源失败)、
+     * 　 更不归 contract-violation(没有违反任何契约)——
+     * 　 归错类会让「内存提醒」混进真故障堆里,把真的问题淹掉。
+     */
+    : miss.reason === 'oversize-kept'
       ? 'unexpected-format' as const
       : 'resource-failure' as const;
   traceRecorder.degradation({

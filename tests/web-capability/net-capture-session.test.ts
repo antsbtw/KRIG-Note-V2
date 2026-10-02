@@ -17,6 +17,7 @@
 import { describe, it, expect } from 'vitest';
 import { NetworkEventBus } from '@platform/main/web-capability/net/bus';
 import { CaptureSession } from '@platform/main/web-capability/net/capture-session';
+import { CdpBodyProvider } from '@platform/main/web-capability/net/body-provider';
 import type { PageId } from '@platform/main/web-capability/page/types';
 
 const PAGE = 'page-1' as unknown as PageId;
@@ -319,5 +320,121 @@ describe('CaptureSession:用假 bus 造边界场景', () => {
     s.start();
     emit(completeEvent);
     expect(s.list()[0].url, 'URL 明明找得到却没带上').toBe('https://x.com/real');
+  });
+});
+
+/**
+ * ⭐⭐⭐ **两条腿合流** —— 2026-10-02 真机「捕 0 条」的真因就在这里
+ *
+ * ── 真因(探针实测,不是从代码推断)──
+ *
+ *   webRequest.onCompleted → recordResponseComplete(**无 body**)
+ *       → 发了事件,但 bodyRef 是 undefined → 订阅者判为 noBody
+ *   CDP loadingFinished   → attachProviderBody(**有 body**)
+ *       → 更新记录、存 body、**一声不吭**(原来不 emit)
+ *
+ * 两条腿各做一半,谁也没把「body 到手了」告诉订阅者。
+ * ⚠️ 真机症状:接线 ✅ attach ✅ **捕获 0 条** —— 而 body 其实就在库里。
+ *
+ * ⚠️ 本节用**真 provider + 真 bus**(不是假 bus):
+ * 这个 bug 恰恰出在两者的接缝上,任一侧单独测都是绿的。
+ */
+describe('⭐⭐⭐ 两条腿合流:CDP 的 body 必须让订阅者知道', () => {
+  const PAGE2 = 'page-legs' as unknown as PageId;
+  const URL = 'https://x.com/i/api/graphql/abc/UserTweets';
+
+  /** 真 CDP 宿主的替身 —— 只替掉 Electron 那层,provider 本身是真的 */
+  function wire(bus: NetworkEventBus, bodyText: string) {
+    const ls: Array<(...a: unknown[]) => void> = [];
+    const provider = new CdpBodyProvider(bus);
+    provider.attach({
+      hostId: 1,
+      debugger: {
+        isAttached: () => false,
+        attach: () => undefined,
+        sendCommand: async (m: string) => (m === 'Network.getResponseBody'
+          ? { body: bodyText, base64Encoded: false } : {}),
+        on: (e: string, l: (...a: unknown[]) => void) => { if (e === 'message') ls.push(l); },
+      },
+      onDestroyed: () => undefined,
+    } as never, PAGE2, { resourceTypes: ['fetch'] });
+    return {
+      cdpStart: () => ls[0]({}, 'Network.requestWillBeSent', {
+        requestId: 'cdp-1', request: { url: URL, method: 'POST' }, type: 'Fetch',
+      }),
+      cdpDone: () => ls[0]({}, 'Network.loadingFinished', { requestId: 'cdp-1' }),
+    };
+  }
+
+  const wrStart = (bus: NetworkEventBus) => bus.recordRequestStart({
+    requestId: 'wr-1', pageId: PAGE2, url: URL, method: 'POST',
+    resourceType: 'xhr', startedAt: new Date().toISOString(),
+  });
+  const wrDone = (bus: NetworkEventBus) => bus.recordResponseComplete({
+    requestId: 'wr-1', pageId: PAGE2, url: URL, method: 'POST', resourceType: 'xhr',
+    status: 200, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString(),
+  });
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+
+  it('⭐⭐⭐ 完整走一遍两条腿 → captured=1、内容完整', async () => {
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE2);
+    s.start();
+    const cdp = wire(bus, '{"data":{"ok":1}}');
+
+    cdp.cdpStart();
+    wrStart(bus);
+    wrDone(bus);          // ⚠️ 此刻还没 body
+    cdp.cdpDone();        // ⭐ body 到手 —— 原来这一步不发事件
+    await settle();
+
+    const st = s.stats();
+    expect(st.captured, '载荷没到订阅者 —— 这正是真机「捕 0 条」的形态').toBe(1);
+    expect(s.list()[0].text, '载荷内容不完整').toBe('{"data":{"ok":1}}');
+  });
+
+  it('⭐⭐ 同一条请求不许**既算 noBody 又算 captured**', async () => {
+    /**
+     * ⚠️⚠️ 后果不只是数字难看:`noBody > 0` 是面板上
+     * 「这是 **CDP 通道**的问题」那句诊断的触发条件 ——
+     * 不去重就会在一切正常时**误报**,把人指向不存在的故障。
+     */
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE2);
+    s.start();
+    const cdp = wire(bus, '{"ok":1}');
+    cdp.cdpStart(); wrStart(bus); wrDone(bus); cdp.cdpDone();
+    await settle();
+
+    expect(s.stats().captured).toBe(1);
+    expect(s.stats().noBody, 'noBody 虚高 —— 会让面板误报「CDP 通道有问题」').toBe(0);
+  });
+
+  it('⭐ 真的通道哑了时,noBody 仍要计上(别矫枉过正)', async () => {
+    /**
+     * ⚠️ 上一条是「别多算」,光有它会被一个「永远不算 noBody」的实现满足 ——
+     * 那就把通道哑了这个信号整个弄丢了。
+     */
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE2);
+    s.start();
+    wrStart(bus);
+    wrDone(bus);          // ⭐ 只有 webRequest 这条腿,CDP 的 body 永远不来
+    await settle();
+
+    expect(s.stats().noBody, '通道哑了却没计 noBody —— 信号丢了').toBe(1);
+    expect(s.stats().captured).toBe(0);
+  });
+
+  it('⭐ 重复的 onCompleted 不让 noBody 翻倍', async () => {
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE2);
+    s.start();
+    wrStart(bus);
+    wrDone(bus);
+    wrDone(bus);
+    wrDone(bus);
+    await settle();
+    expect(s.stats().noBody, '同一条请求被算了多次').toBe(1);
   });
 });

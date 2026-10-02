@@ -93,6 +93,25 @@ export class CaptureSession {
    */
   private firstCaptureReported = false;
 
+  /**
+   * ⭐⭐ 已经算过 `noBody` 的 requestId。
+   *
+   * ── 为什么需要(2026-10-02 实测)──
+   *
+   * 同一条请求会收到**两次** `response-complete`:
+   * ① webRequest 侧 `onCompleted` —— 有响应、**还没 body**
+   * ② CDP 侧 body 到手后补发 —— 有 `bodyRef`
+   * 这是有意的(「有响应」与「载荷到手」本是两个时刻),
+   * 但不去重的话同一条既计 `noBody` 又计 `captured`。
+   *
+   * ⚠️⚠️ 后果不只是数字难看:`noBody > 0` 是面板上
+   * 「**这是 CDP 通道的问题**」那句诊断的触发条件 —— 会**误报**,
+   * 把人指向一个不存在的故障(而那正是这一栏要避免的事)。
+   *
+   * ⭐ 所以后来补到 body 时**撤回**先前那次 noBody。
+   */
+  private noBodySeen = new Set<string>();
+
   constructor(
     private readonly bus: NetworkEventBus,
     private readonly pageId: PageId,
@@ -137,6 +156,7 @@ export class CaptureSession {
   resetStats(): void {
     // ⚠️ 首次标记一起复位 —— 不然新一轮捕到了也不留痕
     this.firstCaptureReported = false;
+    this.noBodySeen.clear();
     this.captured = 0;
     this.noBody = 0;
     this.bodyLost = 0;
@@ -180,8 +200,21 @@ export class CaptureSession {
      * 不是「这条没内容」。必须单独计,否则它会被当成正常请求滑过去。
      */
     if (event.bodyRef === undefined) {
-      this.noBody += 1;
+      // ⚠️ 同一条只计一次 —— 重复的 onCompleted 不该让数字翻倍
+      if (!this.noBodySeen.has(event.requestId)) {
+        this.noBodySeen.add(event.requestId);
+        this.noBody += 1;
+      }
       return;
+    }
+
+    /**
+     * ⭐ 这一条先前被算作 `noBody`,现在 body 到了 —— **撤回**那一次。
+     * ⚠️ 不撤的话 `noBody` 虚高,而它是「CDP 通道有问题」的诊断依据,
+     * 会在一切正常时误报。
+     */
+    if (this.noBodySeen.delete(event.requestId)) {
+      this.noBody -= 1;
     }
 
     const body = this.bus.body(event.bodyRef);
