@@ -154,6 +154,12 @@ export function XConsole(
    */
   const [audit, setAudit] = useState<ReturnType<typeof summarizeAudits> | null>(null);
   /**
+   * ⭐ 收集中的实时进度 —— ⚠️ 不是为了好看:
+   * 没有它的话人在第 ② 步只看到一个「● 收集中」,
+   * **不知道翻页到底有没有收到东西**,也就不知道什么时候该停。
+   */
+  const [peek, setPeek] = useState<{ total: number; wanted: number } | null>(null);
+  /**
    * ⭐⭐ 当前能力 tab。
    *
    * ── 用户 2026-10-02 ──
@@ -224,6 +230,24 @@ export function XConsole(
    * 没有「中途要看的数」了 —— 轮询连同它防的那些坑一起消失。
    * ⭐ 这就是把决策收进底座的直接收益:**上层的复杂度跟着没了**。
    */
+
+  /**
+   * ⭐ 收集中轮询进度 —— ⚠️ **只在 running 时轮**,停了就不轮
+   * (人点了停而数字还在动,会让人以为没停下来)。
+   */
+  useEffect(() => {
+    if (wcId == null || !running) { setPeek(null); return; }
+    const timer = setInterval(() => {
+      void window.electronAPI?.webDomInvoke?.({
+        op: 'acquirePeek',
+        pageRef: { wcId },
+        goal: { wantUrlIncludes: X_TIMELINE_ENDPOINTS },
+      }).then((r) => {
+        if (r.status === 'ok') setPeek(r.value as { total: number; wanted: number });
+      }).catch(() => undefined);
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [wcId, running]);
 
   const call = useCallback(async (label: string, payload: WebDomInvoke) => {
     setBusy(true);
@@ -571,11 +595,32 @@ export function XConsole(
                 </button>
                 {running && <span style={S.live}>● 收集中</span>}
               </div>
+              {/*
+                ⭐⭐ 步骤提示**跟着状态走** —— 2026-10-02 实测踩到:
+                原来条件是 `!running && !report`,**一点「开始收」它就消失了**,
+                于是人进入第 ② 步后面板上只剩一个「● 收集中」,
+                **不告诉他接下来该做什么** —— 那一轮因此没走到「停止并核对」。
+                ⚠️ 与 `feedback-maintainability-over-feature-completion` 同族:
+                　 依据一关就没。⭐ 正在进行的那一步要**更醒目**,不是消失。
+              */}
               {!running && !report && (
                 <div style={S.todo}>
-                  ① 先点「开始收」（两条取数通路同时装上）<br />
-                  ② 去「控制」那栏：重载 / goto / scrollUntil —— <strong>页面怎么翻由你决定</strong><br />
-                  ③ 回来点「停止并核对」—— 给出合并去重的完整数据 + 逐字段完整性
+                  <strong style={{ color: 'var(--text-primary, #ddd)' }}>① 点「开始收」</strong>
+                  　（两条取数通路同时装上）<br />
+                  ② 去「控制」那栏：重载 / goto / scrollUntil<br />
+                  ③ 回来点「停止并核对」
+                </div>
+              )}
+              {running && (
+                <div style={S.diagnose}>
+                  <strong>② 现在去「控制」那栏翻页</strong>
+                  　—— 重载 / goto / scrollUntil，页面怎么翻由你决定。<br />
+                  翻完<strong>回到这里点「停止并核对」</strong>，才会给出数据与完整性。
+                  {peek && (
+                    <div style={{ marginTop: 4, opacity: 0.85 }}>
+                      已收到 {peek.total} 条（命中目标 {peek.wanted} 条）
+                    </div>
+                  )}
                 </div>
               )}
             </div>

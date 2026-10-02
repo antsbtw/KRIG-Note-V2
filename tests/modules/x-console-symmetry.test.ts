@@ -453,3 +453,61 @@ describe('Console 布局:能力并排,不竖排', () => {
     expect(unused, '这些样式零引用 —— 改布局后的残留:\n  ' + unused.join('\n  ')).toEqual([]);
   });
 });
+
+/**
+ * ⭐⭐ 多步流程:**正在进行的那一步必须有指引**
+ *
+ * ── 2026-10-02 实测踩到 ──
+ * 步骤提示的条件是 `!running && !report` —— **一点「开始收」它就消失了**。
+ * 于是人进入第 ② 步(去控制那栏翻页)后,面板上只剩一个「● 收集中」,
+ * **不告诉他接下来该做什么** —— 那一轮因此没走到「停止并核对」,
+ * 留痕里只有 `acquire-start` 没有 `acquire-stop`。
+ *
+ * ⚠️ 与 `feedback-maintainability-over-feature-completion` 同族:
+ * **依据一关就没**。⭐ 正在进行的那一步该**更醒目**,不是消失。
+ */
+describe('⭐⭐ 采集是多步流程:每一步都要有指引', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐⭐ `running` 时必须有「下一步做什么」的提示', () => {
+    /**
+     * ⚠️ 判据不是「有没有提示文案」—— 那种写法下
+     * `{!running && <提示/>}` 照样绿(文案在,但正好在该显示时消失)。
+     * ⭐ 所以钉:存在一个 `{running && ...}` 的块,且它里面提到控制那栏。
+     */
+    const s = panel();
+    const i = s.indexOf('{running && (');
+    expect(i, '收集中没有任何提示 —— 人不知道下一步该干什么').toBeGreaterThan(-1);
+    const block = s.slice(i, s.indexOf(')}', i));
+    expect(block.length, '切出来的块是空的 —— 断言会恒真').toBeGreaterThan(60);
+    expect(block, '提示里没说去「控制」那栏翻页').toContain('控制');
+    expect(block, '提示里没说翻完要回来停').toContain('停止');
+  });
+
+  it('⭐⭐ 收集中要显示**实时收到多少** —— 否则不知道何时该停', () => {
+    /**
+     * ⚠️ 只有一个「● 收集中」的话,人不知道翻页到底有没有收到东西。
+     * ⭐ 这正是「成功路径也要留痕」在界面上的对应物。
+     */
+    const s = panel();
+    expect(s, '没有实时进度 —— 人不知道翻页有没有效果').toMatch(/acquirePeek/);
+    const i = s.indexOf('{running && (');
+    const block = s.slice(i, s.indexOf(')}', i));
+    expect(block, '进度没显示在收集中的提示里').toMatch(/peek/);
+  });
+
+  it('⚠️ 停了就不再轮询进度', () => {
+    /**
+     * ⚠️ 人点了停而数字还在动,会让人以为没停下来,
+     * 然后去查一个不存在的 bug(本轮之前栽过同样的)。
+     */
+    const s = panel();
+    const i = s.indexOf('acquirePeek');
+    expect(i, 'peek 轮询不见了').toBeGreaterThan(-1);
+    // 往回找这个 effect 的守卫条件
+    const head = s.lastIndexOf('useEffect(', i);
+    expect(head, 'peek 不在 effect 里?').toBeGreaterThan(-1);
+    const guard = s.slice(head, i);
+    expect(guard, '没有 running 守卫 —— 停了还在轮').toMatch(/!running/);
+  });
+});
