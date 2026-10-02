@@ -337,6 +337,21 @@ export class ControlEngine {
     let stopReason = `达到轮次上限 ${maxRounds}`;
 
     for (let i = 1; i <= maxRounds; i++) {
+      /**
+       * ⭐⭐ **每轮开头问一次「要不要停」** —— 用户 2026-10-02:
+       * 「停应该包含两个动作 —— 停止翻页/停止取数据吧?」
+       *
+       * ⚠️ 放在轮次开头而不是结尾:结尾问的话,人点停时正在跑的那一轮
+       * 还会把 settleMs 等完(默认 800ms),感觉上仍是「没反应」。
+       *
+       * ⚠️ 取消**不是失败** —— 已滚过的轮次是真实的,照常回报告。
+       * 回 Failed 会让「人主动停的」与「滚不动」长得一样。
+       */
+      if (options.shouldStop?.()) {
+        stopReason = `人工取消(第 ${i} 轮前)`;
+        rounds = i - 1;
+        break;
+      }
       rounds = i;
       const roundStart = Date.now();
 
@@ -407,7 +422,20 @@ export class ControlEngine {
     const scrolledPx = lastY - startY;
 
     // ── A 层自校验:滚动确实发生了(§9.5)。不过要**如实标红**,不许静默 ──
+    /**
+     * ⭐⭐ **人工取消不算 problem** —— 2026-10-02 加。
+     *
+     * ⚠️ 不排除的话,人点「停」会撞上下面
+     * 「要求滚到底,但 N 轮后仍未到底 —— 结果不完整」这一条,
+     * 于是**人主动停的**被报成「结果不完整」,还会把整个结果降级成 `degraded`。
+     * ⭐ 那是**错的归类**:没到底是人的意图,不是缺陷。
+     * 混在一起会让真正的「滚不动」被淹在一堆人工取消里。
+     */
+    const cancelled = stopReason.startsWith('人工取消');
+
     const problems: string[] = [];
+    // ⚠️ 「一动没动」仍然要报 —— 即使是人工取消:
+    //    滚了零像素就点停,与「滚不动」是同一个需要知道的事实。
     if (scrolledPx <= 0) {
       // ⚠️ 这条是本层最重要的一条:滚动没生效时,后面所有判断都建立在假数据上。
       // 现有实现只查 `maxY <= 0`,漏掉「起点不为 0 但一动没动」的情形
@@ -415,13 +443,14 @@ export class ControlEngine {
         `页面从未向下移动(起点 ${startY} → 终点 ${lastY})—— 滚动没生效`,
       );
     }
-    if (stop.kind === 'atBottom' && !reachedBottom) {
+    // ⭐ 下面三条都是「没达成目标」—— 人工取消时目标本来就被放弃了,不算 problem
+    if (!cancelled && stop.kind === 'atBottom' && !reachedBottom) {
       problems.push(`要求滚到底,但 ${rounds} 轮后仍未到底 —— 结果不完整`);
     }
-    if (stop.kind === 'anchorAppears' && !stopReason.startsWith('停止判据满足')) {
+    if (!cancelled && stop.kind === 'anchorAppears' && !stopReason.startsWith('停止判据满足')) {
       problems.push(`要求等锚点出现,但直到停止都没出现 —— 结果不完整`);
     }
-    if (stop.kind === 'custom' && !stopReason.startsWith('停止判据满足')) {
+    if (!cancelled && stop.kind === 'custom' && !stopReason.startsWith('停止判据满足')) {
       problems.push(`要求等自定义判据满足,但直到停止都没满足 —— 结果不完整`);
     }
 

@@ -129,6 +129,18 @@ export type WebDomInvoke =
     }
   /** 清掉攒的内容(保留计数 —— 人要知道这一轮总共来过多少) */
   | { readonly op: 'captureClear'; readonly pageRef: WebDomPageRef }
+  /**
+   * ⭐⭐ **只停翻页**(不碰采集)—— 用户 2026-10-02:
+   * 「停应该包含两个动作 —— 停止翻页/停止取数据吧?」
+   *
+   * ⚠️ 为什么要独立一个 op 而不是只让 `captureStop` 兼管:
+   * 人可能**只滚不捕**(光看页面),那时 `captureStop` 无从谈起,
+   * 但翻页照样要能停。两个动作各有自己的入口才完整。
+   *
+   * ⚠️ 下一轮开头生效(循环在每轮开头检查),不是立即中断当前轮 ——
+   * 当前轮最多再等一个 settleMs。
+   */
+  | { readonly op: 'scrollStop'; readonly pageRef: WebDomPageRef }
   /** 滚动直到某判据 —— ⭐ 只管滚,不管抓(抓是 `capture` 的事) */
   | {
       readonly op: 'scrollUntil';

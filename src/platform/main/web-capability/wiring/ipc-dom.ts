@@ -112,6 +112,21 @@ registerPageIdLookup((wcId) => {
 /** ⚠️ 诊断用,定位后与上面那段一起删 */
 const loggedMiss = new Set<number>();
 
+/**
+ * ⭐⭐ **正在滚动的页面 + 取消标记** —— 2026-10-02。
+ *
+ * ── 用户:「还在翻页?**停应该包含两个动作 —— 停止翻页/停止取数据**吧?」──
+ *
+ * ⚠️ 真机实测:`capture-stop` 在 06:58:50,`scroll-degraded` 在 06:59:08
+ * —— **人点停之后滚动又跑了 18 秒**。因为「停」只退了采集订阅。
+ *
+ * ⭐ 标记放在**主进程**而不是 renderer:滚动循环跑在主进程,
+ * renderer 发一次 IPC 把标记立起来,循环下一轮开头就看见。
+ * ⚠️ 必须按 pageId 分 —— 不分的话在 A 窗口点停会把 B 窗口的滚动也停掉
+ * (`project-host-broadcast-multi-ws-fanout` 的同族)。
+ */
+const scrollCancelled = new Set<PageId>();
+
 /** 取或建会话 —— ⚠️ 不自动 start,开始捕是人的显式动作 */
 function sessionFor(pageId: PageId): CaptureSession {
   const existing = sessionsByPageId.get(pageId);
@@ -468,6 +483,14 @@ export function registerWebDomIpc(): void {
             return { status: 'ok', value: session.stats() };
           }
           case 'captureStop': {
+            /**
+             * ⭐⭐ **「停」= 停止取数据 + 停止翻页**(用户 2026-10-02 定)。
+             *
+             * ⚠️ 原来只停了采集订阅,滚动循环照跑 ——
+             * 实测人点停后滚动又跑了 18 秒,现象就是「停不下来」。
+             * ⭐ 这里立起标记,滚动循环下一轮开头就会看见并退出。
+             */
+            scrollCancelled.add(pageId);
             const session = sessionFor(pageId);
             session.stop();
             const st = session.stats();
@@ -488,6 +511,22 @@ export function registerWebDomIpc(): void {
                 channelFailures: st.channelFailures,
                 lastChannelFailure: st.lastChannelFailure,
                 url: wc.getURL(),
+                /**
+                 * ⭐⭐ **捕到的是什么** —— 2026-10-02 补。
+                 *
+                 * ⚠️ 起因:实测捕到 37 条,但留痕里只有**失败**的 URL,
+                 * 成功的一条 URL 都没有 → 我知道「捕到 37 条」
+                 * 却**不知道捕到的是什么**(第一条还是广告视频分片)。
+                 * ⭐ 又是「不量的字段永远 100%」的同族:
+                 * 数字对了不等于采到了要的东西。
+                 *
+                 * ⚠️ 只记**路径尾段 + 大小**,不记完整 URL(带长 queryId、
+                 * 可能含敏感参数)、更不记正文(几十 KB 会把留痕写爆)。
+                 */
+                payloads: session.list(40).map((x) => ({
+                  tail: x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)',
+                  kb: Math.round(x.byteLength / 102.4) / 10,
+                })),
               },
             });
             console.log(
@@ -497,6 +536,14 @@ export function registerWebDomIpc(): void {
             );
             return { status: 'ok', value: st };
           }
+          /**
+           * ⭐ 只停翻页 —— 人可能**只滚不捕**,那时 `captureStop` 用不上,
+           * 但翻页照样要能停(用户 2026-10-02:「两个动作」)。
+           */
+          case 'scrollStop':
+            scrollCancelled.add(pageId);
+            console.log(`[web.page] 已请求停止翻页 pageId=${pageId}`);
+            return { status: 'ok', value: { cancelled: true } };
           case 'captureStats':
             return { status: 'ok', value: sessionFor(pageId).stats() };
           case 'captureList':
@@ -508,11 +555,23 @@ export function registerWebDomIpc(): void {
           }
           case 'scrollUntil': {
             if (!p.stop) return failed('[web.dom ipc] scrollUntil 缺停止判据');
+            /**
+             * ⚠️ 开跑前先清掉旧标记 —— 不清的话上一轮点过停,
+             * 这一轮会「一轮都没滚就结束」,而现象是「点了没反应」。
+             */
+            scrollCancelled.delete(pageId);
             const r = await controlEngine.scrollUntil(
               pageId,
               toScrollStop(p.stop),
-              { maxRounds: p.maxRounds, settleMs: p.settleMs },
+              {
+                maxRounds: p.maxRounds,
+                settleMs: p.settleMs,
+                // ⭐ 每轮开头问一次 —— 这就是「停」能打断翻页的那根线
+                shouldStop: () => scrollCancelled.has(pageId),
+              },
             );
+            // ⚠️ 跑完即清,免得标记留到下一次(表现为「下次一开始就停」)
+            scrollCancelled.delete(pageId);
             /**
              * ⭐⭐ 滚动结果落盘 —— 这是「载荷为什么是 0」的**头号判据**。
              *

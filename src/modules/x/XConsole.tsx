@@ -419,6 +419,26 @@ export function XConsole(
               title="滚动轮数上限"
             />
             <span style={{ fontSize: 10, opacity: 0.5 }}>轮</span>
+            {/*
+              ⭐⭐ 「停翻页」—— 用户 2026-10-02:
+              「停应该包含两个动作 —— 停止翻页/停止取数据吧?」
+
+              ⚠️ 输出 tab 那个「停」会同时停两件事,但它要求 `running`:
+              人**只滚不捕**时那个按钮是灰的 —— 翻页就停不下来。
+              ⭐ 所以控制 tab 这里要有独立的一个,只管翻页。
+              ⚠️ 不看 `busy`:滚动期间 busy 恒为 true,看了就永远点不到。
+            */}
+            <button
+              type="button"
+              disabled={wcId == null}
+              onClick={() => void window.electronAPI?.webDomInvoke?.({
+                op: 'scrollStop', pageRef: { wcId: wcId! },
+              })}
+              style={S.btn}
+              title="立刻停止翻页（下一轮开头生效）"
+            >
+              停翻页
+            </button>
           </div>
             </div>
             <div style={S.resultArea}>
@@ -497,8 +517,9 @@ export function XConsole(
                     if (r.status === 'ok') setStats(r.value as CaptureStats);
                   }}
                   style={S.btn}
+                  title="停止取数据，并同时停止翻页"
                 >
-                  停
+                  停（取数+翻页）
                 </button>
                 <button
                   type="button"
