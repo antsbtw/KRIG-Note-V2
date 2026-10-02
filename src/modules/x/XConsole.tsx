@@ -63,6 +63,38 @@ type Identified = {
   params: Record<string, string>;
 };
 
+/**
+ * 捕获计数 —— ⭐⭐ **三种状态分开**,与底座 `CaptureStats` 同构。
+ *
+ * ⚠️⚠️ 为什么不能合成一个「捕获 N 条」:
+ * · `noBody` = 有响应但拿不到载荷 → **通道哑了**
+ * · `bodyLost` = 有 bodyRef 但取不出 → 与老化赛跑输了
+ * 两种成因要调的东西完全不同,混起来就不知道该动哪里。
+ * ⭐ 而记忆 `project-x-collect-two-legs` 的教训是:**判据看 payloads
+ * 不看推文数** —— DOM 那条腿会顶着,掩盖载荷全断(实测 payloads 83→0
+ * 而推文数还有 38,人以为只是少了点)。这一栏就是让 payloads 看得见的地方。
+ */
+type CaptureStats = {
+  captured: number;
+  noBody: number;
+  bodyLost: number;
+  channelFailures: number;
+  lastChannelFailure?: string;
+  held: number;
+  running: boolean;
+};
+
+/** 一条攒下来的载荷 —— ⭐ 原样文本,面板不解析 */
+type CapturedPayload = {
+  requestId: string;
+  url: string;
+  method?: string;
+  status?: number;
+  at: string;
+  text: string;
+  byteLength: number;
+};
+
 /** 一次调用的留痕 —— ⭐ 存**整个 Result**,不只存成功与否 */
 type LogEntry = {
   at: string;
@@ -84,6 +116,11 @@ export function XConsole(
    * `null` = 底座说「不认识这一页」(正常答案,不是故障)。
    */
   const [identified, setIdentified] = useState<Identified | null>(null);
+  /** 捕获计数 —— ⚠️ `null` = 还没问过,与「问过了是 0」不是一回事 */
+  const [stats, setStats] = useState<CaptureStats | null>(null);
+  const [payloads, setPayloads] = useState<CapturedPayload[]>([]);
+  /** 展开看原样 JSON 的那一条 */
+  const [openPayload, setOpenPayload] = useState<string | null>(null);
 
   /**
    * ⭐ 页面名**从真表读**,面板不抄一份。
@@ -129,6 +166,32 @@ export function XConsole(
       .catch(() => { if (alive) setIdentified(null); });
     return () => { alive = false; };
   }, [hostUrl]);
+
+  /**
+   * ⭐⭐ 捕获中轮询计数 —— **只在 running 时轮**。
+   *
+   * ⚠️ 为什么用轮询不用主进程推送:
+   * ① `netBus.list` / `stats()` 本来就现成,推送要新开一条通道;
+   * ② 推送要管多窗口扇出,而记忆 `project-host-broadcast-multi-ws-fanout`
+   *    记着四类坑(广播型/定向型/发起型…),为一个调试台开这个口不值。
+   * ⚠️ 这是**我的取舍**,不是用户要求 —— 哪天采集侧要实时进度条,
+   * 推送才真有必要(那时本 effect 是唯一改动点)。
+   *
+   * ⚠️⚠️ **停捕后必须停轮** —— 不停的话:
+   * ① 白耗 IPC;② 更坏的是人点了「停」而数字还在动,
+   * 会让人以为没停下来,然后去查一个不存在的 bug。
+   */
+  useEffect(() => {
+    if (wcId == null || !stats?.running) return;
+    const timer = setInterval(() => {
+      void window.electronAPI?.webDomInvoke?.({ op: 'captureStats', pageRef: { wcId } })
+        .then((r) => { if (r.status === 'ok') setStats(r.value as CaptureStats); })
+        // ⚠️ 轮询失败不进留痕(会刷满),但也不能静默 —— 由下一次轮询自愈;
+        //    真故障会在 channelFailures 计数里出现
+        .catch(() => undefined);
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [wcId, stats?.running]);
 
   const call = useCallback(async (label: string, payload: WebDomInvoke) => {
     setBusy(true);
@@ -292,11 +355,139 @@ export function XConsole(
         </div>
       </section>
       <section style={S.section}>
-        <div style={S.sectionTitle}>输出（web.net 采集）</div>
-        <div style={S.todo}>
-          ⏸️ 第 3 步接。⭐「原样载荷」与「解析结果」将分两栏看 ——
-          解析错了要能分清是「没采到」还是「采到了但解错」。
+        <div style={S.sectionTitle}>
+          输出（web.net 载荷捕获）
+          {stats?.running && <span style={S.live}>● 捕获中</span>}
         </div>
+        <div style={S.row}>
+          <button
+            type="button"
+            disabled={disabled || stats?.running === true}
+            onClick={async () => {
+              await call('captureStart', { op: 'captureStart', pageRef: { wcId: wcId! } });
+              const r = await window.electronAPI!.webDomInvoke({
+                op: 'captureStats', pageRef: { wcId: wcId! },
+              });
+              if (r.status === 'ok') setStats(r.value as CaptureStats);
+            }}
+            style={S.btn}
+          >
+            开始捕获
+          </button>
+          <button
+            type="button"
+            disabled={disabled || !stats?.running}
+            onClick={async () => {
+              const r = await window.electronAPI!.webDomInvoke({
+                op: 'captureStop', pageRef: { wcId: wcId! },
+              });
+              if (r.status === 'ok') setStats(r.value as CaptureStats);
+            }}
+            style={S.btn}
+          >
+            停
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={async () => {
+              const r = await window.electronAPI!.webDomInvoke({
+                op: 'captureList', pageRef: { wcId: wcId! }, limit: 20,
+              });
+              if (r.status === 'ok') setPayloads(r.value as CapturedPayload[]);
+              else setPayloads([]);
+            }}
+            style={S.btn}
+          >
+            取载荷
+          </button>
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={async () => {
+              const r = await window.electronAPI!.webDomInvoke({
+                op: 'captureClear', pageRef: { wcId: wcId! },
+              });
+              if (r.status === 'ok') setStats(r.value as CaptureStats);
+              setPayloads([]);
+              setOpenPayload(null);
+            }}
+            style={S.linkBtn}
+          >
+            清空
+          </button>
+        </div>
+
+        {/*
+          ⭐⭐ 三种状态分开显示 —— 这一栏是本步的**全部意义**。
+          ⚠️ 合成一个「捕获 N 条」会让「通道哑了」长得像「这页没请求」,
+          　 而 `project-x-collect-two-legs` 实测过:payloads 83→0 时
+          　 推文数还有 38,DOM 那条腿顶着,人以为只是少了点。
+        */}
+        {stats && (
+          <div style={S.statRow}>
+            <Stat label="captured" v={stats.captured} tone={stats.captured > 0 ? 'good' : 'idle'}
+              hint="真拿到了 body" />
+            <Stat label="noBody" v={stats.noBody} tone={stats.noBody > 0 ? 'warn' : 'idle'}
+              hint="⚠️ 有响应却没载荷 —— 通道哑了的指纹" />
+            <Stat label="bodyLost" v={stats.bodyLost} tone={stats.bodyLost > 0 ? 'warn' : 'idle'}
+              hint="⚠️ 有 bodyRef 但取不出 —— 与老化赛跑输了" />
+            <Stat label="通道故障" v={stats.channelFailures}
+              tone={stats.channelFailures > 0 ? 'bad' : 'idle'}
+              hint="attach 失败 / 中途被 detach" />
+            <Stat label="攒着" v={stats.held} tone="idle" hint="当前存了几条（封顶 64）" />
+          </div>
+        )}
+        {stats?.lastChannelFailure && (
+          <div style={S.failLine}>最后一条通道故障：{stats.lastChannelFailure}</div>
+        )}
+        {stats && stats.captured === 0 && stats.noBody > 0 && (
+          /*
+            ⭐ 这句话是本栏最值钱的地方:这个组合**唯一指向**通道问题。
+            ⚠️ 没有它,人看到「captured 0」第一反应是去查选择器或页面 ——
+            　 而真因在 CDP 通道,方向完全相反。
+          */
+          <div style={S.diagnose}>
+            ⚠️ 有响应但一条载荷都没拿到 —— 这是 <strong>CDP 通道</strong>的问题，
+            不是页面或选择器的问题。查 DevTools 是否占着通道。
+          </div>
+        )}
+        {stats && !stats.running && stats.captured === 0 && stats.noBody === 0 && (
+          <div style={S.todo}>
+            还没捕到任何响应。⭐ 载荷靠**滚动**触发 —— 先点上面的
+            scrollUntil，页面不动就不会有新请求。
+          </div>
+        )}
+
+        {/* ── 原样载荷 ── */}
+        {payloads.length > 0 && (
+          <div style={S.logBox}>
+            {payloads.map((pl) => (
+              <div key={pl.requestId} style={S.logItem}>
+                <div
+                  style={{ ...S.logHead, cursor: 'pointer' }}
+                  onClick={() => setOpenPayload(openPayload === pl.requestId ? null : pl.requestId)}
+                >
+                  <span style={{ ...S.badge, ...badgeStyle(pl.status === 200 ? 'ok' : 'failed') }}>
+                    {pl.status ?? '—'}
+                  </span>
+                  {/* ⭐ 只显示路径尾段 —— X 的 GraphQL URL 很长,全显示会把别的挤掉 */}
+                  <span style={{ color: '#aaa' }}>{tailOfUrl(pl.url)}</span>
+                  <span style={{ color: '#666', marginLeft: 'auto' }}>
+                    {(pl.byteLength / 1024).toFixed(1)} KB
+                  </span>
+                  <span style={{ color: '#555' }}>{openPayload === pl.requestId ? '▾' : '▸'}</span>
+                </div>
+                {openPayload === pl.requestId && (
+                  /* ⭐ 原样,不解析、不挑字段 —— 这是调试台的本分 */
+                  <pre style={S.pre}>{pl.text.slice(0, 20000)}
+                    {pl.text.length > 20000 && `\n…（还有 ${pl.text.length - 20000} 字，已截断显示）`}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </section>
 
       {/* ── 留痕 ── */}
@@ -324,6 +515,40 @@ export function XConsole(
       </section>
     </div>
   );
+}
+
+/**
+ * 一个计数格。
+ * ⚠️ `tone` 由**调用方按语义给**,不在这里按「大于 0 就绿」猜 ——
+ * `noBody > 0` 是坏事,`captured > 0` 是好事,同一个数两种含义。
+ */
+function Stat(
+  { label, v, tone, hint }: { label: string; v: number; tone: 'good' | 'warn' | 'bad' | 'idle'; hint: string },
+): ReactElement {
+  const color = tone === 'good' ? '#8fd9a8'
+    : tone === 'warn' ? '#d9c48f'
+      : tone === 'bad' ? '#d98f8f' : '#888';
+  return (
+    <div style={S.stat} title={hint}>
+      <div style={{ color, fontSize: 15, lineHeight: 1.2 }}>{v}</div>
+      <div style={{ fontSize: 10, opacity: 0.7 }}>{label}</div>
+    </div>
+  );
+}
+
+/**
+ * URL 尾段 —— ⚠️ 只为显示,**不参与判断**。
+ * X 的 GraphQL URL 带长 queryId,全显示会把别的字段挤出屏幕。
+ */
+function tailOfUrl(u: string): string {
+  if (!u) return '（URL 未知）';   // ⚠️ 如实说不知道,不猜一个
+  try {
+    const x = new URL(u);
+    const seg = x.pathname.split('/').filter(Boolean);
+    return seg.length ? seg[seg.length - 1] : x.hostname;
+  } catch {
+    return u.slice(0, 40);
+  }
 }
 
 /** ⚠️ `degraded` 用**警告色**不用成功色 —— 它不是成功 */
@@ -386,6 +611,17 @@ const S: Record<string, React.CSSProperties> = {
     color: '#777', cursor: 'pointer', fontSize: 11,
   },
   todo: { fontSize: 11, opacity: 0.6, lineHeight: 1.6 },
+  live: { color: '#8fd9a8', fontSize: 10, marginLeft: 4 },
+  statRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
+  stat: {
+    minWidth: 58, textAlign: 'center', padding: '4px 6px',
+    border: '1px solid #2c2c2c', borderRadius: 4, background: '#1b1b1b',
+  },
+  failLine: { fontSize: 10, color: '#d98f8f', lineHeight: 1.5, wordBreak: 'break-all' },
+  diagnose: {
+    fontSize: 11, lineHeight: 1.6, color: '#d9c48f',
+    background: '#2a2415', border: '1px solid #4d3f1f', borderRadius: 4, padding: '6px 8px',
+  },
   logBox: { flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 },
   logItem: { border: '1px solid #2c2c2c', borderRadius: 4, padding: 6 },
   logHead: { display: 'flex', gap: 8, alignItems: 'center', fontSize: 11, marginBottom: 4 },

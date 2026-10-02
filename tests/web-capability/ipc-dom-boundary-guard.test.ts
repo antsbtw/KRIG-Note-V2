@@ -379,3 +379,91 @@ describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', ()
   });
 });
 
+
+/**
+ * ⭐⭐ 载荷捕获那几个 op 的接线约束(2026-10-02 第 3 步)
+ *
+ * ⚠️ 本节钉的全是「漏了就静默失效」的东西 —— 不是风格。
+ */
+describe('⭐⭐ web.net 捕获 op:三条接线约束', () => {
+  /**
+   * ⚠️ 用本文件顶部已有的 `ipcDom`(模块加载时读一次)——
+   * 不另写一份读文件逻辑:两份路径会漂,而漂的表现是
+   * 「守卫读的不是我改的那个文件」,全绿也证明不了什么。
+   */
+  const src = (): string => ipcDom;
+
+  it('⭐⭐⭐ captureStart 必须先接 webRequest 侧 —— 否则关联恒失败', () => {
+    /**
+     * ⚠️⚠️ 不接的整条链(守卫 net-webrequest-side-wired 记着):
+     *   candidatesFor 恒空 → findClosestMatch 恒 null
+     *   → attachProviderBody 恒「关联失败」→ **不发 response-complete**
+     *   → 订阅者一条载荷都收不到,**而且是静默的**
+     * 现象是「捕获 0 条」,人会去查选择器/页面 —— 方向完全相反。
+     *
+     * ⭐ 判据切到 captureStart 分支内,不整文件扫。
+     */
+    const s = src();
+    const i = s.indexOf("case 'captureStart'");
+    expect(i, 'captureStart 分支不见了').toBeGreaterThan(-1);
+    const end = s.indexOf("case 'captureStop'", i);
+    expect(end, 'captureStop 分支不见了 —— 切片没边界').toBeGreaterThan(i);
+    const body = s.slice(i, end);
+    expect(body.length, '切出来的分支是空的 —— 断言会恒真').toBeGreaterThan(80);
+
+    expect(body, 'captureStart 没接 webRequest 侧 —— 载荷关联会恒失败且静默')
+      .toMatch(/wireWebRequestSide(On)?\s*\(/);
+    expect(body, 'captureStart 没 attach CDP 通道 —— 压根不会有 body')
+      .toMatch(/bodyProvider\.attach\s*\(/);
+  });
+
+  it('⭐⭐ 接线必须传**真 session 对象**,不许传反推的 partition 名', () => {
+    /**
+     * ⚠️⚠️ 反推办法是 `wc.session.storagePath` 取尾段,而那**不保证**
+     * 等于 partition 名(X 真实值 `persist:webview-ws-1`)。
+     * 猜错时 `session.fromPartition()` 会**凭空建一个新 session**,
+     * 监听挂到没人用的地方,去重表还把这名字记下 → 真 session 永远挂不上,
+     * **而日志照样打「已接线」**。
+     */
+    const s = src();
+    const i = s.indexOf("case 'captureStart'");
+    const body = s.slice(i, s.indexOf("case 'captureStop'", i));
+    expect(body, '接线传的不是真 session —— 猜错 partition 名会完全静默')
+      .toMatch(/wireWebRequestSideOn\s*\(\s*\w+\s*,\s*wc\.session/);
+    expect(body, '接线用了反推出来的 partition 名').not.toMatch(/wireWebRequestSideOn\s*\([^)]*readPartition/);
+  });
+
+  it('⭐⭐ attach 失败要**如实回报**,不许只靠广播', () => {
+    /**
+     * ⭐ provider 会广播 channel-failed(订阅者收得到),但人点了「开始捕」
+     * 要**立刻**知道成没成 —— 不能等他滚了半天才发现一条都没有。
+     */
+    const s = src();
+    const i = s.indexOf("case 'captureStart'");
+    const body = s.slice(i, s.indexOf("case 'captureStop'", i));
+    expect(body, 'attach 失败没回 failed —— 人点了开始捕却不知道没成').toMatch(/failed\s*\(/);
+  });
+
+  it('⭐⭐ wc 销毁时必须清会话 —— 否则内存只涨不降', () => {
+    /**
+     * ⚠️ 不清的话会话一直订阅一个死页面,
+     * 而症状是**内存只涨不降**,没有任何报错指向这里。
+     * ⭐ 判据切到 destroyed 回调里。
+     */
+    const s = src();
+    const i = s.indexOf("wc.once('destroyed'");
+    expect(i, 'destroyed 回调不见了').toBeGreaterThan(-1);
+    const body = s.slice(i, i + 400);
+    expect(body, 'destroyed 时没停会话 —— 会一直订阅死页面').toMatch(/\.stop\s*\(\s*\)/);
+    expect(body, 'destroyed 时没删会话记录').toMatch(/sessionsByPageId\.delete/);
+  });
+
+  it('⭐ 会话按 pageId 分,不按 wcId —— 页面刷新后会话该延续', () => {
+    /**
+     * ⚠️ 按 wcId 分的话,人点了「开始捕」、页面刷新一下就悄悄停了 ——
+     * 而数字不动很难察觉是「停了」还是「没载荷」。
+     */
+    const s = src();
+    expect(s, '会话表的键不是 pageId').toMatch(/sessionsByPageId\s*=\s*new Map<\s*PageId/);
+  });
+});

@@ -65,10 +65,43 @@ export function registerPageIdLookup(fn: PageIdLookup): void {
  * 那会让这一侧又悄悄失效。
  */
 export function wireWebRequestSide(bus: NetworkEventBus, partition: string): void {
+  /**
+   * ⚠️⚠️ **去重检查必须在 `fromPartition` 之前** —— 2026-10-02 被
+   * `webrequest-side-behaviour` 抓到:我一度写成先 `fromPartition` 再进去判重,
+   * 于是每次调用都真的查/建一次 session(测试数的正是这个次数)。
+   * ⭐ 不只是「多余」:`fromPartition` 对不存在的名字会**凭空建 session**,
+   * 把它放在判重前等于让一个该被跳过的调用产生副作用。
+   */
   if (wired.has(partition)) return;
-  wired.add(partition);
+  wireWebRequestSideOn(bus, session.fromPartition(partition), partition);
+}
 
-  const sess = session.fromPartition(partition);
+/**
+ * ⭐⭐ 同上,但**直接收 session 对象**,不靠 partition 名去查。
+ *
+ * ── ⚠️ 为什么非要这个重载(2026-10-02)──
+ *
+ * 调用方手上常常只有 `WebContents`,于是要把 partition 名**反推**出来 ——
+ * 实测的反推办法是 `wc.session.storagePath` 取尾段,
+ * 而那**不保证**等于 partition 名(X 的真实值是 `persist:webview-ws-1`)。
+ *
+ * ⚠️⚠️ 猜错的后果是**完全静默**:
+ * `session.fromPartition('猜错的名字')` 会**凭空建一个新 session**
+ * (Electron 的语义),监听挂在那个没人用的 session 上;
+ * 而 `wired` 还把这个名字记下了,于是真正的 session **永远挂不上**。
+ * 现象:日志里明明打了「webRequest 侧已接线」,载荷却一条都关联不上。
+ *
+ * ⭐ 所以有 `wc` 在手时**一律走这个口**,把真 session 交进来,不反推。
+ * `label` 只用于去重与日志,拿不准就传 `wc.session.storagePath`。
+ */
+export function wireWebRequestSideOn(
+  bus: NetworkEventBus,
+  sess: Electron.Session,
+  label: string,
+): void {
+  if (wired.has(label)) return;
+  wired.add(label);
+  const partition = label;
 
   sess.webRequest.onBeforeRequest((details, callback) => {
     try {

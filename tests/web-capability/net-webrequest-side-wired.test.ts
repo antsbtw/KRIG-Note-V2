@@ -67,6 +67,45 @@ describe('⭐⭐ web.net:两侧都要接线,只有一侧等于整层不工作', 
     ).not.toHaveLength(0);
   });
 
+  it('⭐⭐⭐ 而那个调用者自己也得**有人调** —— 否则整条链还是死的', () => {
+    /**
+     * ⚠️⚠️ **本条是 2026-10-02 补的,因为上一条假绿了。**
+     *
+     * 上一条用 `\.recordRequestStart\s*\(` 搜生产代码、排除定义文件
+     * `net/bus.ts` —— 于是 `webrequest-side.ts` 里的 `bus.recordRequestStart({`
+     * 让它变绿。可那两处在 `recordStart`/`recordHeaders` 里,
+     * 而它们只被 `wireWebRequestSide` 调,**而 `wireWebRequestSide` 零调用**。
+     *
+     * ⭐ 所以上一条说的是「有人调」,真相是「**只有那个本身没被调的函数在调**」——
+     * 正是 `feedback-guard-must-pin-live-code` 第二刀:
+     * 守卫钉在**进不去的分支**上,全绿也证明不了链路活着。
+     *
+     * ⭐ 判据换成**从接线入口往回查**:`wireWebRequestSide` 必须有人调。
+     * 它是整条 webRequest 侧的唯一门,门没开里面谁调谁都不算。
+     */
+    const callers = FILES.filter((f) => {
+      if (f.endsWith('webrequest-side.ts')) return false;   // 它自己的定义处
+      /**
+       * ⚠️ 两个入口都算:`wireWebRequestSide(partition)` 与
+       * `wireWebRequestSideOn(session)` —— 后者是 2026-10-02 加的,
+       * 因为调用方手上只有 WebContents 时反推 partition 名会猜错
+       * (猜错会**凭空建 session**,监听挂到没人用的地方,且完全静默)。
+       * ⭐ 只认前者的话,改用新入口会让这条守卫**假红** —— 它会报
+       * 「零调用」而链路其实是活的,然后有人去「修」一个不存在的问题。
+       */
+      return /\bwireWebRequestSide(On)?\s*\(/.test(strip(readFileSync(f, 'utf-8')));
+    }).map((f) => f.slice(SRC.length + 1));
+
+    expect(
+      callers,
+      'wireWebRequestSide 零调用 —— webRequest 侧整条是死的:\n'
+      + '  candidatesFor(pageId) 恒空 → findClosestMatch 恒 null\n'
+      + '  → attachProviderBody 恒「关联失败」→ 不发 response-complete\n'
+      + '  → 所有订阅者一条载荷都收不到(而且是**静默**的,只在日志里刷关联失败)\n'
+      + '⚠️ 上面那条「有人调用」会绿,因为调用者在 wireWebRequestSide 内部。',
+    ).not.toHaveLength(0);
+  });
+
   it('⭐ CDP 侧(bindProviderRequest)也要有人调用 —— 少哪边都配不上', () => {
     /**
      * ⚠️⚠️ 本条初版钉的是 `noteProviderRequest` —— **全仓不存在这个方法**

@@ -100,6 +100,35 @@ export type WebDomInvoke =
    * 报 failed 会让留痕里堆满红条,真故障就被淹了。
    */
   | { readonly op: 'identify'; readonly url: string }
+  // ── 输出(`web.net` 载荷捕获)—— 2026-10-02 为 X Console 第 3 步开放 ──
+  /**
+   * ⭐ 开始捕这一页的载荷。⚠️ **幂等**,重复调不会装两份订阅。
+   *
+   * ⚠️ 为什么要显式「开始」而不是一直开着:
+   * 攒 body 占主进程内存,而**涨到卡住之前没有任何症状**。
+   * 人点开始才攒,是让这件事有边界。
+   *
+   * ⚠️ 它会顺便 attach CDP 通道(由底座的单一持有者做)——
+   * 调用方**没有** detach 这个动作,这是刻意的:
+   * X 旧实现那 8 处业务方持有 detach,踩了「A 结束时把共用的 B
+   * 一起掐掉」,而 B **静默失聪不报错**。
+   */
+  | { readonly op: 'captureStart'; readonly pageRef: WebDomPageRef }
+  /** 停捕(只退自己的订阅,不碰通道) */
+  | { readonly op: 'captureStop'; readonly pageRef: WebDomPageRef }
+  /**
+   * ⭐⭐ 取计数 —— **三种状态分开**,不是一个「捕获 N 条」。
+   * 见 `CaptureStats`:captured / noBody(通道哑了) / bodyLost(老化赛跑输了)。
+   */
+  | { readonly op: 'captureStats'; readonly pageRef: WebDomPageRef }
+  /** 取攒下来的载荷(最新在前)。⚠️ 原样文本,不解析 */
+  | {
+      readonly op: 'captureList';
+      readonly pageRef: WebDomPageRef;
+      readonly limit?: number;
+    }
+  /** 清掉攒的内容(保留计数 —— 人要知道这一轮总共来过多少) */
+  | { readonly op: 'captureClear'; readonly pageRef: WebDomPageRef }
   /** 滚动直到某判据 —— ⭐ 只管滚,不管抓(抓是 `capture` 的事) */
   | {
       readonly op: 'scrollUntil';

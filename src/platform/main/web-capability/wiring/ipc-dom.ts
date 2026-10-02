@@ -34,8 +34,11 @@ import type {
 } from '@shared/ipc/web-dom-types';
 import {
   controlEngine, domRunner, pageRegistry, scriptRegistry, listPageNames,
-  identifySemanticPage,
+  identifySemanticPage, netBus, bodyProvider,
 } from './runtime';
+import { CaptureSession } from '../net/capture-session';
+import { toPageHost } from './electron-page-host';
+import { wireWebRequestSideOn } from './webrequest-side';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
 import type { AnchorName } from '../dom/types';
 import { bindPageHost } from './page-hosts';
@@ -44,6 +47,27 @@ import type { ScriptId } from '../dom/types';
 
 /** wcId → pageId。⚠️ 同一个 wc 只登记一次,否则每次调用都新增一条页面记录 */
 const pageIdByWcId = new Map<number, PageId>();
+
+/**
+ * pageId → 捕获会话。
+ *
+ * ⚠️ 按 **pageId** 分而不是按 wcId:同一个 wc 重载后 pageId 不变
+ * (`resolve` 里缓存着),会话应当延续 —— 人点了「开始捕」,
+ * 页面刷新一下就悄悄停了会很难察觉。
+ *
+ * ⚠️ wc 销毁时要清(见 `resolve` 里的 `destroyed` 回调)——
+ * 不清的话会话会一直订阅一个死页面,而症状是**内存只涨不降**。
+ */
+const sessionsByPageId = new Map<PageId, CaptureSession>();
+
+/** 取或建会话 —— ⚠️ 不自动 start,开始捕是人的显式动作 */
+function sessionFor(pageId: PageId): CaptureSession {
+  const existing = sessionsByPageId.get(pageId);
+  if (existing) return existing;
+  const fresh = new CaptureSession(netBus, pageId);
+  sessionsByPageId.set(pageId, fresh);
+  return fresh;
+}
 
 /**
  * 把 renderer 给的 `wcId` 解析成「真 webContents + 底座认识的 pageId」。
@@ -79,7 +103,15 @@ function resolve(ref: WebDomPageRef): { wc: WebContents; pageId: PageId } | { er
   });
   bindPageHost(facts.pageId, wc);
   pageIdByWcId.set(ref.wcId, facts.pageId);
-  wc.once('destroyed', () => pageIdByWcId.delete(ref.wcId));
+  wc.once('destroyed', () => {
+    pageIdByWcId.delete(ref.wcId);
+    /**
+     * ⚠️ 会话必须跟着清 —— 不清的话它会一直订阅一个死页面,
+     * 而症状是**内存只涨不降**,没有任何报错指向这里。
+     */
+    sessionsByPageId.get(facts.pageId)?.stop();
+    sessionsByPageId.delete(facts.pageId);
+  });
   return { wc, pageId: facts.pageId };
 }
 
@@ -257,6 +289,77 @@ export function registerWebDomIpc(): void {
               toReadyCriterion(p.criterion),
               p.timeoutMs,
             ));
+          }
+          /**
+           * ── 输出(`web.net` 载荷捕获)—— 2026-10-02 ──
+           *
+           * ⭐ `captureStart` 兼管 attach:通道由底座单一持有,
+           * 调用方**没有** detach 这个动作(X 旧实现那 8 处的血泪)。
+           */
+          case 'captureStart': {
+            /**
+             * ⭐⭐⭐ **webRequest 侧必须先接线** —— 2026-10-02 查出来的真缺口。
+             *
+             * ── ⚠️ 不接会怎样(整条链,守卫 net-webrequest-side-wired 记着)──
+             *
+             *   candidatesFor(pageId) 恒空
+             *     → findClosestMatch 恒 null
+             *       → attachProviderBody 恒「关联失败」
+             *         → **不发 response-complete**
+             *           → 订阅者一条载荷都收不到
+             *
+             * ⚠️⚠️ 而且是**静默**的:日志里只刷「关联失败」,
+             * 调用方看到的是「捕获 0 条」—— 人会去查选择器或页面,方向完全相反。
+             * 本仓 bio 采集 0/192、「未截获 @x 的账号载荷」都是这么来的。
+             *
+             * ⭐ 为什么挂在这里:`wireWebRequestSide` **自己幂等**(按 partition 去重),
+             * 而这里是唯一知道「人要开始捕哪个页面」的地方。
+             * ⚠️ Electron 每个 session **只能有一个** onBeforeRequest 监听器
+             * (后挂的覆盖先挂的)—— 所以绝不能让业务方各挂一份,
+             * 那会让这一侧又悄悄失效。全仓已确认只有这一处挂。
+             */
+            /**
+             * ⚠️⚠️ 传**真 session 对象**,不传反推出来的 partition 名 ——
+             * `readPartition` 是从 `storagePath` 取尾段猜的,而猜错时
+             * `session.fromPartition()` 会**凭空建一个新 session**,
+             * 监听挂到没人用的地方,且去重表还把这名字记下 →
+             * 真 session 永远挂不上,**而日志照样打「已接线」**。
+             * ⭐ 去重 label 用 storagePath(同一 session 必然相同、
+             * 不同 session 必然不同),它不需要等于 partition 名。
+             */
+            wireWebRequestSideOn(netBus, wc.session, wc.session.storagePath ?? 'default');
+
+            const session = sessionFor(pageId);
+            session.start();
+            /**
+             * ⚠️ attach 失败**不静默** —— provider 会广播 channel-failed,
+             * 上面的订阅者立刻收到,计数里也会出现。
+             * ⭐ 但这里仍要如实回报:人点了「开始捕」要立刻知道成没成,
+             * 不能等他滚了半天才发现一条都没有。
+             */
+            const attached = bodyProvider.attach(toPageHost(wc), pageId, {
+              // ⚠️ 与 AI 侧同口径(interceptor.ts):X 的 GraphQL 走 fetch/xhr
+              resourceTypes: ['fetch', 'document', 'xhr'],
+            });
+            if (!attached) {
+              return failed('[web.net ipc] CDP 通道 attach 失败 —— 载荷一条都收不到(DevTools 占着?)');
+            }
+            console.log(`[web.net] 载荷捕获已开始 pageId=${pageId}`);
+            return { status: 'ok', value: session.stats() };
+          }
+          case 'captureStop': {
+            const session = sessionFor(pageId);
+            session.stop();
+            return { status: 'ok', value: session.stats() };
+          }
+          case 'captureStats':
+            return { status: 'ok', value: sessionFor(pageId).stats() };
+          case 'captureList':
+            return { status: 'ok', value: sessionFor(pageId).list(p.limit) };
+          case 'captureClear': {
+            const session = sessionFor(pageId);
+            session.clearPayloads();
+            return { status: 'ok', value: session.stats() };
           }
           case 'scrollUntil': {
             if (!p.stop) return failed('[web.dom ipc] scrollUntil 缺停止判据');
