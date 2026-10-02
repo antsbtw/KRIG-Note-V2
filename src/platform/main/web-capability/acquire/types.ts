@@ -47,12 +47,11 @@ export type AcquireGoal = {
    */
   readonly wantAtLeast?: number;
   /**
-   * 最多滚几轮。⚠️ 这是**安全网不是目标**
-   * (`feedback-pdca-close-the-loop`:「次数是安全网不是目标」——
-   *  把轮数当目标填 30 实采 250、填 600 有 43% 空转)。
+   * ⚠️ **没有 `maxRounds`** —— 滚几轮是**控制**的事,不是采集的事
+   * (2026-10-02 用户:「控制是控制,采集是采集」)。
+   * 采集只负责「收到了什么、够不够」,页面怎么动由控制那栏决定。
    */
-  readonly maxRounds?: number;
-  /** 最长跑多久(毫秒)。⚠️ 同样是安全网 */
+  /** 最长等多久(毫秒)—— ⚠️ 安全网,防「等一个永远不来的载荷」 */
   readonly maxMs?: number;
 };
 
@@ -86,8 +85,10 @@ export type AcquireReport = {
   readonly items: readonly AcquiredItem[];
   /** 其中命中 `wantUrlIncludes` 的有几条 */
   readonly wanted: number;
-  readonly rounds: number;
-  readonly scrolledPx: number;
+  /**
+   * ⚠️ **没有 rounds / scrolledPx** —— 那是控制那栏的报告
+   * (`ScrollReport` 已经有了),采集不该重复记一份。
+   */
   readonly elapsedMs: number;
   readonly stopReason: string;
   /**
@@ -106,21 +107,30 @@ export type AcquireReport = {
   };
 };
 
-/** 本层依赖的最小操作集 —— ⭐ 由 wiring 注入,本层零 Electron */
+/**
+ * 本层依赖的最小操作集 —— ⭐ 由 wiring 注入,本层零 Electron。
+ *
+ * ── ⚠️⚠️ 这里**没有** reload / scrollOnce(2026-10-02 拆出去)──
+ *
+ * 用户:「我觉得不要改变前面的逻辑,**控制是控制,采集是采集**。
+ * 　你现在是简化了,但是**违背了逻辑**。控制/输出是分开的。」
+ *
+ * ⭐ 对的 —— 我把「翻页滚动」揉进了「采集」,而三栏的本意是:
+ * · **控制**(web.page):goto / 重载 / 滚动 —— 人决定页面怎么动
+ * · **输出**(web.net):开始收 / 停止收 / 收到了什么 —— 只管接
+ *
+ * ⚠️ 揉在一起的直接后果,本轮实测就看见了:
+ * `rounds=0 scrolledPx=0` —— 重载后首屏就够数,**一轮都没滚**,
+ * 采集替控制做了「要不要翻页」的决定,而人看不出来。
+ */
 export interface AcquireDeps {
   /** 把所有获取方法装上。返回各条腿是否就绪 */
   startAll(pageId: PageId): Promise<{ cdpAttached: boolean; hookInstalled: boolean }>;
   /** 全部停掉 */
   stopAll(pageId: PageId): void;
-  /** 重载页面 —— ⭐ 解「装腿晚于首次请求」的竞态 */
-  reload(pageId: PageId): void;
   /** 取当前合并去重后的结果 */
   snapshot(pageId: PageId): readonly AcquiredItem[];
   /** 各腿健康度 */
   legStats(pageId: PageId): { hookInjected: boolean };
-  /** 滚一轮。返回这一轮滚了多少像素(0 = 没动) */
-  scrollOnce(pageId: PageId): Promise<number>;
-  /** 等一会(让懒加载补货) */
-  wait(ms: number): Promise<void>;
   now(): number;
 }

@@ -165,31 +165,35 @@ export type WebDomInvoke =
    * 单点依赖本身就是缺陷:一条腿收不到时,分不清
    * 「站点没发」还是「我们没收到」(2026-10-02 七轮排查的根因)。
    */
+  // ── ⭐⭐ 采集(输出栏)—— **只管收,不碰页面** ──
   /**
-   * ⭐⭐⭐ **把这一页的内容取全** —— 上层只说目标,不选方法。
+   * ⭐⭐ 开始收。**立即返回**,不等。
    *
    * ── 用户 2026-10-02 ──
-   * 「不是选择用哪条腿 —— 你要构建**获取完整信息的函数/或者类**。
-   * 　底层能够可以做最小化的抽象函数,但**上层只关注某个具体的目标**呀。」
+   * 「不要改变前面的逻辑,**控制是控制,采集是采集**。
+   * 　你现在是简化了,但是**违背了逻辑**。控制/输出是分开的。」
    *
-   * ⭐ 一次调用内部会:所有腿一起上 → 重载(解竞态)→ 滚到够了或真到底
-   * → 合并去重 → 回一份报告。调用方**不需要知道**这些。
+   * ⚠️ 我上一版把 reload / 滚动揉进了采集,实测当场看见后果:
+   * `rounds=0 scrolledPx=0` —— 重载后首屏就够数、**一轮都没滚**,
+   * 而人从输出那栏看不出来页面没动过。
    *
-   * ⚠️ 刻意**没有** `useCdp` / `reload` 这类开关:给出来就等于
-   * 让调用方替底座做决定,那正是用户点破的问题。
-   *
-   * ⚠️ 这是**长操作**(可能跑几十秒)——
-   * 调用方要能中途停,用 `scrollStop`(它会打断滚动循环)。
+   * ⭐ 现在:页面怎么动去**控制那栏**(goto / 滚动 / 重载),
+   * 这里只负责「开始接」。两条腿同时装,调用方不选。
    */
+  | { readonly op: 'acquireStart'; readonly pageRef: WebDomPageRef }
+  /** ⭐ 看当前收到多少 —— 纯读,不停不改 */
   | {
-      readonly op: 'acquire';
+      readonly op: 'acquirePeek';
       readonly pageRef: WebDomPageRef;
-      /** 目标 —— 见 `AcquireGoal`。不给就是「全都要、按安全网停」 */
+      readonly goal?: { readonly wantUrlIncludes?: readonly string[] };
+    }
+  /** ⭐ 停止收,并给出报告(含完整性判据) */
+  | {
+      readonly op: 'acquireStop';
+      readonly pageRef: WebDomPageRef;
       readonly goal?: {
         readonly wantUrlIncludes?: readonly string[];
         readonly wantAtLeast?: number;
-        readonly maxRounds?: number;
-        readonly maxMs?: number;
       };
     }
   | { readonly op: 'hookStart'; readonly pageRef: WebDomPageRef }

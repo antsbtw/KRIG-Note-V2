@@ -39,7 +39,7 @@ import {
 import { CaptureSession } from '../net/capture-session';
 import { HookSession } from '../hook/hook-session';
 import { toHookHost } from './electron-hook-host';
-import { acquireContent } from '../acquire/acquire';
+import { startAcquire, peekAcquire, finishAcquire } from '../acquire/acquire';
 import type { AcquireDeps, AcquiredItem } from '../acquire/types';
 import { toPageHost } from './electron-page-host';
 import { wireWebRequestSideOn, registerPageIdLookup } from './webrequest-side';
@@ -140,6 +140,9 @@ const scrollCancelled = new Set<PageId>();
  */
 const hooksByPageId = new Map<PageId, HookSession>();
 
+/** 采集开始时刻 —— ⚠️ 只为算耗时,不影响任何判断 */
+const acquireStartedAt = new Map<PageId, number>();
+
 /**
  * ⭐⭐⭐ 一条**合并后**的采集结果 —— 对外只有这一种形状。
  *
@@ -169,8 +172,19 @@ type MergedItem = {
  * 只按 url 去重会把**不同轮次的数据**当成重复丢掉 —— 那是真丢数据。
  * ⭐ 加上 `byteLength` 后,内容不同的就留得住。
  */
-function dedupKey(url: string, status: number, byteLength: number): string {
-  return `${url.split('?')[0]}|${status}|${byteLength}`;
+function dedupKey(url: string, status: number, text: string): string {
+  /**
+   * ⚠️⚠️ **不能用 `byteLength`** —— 2026-10-02 真机实测:
+   * 同一个 `HomeTimeline` 响应,CDP 报 **267.2KB**、页面钩子报 **248.4KB**
+   * (CDP 数的是**原始字节**,钩子数的是 **UTF-8 解码后的字符**)。
+   * 进了去重键就**永远配不上** → 同一条被算两次 → `both` 该有的互证也没了。
+   *
+   * ⭐ 改用**内容前缀**:同一条响应两条腿拿到的文本是一样的,
+   * 而同一 URL 的不同轮次(翻页/轮询)内容必然不同 —— 两头都兜住。
+   * ⚠️ 只取前 256 字符:整段比对在几百 KB 的载荷上太贵,
+   * 而 JSON 的前 256 字符已经包含了游标/首条 id 这类区分度最高的东西。
+   */
+  return `${url.split('?')[0]}|${status}|${text.slice(0, 256)}`;
 }
 
 /**
@@ -184,7 +198,7 @@ function mergedItems(pageId: PageId, limit: number): MergedItem[] {
 
   // ① CDP 腿
   for (const x of sessionsByPageId.get(pageId)?.list(256) ?? []) {
-    const k = dedupKey(x.url, x.status ?? 0, x.byteLength);
+    const k = dedupKey(x.url, x.status ?? 0, x.text);
     byKey.set(k, {
       url: x.url, method: x.method ?? 'GET', status: x.status ?? 0,
       text: x.text, byteLength: x.byteLength, at: x.at, from: 'cdp',
@@ -193,7 +207,7 @@ function mergedItems(pageId: PageId, limit: number): MergedItem[] {
 
   // ② 钩子腿 —— ⭐ 已存在的标成 `both`(**那是互证成功的证据**)
   for (const x of hooksByPageId.get(pageId)?.list(256) ?? []) {
-    const k = dedupKey(x.url, x.status, x.byteLength);
+    const k = dedupKey(x.url, x.status, x.text);
     const prev = byKey.get(k);
     if (prev) {
       byKey.set(k, { ...prev, from: 'both' });
@@ -280,36 +294,12 @@ function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
       hooksByPageId.get(pageId)?.stop();
     },
 
-    reload() {
-      wc.reload();
-    },
-
     snapshot(pageId) {
       return mergedItems(pageId, Number.MAX_SAFE_INTEGER);
     },
 
     legStats(pageId) {
       return { hookInjected: Boolean(hooksByPageId.get(pageId)?.stats().injected) };
-    },
-
-    async scrollOnce(pageId) {
-      /**
-       * ⚠️ 借 `controlEngine` 滚**一轮**,不自己写滚动脚本 ——
-       * 那边有四条血泪(同步 scrollBy / 不用 DOM 条数判进度 /
-       * 连续多轮不变才算到底 / 日期不做停止判据),重写必然重踩。
-       * ⭐ 这里只要「滚了多少像素」,到底与否由 `acquireContent` 判。
-       */
-      const r = await controlEngine.scrollUntil(
-        pageId,
-        { kind: 'rounds', n: 1 },
-        { maxRounds: 1, settleMs: 0, shouldStop: () => scrollCancelled.has(pageId) },
-      );
-      const v = (r as { value?: { scrolledPx?: number } }).value;
-      return typeof v?.scrolledPx === 'number' ? v.scrolledPx : 0;
-    },
-
-    wait(ms) {
-      return new Promise((resolve) => { setTimeout(resolve, ms); });
     },
 
     now: () => Date.now(),
@@ -750,18 +740,37 @@ export function registerWebDomIpc(): void {
             return { status: 'ok', value: { reloaded: true, url: before } };
           }
           /**
-           * ⭐⭐⭐ **把这一页的内容取全** —— 用户 2026-10-02:
-           * 「你要构建**获取完整信息的函数/或者类**…上层只关注某个具体的目标呀。」
-           *
-           * ⭐ 本分支只做**接线**:把两条腿和页面操作注入 `acquireContent`,
-           * 「什么算取全了」的判断全在那个纯逻辑函数里。
+           * ── ⭐⭐ 采集(输出栏)—— **只管收,不碰页面** ──
+           * 用户 2026-10-02:「控制是控制,采集是采集…控制/输出是分开的。」
            */
-          case 'acquire': {
-            const report = await acquireContent(
-              makeAcquireDeps(wc, pageId),
-              pageId,
-              p.goal ?? {},
+          case 'acquireStart': {
+            const r = await startAcquire(makeAcquireDeps(wc, pageId), pageId);
+            acquireStartedAt.set(pageId, Date.now());
+            traceRecorder.lifecycle({
+              layer: 'web.net', event: 'acquire-start', pageId: String(pageId),
+              detail: { url: wc.getURL(), ...r },
+            });
+            console.log(
+              `[web.acquire] 开始收 pageId=${pageId} —— `
+              + `CDP=${r.cdpAttached ? '✓' : '✗'} 钩子=${r.hookInstalled ? '✓' : '✗'}`,
             );
+            /** ⚠️ **两条都没起来**才算失败 —— 少一条是降级 */
+            if (!r.ok) return failed('[web.acquire] 两条腿都没起来 —— 什么也收不到');
+            return { status: 'ok', value: r };
+          }
+
+          case 'acquirePeek':
+            return {
+              status: 'ok',
+              value: peekAcquire(makeAcquireDeps(wc, pageId), pageId, p.goal ?? {}),
+            };
+
+          case 'acquireStop': {
+            const report = finishAcquire(
+              makeAcquireDeps(wc, pageId), pageId, p.goal ?? {},
+              acquireStartedAt.get(pageId),
+            );
+            acquireStartedAt.delete(pageId);
             traceRecorder.lifecycle({
               layer: 'web.net',
               event: report.ok ? 'acquire-ok' : 'acquire-incomplete',
@@ -770,13 +779,9 @@ export function registerWebDomIpc(): void {
                 url: wc.getURL(),
                 total: report.items.length,
                 wanted: report.wanted,
-                rounds: report.rounds,
-                scrolledPx: report.scrolledPx,
                 elapsedMs: report.elapsedMs,
-                stopReason: report.stopReason,
                 legs: report.legs,
                 problems: report.problems,
-                /** ⭐ 采到了**什么** —— 只记尾段+KB,不记正文 */
                 items: report.items.slice(0, 40).map((x) => ({
                   tail: x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)',
                   kb: Math.round(x.byteLength / 102.4) / 10,
@@ -785,14 +790,9 @@ export function registerWebDomIpc(): void {
               },
             });
             console.log(
-              `[web.acquire] ${report.ok ? '✓ 采全' : '⚠ 不完整'} pageId=${pageId} —— `
-              + `${report.items.length} 条(命中 ${report.wanted})`
-              + ` / ${report.rounds} 轮 ${report.scrolledPx}px / ${report.stopReason}`,
+              `[web.acquire] ${report.ok ? '✓' : '⚠'} 停止 pageId=${pageId} —— `
+              + `${report.items.length} 条(命中 ${report.wanted})`,
             );
-            /**
-             * ⚠️ 不完整时回 `degraded` **不是 failed** ——
-             * 采了一半的数据也是真的,当 Failed 会让调用方丢掉已有进度。
-             */
             if (!report.ok) {
               return { status: 'degraded', value: report, missing: [...report.problems] };
             }

@@ -93,8 +93,6 @@ type AcquireReport = {
   problems: string[];
   items: AcquiredItem[];
   wanted: number;
-  rounds: number;
-  scrolledPx: number;
   elapsedMs: number;
   stopReason: string;
   /**
@@ -444,6 +442,22 @@ export function XConsole(
             >
               停翻页
             </button>
+            {/*
+              ⭐ 「重载」是**控制**的活 —— 2026-10-02 从采集里拆回来。
+              ⚠️ 它解的是时序竞态:两条取数通路要在页面发请求**之前**装好。
+              　 正确用法:先去输出栏「开始收」,回来点这个,页面从第一条请求开始发。
+            */}
+            <button
+              type="button"
+              disabled={wcId == null}
+              onClick={() => void window.electronAPI?.webDomInvoke?.({
+                op: 'reload', pageRef: { wcId: wcId! },
+              })}
+              style={S.btn}
+              title="重载页面 —— 先在「输出」那栏点「开始收」，再点这个，才能收到首屏那批请求"
+            >
+              重载
+            </button>
           </div>
             </div>
             <div style={S.resultArea}>
@@ -492,71 +506,76 @@ export function XConsole(
                 现在底层 `acquire` 一次做完:所有腿一起上 → 重载(解竞态)
                 → 滚到够了或真到底 → 合并去重 → 回一份报告。
               */}
+              {/*
+                ⭐⭐ **控制是控制,采集是采集**(用户 2026-10-02)。
+                这一栏只管「开始接 / 停止接」—— 页面怎么翻去**控制那栏**。
+                ⚠️ 上一版把 reload+滚动揉进采集,实测 `rounds=0 scrolledPx=0`:
+                　 重载后首屏就够数、一轮都没滚,而人在这栏看不出来页面没动过。
+              */}
               <div style={S.row}>
                 <button
                   type="button"
-                  /** ⚠️ 不看 busy:这**就是**那个长操作,看了就永远点不到 */
                   disabled={wcId == null || running}
                   onClick={async () => {
-                    setRunning(true);
-                    setReport(null);
-                    try {
-                      const r = await window.electronAPI!.webDomInvoke({
-                        op: 'acquire',
-                        pageRef: { wcId: wcId! },
-                        /**
-                         * ⭐ 用户 2026-10-02:「测试期间,每次就爬取**两页**就够了。」
-                         * ⚠️ 「一页」= 一条 timeline 载荷(X 每次翻页回一个)——
-                         * 所以 `wantAtLeast: 2` 就是两页,不是两条推文。
-                         * ⭐ 端点清单在 `x-pages`(X 的业务知识),底座不认识它。
-                         */
-                        goal: {
-                          wantUrlIncludes: X_TIMELINE_ENDPOINTS,
-                          wantAtLeast: 2,
-                          maxRounds: 20,
-                        },
-                      });
-                      // ⚠️ degraded 也有数据 —— 不许当失败丢掉
-                      if (r.status === 'ok' || r.status === 'degraded') {
-                        const rep = r.value as AcquireReport;
-                        setReport(rep);
-                        /**
-                         * ⭐⭐ **核对完整性** —— 只核对命中目标的那些载荷。
-                         * ⚠️ 不核对的话「采到 N 条」毫无意义:
-                         * 2026-10-02 实测 captured=72 而**一条推文都没有**。
-                         */
-                        const audits: TimelineAudit[] = rep.items
-                          .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
-                          .map((it) => auditTimelinePayload(it.text));
-                        setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
-                      }
-                      setLog((l) => [{
-                        at: new Date().toLocaleTimeString(), label: '取全这一页', result: r,
-                      }, ...l].slice(0, 50));
-                    } finally {
-                      setRunning(false);
+                    const r = await window.electronAPI!.webDomInvoke({
+                      op: 'acquireStart', pageRef: { wcId: wcId! },
+                    });
+                    setLog((l) => [{
+                      at: new Date().toLocaleTimeString(), label: '开始收', result: r,
+                    }, ...l].slice(0, 50));
+                    if (r.status === 'ok') {
+                      setRunning(true);
+                      setReport(null);
+                      setAudit(null);
                     }
                   }}
                   style={S.btn}
+                  title="两条取数通路同时装上；页面怎么翻请去「控制」那栏"
                 >
-                  {running ? '采集中…' : '取全这一页'}
+                  开始收
                 </button>
                 <button
                   type="button"
-                  /** ⭐ 停是取消动作,必须在忙的时候可用 */
                   disabled={wcId == null || !running}
-                  onClick={() => void window.electronAPI?.webDomInvoke?.({
-                    op: 'scrollStop', pageRef: { wcId: wcId! },
-                  })}
+                  onClick={async () => {
+                    const r = await window.electronAPI!.webDomInvoke({
+                      op: 'acquireStop',
+                      pageRef: { wcId: wcId! },
+                      goal: {
+                        wantUrlIncludes: X_TIMELINE_ENDPOINTS,
+                        // ⭐ 用户 2026-10-02:「测试期间每次就爬取两页就够了」
+                        wantAtLeast: 2,
+                      },
+                    });
+                    setRunning(false);
+                    if (r.status === 'ok' || r.status === 'degraded') {
+                      const rep = r.value as AcquireReport;
+                      setReport(rep);
+                      /**
+                       * ⭐⭐ **核对完整性** —— 用户:「关键是核对爬取的数据完整没有」。
+                       * ⚠️ 不核对的话「采到 N 条」毫无意义:
+                       * 2026-10-02 实测 captured=72 而一条推文都没有。
+                       */
+                      const audits: TimelineAudit[] = rep.items
+                        .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
+                        .map((it) => auditTimelinePayload(it.text));
+                      setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
+                    }
+                    setLog((l) => [{
+                      at: new Date().toLocaleTimeString(), label: '停止收', result: r,
+                    }, ...l].slice(0, 50));
+                  }}
                   style={S.btn}
                 >
-                  停止
+                  停止并核对
                 </button>
+                {running && <span style={S.live}>● 收集中</span>}
               </div>
               {!running && !report && (
                 <div style={S.todo}>
-                  点「取全这一页」—— 底层会把所有获取方法一起用上、
-                  重载避开时序竞态、滚到采全为止，最后给你一份合并去重的完整数据。
+                  ① 先点「开始收」（两条取数通路同时装上）<br />
+                  ② 去「控制」那栏：重载 / goto / scrollUntil —— <strong>页面怎么翻由你决定</strong><br />
+                  ③ 回来点「停止并核对」—— 给出合并去重的完整数据 + 逐字段完整性
                 </div>
               )}
             </div>
@@ -570,11 +589,11 @@ export function XConsole(
                       tone={report.items.length > 0 ? 'good' : 'idle'} hint="合并去重后的总条数" />
                     <Stat label="命中目标" v={report.wanted}
                       tone={report.wanted > 0 ? 'good' : 'idle'} hint="符合本次目标的条数" />
-                    <Stat label="轮次" v={report.rounds} tone="idle" hint="滚了几轮" />
-                    <Stat label="像素" v={Math.round(report.scrolledPx)} tone="idle" hint="总共滚了多少" />
+                    {/* ⚠️ 轮次/像素是**控制**那栏的报告,采集不重复记一份 */}
                   </div>
                   <div style={S.todo}>
-                    {report.stopReason}　·　{(report.elapsedMs / 1000).toFixed(1)}s
+                    {report.stopReason}
+                    {report.elapsedMs > 0 && `　·　${(report.elapsedMs / 1000).toFixed(1)}s`}
                   </div>
 
                   {/*
