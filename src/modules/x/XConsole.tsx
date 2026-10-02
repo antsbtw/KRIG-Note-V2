@@ -690,21 +690,49 @@ export function XConsole(
                         {audit.tweets !== audit.uniqueTweets
                           && `（原始 ${audit.tweets} 条，去重后 ${audit.uniqueTweets}）`}
                       </div>
-                      <div style={S.statRow}>
-                        {Object.entries(audit.coverage).map(([k, v]) => (
-                          <div key={k} style={S.stat} title={`${k} 字段的覆盖率`}>
-                            <div style={{
-                              fontSize: 15,
-                              lineHeight: 1.2,
-                              // ⚠️ 100% 才算满 —— 95% 也意味着有东西丢了
-                              color: v === 100 ? '#8fd9a8' : v > 0 ? '#d9c48f' : '#777',
-                            }}>
-                              {v}%
-                            </div>
-                            <div style={{ fontSize: 10, opacity: 0.7 }}>{k}</div>
+                      {/*
+                        ⭐⭐ **分组显示** —— 字段清单从 8 项扩到 22 项(照搬旧实现
+                        实际取过的),挤一行就看不了了。
+                        ⭐ 三组的含义**完全不同**:
+                        ① 缺了是真丢数据 ② 缺了影响筛选 ③ 是种类不是缺失
+                      */}
+                      {([
+                        ['① 正文与身份（缺＝真丢数据）',
+                          ['正文', '作者', '作者id', '显示名', '头像']],
+                        ['② 元数据（缺＝影响筛选／排序）',
+                          ['发布时间', '语言', '互动数', '会话id', '推文链接',
+                            '蓝V', '关系', '作者bio', '我的操作']],
+                        ['③ 种类分布（不是缺失）',
+                          ['长推', '长文', '有媒体', '是回复']],
+                      ] as const).map(([title, keys]) => (
+                        <div key={title} style={{ marginTop: 4 }}>
+                          <div style={{ fontSize: 10, opacity: 0.55, marginBottom: 2 }}>{title}</div>
+                          <div style={S.statRow}>
+                            {keys.filter((k) => audit.coverage[k] !== undefined).map((k) => {
+                              const v = audit.coverage[k];
+                              /**
+                               * ⚠️ 第③组是**分布**不是缺失 —— 不许用红/黄配色,
+                               * 　 否则「长文 0%」会被当成故障(其实只是这批没长文)。
+                               */
+                              const isDist = title.startsWith('③');
+                              return (
+                                <div key={k} style={S.stat} title={`${k}：${v}%`}>
+                                  <div style={{
+                                    fontSize: 15,
+                                    lineHeight: 1.2,
+                                    color: isDist ? '#9ac'
+                                      // ⚠️ 100% 才算满 —— 95% 也意味着有东西丢了
+                                      : v === 100 ? '#8fd9a8' : v > 0 ? '#d9c48f' : '#777',
+                                  }}>
+                                    {v}%
+                                  </div>
+                                  <div style={{ fontSize: 10, opacity: 0.7 }}>{k}</div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))}
                       {audit.problems.length > 0 && (
                         <div style={{ ...S.failLine, marginTop: 4 }}>
                           {[...new Set(audit.problems)].map((x) => <div key={x}>⚠️ {x}</div>)}

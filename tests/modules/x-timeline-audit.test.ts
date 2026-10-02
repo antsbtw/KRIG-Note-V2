@@ -12,14 +12,36 @@
 import { describe, it, expect } from 'vitest';
 import { auditTimelinePayload, summarizeAudits } from '@modules/x/x-timeline-audit';
 
-/** 造一条**形状贴近真实**的推文节点 */
+/**
+ * 造一条**形状贴近真实**的推文节点。
+ *
+ * ⚠️⚠️ 2026-10-02 重写:原来只有 8 个字段,那是**我挑的**。
+ * 查旧实现 `x-timeline-harvester.ts`(1871 行)与 `x_tweet` 表 schema 后,
+ * 真实载荷有 22 项 —— 样本必须贴近真实,否则
+ * 「字段缺了量不量得出来」这类测试**根本测不到**
+ * (`feedback-check-sample-contains-phenomenon`)。
+ *
+ * ⭐ 尤其是这几个**两个位置**的:显示名 / 头像 / 蓝V / 关系 / bio ——
+ * 旧实现踩过「只读一个位置会漏」,样本里两边都给才试得出来。
+ */
 function tweet(over: Record<string, unknown> = {}, legacyOver: Record<string, unknown> = {}) {
   return {
     __typename: 'Tweet',
     rest_id: '1234567890',
+    views: { count: '1234', state: 'EnabledWithCount' },
     core: {
       user_results: {
-        result: { rest_id: '111', legacy: { screen_name: 'someone', name: 'Some One' } },
+        result: {
+          rest_id: '111',
+          // ⭐ 新形态:core.screen_name / core.name / avatar.image_url
+          core: { screen_name: 'someone', name: 'Some One' },
+          avatar: { image_url: 'https://pbs.twimg.com/a_normal.jpg' },
+          is_blue_verified: true,
+          relationship_perspectives: { following: false, followed_by: true },
+          profile_bio: { description: '一段 bio' },
+          // 旧形态同时给(真实载荷里两种都可能出现)
+          legacy: { screen_name: 'someone', name: 'Some One' },
+        },
       },
     },
     legacy: {
@@ -27,9 +49,15 @@ function tweet(over: Record<string, unknown> = {}, legacyOver: Record<string, un
       full_text: 'hello world',
       created_at: 'Wed Oct 01 12:00:00 +0000 2026',
       conversation_id_str: '1234567890',
+      lang: 'zh',
       favorite_count: 3,
       retweet_count: 1,
       reply_count: 0,
+      quote_count: 2,
+      bookmark_count: 5,
+      favorited: false,
+      retweeted: false,
+      bookmarked: true,
       ...legacyOver,
     },
     ...over,
@@ -92,12 +120,10 @@ describe('⭐⭐ 解得出推文', () => {
 describe('⭐⭐⭐ 逐字段量 —— 不量的字段永远 100%', () => {
   it('⭐ 全字段齐 → 覆盖率都是 100%', () => {
     const a = auditTimelinePayload(payload([tweet(), tweet()]));
-    expect(a.coverage['正文']).toBe(100);
-    expect(a.coverage['作者']).toBe(100);
-    expect(a.coverage['发布时间']).toBe(100);
-    expect(a.coverage['互动数']).toBe(100);
-    expect(a.coverage['会话id']).toBe(100);
-    expect(a.coverage['推文链接']).toBe(100);
+    for (const k of ['正文', '作者', '作者id', '显示名', '头像', '发布时间',
+      '语言', '互动数', '会话id', '推文链接', '蓝V', '关系', '作者bio']) {
+      expect(a.coverage[k], `${k} 没量到 100%`).toBe(100);
+    }
   });
 
   it('⭐⭐ 正文丢了 → 覆盖率掉下来(最要紧的一条)', () => {
@@ -119,10 +145,80 @@ describe('⭐⭐⭐ 逐字段量 —— 不量的字段永远 100%', () => {
     expect(a.coverage['会话id']).toBe(50);
   });
 
-  it('⭐ 互动数丢了 → 量得出来', () => {
-    const t = tweet({}, { favorite_count: undefined, retweet_count: undefined, reply_count: undefined });
+  it('⭐⭐ 互动数**六项都要齐** —— 缺一项就看得见', () => {
+    /**
+     * ⭐ 旧实现取六项:likes/retweets/replies/quotes/bookmarks/views。
+     * ⚠️ 只量「有没有互动数」的话,缺了 quotes/bookmarks/views 照样报 100% ——
+     * 又一次「不量的字段永远 100%」。
+     */
+    const t = tweet({ views: undefined }, { quote_count: undefined, bookmark_count: undefined });
     const a = auditTimelinePayload(payload([t, tweet()]));
-    expect(a.coverage['互动数']).toBe(50);
+    expect(a.coverage['互动数'], '缺了三项却报满').toBe(50);
+    expect(a.items[0].metricsCount, '没数清缺了几项').toBe(3);
+  });
+
+  it('⭐⭐ `views.count` 是**字符串** —— 要转成数字', () => {
+    /** ⚠️ 旧实现专门记着这条:「views.count 是字符串,state=Enabled 时没有数字」 */
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].metrics.views, 'views 没解出来').toBe(1234);
+  });
+
+  it('⭐⭐ 作者的**两个位置**都要看(新/旧形态)', () => {
+    /**
+     * ⚠️ 旧实现踩过:只读一个位置 → tweet_url 77% 空、author_avatar 80% 空。
+     */
+    const onlyLegacy = tweet();
+    const u = ((onlyLegacy.core as Record<string, unknown>).user_results as Record<string, unknown>)
+      .result as Record<string, unknown>;
+    delete u.core; delete u.avatar;
+    (u.legacy as Record<string, unknown>).profile_image_url_https = 'https://x/a.jpg';
+    const a = auditTimelinePayload(payload([onlyLegacy]));
+    expect(a.items[0].handle, '旧形态的 handle 没读到').toBe('someone');
+    expect(a.items[0].authorName, '旧形态的显示名没读到').toBe('Some One');
+    expect(a.items[0].hasAvatar, '旧形态的头像没读到').toBe(true);
+  });
+
+  it('⭐⭐ 蓝V/关系/bio 的**第二个位置**也要读', () => {
+    /**
+     * ⚠️⚠️ 注入验证抓到:我的样本**两个位置都给了蓝V**,
+     * 所以「只读一个位置」的实现**照样全绿** ——
+     * 样本里根本没有「只有第二个位置有」这个现象
+     * (`feedback-check-sample-contains-phenomenon`,今天第三次栽)。
+     *
+     * ⭐ 旧实现原话:「只读一个会漏 —— 那正是 x_author 里蓝V只有 2% 的成因之一」。
+     * ⭐ 真能区分的样本:**只给第二个位置**(verification.is_blue_verified)。
+     */
+    const onlySecond = tweet();
+    const u = ((onlySecond.core as Record<string, unknown>).user_results as Record<string, unknown>)
+      .result as Record<string, unknown>;
+    delete u.is_blue_verified;                       // 第一个位置拿掉
+    u.verification = { is_blue_verified: true };     // 只剩第二个
+    delete u.relationship_perspectives;              // 关系也只留旧形态
+    (u.legacy as Record<string, unknown>).following = true;
+    delete u.profile_bio;                            // bio 也只留旧形态
+    (u.legacy as Record<string, unknown>).description = '旧形态 bio';
+
+    const a = auditTimelinePayload(payload([onlySecond]));
+    expect(a.items[0].isBlueVerified, '只读第一个位置 —— 蓝V 会漏掉').toBe(true);
+    expect(a.items[0].iFollow, '关系只读新形态 —— 旧形态会漏').toBe(true);
+    expect(a.items[0].authorBio, 'bio 只读新形态 —— 旧形态会漏').toBe('旧形态 bio');
+  });
+
+  it('⭐ 带了就有值,**没带是 undefined 不是 false**', () => {
+    /** ⚠️ 「没关注」与「不知道关注没」是两件事,混起来会让追踪名单判错人 */
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].isBlueVerified).toBe(true);
+    expect(a.items[0].iFollow).toBe(false);
+    expect(a.items[0].followsMe).toBe(true);
+    expect(a.items[0].authorBio).toBe('一段 bio');
+
+    const bare = tweet();
+    const u2 = ((bare.core as Record<string, unknown>).user_results as Record<string, unknown>)
+      .result as Record<string, unknown>;
+    delete u2.is_blue_verified; delete u2.relationship_perspectives; delete u2.profile_bio;
+    delete (u2.legacy as Record<string, unknown>).following;
+    const b = auditTimelinePayload(payload([bare]));
+    expect(b.items[0].iFollow, '没带关系却兜底成了 false').toBeUndefined();
   });
 
   it('⭐⭐ 长推取**长的那个正文** —— 不是截断版', () => {
@@ -154,7 +250,10 @@ describe('⭐⭐⭐ 逐字段量 —— 不量的字段永远 100%', () => {
     const pureNote = tweet({
       note_tweet: { note_tweet_results: { result: { text: 'y'.repeat(3000) } } },
     });
-    const pureArticle = tweet({ rest_id: '2', article: { article_results: {} } }, { id_str: '2' });
+    const pureArticle = tweet(
+      { rest_id: '2', article: { article_results: { result: { content_state: { x: 1 } } } } },
+      { id_str: '2' },
+    );
     const a = auditTimelinePayload(payload([pureNote, pureArticle]));
 
     expect(a.tweets).toBe(2);
@@ -271,8 +370,8 @@ describe('⭐⭐⭐ 「数据是否完整」要逐条说清', () => {
     const sum = summarizeAudits([auditTimelinePayload(payload([bad, good]))]);
 
     expect(sum.incomplete.length, '没列出有缺失的那条').toBe(1);
-    expect(sum.incomplete[0].missing, '缺的字段没说清')
-      .toEqual(expect.arrayContaining(['正文', '会话id']));
+    expect(sum.incomplete[0].missing.join(), '缺的字段没说清').toContain('正文');
+    expect(sum.incomplete[0].missing.join()).toContain('会话id');
     // ⭐ 完好的那条不该进来
     expect(sum.incomplete.some((x) => x.audit.id === '2'), '完好的被当成了有缺失').toBe(false);
   });

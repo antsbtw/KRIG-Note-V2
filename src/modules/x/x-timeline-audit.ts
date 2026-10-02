@@ -18,29 +18,87 @@
  * ⭐ 所以核对必须**逐字段量**,而且**不量的字段永远 100%**。
  */
 
-/** 一条推文的完整性画像 —— ⚠️ 字段选取对应已知的丢失形态 */
+/**
+ * 一条推文的完整性画像。
+ *
+ * ── ⭐⭐ 字段清单**照搬旧实现实际取过的**(用户 2026-10-02:
+ * 「我建议你调研一下原来的设计,究竟都取了哪些数据」「包括元数据」)──
+ *
+ * ⚠️ 我原来只量 8 项,那是**我挑的**。查 `x-timeline-harvester.ts`
+ * (旧实现的载荷解析器,1871 行)与 `x_tweet` 表 schema 后,
+ * 真实清单是 **22 项**,下面逐条对齐。
+ *
+ * ⭐ 分三组,因为它们「缺了」的含义完全不同:
+ * ① **正文与身份** —— 缺了就是真丢数据
+ * ② **元数据** —— 缺了影响筛选/排序,但推文本身还在
+ * ③ **DOM 独有** —— ⚠️ 载荷路**本来就没有**,标「—」不是「漏采」
+ *    (旧实现原话:「不是『漏采』,是『这一路拿不到』。两者必须看得出区别」)
+ */
 export type TweetAudit = {
   readonly id: string;
   /**
-   * ⭐ 正文开头 —— 用户 2026-10-02:「对于推文中的**数据是否完整**没有显示哦。」
-   * ⚠️ 只给**开头 80 字**:面板要能一眼看出「这条采到的是什么」,
-   * 而整段正文几千字会把面板撑爆(真要看全文点开原始载荷)。
+   * ⭐ 正文开头 —— 一眼看出采到的是什么。
+   * ⚠️ 只给 80 字:整段几千字会把面板撑爆(看全文点开原始载荷)。
    */
   readonly preview: string;
-  /** 正文有没有 */
+
+  // ── ① 正文与身份 ──
   readonly hasText: boolean;
   readonly textLen: number;
   /** ⚠️ 长推(note_tweet)与长文(article)是**两回事**,分开量 */
   readonly isLongText: boolean;
   readonly isArticle: boolean;
-  /** 作者 */
+  /**
+   * ⭐⭐ **这条没拿全,以及为什么** —— 旧实现的 `incomplete` 字段。
+   *
+   * 用户 2026-09-22 原话:「不管长文短文,如果折叠起来就应该 show all,
+   * 然后获取完整的内容,就像人一样,但是现在却是分的零碎」。
+   * ⚠️ 此前是「载荷给什么存什么」——「没拿全」和「本来就这么短」
+   * 在库里**长得一模一样**。
+   */
+  readonly incomplete?: 'text-truncated' | 'article-no-body';
   readonly hasAuthor: boolean;
   readonly handle: string;
-  /** ⚠️ 这几个是历史上丢过的 */
+  /** ⭐ 作者数字 id —— username 会改名,rest_id 不会(旧实现实测 131/131 都有) */
+  readonly authorRestId: string;
+  /** ⚠️ 显示名:`core.name`(新)/ `legacy.name`(旧)**两个位置都要看** */
+  readonly authorName: string;
+  /** ⚠️ 头像:`avatar.image_url`(新)/ `legacy.profile_image_url_https`(旧) */
+  readonly hasAvatar: boolean;
+
+  // ── ② 元数据 ──
   readonly hasCreatedAt: boolean;
-  readonly hasMetrics: boolean;
+  readonly lang: string;
+  /** ⭐ 六项互动数 —— 旧实现全取:likes/retweets/replies/quotes/bookmarks/views */
+  readonly metrics: Readonly<Record<string, number | undefined>>;
+  readonly metricsCount: number;
   readonly hasConversationId: boolean;
+  /** ⭐ 回复关系 —— `project-x-reply-chain-order`:「先看上文确认真相关」 */
+  readonly inReplyToStatusId: string;
+  readonly inReplyToScreenName: string;
+  readonly quotedStatusId: string;
+  /**
+   * ⭐ 媒体 —— ⚠️ 判据**很窄**(旧实现契约 §2.1,三个不算):
+   * 链接预览卡不算、引用原文里的图不算、回复里 @ 到的推的图不算。
+   * 只认 `legacy.extended_entities.media`。
+   */
+  readonly hasMedia: boolean;
+  readonly mediaTypes: readonly string[];
   readonly hasTweetUrl: boolean;
+
+  // ── ③ 登录态独有(零额外请求) ──
+  /** ⭐ 我对这条推的状态 —— 登录态 webview 独有 */
+  readonly self: { favorited?: boolean; retweeted?: boolean; bookmarked?: boolean };
+  /** ⚠️ 蓝V:`is_blue_verified` 与 `verification.is_blue_verified` **两个位置** */
+  readonly isBlueVerified?: boolean;
+  /**
+   * ⚠️ 我与作者的关系 —— **带了就有值,没带就是 undefined**。
+   * 「没关注」与「不知道关注没」是两件事,混起来会让追踪名单判错人。
+   */
+  readonly iFollow?: boolean;
+  readonly followsMe?: boolean;
+  /** ⚠️ 作者 bio —— 旧实现这里曾是**说谎的字段**(报 0 其实是根本没采) */
+  readonly authorBio: string;
 };
 
 /** 一次核对的结果 */
@@ -85,6 +143,43 @@ function collectBy(node: unknown, pred: (o: Record<string, unknown>) => boolean)
   return out;
 }
 
+/**
+ * ⭐⭐ **覆盖率表只有这一份** —— 2026-10-02 抽出来。
+ *
+ * ⚠️ 原来单页与汇总各写一份,我改了汇总忘了单页 → 单页少了四项,
+ * 而 `coverage['长推']` 变成 `undefined`,面板上那一格**什么都不显示**。
+ * ⭐ 两份表必然漂,漂的表现是「同一份数据两处算出不同的覆盖率」。
+ */
+function buildCoverage(items: readonly TweetAudit[]): Record<string, number> {
+  const pct = (f: (t: TweetAudit) => boolean): number =>
+    (items.length === 0 ? 0 : Math.round((items.filter(f).length / items.length) * 100));
+  return {
+    // ── ① 正文与身份:缺了就是真丢数据 ──
+    正文: pct((t) => t.hasText),
+    作者: pct((t) => t.hasAuthor),
+    作者id: pct((t) => t.authorRestId.length > 0),
+    显示名: pct((t) => t.authorName.length > 0),
+    头像: pct((t) => t.hasAvatar),
+    // ── ② 元数据:缺了影响筛选/排序 ──
+    发布时间: pct((t) => t.hasCreatedAt),
+    语言: pct((t) => t.lang.length > 0),
+    // ⭐ 六项齐了才算 100% —— 只量「有没有」的话缺三项照样满分
+    互动数: pct((t) => t.metricsCount >= 6),
+    会话id: pct((t) => t.hasConversationId),
+    推文链接: pct((t) => t.hasTweetUrl),
+    // ── ③ 登录态独有(零额外请求)──
+    蓝V: pct((t) => t.isBlueVerified !== undefined),
+    关系: pct((t) => t.iFollow !== undefined),
+    作者bio: pct((t) => t.authorBio.length > 0),
+    我的操作: pct((t) => Object.values(t.self).some((v) => v !== undefined)),
+    // ── ④ **种类分布**,不是缺失 ──
+    长推: pct((t) => t.isLongText),
+    长文: pct((t) => t.isArticle),
+    有媒体: pct((t) => t.hasMedia),
+    是回复: pct((t) => t.inReplyToStatusId.length > 0),
+  };
+}
+
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -124,38 +219,124 @@ export function auditTimelinePayload(text: string): TimelineAudit {
     const article = (node.article as Record<string, unknown> | undefined);
 
     /**
-     * ⚠️ 正文取**最长**的那个 —— 长推的全文在 `note_tweet` 里,
-     * `legacy.full_text` 是截断版。
-     * `project-x-article-body-lost`:取错了会「23 字 vs 16081 字」。
+     * ⚠️ 正文取**最长**的那个 —— 长推全文在 `note_tweet`,
+     * `legacy.full_text` 是截断版(`project-x-article-body-lost`:23 字 vs 16081 字)。
      */
     const full = str(legacy.full_text);
     const noteText = isObj(noteTweet?.note_tweet_results)
       ? str((((noteTweet.note_tweet_results as Record<string, unknown>).result) as Record<string, unknown> | undefined)?.text)
       : '';
-    const text2 = noteText.length > full.length ? noteText : full;
+    /** ⭐ 长文正文在 `article_results.result.content_state`,**列表页不给** */
+    const ares = isObj(article?.article_results)
+      ? ((article.article_results as Record<string, unknown>).result as Record<string, unknown> | undefined)
+      : undefined;
+    const articleBody = ares && isObj(ares.content_state) ? JSON.stringify(ares.content_state) : '';
+    const text2 = [full, noteText].sort((a, b) => b.length - a.length)[0] ?? '';
 
-    // 作者 —— ⚠️ 不写死路径,按特征找
-    const users = collectBy(node.core ?? node, (o) => typeof o.screen_name === 'string');
-    const handle = users.length > 0 ? str(users[0].screen_name) : '';
+    /**
+     * ⭐⭐ 作者 —— ⚠️ 旧实现踩过:只读一个位置会漏。
+     * 显示名 `core.name`(新)/ `legacy.name`(旧);
+     * 头像 `avatar.image_url`(新)/ `legacy.profile_image_url_https`(旧)。
+     * 后果曾是「tweet_url 77% 空、author_avatar 80% 空」。
+     */
+    const urr = isObj(node.core)
+      ? (((node.core as Record<string, unknown>).user_results as Record<string, unknown> | undefined)
+        ?.result as Record<string, unknown> | undefined)
+      : undefined;
+    const ucore = urr?.core as Record<string, unknown> | undefined;
+    const ulegacy = urr?.legacy as Record<string, unknown> | undefined;
+    const uavatar = urr?.avatar as Record<string, unknown> | undefined;
+    const handle = str(ucore?.screen_name) || str(ulegacy?.screen_name);
+    const authorName = str(ucore?.name) || str(ulegacy?.name);
+    const avatarUrl = str(uavatar?.image_url) || str(ulegacy?.profile_image_url_https);
 
-    const metrics = ['favorite_count', 'retweet_count', 'reply_count']
-      .some((k) => typeof legacy[k] === 'number');
+    /** ⚠️ 蓝V **两个位置**都要看(旧实现:只读一个是 x_author 蓝V仅 2% 的成因) */
+    const verification = urr?.verification as Record<string, unknown> | undefined;
+    const blue = typeof urr?.is_blue_verified === 'boolean'
+      ? urr.is_blue_verified as boolean
+      : (typeof verification?.is_blue_verified === 'boolean'
+        ? verification.is_blue_verified as boolean : undefined);
+
+    /** ⚠️ 关系同样两个位置;**没带就是 undefined,不兜底成 false** */
+    const persp = urr?.relationship_perspectives as Record<string, unknown> | undefined;
+    const iFollow = typeof persp?.following === 'boolean'
+      ? persp.following as boolean
+      : (typeof ulegacy?.following === 'boolean' ? ulegacy.following as boolean : undefined);
+    const followsMe = typeof persp?.followed_by === 'boolean'
+      ? persp.followed_by as boolean
+      : (typeof ulegacy?.followed_by === 'boolean' ? ulegacy.followed_by as boolean : undefined);
+
+    /** ⚠️ bio 也是两个位置(旧实现这里曾是**说谎的字段**:报 0 其实根本没采) */
+    const profileBio = urr?.profile_bio as Record<string, unknown> | undefined;
+    const authorBio = str(profileBio?.description) || str(ulegacy?.description);
+
+    /** ⭐ 六项互动数。⚠️ `views.count` 是**字符串**,且 state=Enabled 时没有数字 */
+    const views = node.views as Record<string, unknown> | undefined;
+    const num = (v: unknown): number | undefined =>
+      (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const metrics = {
+      likes: num(legacy.favorite_count),
+      retweets: num(legacy.retweet_count),
+      replies: num(legacy.reply_count),
+      quotes: num(legacy.quote_count),
+      bookmarks: num(legacy.bookmark_count),
+      views: typeof views?.count === 'string' ? Number(views.count) : undefined,
+    };
+
+    /**
+     * ⭐ 媒体判据**很窄**(旧实现契约 §2.1,三个不算):
+     * 链接预览卡不算、引用原文里的图不算、回复里 @ 到的推的图不算。
+     * 只认 `legacy.extended_entities.media`。
+     */
+    const extEnt = legacy.extended_entities as Record<string, unknown> | undefined;
+    const mediaArr = Array.isArray(extEnt?.media) ? extEnt.media as Record<string, unknown>[] : [];
+    const mediaTypes = [...new Set(mediaArr.map((m) => str(m.type)).filter(Boolean))];
+
+    /**
+     * ⭐⭐ **这条没拿全,以及为什么**(旧实现的 `incomplete`)。
+     * ⚠️ 长文只有标题+摘要(列表页不给正文)是 `article-no-body`;
+     * ⚠️ 没有 note_tweet 而 full_text 带截断特征是 `text-truncated`。
+     */
+    let incomplete: TweetAudit['incomplete'];
+    if (article !== undefined && articleBody.length === 0) incomplete = 'article-no-body';
+    else if (noteText.length === 0 && /…$|\.\.\.$|https:\/\/t\.co\/\w+$/.test(full.trim())) {
+      incomplete = 'text-truncated';
+    }
 
     return {
       id: str(legacy.id_str) || str(node.rest_id),
-      // ⚠️ 去掉换行:面板一行显示,换行会把布局撑开
       preview: text2.slice(0, 80).replace(/\s+/g, ' '),
       hasText: text2.length > 0,
       textLen: text2.length,
       isLongText: noteText.length > 0,
       isArticle: article !== undefined,
+      incomplete,
       hasAuthor: handle.length > 0,
       handle,
+      authorRestId: str(urr?.rest_id),
+      authorName,
+      hasAvatar: avatarUrl.length > 0,
       hasCreatedAt: typeof legacy.created_at === 'string',
-      hasMetrics: metrics,
+      lang: str(legacy.lang),
+      metrics,
+      metricsCount: Object.values(metrics).filter((v) => v !== undefined).length,
       hasConversationId: typeof legacy.conversation_id_str === 'string',
-      // ⚠️ tweet_url 在载荷里不是直接字段,靠 handle+id 拼得出来才算有
+      inReplyToStatusId: str(legacy.in_reply_to_status_id_str),
+      inReplyToScreenName: str(legacy.in_reply_to_screen_name),
+      quotedStatusId: str(legacy.quoted_status_id_str),
+      hasMedia: mediaArr.length > 0,
+      mediaTypes,
+      // ⚠️ tweet_url 载荷里没有,靠 handle+id 拼得出来才算有
       hasTweetUrl: Boolean(handle && str(legacy.id_str)),
+      self: {
+        favorited: typeof legacy.favorited === 'boolean' ? legacy.favorited : undefined,
+        retweeted: typeof legacy.retweeted === 'boolean' ? legacy.retweeted : undefined,
+        bookmarked: typeof legacy.bookmarked === 'boolean' ? legacy.bookmarked : undefined,
+      },
+      isBlueVerified: blue,
+      iFollow,
+      followsMe,
+      authorBio,
     };
   });
 
@@ -176,9 +357,6 @@ export function auditTimelinePayload(text: string): TimelineAudit {
     problems.push('没有翻页游标 —— 要么是最后一页,要么载荷不完整(翻不动下一页)');
   }
 
-  const pct = (f: (t: TweetAudit) => boolean): number =>
-    (items.length === 0 ? 0 : Math.round((items.filter(f).length / items.length) * 100));
-
   return {
     tweets: items.length,
     hasCursor: cursor.length > 0,
@@ -189,16 +367,7 @@ export function auditTimelinePayload(text: string): TimelineAudit {
      * 「不量的字段永远 100%」(载荷路径曾不产出 tweet_url/avatar,
      * 而 coverage 不量它们,故恒报 100%)。
      */
-    coverage: {
-      正文: pct((t) => t.hasText),
-      作者: pct((t) => t.hasAuthor),
-      发布时间: pct((t) => t.hasCreatedAt),
-      互动数: pct((t) => t.hasMetrics),
-      会话id: pct((t) => t.hasConversationId),
-      推文链接: pct((t) => t.hasTweetUrl),
-      长推: pct((t) => t.isLongText),
-      长文: pct((t) => t.isArticle),
-    },
+    coverage: buildCoverage(items),
     problems,
   };
 }
@@ -229,9 +398,6 @@ export function summarizeAudits(audits: readonly TimelineAudit[]): {
       if (t.id) ids.add(t.id);
     }
   }
-  const pct = (f: (t: TweetAudit) => boolean): number =>
-    (all.length === 0 ? 0 : Math.round((all.filter(f).length / all.length) * 100));
-
   /** ⭐ 去重后的明细 —— 两页之间会重叠 */
   const seen = new Set<string>();
   const uniq: TweetAudit[] = [];
@@ -250,9 +416,22 @@ export function summarizeAudits(audits: readonly TimelineAudit[]): {
     if (!t.hasText) missing.push('正文');
     if (!t.hasAuthor) missing.push('作者');
     if (!t.hasCreatedAt) missing.push('发布时间');
-    if (!t.hasMetrics) missing.push('互动数');
+    // ⭐ 六项互动数缺哪几项要说清 —— 「缺互动数」太笼统
+    if (t.metricsCount < 6) {
+      const lack = Object.entries(t.metrics).filter(([, v]) => v === undefined).map(([k]) => k);
+      missing.push(`互动数(${lack.join(',')})`);
+    }
     if (!t.hasConversationId) missing.push('会话id');
     if (!t.hasTweetUrl) missing.push('推文链接');
+    if (!t.hasAvatar) missing.push('头像');
+    if (t.authorRestId.length === 0) missing.push('作者id');
+    if (t.authorName.length === 0) missing.push('显示名');
+    /**
+     * ⭐⭐ 旧实现的 `incomplete` —— 它比任何缺字段都要紧:
+     * 「没拿全」和「本来就这么短」此前在库里**长得一模一样**。
+     */
+    if (t.incomplete === 'text-truncated') missing.push('⚠️正文被截断');
+    if (t.incomplete === 'article-no-body') missing.push('⚠️长文没正文');
     return { audit: t, missing };
   }).filter((x) => x.missing.length > 0);
 
@@ -262,16 +441,7 @@ export function summarizeAudits(audits: readonly TimelineAudit[]): {
     uniqueTweets: ids.size,
     items: uniq,
     incomplete,
-    coverage: {
-      正文: pct((t) => t.hasText),
-      作者: pct((t) => t.hasAuthor),
-      发布时间: pct((t) => t.hasCreatedAt),
-      互动数: pct((t) => t.hasMetrics),
-      会话id: pct((t) => t.hasConversationId),
-      推文链接: pct((t) => t.hasTweetUrl),
-      长推: pct((t) => t.isLongText),
-      长文: pct((t) => t.isArticle),
-    },
+    coverage: buildCoverage(all),
     problems,
   };
 }
