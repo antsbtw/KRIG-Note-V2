@@ -27,6 +27,37 @@ function cleanHandle(h: string): string {
   return h.trim().replace(/^@+/, '').toLowerCase();
 }
 
+/**
+ * ⭐ 从**推文链接或裸 id** 取出 tweetId。取不出返回 null。
+ *
+ * ── 用户 2026-10-02:「应该是推文的链接,而不是 id 号,
+ * 　因为没有必要单独填写 id 号」──
+ *
+ * ⭐ 对的:人手上有的就是**链接**(从 X 上复制的),
+ * 让人先把 id 抠出来是把本该代码做的事推给人。
+ *
+ * ⚠️ 实测踩到:框只收 id 时用户粘了整条链接,
+ * 于是拼出 `/i/status/https://x.com/.../status/2105…?s=20` —— 页面当然不存在。
+ *
+ * 支持三种写法(都是人真会粘的):
+ * · `https://x.com/someone/status/123?s=20`
+ * · `x.com/i/status/123`
+ * · `123`(裸 id)
+ *
+ * ⚠️ **与 `identify()` 共用同一条正则** —— 另写一份会漂,
+ * 而漂的表现是「正向解析得出来、反向认不出」。
+ */
+const STATUS_PATH = /\/(?:i|[^/]+)\/status\/(\d+)/;
+
+export function extractTweetId(input: string): string | null {
+  const v = input.trim();
+  if (!v) return null;
+  // ⭐ 裸数字 id 直接用(人也可能只粘 id)
+  if (/^\d+$/.test(v)) return v;
+  const m = v.match(STATUS_PATH);
+  return m ? m[1] : null;
+}
+
 /** URL 片段判据 —— 首页/通知这类「没有具体对象」的页面够用 */
 const byUrl = (fragment: string): ReadyCriterion => ({ kind: 'urlIncludes', fragment });
 
@@ -145,7 +176,14 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
    * `/{真作者}/status/`,判 handle 会把「已经到了」误判成「没到位」。
    */
   'x.status': (p) => {
-    const id = (p.tweetId ?? '').trim();
+    /**
+     * ⭐ 收**链接或裸 id** —— 人手上有的是从 X 复制的链接,
+     * 让人先抠 id 是把代码该做的事推给人(用户 2026-10-02)。
+     * ⚠️ 取不出来返回 null(由底座翻成 Failed),**不拿原值硬拼** ——
+     * 硬拼会得到 `/i/status/https://…`,页面当然不存在,
+     * 而报错会说成「没到位」,把人指向完全错误的方向。
+     */
+    const id = extractTweetId(p.tweetId ?? p.url ?? '');
     if (!id) return null;
     return {
       url: `${BASE_URL}/i/status/${id}`,
@@ -173,7 +211,8 @@ function identify(url: string): { name: string; params: Record<string, string> }
 
   if (path === '/home') return { name: 'x.home', params: {} };
 
-  const status = path.match(/^\/(?:i|[^/]+)\/status\/(\d+)/);
+  // ⭐ 与 `extractTweetId` 共用同一条正则 —— 另写一份会漂
+  const status = path.match(STATUS_PATH);
   if (status) return { name: 'x.status', params: { tweetId: status[1] } };
 
   const withReplies = path.match(/^\/([^/]+)\/with_replies\/?$/);
