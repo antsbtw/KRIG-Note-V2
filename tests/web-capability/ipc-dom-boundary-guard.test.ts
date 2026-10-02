@@ -360,6 +360,22 @@ describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', ()
       + '(旧实现正是这么栽的:四处正则决定要不要显示输入框):\n  '
       + hardcoded.join(', '),
     ).toEqual([]);
+
+    /**
+     * ③ ⚠️ **参数名**同理 —— 2026-10-01 实测:
+     * 我写了 `k === 'handle' ? 'elonmusk…' : k`,于是 `tweetId` 那个框
+     * 只显示「tweetId」三个字,用户填了账号名 →
+     * 拼出 `/i/status/elonmusk` → 判据诚实超时。
+     * ⭐ 提示该放在**业务的真表**里(`PARAM_HINTS`),不放面板。
+     */
+    const paramBranch = c.match(/['"](handle|tweetId|q|days)['"]\s*(===|==|\?)/g) ?? [];
+    expect(
+      paramBranch,
+      'Console 里按**参数名**分支了 —— 提示应来自真表 hints,\n'
+      + '写在面板里的话,新参数又会只显示一个光秃秃的字段名:\n  '
+      + paramBranch.join(', '),
+    ).toEqual([]);
+    expect(c, '没用真表的 hints —— placeholder 是从哪来的?').toMatch(/hints\s*\[/);
   });
 });
 

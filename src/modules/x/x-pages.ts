@@ -83,6 +83,23 @@ export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'x.status': ['tweetId'],
 };
 
+/**
+ * ⭐ 每个参数**长什么样** —— 给面板当 placeholder。
+ *
+ * ⚠️ 2026-10-01 实测踩到:用户选 `x.status` 填了 `elonmusk`,
+ * 于是拼出 `https://x.com/i/status/elonmusk`(不存在的推文)→ 到位判据诚实超时。
+ * ⭐ **系统行为是对的**(没假装成功),但 UI 让人很容易填错:
+ * 那个框只显示「tweetId」三个字,不说它要的是一串数字。
+ *
+ * ⚠️ 且提示**必须放在这里**而不是面板里 ——
+ * 面板里写 `k === 'handle' ? … : …` 就是「写死清单」的开端
+ * (守卫钉着:Console 不许出现写死的参数名分支)。
+ */
+export const PARAM_HINTS: Readonly<Record<string, string>> = {
+  handle: '账号，如 elonmusk（不带 @）',
+  tweetId: '推文数字 id，如 1519480761749016577（不是账号名）',
+};
+
 type Resolved = { url: string; arrival: ReadyCriterion; describe: string };
 
 /**
@@ -172,10 +189,13 @@ function identify(url: string): { name: string; params: Record<string, string> }
 /** ⭐ 本模块的页面表 —— 启动时 **push** 给底座,底座不认识 X */
 export const xPageResolver: PageResolver & {
   paramsOf(name: string): readonly string[];
+  hintOf(param: string): string;
 } = {
   resolve: (name, params) => PAGES[name]?.(params ?? {}) ?? null,
   names: () => Object.keys(PAGES),
   /** ⭐ 面板据此渲染输入框 —— 真表,不许抄 */
   paramsOf: (name) => PAGE_PARAMS[name] ?? [],
+  /** ⭐ 参数该填什么样的值 —— 同样是真表,面板不许自己写分支 */
+  hintOf: (param) => PARAM_HINTS[param] ?? param,
   identify,
 };

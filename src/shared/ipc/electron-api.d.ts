@@ -921,6 +921,8 @@ declare global {
         names: string[];
         /** ⭐ 每个页面要哪些参数 —— 面板据此渲染输入框,不许抄一份 */
         params: Record<string, string[]>;
+        /** ⭐ 每个参数该填什么样的值 —— 面板当 placeholder,不许自己写分支 */
+        hints: Record<string, string>;
       }>>;
       webDomRun(
         pageRef: { wcId: number },

@@ -190,15 +190,31 @@ export function listPageNames(): Array<{
    * 没有就给空表,而不是假装每个页面都零参数。
    */
   params: Record<string, string[]>;
+  /**
+   * ⭐ 每个参数该填什么样的值 —— 面板当 placeholder 用。
+   * ⚠️ 提示放在**业务的表**里,不放面板:面板里写
+   * `k === 'handle' ? … : …` 就是「写死清单」的开端。
+   */
+  hints: Record<string, string>;
 }> {
   return Array.from(pageTables.entries()).map(([owner, t]) => {
     const names = typeof t.names === 'function' ? t.names() : [];
-    const withParams = t as { paramsOf?: (n: string) => readonly string[] };
+    const withParams = t as {
+      paramsOf?: (n: string) => readonly string[];
+      hintOf?: (p: string) => string;
+    };
     const params: Record<string, string[]> = {};
+    const hints: Record<string, string> = {};
     if (typeof withParams.paramsOf === 'function') {
-      for (const n of names) params[n] = [...withParams.paramsOf(n)];
+      for (const n of names) {
+        const ps = [...withParams.paramsOf(n)];
+        params[n] = ps;
+        if (typeof withParams.hintOf === 'function') {
+          for (const k of ps) hints[k] = withParams.hintOf(k);
+        }
+      }
     }
-    return { owner, names, params };
+    return { owner, names, params, hints };
   });
 }
 

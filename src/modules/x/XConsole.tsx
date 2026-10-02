@@ -32,6 +32,8 @@ type PageTable = {
   names: string[];
   /** ⭐ 每个页面要哪些参数 —— **从真表来**,面板不抄 */
   params: Record<string, string[]>;
+  /** ⭐ 每个参数该填什么 —— **从真表来**,面板不许自己写 `k === 'handle'` 分支 */
+  hints: Record<string, string>;
 };
 
 /** 一次调用的留痕 —— ⭐ 存**整个 Result**,不只存成功与否 */
@@ -90,8 +92,8 @@ export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
    * ⚠️ 2026-10-01 Console 第一版没有这张表,用户点 x.profile 直接 failed
    * 「没传参数」—— **面板没办法知道该填什么**。
    */
-  const requiredParams: string[] =
-    tables.find((t) => t.names.includes(pageName))?.params[pageName] ?? [];
+  const ownerTable = tables.find((t) => t.names.includes(pageName));
+  const requiredParams: string[] = ownerTable?.params[pageName] ?? [];
 
   /** ⚠️ 必填参数没填满就禁用 —— 免得点下去只拿到一句「解析不出 URL」 */
   const missing = requiredParams.filter((k) => !(paramVals[k] ?? '').trim());
@@ -141,7 +143,7 @@ export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
             <input
               value={paramVals[k] ?? ''}
               onChange={(e) => setParamVals((v) => ({ ...v, [k]: e.target.value }))}
-              placeholder={k === 'handle' ? 'elonmusk（不带 @）' : k}
+              placeholder={ownerTable?.hints[k] ?? k}
               style={S.input}
             />
           </div>
