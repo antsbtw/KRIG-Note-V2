@@ -740,6 +740,22 @@ export function registerWebDomIpc(): void {
             return { status: 'ok', value: { reloaded: true, url: before } };
           }
           /**
+           * ⭐⭐ 面板动作落盘 —— 让「人点了什么」能被读到。
+           * ⚠️ 2026-10-02:连续两轮卡在同一步而我**读不到面板状态**,
+           * 只能静态推断(查了四轮没结论)。
+           * ⭐ 「人点了但没发出去」与「人没点」必须分得开。
+           */
+          case 'uiTrace': {
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: `ui:${p.action}`,
+              pageId: String(pageId),
+              detail: { ...(p.state ?? {}) },
+            });
+            return { status: 'ok', value: { recorded: true } };
+          }
+
+          /**
            * ── ⭐⭐ 采集(输出栏)—— **只管收,不碰页面** ──
            * 用户 2026-10-02:「控制是控制,采集是采集…控制/输出是分开的。」
            */
@@ -762,13 +778,12 @@ export function registerWebDomIpc(): void {
           case 'acquirePeek':
             return {
               status: 'ok',
-              value: peekAcquire(makeAcquireDeps(wc, pageId), pageId, p.goal ?? {}),
+              value: peekAcquire(makeAcquireDeps(wc, pageId), pageId),
             };
 
           case 'acquireStop': {
             const report = finishAcquire(
-              makeAcquireDeps(wc, pageId), pageId, p.goal ?? {},
-              acquireStartedAt.get(pageId),
+              makeAcquireDeps(wc, pageId), pageId, acquireStartedAt.get(pageId),
             );
             acquireStartedAt.delete(pageId);
             traceRecorder.lifecycle({
@@ -778,7 +793,6 @@ export function registerWebDomIpc(): void {
               detail: {
                 url: wc.getURL(),
                 total: report.items.length,
-                wanted: report.wanted,
                 elapsedMs: report.elapsedMs,
                 legs: report.legs,
                 problems: report.problems,
@@ -791,7 +805,7 @@ export function registerWebDomIpc(): void {
             });
             console.log(
               `[web.acquire] ${report.ok ? '✓' : '⚠'} 停止 pageId=${pageId} —— `
-              + `${report.items.length} 条(命中 ${report.wanted})`,
+              + `${report.items.length} 条`,
             );
             if (!report.ok) {
               return { status: 'degraded', value: report, missing: [...report.problems] };

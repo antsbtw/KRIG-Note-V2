@@ -92,7 +92,6 @@ type AcquireReport = {
   ok: boolean;
   problems: string[];
   items: AcquiredItem[];
-  wanted: number;
   elapsedMs: number;
   stopReason: string;
   /**
@@ -158,7 +157,7 @@ export function XConsole(
    * 没有它的话人在第 ② 步只看到一个「● 收集中」,
    * **不知道翻页到底有没有收到东西**,也就不知道什么时候该停。
    */
-  const [peek, setPeek] = useState<{ total: number; wanted: number } | null>(null);
+  const [peek, setPeek] = useState<{ total: number } | null>(null);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -239,11 +238,9 @@ export function XConsole(
     if (wcId == null || !running) { setPeek(null); return; }
     const timer = setInterval(() => {
       void window.electronAPI?.webDomInvoke?.({
-        op: 'acquirePeek',
-        pageRef: { wcId },
-        goal: { wantUrlIncludes: X_TIMELINE_ENDPOINTS },
+        op: 'acquirePeek', pageRef: { wcId },
       }).then((r) => {
-        if (r.status === 'ok') setPeek(r.value as { total: number; wanted: number });
+        if (r.status === 'ok') setPeek(r.value as { total: number });
       }).catch(() => undefined);
     }, 1200);
     return () => clearInterval(timer);
@@ -541,6 +538,15 @@ export function XConsole(
                   type="button"
                   disabled={wcId == null || running}
                   onClick={async () => {
+                    /**
+                     * ⭐ 落痕「人点了什么」—— 2026-10-02:
+                     * 连续两轮卡在同一步而我**读不到面板状态**,只能静态推断。
+                     * ⚠️ 「人点了但没发出去」与「人没点」必须分得开。
+                     */
+                    void window.electronAPI?.webDomInvoke?.({
+                      op: 'uiTrace', pageRef: { wcId: wcId! },
+                      action: '开始收', state: { running, hasReport: report !== null },
+                    });
                     const r = await window.electronAPI!.webDomInvoke({
                       op: 'acquireStart', pageRef: { wcId: wcId! },
                     });
@@ -562,23 +568,39 @@ export function XConsole(
                   type="button"
                   disabled={wcId == null || !running}
                   onClick={async () => {
-                    const r = await window.electronAPI!.webDomInvoke({
-                      op: 'acquireStop',
-                      pageRef: { wcId: wcId! },
-                      goal: {
-                        wantUrlIncludes: X_TIMELINE_ENDPOINTS,
-                        // ⭐ 用户 2026-10-02:「测试期间每次就爬取两页就够了」
-                        wantAtLeast: 2,
-                      },
+                    /**
+                     * ⚠️⚠️ **先把 running 置回,再做别的** —— 2026-10-02 实测:
+                     * 用户点了停,数据**还在不断进来**、提示块也不消失。
+                     * 真因:原来 `setRunning(false)` 写在 `await` **之后**,
+                     * 那次 IPC 一抛异常,整个 handler 就中断 ——
+                     * **停不下来,而且界面看不出哪里出了错**。
+                     *
+                     * ⭐ 「停」是取消动作:它必须**先生效**,
+                     * 失败也只是「没拿到报告」,不该变成「停不下来」。
+                     */
+                    void window.electronAPI?.webDomInvoke?.({
+                      op: 'uiTrace', pageRef: { wcId: wcId! },
+                      action: '停止并核对',
+                      state: { running, peekTotal: peek?.total ?? null },
                     });
                     setRunning(false);
+                    setPeek(null);
+                    let r: WebDomResult | { status: 'error'; reason: string };
+                    try {
+                      r = await window.electronAPI!.webDomInvoke({
+                        op: 'acquireStop', pageRef: { wcId: wcId! },
+                      });
+                    } catch (e) {
+                      // ⚠️ 不静默:停不下来时人要看得见原因
+                      r = { status: 'error' as const, reason: e instanceof Error ? e.message : String(e) };
+                    }
                     if (r.status === 'ok' || r.status === 'degraded') {
-                      const rep = r.value as AcquireReport;
+                      const rep = (r as WebDomResult & { value: AcquireReport }).value;
                       setReport(rep);
                       /**
-                       * ⭐⭐ **核对完整性** —— 用户:「关键是核对爬取的数据完整没有」。
-                       * ⚠️ 不核对的话「采到 N 条」毫无意义:
-                       * 2026-10-02 实测 captured=72 而一条推文都没有。
+                       * ⭐⭐ **完整性核对在这里做** —— 它是 X 的活。
+                       * ⚠️ 底座只回「收到了什么」,不做研判(用户 2026-10-02:
+                       * 「采集数据就是全面的采集,**没有数据研判的功能呀?**」)。
                        */
                       const audits: TimelineAudit[] = rep.items
                         .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
@@ -618,7 +640,8 @@ export function XConsole(
                   翻完<strong>回到这里点「停止并核对」</strong>，才会给出数据与完整性。
                   {peek && (
                     <div style={{ marginTop: 4, opacity: 0.85 }}>
-                      已收到 {peek.total} 条（命中目标 {peek.wanted} 条）
+                      {/* ⚠️ 只报**收到多少** —— 「其中几条有用」是停止后核对的事 */}
+                      已收到 {peek.total} 条
                     </div>
                   )}
                 </div>
@@ -632,8 +655,6 @@ export function XConsole(
                   <div style={S.statRow}>
                     <Stat label="采到" v={report.items.length}
                       tone={report.items.length > 0 ? 'good' : 'idle'} hint="合并去重后的总条数" />
-                    <Stat label="命中目标" v={report.wanted}
-                      tone={report.wanted > 0 ? 'good' : 'idle'} hint="符合本次目标的条数" />
                     {/* ⚠️ 轮次/像素是**控制**那栏的报告,采集不重复记一份 */}
                   </div>
                   <div style={S.todo}>
@@ -678,10 +699,10 @@ export function XConsole(
                       )}
                     </div>
                   )}
-                  {report.wanted > 0 && !audit && (
+                  {report.items.length > 0 && !audit && (
                     <div style={S.diagnose}>
-                      ⚠️ 命中了 {report.wanted} 条目标响应，但<strong>一条推文都没解出来</strong>
-                      —— 载荷结构可能变了，展开下面的原文看看。
+                      ⚠️ 收到了 {report.items.length} 条响应，但<strong>一条推文都没解出来</strong>
+                      —— 可能这一页没发时间线请求，或载荷结构变了（展开下面的原文看看）。
                     </div>
                   )}
                   {report.problems.length > 0 && (

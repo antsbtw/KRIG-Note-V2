@@ -12,11 +12,12 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import {
-  startAcquire, peekAcquire, finishAcquire, awaitEnough,
+  startAcquire, peekAcquire, finishAcquire, awaitFor,
 } from '@platform/main/web-capability/acquire/acquire';
 import type { AcquireDeps, AcquiredItem } from '@platform/main/web-capability/acquire/types';
 import type { PageId } from '@platform/main/web-capability/page/types';
 import { readFileSync } from 'node:fs';
+import { stripComments as strip } from '../helpers/source-scan';
 import { resolve } from 'node:path';
 
 const PAGE = 'p1' as unknown as PageId;
@@ -127,9 +128,8 @@ describe('⭐⭐ 开始收', () => {
 describe('⭐ 查看进度:纯读', () => {
   it('⭐ peek 不停、不改任何状态', () => {
     const { d, calls } = deps({ pool: [item('https://x.com/api/1'), item('https://x.com/b', 'hook')] });
-    const r = peekAcquire(d, PAGE, { wantUrlIncludes: ['/api/'] });
+    const r = peekAcquire(d, PAGE);
     expect(r.total).toBe(2);
-    expect(r.wanted).toBe(1);
     expect(calls.stop, 'peek 把采集停了 —— 它该是纯读').toBe(0);
   });
 
@@ -158,28 +158,9 @@ describe('⭐⭐ 停止并报告:problems 空才算采全', () => {
     expect(r.problems.join(''), '没提示去控制那栏翻页').toContain('控制');
   });
 
-  it('⭐⭐ 收到了但没一条命中目标 → 报问题(最误导的一种)', () => {
-    /** ⚠️ 2026-10-02 实测:captured=72 而**一条推文都没有** */
-    const { d } = deps({ pool: [item('https://video.twimg.com/a.m4s')] });
-    const r = finishAcquire(d, PAGE, { wantUrlIncludes: ['/i/api/graphql/'] });
-    expect(r.ok).toBe(false);
-    expect(r.problems.join('')).toContain('没有一条');
-    expect(r.items.length, '不完整就把数据丢了').toBe(1);
-  });
-
-  it('⭐⭐ 不足目标页数 → 报问题,并提示去多翻几页', () => {
-    const { d } = deps({ pool: [item('https://x.com/i/api/graphql/HomeTimeline')] });
-    const r = finishAcquire(d, PAGE, {
-      wantUrlIncludes: ['/i/api/graphql/'], wantAtLeast: 2,
-    });
-    expect(r.ok).toBe(false);
-    expect(r.problems.join(''), '没说清不足').toContain('不足目标');
-    expect(r.problems.join(''), '没提示去控制那栏多翻几页').toContain('控制');
-  });
-
   it('⭐⭐ `ok` 由 `problems` 算出,不是独立字段', () => {
     const { d } = deps({ pool: [item('https://x.com/api/1')] });
-    const r = finishAcquire(d, PAGE, { wantUrlIncludes: ['/api/'] });
+    const r = finishAcquire(d, PAGE);
     expect(r.ok).toBe(r.problems.length === 0);
   });
 
@@ -195,23 +176,52 @@ describe('⭐⭐ 停止并报告:problems 空才算采全', () => {
   });
 });
 
-describe('⚠️ awaitEnough:可选的便利函数,仍不碰页面', () => {
-  it('⭐ 够了就返回', async () => {
-    const pool = [item('https://x.com/i/api/graphql/A'), item('https://x.com/i/api/graphql/B')];
-    const { d } = deps({ pool });
-    const sleep = vi.fn(async () => undefined);
-    const r = await awaitEnough(d, PAGE, {
-      wantUrlIncludes: ['/i/api/graphql/'], wantAtLeast: 2, maxMs: 5000,
-    }, sleep);
-    expect(r.ok).toBe(true);
-    expect(r.stopReason).toContain('已采够');
+describe('⭐⭐⭐ 采集层**不做研判**', () => {
+  it('⭐⭐⭐ `AcquireGoal` 里没有任何筛选条件', () => {
+    /**
+     * ── 用户 2026-10-02 ──
+     * 「『命中目标 1 条』的意义?**采集数据就是全面的采集,没有数据研判的功能呀?**」
+     * ⭐ 对的 —— 「哪些算有用、够不够」是上层拿到数据之后的事。
+     * ⚠️ 剥注释后再扫:注释里记账「原来有 wantUrlIncludes,已删」不算违规。
+     */
+    const src = strip(readFileSync(
+      resolve(__dirname, '../../src/platform/main/web-capability/acquire/types.ts'), 'utf-8',
+    ));
+    const goal = src.slice(src.indexOf('export type AcquireGoal'));
+    const body = goal.slice(0, goal.indexOf('\n};'));
+    expect(body.length, '切片是空的').toBeGreaterThan(10);
+    for (const bad of ['wantUrlIncludes', 'wantAtLeast', 'filter', 'match']) {
+      expect(body, `AcquireGoal 里出现了筛选条件「${bad}」—— 研判又被塞回采集了`)
+        .not.toContain(bad);
+    }
   });
 
-  it('⭐⭐ 等不到就超时 —— **不无限等**', async () => {
-    const { d } = deps({ pool: [] });
+  it('⭐⭐ 报告里没有 `wanted`', () => {
+    const src = strip(readFileSync(
+      resolve(__dirname, '../../src/platform/main/web-capability/acquire/types.ts'), 'utf-8',
+    ));
+    const rep = src.slice(src.indexOf('export type AcquireReport'));
+    expect(rep.slice(0, rep.indexOf('\n};'))).not.toMatch(/readonly wanted\s*:/);
+  });
+
+  it('⭐ problems 只报采集自己的问题 —— 不报「不够用」', () => {
+    const src = strip(readFileSync(
+      resolve(__dirname, '../../src/platform/main/web-capability/acquire/acquire.ts'), 'utf-8',
+    ));
+    expect(src, '采集层在判断「够不够」—— 那是研判').not.toContain('不足目标');
+    expect(src, '采集层在判断「有没有用」').not.toContain('没有一条');
+    // ⭐ 反向锁:剥过头会让上面恒绿
+    expect(src, '剥过头了 —— 断言恒真').toContain('finishAcquire');
+  });
+});
+
+describe('⚠️ awaitFor:可选的便利函数,仍不碰页面', () => {
+  it('⭐ 收一段时间就返回 —— 不做任何研判', async () => {
+    const { d } = deps({ pool: [item('https://x.com/a')] });
     const sleep = vi.fn(async () => undefined);
-    const r = await awaitEnough(d, PAGE, { wantAtLeast: 5, maxMs: 500 }, sleep);
-    expect(r.stopReason, '没超时就返回了?').toContain('超时');
-    expect(r.ok, '什么都没收到却报采全').toBe(false);
+    const r = await awaitFor(d, PAGE, 500, sleep);
+    expect(sleep, '没等就返回了').toHaveBeenCalled();
+    expect(r.ok, '收到了东西却报问题').toBe(true);
+    expect(r.items.length).toBe(1);
   });
 });

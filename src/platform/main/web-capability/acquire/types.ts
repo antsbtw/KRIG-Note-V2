@@ -34,22 +34,16 @@ import type { PageId } from '../page/types';
  */
 export type AcquireGoal = {
   /**
-   * ⭐ 想要的内容的判据 —— URL 里含这些片段的响应才算「要的东西」。
-   * 空/不给 = 全都要(调试台用)。
+   * ⚠️⚠️ **本类型已清空** —— 2026-10-02 用户:
+   * 「『命中目标 1 条』的意义?**采集数据就是全面的采集,没有数据研判的功能呀?**」
    *
-   * ⚠️ 这是**调用方的业务知识**,底座不猜:
-   * X 要的是 `/i/api/graphql/`,论坛可能要 `/api/posts`。
-   */
-  readonly wantUrlIncludes?: readonly string[];
-  /**
-   * ⭐⭐ **采够多少条就算够了**。不给 = 不以条数为判据。
-   * ⚠️ 它是**下限不是上限**:达到就可以停,但不会因此丢掉已采到的。
-   */
-  readonly wantAtLeast?: number;
-  /**
-   * ⚠️ **没有 `maxRounds`** —— 滚几轮是**控制**的事,不是采集的事
-   * (2026-10-02 用户:「控制是控制,采集是采集」)。
-   * 采集只负责「收到了什么、够不够」,页面怎么动由控制那栏决定。
+   * ⭐ 对的。我原来放了 `wantUrlIncludes` / `wantAtLeast`,
+   * 那是把**研判**(哪些算有用、够不够)塞进了**采集**。
+   * 采集只该回答一件事:**收到了什么**。
+   * 「这些够不够、哪条有用」是上层(业务模块)拿到数据之后的事。
+   *
+   * ⚠️ 留着这个空类型是为了 `awaitEnough` 的超时安全网,
+   * **不是**为了将来往里塞筛选条件 —— 真要筛,在上层筛。
    */
   /** 最长等多久(毫秒)—— ⚠️ 安全网,防「等一个永远不来的载荷」 */
   readonly maxMs?: number;
@@ -83,8 +77,12 @@ export type AcquireReport = {
   readonly problems: readonly string[];
   /** 合并去重后的完整结果 */
   readonly items: readonly AcquiredItem[];
-  /** 其中命中 `wantUrlIncludes` 的有几条 */
-  readonly wanted: number;
+  /**
+   * ⚠️ **没有 `wanted`** —— 2026-10-02 删:
+   * 「命中了几条」是**研判**,不是采集的事(用户原话:
+   * 「采集数据就是全面的采集,没有数据研判的功能呀?」)。
+   * ⭐ 想知道「哪些是推文」,拿 `items` 去问业务模块的核对器。
+   */
   /**
    * ⚠️ **没有 rounds / scrolledPx** —— 那是控制那栏的报告
    * (`ScrollReport` 已经有了),采集不该重复记一份。

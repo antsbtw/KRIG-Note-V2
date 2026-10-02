@@ -165,6 +165,28 @@ export type WebDomInvoke =
    * 单点依赖本身就是缺陷:一条腿收不到时,分不清
    * 「站点没发」还是「我们没收到」(2026-10-02 七轮排查的根因)。
    */
+  /**
+   * ⭐⭐ **面板动作落盘** —— 让「人点了什么」能被读到。
+   *
+   * ── 2026-10-02 实测逼出来的 ──
+   * 连续两轮测试都卡在同一步:留痕里有 `acquire-start`、有 `scroll`,
+   * 就是**没有 `acquire-stop`**。而我**读不到面板的状态**
+   * (running / 按钮灰不灰 / 人点了哪个),只能反复静态推断 —— 查了四轮没结论。
+   *
+   * ⚠️ 这正是 `feedback-maintainability-over-feature-completion` 的下一处:
+   * 主进程的动作有留痕,**renderer 的动作没有** ——
+   * 于是「人点了但没发出去」与「人没点」长得一模一样。
+   *
+   * ⭐ 它只记事实:哪个按钮、当时的状态、结果。不改任何行为。
+   */
+  | {
+      readonly op: 'uiTrace';
+      readonly pageRef: WebDomPageRef;
+      /** 按钮/动作名 */
+      readonly action: string;
+      /** 当时面板的关键状态 —— ⚠️ 只放判断用得上的,不放全量 state */
+      readonly state?: Readonly<Record<string, string | number | boolean | null>>;
+    }
   // ── ⭐⭐ 采集(输出栏)—— **只管收,不碰页面** ──
   /**
    * ⭐⭐ 开始收。**立即返回**,不等。

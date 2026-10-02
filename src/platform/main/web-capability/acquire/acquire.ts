@@ -28,15 +28,6 @@ export const DEFAULT_MAX_MS = 120_000;
 /** 查一次「够了没」的间隔 */
 export const POLL_MS = 400;
 
-function hits(item: AcquiredItem, want: readonly string[]): boolean {
-  if (want.length === 0) return true;
-  return want.some((w) => item.url.includes(w));
-}
-
-function countWanted(items: readonly AcquiredItem[], want: readonly string[]): number {
-  return items.filter((x) => hits(x, want)).length;
-}
-
 /**
  * ⭐ 开始收。**立即返回**,不等 —— 页面怎么动由控制那栏决定。
  *
@@ -60,38 +51,31 @@ export async function startAcquire(
 export function finishAcquire(
   deps: AcquireDeps,
   pageId: PageId,
-  goal: AcquireGoal = {},
   startedAt?: number,
 ): AcquireReport {
-  const want = goal.wantUrlIncludes ?? [];
   deps.stopAll(pageId);
 
   const items = [...deps.snapshot(pageId)];
-  const wanted = countWanted(items, want);
   const legStats = deps.legStats(pageId);
   const fromCount = (k: AcquiredItem['from']): number => items.filter((x) => x.from === k).length;
 
+  /**
+   * ⭐⭐ `problems` —— **只报采集本身的问题**,不做研判。
+   *
+   * ⚠️ 2026-10-02 删掉了「没一条命中目标」「不足目标条数」两条:
+   * 那是**研判**(哪些算有用、够不够),不是采集的事
+   * (用户:「采集数据就是全面的采集,没有数据研判的功能呀?」)。
+   * ⭐ 采集只知道一件事:**一条都没收到** —— 那才是它自己的问题。
+   */
   const problems: string[] = [];
   if (items.length === 0) {
     problems.push('一条响应都没有 —— 页面可能没发请求(先去控制那栏翻页/滚动),或两条腿都失效');
-  } else if (want.length > 0 && wanted === 0) {
-    problems.push(
-      `采到 ${items.length} 条响应,但**没有一条**命中目标(${want.join(' / ')})`
-      + ' —— 可能页面不对,或该站点的接口路径变了',
-    );
-  }
-  if (goal.wantAtLeast !== undefined && wanted < goal.wantAtLeast) {
-    problems.push(
-      `只采到 ${wanted} 条,不足目标 ${goal.wantAtLeast} 条 —— `
-      + '结果不完整(**去控制那栏多翻几页**再回来停)',
-    );
   }
 
   return {
     ok: problems.length === 0,
     problems,
     items,
-    wanted,
     elapsedMs: startedAt === undefined ? 0 : deps.now() - startedAt,
     stopReason: '人工停止',
     legs: {
@@ -99,7 +83,6 @@ export function finishAcquire(
       hook: fromCount('hook'),
       both: fromCount('both'),
       hookInjected: legStats.hookInjected,
-      // ⚠️ 到这一步已经停了,只能回报当下是否仍有腿在 —— 如实说
       cdpAttached: fromCount('cdp') + fromCount('both') > 0,
     },
   };
@@ -112,16 +95,11 @@ export function finishAcquire(
 export function peekAcquire(
   deps: AcquireDeps,
   pageId: PageId,
-  goal: AcquireGoal = {},
-): { total: number; wanted: number; cdp: number; hook: number; both: number } {
+): { total: number; cdp: number; hook: number; both: number } {
   const items = deps.snapshot(pageId);
-  const want = goal.wantUrlIncludes ?? [];
   const n = (k: AcquiredItem['from']): number => items.filter((x) => x.from === k).length;
-  return {
-    total: items.length,
-    wanted: countWanted(items, want),
-    cdp: n('cdp'), hook: n('hook'), both: n('both'),
-  };
+  // ⚠️ 只报**收到了多少** —— 「其中几条有用」是上层的事
+  return { total: items.length, cdp: n('cdp'), hook: n('hook'), both: n('both') };
 }
 
 /**
@@ -131,27 +109,15 @@ export function peekAcquire(
  * 页面该怎么动由调用方在**另一条线**上做(控制那栏)。
  * ⚠️ 没有调用方时不要保留它:本仓「建好了没接线」已栽过五次。
  */
-export async function awaitEnough(
+export async function awaitFor(
   deps: AcquireDeps,
   pageId: PageId,
-  goal: AcquireGoal,
+  ms: number,
   sleep: (ms: number) => Promise<void>,
 ): Promise<AcquireReport> {
   const t0 = deps.now();
-  const maxMs = goal.maxMs ?? DEFAULT_MAX_MS;
-  const want = goal.wantUrlIncludes ?? [];
-
   await startAcquire(deps, pageId);
-  while (deps.now() - t0 < maxMs) {
-    if (goal.wantAtLeast !== undefined
-      && countWanted(deps.snapshot(pageId), want) >= goal.wantAtLeast) break;
-    await sleep(POLL_MS);
-  }
-  const r = finishAcquire(deps, pageId, goal, t0);
-  return {
-    ...r,
-    stopReason: r.wanted >= (goal.wantAtLeast ?? 0)
-      ? `已采够 ${r.wanted} 条(目标 ${goal.wantAtLeast})`
-      : `等到 ${maxMs}ms 超时,只采到 ${r.wanted} 条`,
-  };
+  await sleep(ms);
+  const r = finishAcquire(deps, pageId, t0);
+  return { ...r, stopReason: `收了 ${ms}ms` };
 }
