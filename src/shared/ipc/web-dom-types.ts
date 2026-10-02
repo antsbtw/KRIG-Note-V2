@@ -153,6 +153,27 @@ export type WebDomInvoke =
    * (与 `goto` 只收语义名同一道理)。
    */
   | { readonly op: 'reload'; readonly pageRef: WebDomPageRef }
+  // ── ⭐⭐ 第二条腿:页面内网络钩子(M4)—— 2026-10-02 ──
+  /**
+   * 装页面内钩子(覆写 XHR/fetch)。⚠️ **幂等**。
+   *
+   * ── 用户 2026-10-02 ──
+   * 「要**充分利用几种方法**获取数据,而不是单独依赖 CDP。」
+   * 「web 能力层应该具备**所有获取网页内容的能力**。」
+   *
+   * ⭐ 与 CDP 那条腿(`captureStart`)**平级并存,各记各的** ——
+   * 单点依赖本身就是缺陷:一条腿收不到时,分不清
+   * 「站点没发」还是「我们没收到」(2026-10-02 七轮排查的根因)。
+   */
+  | { readonly op: 'hookStart'; readonly pageRef: WebDomPageRef }
+  | { readonly op: 'hookStop'; readonly pageRef: WebDomPageRef }
+  | { readonly op: 'hookStats'; readonly pageRef: WebDomPageRef }
+  | {
+      readonly op: 'hookList';
+      readonly pageRef: WebDomPageRef;
+      readonly limit?: number;
+    }
+  | { readonly op: 'hookClear'; readonly pageRef: WebDomPageRef }
   /** 滚动直到某判据 —— ⭐ 只管滚,不管抓(抓是 `capture` 的事) */
   | {
       readonly op: 'scrollUntil';

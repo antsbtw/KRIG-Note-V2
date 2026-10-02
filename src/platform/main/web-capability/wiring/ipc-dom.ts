@@ -37,6 +37,8 @@ import {
   identifySemanticPage, netBus, bodyProvider, traceRecorder,
 } from './runtime';
 import { CaptureSession } from '../net/capture-session';
+import { HookSession } from '../hook/hook-session';
+import { toHookHost } from './electron-hook-host';
 import { toPageHost } from './electron-page-host';
 import { wireWebRequestSideOn, registerPageIdLookup } from './webrequest-side';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
@@ -127,6 +129,15 @@ const loggedMiss = new Set<number>();
  */
 const scrollCancelled = new Set<PageId>();
 
+/**
+ * ⭐⭐ **第二条腿**:页面内钩子会话(M4)—— 与 `sessionsByPageId`(CDP 腿)平级。
+ *
+ * 用户 2026-10-02:「要充分利用几种方法获取数据,而不是单独依赖 CDP」。
+ * ⚠️ 两条腿**各记各的,绝不合并计数** —— 合并就失去了互证能力,
+ * 而「没有第二个视角可以互证」正是那次七轮排查的根因。
+ */
+const hooksByPageId = new Map<PageId, HookSession>();
+
 /** 取或建会话 —— ⚠️ 不自动 start,开始捕是人的显式动作 */
 function sessionFor(pageId: PageId): CaptureSession {
   const existing = sessionsByPageId.get(pageId);
@@ -192,6 +203,9 @@ function resolve(ref: WebDomPageRef): { wc: WebContents; pageId: PageId } | { er
      */
     sessionsByPageId.get(facts.pageId)?.stop();
     sessionsByPageId.delete(facts.pageId);
+    // ⚠️ 第二条腿也要清 —— 同样的理由:不清会一直持有死页面的引用
+    hooksByPageId.get(facts.pageId)?.stop();
+    hooksByPageId.delete(facts.pageId);
   });
   return { wc, pageId: facts.pageId };
 }
@@ -556,6 +570,74 @@ export function registerWebDomIpc(): void {
             });
             console.log(`[web.page] 已重载(捕获中)pageId=${pageId} ${before}`);
             return { status: 'ok', value: { reloaded: true, url: before } };
+          }
+          // ── ⭐⭐ 第二条腿:页面内钩子(M4)──
+          case 'hookStart': {
+            let hook = hooksByPageId.get(pageId);
+            if (!hook) {
+              hook = new HookSession(toHookHost(wc), pageId, (r) => {
+                traceRecorder.lifecycle({
+                  layer: 'web.net',
+                  event: 'hook-first-payload',
+                  pageId: String(pageId),
+                  detail: { via: r.via, url: r.url, byteLength: r.byteLength },
+                });
+                console.log(`[web.hook] ⭐ 首条(${r.via}) ${r.byteLength}B ${r.url}`);
+              });
+              hooksByPageId.set(pageId, hook);
+            }
+            await hook.start();
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: 'hook-start',
+              pageId: String(pageId),
+              detail: { url: wc.getURL() },
+            });
+            console.log(`[web.hook] 页面内钩子已装 pageId=${pageId}`);
+            return { status: 'ok', value: hook.stats() };
+          }
+          case 'hookStop': {
+            const hook = hooksByPageId.get(pageId);
+            if (!hook) return failed('[web.hook ipc] 这个页面没有钩子会话');
+            hook.stop();
+            const st = hook.stats();
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: 'hook-stop',
+              pageId: String(pageId),
+              detail: {
+                hooked: st.hooked,
+                lost: st.lost,
+                injected: st.injected,
+                url: wc.getURL(),
+                /** ⭐ 记下钩到了**什么** —— 只记路径尾段+KB,不记正文 */
+                payloads: hook.list(40).map((x) => ({
+                  via: x.via,
+                  tail: x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)',
+                  kb: Math.round(x.byteLength / 102.4) / 10,
+                })),
+              },
+            });
+            console.log(
+              `[web.hook] 已停 pageId=${pageId} —— hooked=${st.hooked} lost=${st.lost}`,
+            );
+            return { status: 'ok', value: st };
+          }
+          case 'hookStats': {
+            const hook = hooksByPageId.get(pageId);
+            // ⚠️ 没会话时如实回「全 0 且未注入」,不报错 —— 面板要能轮询
+            return {
+              status: 'ok',
+              value: hook?.stats()
+                ?? { hooked: 0, lost: 0, held: 0, running: false, injected: false },
+            };
+          }
+          case 'hookList':
+            return { status: 'ok', value: hooksByPageId.get(pageId)?.list(p.limit) ?? [] };
+          case 'hookClear': {
+            const hook = hooksByPageId.get(pageId);
+            hook?.clear();
+            return { status: 'ok', value: hook?.stats() ?? null };
           }
           case 'scrollStop':
             scrollCancelled.add(pageId);

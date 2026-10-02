@@ -97,6 +97,25 @@ type CaptureStats = {
   running: boolean;
 };
 
+/**
+ * ⭐⭐ **第二条腿**(页面内钩子 M4)的计数 —— 与 CDP 那条**并排显示**。
+ *
+ * 用户 2026-10-02:「要充分利用几种方法获取数据,而不是单独依赖 CDP。」
+ * ⚠️ 两条腿的数**不合并** —— 并排才能互证:
+ * · 两边都有 → 链路健康
+ * · CDP 有、钩子没有 → 注入没生效(看 `injected`)
+ * · 钩子有、CDP 没有 → ⭐ CDP 漏了(流式响应/竞态),而数据**没丢**
+ * · 两边都没有 → 站点真的没发
+ */
+type HookStats = {
+  hooked: number;
+  lost: number;
+  held: number;
+  running: boolean;
+  /** ⚠️ 注入是否真生效 —— 没生效时 hooked 恒 0,但那是两种完全不同的事 */
+  injected: boolean;
+};
+
 /** 一条攒下来的载荷 —— ⭐ 原样文本,面板不解析 */
 type CapturedPayload = {
   requestId: string;
@@ -134,6 +153,8 @@ export function XConsole(
   const [payloads, setPayloads] = useState<CapturedPayload[]>([]);
   /** 展开看原样 JSON 的那一条 */
   const [openPayload, setOpenPayload] = useState<string | null>(null);
+  /** 第二条腿的计数 —— ⚠️ `null` = 还没问过,与「问过了是 0」不是一回事 */
+  const [hook, setHook] = useState<HookStats | null>(null);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -216,6 +237,10 @@ export function XConsole(
     const timer = setInterval(() => {
       void window.electronAPI?.webDomInvoke?.({ op: 'captureStats', pageRef: { wcId } })
         .then((r) => { if (r.status === 'ok') setStats(r.value as CaptureStats); })
+        .catch(() => undefined);
+      // ⭐ 第二条腿一起轮 —— 两边的数要同时看得见才能互证
+      void window.electronAPI?.webDomInvoke?.({ op: 'hookStats', pageRef: { wcId } })
+        .then((r) => { if (r.status === 'ok') setHook(r.value as HookStats); })
         // ⚠️ 轮询失败不进留痕(会刷满),但也不能静默 —— 由下一次轮询自愈;
         //    真故障会在 channelFailures 计数里出现
         .catch(() => undefined);
@@ -594,6 +619,80 @@ export function XConsole(
           )}
           {stats?.lastChannelFailure && (
             <div style={S.failLine}>最后一条通道故障：{stats.lastChannelFailure}</div>
+          )}
+
+          {/*
+            ⭐⭐ **第二条腿**:页面内钩子(M4)—— 用户 2026-10-02:
+            「要充分利用几种方法获取数据，而不是单独依赖 CDP。」
+            ⚠️ 与上面那行**并排不合并** —— 合并就失去了互证能力,
+            　 而「没有第二个视角可以互证」正是那次七轮排查的根因。
+          */}
+          <div style={S.row}>
+            <span style={{ fontSize: 10, opacity: 0.6, width: 64 }}>页面内钩子</span>
+            <button
+              type="button"
+              disabled={wcId == null || hook?.running === true}
+              onClick={async () => {
+                await call('hookStart', { op: 'hookStart', pageRef: { wcId: wcId! } });
+                const r = await window.electronAPI!.webDomInvoke({
+                  op: 'hookStats', pageRef: { wcId: wcId! },
+                });
+                if (r.status === 'ok') setHook(r.value as HookStats);
+              }}
+              style={S.btn}
+              title="在页面里覆写 XHR/fetch —— 与 CDP 那条腿互为对照"
+            >
+              装钩子
+            </button>
+            <button
+              type="button"
+              disabled={wcId == null || !hook?.running}
+              onClick={async () => {
+                const r = await window.electronAPI!.webDomInvoke({
+                  op: 'hookStop', pageRef: { wcId: wcId! },
+                });
+                if (r.status === 'ok') setHook(r.value as HookStats);
+              }}
+              style={S.btn}
+            >
+              停钩子
+            </button>
+          </div>
+          {hook && (
+            <div style={S.statRow}>
+              <Stat label="hooked" v={hook.hooked} tone={hook.hooked > 0 ? 'good' : 'idle'}
+                hint="页面内钩到并送回来的条数" />
+              <Stat label="lost" v={hook.lost} tone={hook.lost > 0 ? 'warn' : 'idle'}
+                hint="⚠️ 钩到了但送回失败（payload 被截断／形状不对）" />
+              <Stat label="攒着" v={hook.held} tone="idle" hint="当前存了几条（封顶 64）" />
+              <div style={S.stat} title="注入是否真生效 —— 没生效时 hooked 恒 0，但那是两回事">
+                <div style={{ color: hook.injected ? '#8fd9a8' : '#888', fontSize: 15, lineHeight: 1.2 }}>
+                  {hook.injected ? '✓' : '—'}
+                </div>
+                <div style={{ fontSize: 10, opacity: 0.7 }}>已注入</div>
+              </div>
+            </div>
+          )}
+
+          {/*
+            ⭐⭐⭐ **互证判读** —— 这是两条腿真正的价值所在。
+            ⚠️ 没有这一段的话,人看到两行数字也不知道该查哪边。
+          */}
+          {stats && hook && (stats.captured > 0 || hook.hooked > 0) && (
+            <div style={S.diagnose}>
+              {hook.hooked > 0 && stats.captured === 0 && (
+                <>⭐ <strong>钩子拿到了、CDP 没有</strong> —— CDP 这条腿漏了（流式响应或竞态），
+                但<strong>数据没丢</strong>。</>
+              )}
+              {stats.captured > 0 && hook.hooked === 0 && hook.running && (
+                <>⚠️ <strong>CDP 拿到了、钩子没有</strong> ——{' '}
+                {hook.injected ? '注入生效了却钩不到，可能站点用了 sendBeacon／WebSocket。'
+                  : '注入没生效（已注入＝—），先点「捕获中重载」让脚本抢在站点之前跑。'}</>
+              )}
+              {stats.captured > 0 && hook.hooked > 0 && (
+                <>✅ <strong>两条腿都拿到了</strong> —— 链路健康，可互相对账。</>
+              )}
+            </div>
           )}
           {stats && stats.captured === 0 && stats.noBody > 0 && (
             /*
