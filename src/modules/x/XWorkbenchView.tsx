@@ -29,7 +29,7 @@ import type { ViewComponentProps } from '@slot/view-type-registry/view-definitio
 
 import { useSyncExternalStore } from 'react';
 import { XConsole } from './XConsole';
-import { getXHostWcId, subscribeXHost } from './x-host-registry';
+import { getXHostState, subscribeXHost } from './x-host-registry';
 
 export function XWorkbenchView({ workspaceId }: ViewComponentProps): ReactElement {
   /**
@@ -37,10 +37,24 @@ export function XWorkbenchView({ workspaceId }: ViewComponentProps): ReactElemen
    * ⚠️ 订阅而不是读一次:左栏可能**后于**右栏挂载,
    * 读一次会永远是 null(现象是「Console 上按钮一直灰着」)。
    */
+  /**
+   * ⚠️⚠️ **两个字段分开订阅,不整对象订阅** ——
+   * `useSyncExternalStore` 会用 `Object.is` 比 getSnapshot 的返回值,
+   * 返回对象时**只要引用变了就重渲染**。registry 目前靠「两字段都没变就
+   * 提前 return」保住引用稳定,但那是它的**内部实现**:
+   * 哪天有人在 `setXHostState` 里去掉幂等检查(看着无害),
+   * 这里就变成每次导航都无限重渲染 —— 而症状(右栏卡死)离成因很远。
+   * ⭐ 取标量就与那个实现细节脱钩了。
+   */
   const wcId = useSyncExternalStore(
     subscribeXHost,
-    () => getXHostWcId(workspaceId),
+    () => getXHostState(workspaceId)?.wcId ?? null,
+  );
+  /** ⭐ 左栏当前 URL —— Console 靠它反向识别语义页面(「对称性」) */
+  const hostUrl = useSyncExternalStore(
+    subscribeXHost,
+    () => getXHostState(workspaceId)?.url ?? '',
   );
 
-  return <XConsole wcId={wcId} />;
+  return <XConsole wcId={wcId} hostUrl={hostUrl} />;
 }

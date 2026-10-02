@@ -52,6 +52,9 @@ export type WebDomParams = Readonly<Record<string, string | number | boolean>>;
  * 就是给 renderer 一个**空头承诺**:调了必然失败,而失败原因是
  * 「底座没实现」而不是调用方的错,排查方向完全被带偏。
  * 等它们真的实现了再加 op,**那时本类型是唯一改动点**。
+ *
+ * ⭐ 2026-10-01 已加控制三个(`goto`/`ready`/`scrollUntil`),
+ * 2026-10-02 加 `identify` —— 它们都**有真实现**,不是空头承诺。
  */
 export type WebDomInvoke =
   | { readonly op: 'run'; readonly pageRef: WebDomPageRef; readonly scriptId: string; readonly params?: WebDomParams }
@@ -78,6 +81,25 @@ export type WebDomInvoke =
       readonly criterion: WebDomReadyCriterion;
       readonly timeoutMs?: number;
     }
+  /**
+   * ⭐⭐ **反向**:当前 URL → 语义页面名 + 参数(「对称性」)。
+   *
+   * 用户 2026-09-18:「点击左边时,右边自动填充变量,点击采集,即可采集。」
+   * 用户 2026-10-02:「在左边操作,右边自动识别行为并填写上参数?」
+   *
+   * ── ⚠️ 为什么**不收 pageRef**(本 op 是全家唯一一个)──
+   *
+   * 它**纯算**:问各业务的页面表「这个 URL 是哪一页」,不读页面、不改页面。
+   * 收 pageRef 会迫使 main 侧走 `resolve()`——
+   * 那条路会**登记一条 PageFacts 并 bindPageHost**(有副作用),
+   * 于是「问一句这是哪页」变成了「注册一个页面」。
+   * ⭐ 判据:本 op 在 webview 已关闭时也该照样能回答。
+   *
+   * ⚠️ 认不出来回 `ok` + `value: null`,**不是 failed** ——
+   * 「这页我不认识」是正常答案(人可能在 x.com 的设置页),
+   * 报 failed 会让留痕里堆满红条,真故障就被淹了。
+   */
+  | { readonly op: 'identify'; readonly url: string }
   /** 滚动直到某判据 —— ⭐ 只管滚,不管抓(抓是 `capture` 的事) */
   | {
       readonly op: 'scrollUntil';

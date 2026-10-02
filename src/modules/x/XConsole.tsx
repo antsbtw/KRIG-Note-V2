@@ -22,6 +22,19 @@
  *
  * 骨架 + 控制那栏接通。输入/输出两栏先占位 ——
  * ⭐ 把「能不能调通」与「调得对不对」分开验。
+ *
+ * ── ⭐⭐ 对称性(2026-10-02 加)──
+ *
+ * 用户:「在左边操作,右边自动识别行为并填写上参数?」
+ *
+ * ⚠️⚠️ **做成「建议」而不是「自动覆盖」** —— 这是刻意的取舍:
+ * 自动跟随左栏会在两种场合咬人,
+ * ① 人在右栏打了一半参数,左栏一跳转就被冲掉;
+ * ② 更贵的那次 —— 记忆 `project-x-collect-panel-scraped-homepage`:
+ *    「跟着左边走」把人选好的 `x.profile` **静默改成** `x.home`,
+ *    结果爬了自己 For You 首页 1281 条、703 轮、30 分钟,污染入库。
+ *    真因正是**自动跟随覆盖了人的选择且不出声**。
+ * ⭐ 所以这里只**显示**识别结果,人点「用它」才写进下拉与参数框。
  */
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
@@ -36,6 +49,14 @@ type PageTable = {
   hints: Record<string, string>;
 };
 
+/** 左栏当前页的识别结果(来自底座 `identify`,不是面板自己 parse 的) */
+type Identified = {
+  /** ⭐ 记下是**哪个 URL** 认出来的 —— 免得 URL 已变而建议还是旧的 */
+  url: string;
+  name: string;
+  params: Record<string, string>;
+};
+
 /** 一次调用的留痕 —— ⭐ 存**整个 Result**,不只存成功与否 */
 type LogEntry = {
   at: string;
@@ -43,13 +64,20 @@ type LogEntry = {
   result: WebDomResult | { status: 'error'; reason: string };
 };
 
-export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
+export function XConsole(
+  { wcId, hostUrl }: { wcId: number | null; hostUrl: string },
+): ReactElement {
   const [tables, setTables] = useState<PageTable[]>([]);
   const [pageName, setPageName] = useState('');
   /** 参数值:`{ handle: 'elonmusk' }` —— ⭐ 字段**由真表决定**,不写死 */
   const [paramVals, setParamVals] = useState<Record<string, string>>({});
   const [log, setLog] = useState<LogEntry[]>([]);
   const [busy, setBusy] = useState(false);
+  /**
+   * 左栏当前页的识别结果 —— ⭐ 只用于**显示建议**,不自动写进上面的下拉。
+   * `null` = 底座说「不认识这一页」(正常答案,不是故障)。
+   */
+  const [identified, setIdentified] = useState<Identified | null>(null);
 
   /**
    * ⭐ 页面名**从真表读**,面板不抄一份。
@@ -66,6 +94,35 @@ export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
       }, ...l]);
     });
   }, []);
+
+  /**
+   * ⭐⭐ 对称性:左栏 URL 一变就问底座「这是哪一页」。
+   *
+   * ⚠️ 识别走**底座的 `identify`**(各业务页面表的反向),
+   * 面板**绝不自己 parse x.com 的 URL** ——
+   * 自己 parse 就有了第二份规则,而漂的表现是
+   * 「自动填的和实际采的不是同一页」(`control-types.ts` 原话)。
+   *
+   * ⚠️ 这一路**不进留痕**:它每次导航都跑,会把 50 条留痕瞬间刷没,
+   * 真正要看的 goto/scroll 返回值就被淹了。失败只落到 `identified`。
+   */
+  useEffect(() => {
+    if (!hostUrl) { setIdentified(null); return; }
+    let alive = true;
+    void window.electronAPI?.webDomInvoke?.({ op: 'identify', url: hostUrl })
+      .then((r) => {
+        if (!alive) return;
+        // ⚠️ `ok` + `value: null` = 认不出来(正常);非 ok 才是真出错
+        if (r.status === 'ok') {
+          const v = r.value as { name: string; params: Record<string, string> } | null;
+          setIdentified(v ? { url: hostUrl, ...v } : null);
+        } else {
+          setIdentified(null);
+        }
+      })
+      .catch(() => { if (alive) setIdentified(null); });
+    return () => { alive = false; };
+  }, [hostUrl]);
 
   const call = useCallback(async (label: string, payload: WebDomInvoke) => {
     setBusy(true);
@@ -111,6 +168,46 @@ export function XConsole({ wcId }: { wcId: number | null }): ReactElement {
       {/* ── 控制 ── */}
       <section style={S.section}>
         <div style={S.sectionTitle}>控制（web.page）</div>
+
+        {/*
+          ⭐⭐ 对称性:左栏在哪一页 —— **建议,不自动覆盖**。
+          ⚠️ 为什么留「用它」这一下:自动写会冲掉人正在填的参数,
+          　 更贵的那次是 2026-09-07「跟着左边走」把 x.profile 静默改成 x.home
+          　 → 爬了首页 1281 条污染入库。见本文件头注释。
+        */}
+        <div style={S.suggest}>
+          {!hostUrl && <span style={{ opacity: 0.5 }}>左栏还没导航。</span>}
+          {hostUrl && identified && identified.url === hostUrl && (
+            <>
+              <span>左栏在 </span>
+              <code style={S.code}>{identified.name}</code>
+              {Object.entries(identified.params).map(([k, v]) => (
+                <code key={k} style={S.code}>{`${k}=${v}`}</code>
+              ))}
+              <button
+                type="button"
+                onClick={() => {
+                  setPageName(identified.name);
+                  // ⭐ 整份替换而非 merge:留着上一页的残参数会**混搭成一个不存在的页**
+                  setParamVals(identified.params);
+                }}
+                style={S.btn}
+              >
+                用它
+              </button>
+            </>
+          )}
+          {hostUrl && !(identified && identified.url === hostUrl) && (
+            /*
+              ⚠️ 「不认识」是**正常答案**(人可能停在设置页/登录页),
+              　 所以用灰字不用报错色 —— 染红会让人去查一个不存在的故障。
+            */
+            <span style={{ opacity: 0.5 }}>
+              这一页没有对应的语义名（{shortUrl(hostUrl)}）
+            </span>
+          )}
+        </div>
+
         <div style={S.row}>
           <select
             value={pageName}
@@ -215,6 +312,17 @@ function badgeStyle(status: string): React.CSSProperties {
   return { background: '#4d1f1f', color: '#d98f8f' };
 }
 
+/** URL 截短显示 —— ⚠️ 只为显示,**不参与任何判断**(判断一律用完整 URL) */
+function shortUrl(u: string): string {
+  try {
+    const x = new URL(u);
+    const p = x.pathname + x.search;
+    return x.hostname + (p.length > 40 ? p.slice(0, 40) + '…' : p);
+  } catch {
+    return u.length > 50 ? u.slice(0, 50) + '…' : u;
+  }
+}
+
 const S: Record<string, React.CSSProperties> = {
   root: {
     display: 'flex', flexDirection: 'column', gap: 10, padding: 12,
@@ -232,6 +340,14 @@ const S: Record<string, React.CSSProperties> = {
     display: 'flex', alignItems: 'center', gap: 8,
   },
   row: { display: 'flex', gap: 6, alignItems: 'center' },
+  suggest: {
+    display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap',
+    fontSize: 11, padding: '4px 0', minHeight: 24,
+  },
+  code: {
+    background: '#232323', border: '1px solid #3a3a3a', borderRadius: 3,
+    padding: '1px 5px', color: '#bda', fontSize: 11,
+  },
   input: {
     flex: 1, background: '#1b1b1b', border: '1px solid #3a3a3a',
     borderRadius: 4, color: '#ddd', fontSize: 12, padding: '4px 6px',

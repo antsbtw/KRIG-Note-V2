@@ -34,6 +34,7 @@ import type {
 } from '@shared/ipc/web-dom-types';
 import {
   controlEngine, domRunner, pageRegistry, scriptRegistry, listPageNames,
+  identifySemanticPage,
 } from './runtime';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
 import type { AnchorName } from '../dom/types';
@@ -200,6 +201,28 @@ export function registerWebDomIpc(): void {
       const p = payload as WebDomInvoke | null;
       if (!p || typeof p !== 'object' || typeof p.op !== 'string') {
         return failed('[web.dom ipc] 入参非法:缺 op');
+      }
+
+      /**
+       * ⭐⭐ `identify` 在 `resolve` **之前**分流 —— 它是全家唯一不收 pageRef 的 op。
+       *
+       * ⚠️ 不分流会怎样:`resolve()` 看到 `pageRef === undefined` 就报
+       * 「pageRef.wcId 非法: undefined」—— 一句**诚实但完全误导**的错,
+       * 人会去查 wcId 怎么没传,而真因是「这个 op 本来就不需要它」。
+       *
+       * ⭐ 而且 `resolve()` **有副作用**(register + bindPageHost):
+       * 让纯查询走它,等于问一句话就注册一个页面。
+       */
+      if (p.op === 'identify') {
+        if (typeof p.url !== 'string' || !p.url) {
+          return failed('[web.page ipc] identify 缺 url');
+        }
+        /**
+         * ⚠️ 认不出来回 `ok` + `null`,**不是 failed** ——
+         * 「这页我不认识」是正常答案(人可能停在 x.com 的设置页)。
+         * 报 failed 会让留痕里堆满红条,真故障被淹掉。
+         */
+        return { status: 'ok', value: identifySemanticPage(p.url) };
       }
 
       const got = resolve(p.pageRef);

@@ -33,7 +33,7 @@ import { requireCapabilityApi } from '@slot/capability-registry/get-capability-a
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
 import type { HostHandle, HostProps } from '@capabilities/web-rendering';
-import { setXHostWcId, clearXHostWcId } from './x-host-registry';
+import { setXHostState, clearXHostState } from './x-host-registry';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -66,12 +66,28 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
    *
    * ⚠️ 卸载时必须清 —— 不清的话右栏会拿着一个已销毁的 wcId 反复失败。
    */
-  const registerWc = useCallback(() => {
+  /**
+   * ⭐ 最后一次 displayUrl —— ⚠️ **用 ref 不用 state**。
+   *
+   * ⚠️⚠️ 为什么:登记函数与 `setUrl(u)` 在**同一个回调里并列调用**,
+   * 那时 `url` state 还是**上一页**的值(setState 不同步生效)。
+   * 读 state 登记就会落后一页,现象是右栏识别结果**永远慢一拍**:
+   * 人点进 A 的主页,右栏填的是上一页。
+   *
+   * ⭐ ref 与 state **在同一行同时赋值**,所以不是「两份真源」——
+   * state 只管渲染(传给 Host 的 currentUrl),ref 只管登记。
+   * ⚠️ 不能只留 ref:Host 的 currentUrl 是受控 prop,必须走 state。
+   * ⚠️ 也不能让登记函数收参数了就算完 —— `onLoadingChanged` 那一路
+   * 没有 URL 参数可传,只能读这里,所以真源必须是 ref 而不是 state。
+   */
+  const lastUrlRef = useRef(X_HOME);
+
+  const registerHost = useCallback(() => {
     const id = hostRef.current?.getWebContentsId() ?? null;
-    if (id != null) setXHostWcId(workspaceId, id);
+    if (id != null) setXHostState(workspaceId, id, lastUrlRef.current);
   }, [workspaceId]);
 
-  useEffect(() => () => clearXHostWcId(workspaceId), [workspaceId]);
+  useEffect(() => () => clearXHostState(workspaceId), [workspaceId]);
 
   /**
    * ⊞ 右栏视图切换 —— ⭐ 复用**全局 SlotPicker**,不自造 toggle 逻辑
@@ -178,8 +194,13 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         translateMode={false}
         partition={`persist:webview-${workspaceId}`}
         style={{ flex: 1, width: '100%' }}
-        onDisplayUrlChanged={(u) => { setUrl(u); registerWc(); }}
-        onLoadingChanged={registerWc}
+        /**
+         * ⭐ ref 与 state **同时**赋值 —— ref 给登记用(即刻生效),
+         * state 给渲染用(Host 的受控 prop)。见 `lastUrlRef` 的注释。
+         */
+        onDisplayUrlChanged={(u) => { lastUrlRef.current = u; setUrl(u); registerHost(); }}
+        /** ⚠️ 这一路只为补「wcId 晚于首次导航才可取」—— URL 一律读 ref */
+        onLoadingChanged={registerHost}
       />
 
       {/* ⚠️ slot 只用于调试显示;真要关栏时由框架给的 slot 决定,不自己推导 */}
