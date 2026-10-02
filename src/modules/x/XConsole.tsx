@@ -39,6 +39,8 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
+import { auditTimelinePayload, summarizeAudits, type TimelineAudit } from './x-timeline-audit';
+import { X_TIMELINE_ENDPOINTS } from './x-pages';
 
 type PageTable = {
   owner: string;
@@ -146,6 +148,13 @@ export function XConsole(
    */
   const [running, setRunning] = useState(false);
   const [report, setReport] = useState<AcquireReport | null>(null);
+  /**
+   * ⭐⭐ **完整性核对**结果 —— 用户 2026-10-02:
+   * 「关键是**核对爬取的数据完整没有**。」
+   * ⚠️ 底座只知道「采到几条响应」,**一条推文都没有**时它照样报「采到 72 条」
+   * (2026-10-02 实测)。所以必须逐字段量。
+   */
+  const [audit, setAudit] = useState<ReturnType<typeof summarizeAudits> | null>(null);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -495,12 +504,31 @@ export function XConsole(
                       const r = await window.electronAPI!.webDomInvoke({
                         op: 'acquire',
                         pageRef: { wcId: wcId! },
-                        // ⭐ 调试台要「全都要」—— 业务方会给自己的判据
-                        goal: { maxRounds: 30 },
+                        /**
+                         * ⭐ 用户 2026-10-02:「测试期间,每次就爬取**两页**就够了。」
+                         * ⚠️ 「一页」= 一条 timeline 载荷(X 每次翻页回一个)——
+                         * 所以 `wantAtLeast: 2` 就是两页,不是两条推文。
+                         * ⭐ 端点清单在 `x-pages`(X 的业务知识),底座不认识它。
+                         */
+                        goal: {
+                          wantUrlIncludes: X_TIMELINE_ENDPOINTS,
+                          wantAtLeast: 2,
+                          maxRounds: 20,
+                        },
                       });
                       // ⚠️ degraded 也有数据 —— 不许当失败丢掉
                       if (r.status === 'ok' || r.status === 'degraded') {
-                        setReport(r.value as AcquireReport);
+                        const rep = r.value as AcquireReport;
+                        setReport(rep);
+                        /**
+                         * ⭐⭐ **核对完整性** —— 只核对命中目标的那些载荷。
+                         * ⚠️ 不核对的话「采到 N 条」毫无意义:
+                         * 2026-10-02 实测 captured=72 而**一条推文都没有**。
+                         */
+                        const audits: TimelineAudit[] = rep.items
+                          .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
+                          .map((it) => auditTimelinePayload(it.text));
+                        setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
                       }
                       setLog((l) => [{
                         at: new Date().toLocaleTimeString(), label: '取全这一页', result: r,
@@ -548,6 +576,50 @@ export function XConsole(
                   <div style={S.todo}>
                     {report.stopReason}　·　{(report.elapsedMs / 1000).toFixed(1)}s
                   </div>
+
+                  {/*
+                    ⭐⭐⭐ **完整性核对** —— 用户 2026-10-02:
+                    「关键是**核对爬取的数据完整没有**。」
+                    ⚠️ 上面那行「采到 N 条」说的是**响应条数**;
+                    　 2026-10-02 实测 72 条响应里**一条推文都没有**。
+                    　 所以真正要看的是下面这些。
+                  */}
+                  {audit && (
+                    <div style={S.auditBox}>
+                      <div style={{ color: 'var(--text-primary, #ddd)', marginBottom: 4 }}>
+                        完整性核对：{audit.pages} 页 ·
+                        {' '}{audit.uniqueTweets} 条推文
+                        {audit.tweets !== audit.uniqueTweets
+                          && `（原始 ${audit.tweets} 条，去重后 ${audit.uniqueTweets}）`}
+                      </div>
+                      <div style={S.statRow}>
+                        {Object.entries(audit.coverage).map(([k, v]) => (
+                          <div key={k} style={S.stat} title={`${k} 字段的覆盖率`}>
+                            <div style={{
+                              fontSize: 15,
+                              lineHeight: 1.2,
+                              // ⚠️ 100% 才算满 —— 95% 也意味着有东西丢了
+                              color: v === 100 ? '#8fd9a8' : v > 0 ? '#d9c48f' : '#777',
+                            }}>
+                              {v}%
+                            </div>
+                            <div style={{ fontSize: 10, opacity: 0.7 }}>{k}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {audit.problems.length > 0 && (
+                        <div style={{ ...S.failLine, marginTop: 4 }}>
+                          {[...new Set(audit.problems)].map((x) => <div key={x}>⚠️ {x}</div>)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {report.wanted > 0 && !audit && (
+                    <div style={S.diagnose}>
+                      ⚠️ 命中了 {report.wanted} 条目标响应，但<strong>一条推文都没解出来</strong>
+                      —— 载荷结构可能变了，展开下面的原文看看。
+                    </div>
+                  )}
                   {report.problems.length > 0 && (
                     <div style={S.diagnose}>
                       {report.problems.map((x) => <div key={x}>⚠️ {x}</div>)}
@@ -732,6 +804,10 @@ const S: Record<string, React.CSSProperties> = {
     border: '1px solid #2c2c2c', borderRadius: 4, background: '#1b1b1b',
   },
   failLine: { fontSize: 10, color: '#d98f8f', lineHeight: 1.5, wordBreak: 'break-all' },
+  auditBox: {
+    border: '1px solid var(--border-color, #333)', borderRadius: 6,
+    padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11,
+  },
   diagnose: {
     fontSize: 11, lineHeight: 1.6, color: '#d9c48f',
     background: '#2a2415', border: '1px solid #4d3f1f', borderRadius: 4, padding: '6px 8px',
