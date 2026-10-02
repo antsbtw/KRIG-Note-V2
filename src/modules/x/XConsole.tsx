@@ -41,6 +41,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 import { auditTimelinePayload, summarizeAudits, type TimelineAudit } from './x-timeline-audit';
 import { X_TIMELINE_ENDPOINTS } from './x-pages';
+import { describePayload } from './x-payload-shape';
 
 type PageTable = {
   owner: string;
@@ -635,9 +636,21 @@ export function XConsole(
               )}
               {running && (
                 <div style={S.diagnose}>
-                  <strong>② 现在去「控制」那栏翻页</strong>
-                  　—— 重载 / goto / scrollUntil，页面怎么翻由你决定。<br />
-                  翻完<strong>回到这里点「停止并核对」</strong>，才会给出数据与完整性。
+                  {/*
+                    ⚠️⚠️ **重载不是可选项,是必须的第一步** —— 2026-10-02 实测:
+                    这一轮没重载,结果 6 条全是杂项、`HomeTimeline` 一条都没有。
+                    ⭐ 真因:X 首页的 `HomeTimeline` 在**页面加载时就发完了**,
+                    　 装腿时它早已过去。重载让页面从第一条请求重新开始。
+                    ⚠️ 原来写成「重载 / goto / scrollUntil」并列,像三个可选项 ——
+                    　 那是我的表述把必须步骤降级成了选项。
+                  */}
+                  <strong>② 去「控制」那栏，按顺序做两步：</strong><br />
+                  　<strong style={{ color: '#d9c48f' }}>必须先点「重载」</strong>
+                  　—— 首屏那批请求（含 HomeTimeline）只在页面加载时发一次，
+                  不重载就永远收不到。<br />
+                  　再点「scrollUntil」翻页（X 要滚到接近底部才请求下一批，
+                  <strong>2 轮通常不够，建议 10 轮以上</strong>）。<br />
+                  翻完<strong>回到这里点「停止并核对」</strong>。
                   {peek && (
                     <div style={{ marginTop: 4, opacity: 0.85 }}>
                       {/* ⚠️ 只报**收到多少** —— 「其中几条有用」是停止后核对的事 */}
@@ -743,6 +756,27 @@ export function XConsole(
                             {openPayload === it.url + it.at ? '▾' : '▸'}
                           </span>
                         </div>
+                        {/*
+                          ⭐⭐ **每条里有什么** —— 用户 2026-10-02:
+                          「采集了几条,**每条的内容是什么,有哪些数据,有哪些元数据**?」
+                          ⚠️ 原来只显示「尾段 + KB」,人要一条条点开看原始 JSON ——
+                          　 那不叫「看得见」。
+                        */}
+                        {(() => {
+                          const sh = describePayload(it.text);
+                          return (
+                            <div style={S.shapeLine}>
+                              <span style={{ color: sh.empty || sh.notJson ? '#888' : '#9ac' }}>
+                                {sh.summary}
+                              </span>
+                              {sh.collections.length > 0 && (
+                                <span style={{ opacity: 0.6 }}>
+                                  　｜ 最大集合：{sh.collections[0].path}（{sh.collections[0].count} 项）
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {openPayload === it.url + it.at && (
                           <pre style={S.pre}>{it.text.slice(0, 20000)}
                             {it.text.length > 20000
@@ -889,6 +923,10 @@ const S: Record<string, React.CSSProperties> = {
     border: '1px solid #2c2c2c', borderRadius: 4, background: '#1b1b1b',
   },
   failLine: { fontSize: 10, color: '#d98f8f', lineHeight: 1.5, wordBreak: 'break-all' },
+  shapeLine: {
+    fontSize: 10, lineHeight: 1.6, padding: '2px 0 0 4px',
+    wordBreak: 'break-all', opacity: 0.9,
+  },
   auditBox: {
     border: '1px solid var(--border-color, #333)', borderRadius: 6,
     padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 6, fontSize: 11,
