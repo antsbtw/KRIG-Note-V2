@@ -165,6 +165,33 @@ export type WebDomInvoke =
    * 单点依赖本身就是缺陷:一条腿收不到时,分不清
    * 「站点没发」还是「我们没收到」(2026-10-02 七轮排查的根因)。
    */
+  /**
+   * ⭐⭐⭐ **把这一页的内容取全** —— 上层只说目标,不选方法。
+   *
+   * ── 用户 2026-10-02 ──
+   * 「不是选择用哪条腿 —— 你要构建**获取完整信息的函数/或者类**。
+   * 　底层能够可以做最小化的抽象函数,但**上层只关注某个具体的目标**呀。」
+   *
+   * ⭐ 一次调用内部会:所有腿一起上 → 重载(解竞态)→ 滚到够了或真到底
+   * → 合并去重 → 回一份报告。调用方**不需要知道**这些。
+   *
+   * ⚠️ 刻意**没有** `useCdp` / `reload` 这类开关:给出来就等于
+   * 让调用方替底座做决定,那正是用户点破的问题。
+   *
+   * ⚠️ 这是**长操作**(可能跑几十秒)——
+   * 调用方要能中途停,用 `scrollStop`(它会打断滚动循环)。
+   */
+  | {
+      readonly op: 'acquire';
+      readonly pageRef: WebDomPageRef;
+      /** 目标 —— 见 `AcquireGoal`。不给就是「全都要、按安全网停」 */
+      readonly goal?: {
+        readonly wantUrlIncludes?: readonly string[];
+        readonly wantAtLeast?: number;
+        readonly maxRounds?: number;
+        readonly maxMs?: number;
+      };
+    }
   | { readonly op: 'hookStart'; readonly pageRef: WebDomPageRef }
   | { readonly op: 'hookStop'; readonly pageRef: WebDomPageRef }
   | { readonly op: 'hookStats'; readonly pageRef: WebDomPageRef }

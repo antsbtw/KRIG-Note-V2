@@ -77,54 +77,44 @@ type Identified = {
 };
 
 /**
- * 捕获计数 —— ⭐⭐ **三种状态分开**,与底座 `CaptureStats` 同构。
+ * ⭐⭐⭐ 一次「取全这一页」的报告 —— 与底座 `AcquireReport` 同构。
  *
- * ⚠️⚠️ 为什么不能合成一个「捕获 N 条」:
- * · `noBody` = 有响应但拿不到载荷 → **通道哑了**
- * · `bodyLost` = 有 bodyRef 但取不出 → 与老化赛跑输了
- * 两种成因要调的东西完全不同,混起来就不知道该动哪里。
- * ⭐ 而记忆 `project-x-collect-two-legs` 的教训是:**判据看 payloads
- * 不看推文数** —— DOM 那条腿会顶着,掩盖载荷全断(实测 payloads 83→0
- * 而推文数还有 38,人以为只是少了点)。这一栏就是让 payloads 看得见的地方。
+ * ── 用户 2026-10-02 ──
+ * 「我需要的是**完整的数据**,而不是分这么多类别。」
+ * 「不是选择用哪条腿 —— 你要构建**获取完整信息的函数/或者类**。」
+ *
+ * ⭐ 所以面板上**没有** CaptureStats / HookStats 这些按腿分的类型了:
+ * 那是实现细节,合并在底座完成,这里只认一份结果。
  */
-type CaptureStats = {
-  captured: number;
-  noBody: number;
-  bodyLost: number;
-  channelFailures: number;
-  lastChannelFailure?: string;
-  held: number;
-  running: boolean;
+type AcquireReport = {
+  ok: boolean;
+  problems: string[];
+  items: AcquiredItem[];
+  wanted: number;
+  rounds: number;
+  scrolledPx: number;
+  elapsedMs: number;
+  stopReason: string;
+  /**
+   * ⚠️ 各腿计数是**证据不是选项** —— 面板只在出问题时显示它,
+   * 用来回答「为什么只采到这么点」,正常时它是噪音。
+   */
+  legs: {
+    cdp: number; hook: number; both: number;
+    hookInjected: boolean; cdpAttached: boolean;
+  };
 };
 
-/**
- * ⭐⭐ **第二条腿**(页面内钩子 M4)的计数 —— 与 CDP 那条**并排显示**。
- *
- * 用户 2026-10-02:「要充分利用几种方法获取数据,而不是单独依赖 CDP。」
- * ⚠️ 两条腿的数**不合并** —— 并排才能互证:
- * · 两边都有 → 链路健康
- * · CDP 有、钩子没有 → 注入没生效(看 `injected`)
- * · 钩子有、CDP 没有 → ⭐ CDP 漏了(流式响应/竞态),而数据**没丢**
- * · 两边都没有 → 站点真的没发
- */
-type HookStats = {
-  hooked: number;
-  lost: number;
-  held: number;
-  running: boolean;
-  /** ⚠️ 注入是否真生效 —— 没生效时 hooked 恒 0,但那是两种完全不同的事 */
-  injected: boolean;
-};
-
-/** 一条攒下来的载荷 —— ⭐ 原样文本,面板不解析 */
-type CapturedPayload = {
-  requestId: string;
+/** 采到的一条 —— ⭐ 对外只有这一种形状,不分腿 */
+type AcquiredItem = {
   url: string;
-  method?: string;
-  status?: number;
-  at: string;
+  method: string;
+  status: number;
   text: string;
   byteLength: number;
+  at: string;
+  /** ⚠️ 证据字段:正常情况下面板不该用它做任何分支 */
+  from: 'cdp' | 'hook' | 'both';
 };
 
 /** 一次调用的留痕 —— ⭐ 存**整个 Result**,不只存成功与否 */
@@ -148,13 +138,14 @@ export function XConsole(
    * `null` = 底座说「不认识这一页」(正常答案,不是故障)。
    */
   const [identified, setIdentified] = useState<Identified | null>(null);
-  /** 捕获计数 —— ⚠️ `null` = 还没问过,与「问过了是 0」不是一回事 */
-  const [stats, setStats] = useState<CaptureStats | null>(null);
-  const [payloads, setPayloads] = useState<CapturedPayload[]>([]);
   /** 展开看原样 JSON 的那一条 */
   const [openPayload, setOpenPayload] = useState<string | null>(null);
-  /** 第二条腿的计数 —— ⚠️ `null` = 还没问过,与「问过了是 0」不是一回事 */
-  const [hook, setHook] = useState<HookStats | null>(null);
+  /**
+   * ⭐ 采集中 / 最近一次报告 —— **只有这两个 state**。
+   * ⚠️ 原来有 stats / hook / payloads 三份(按腿分),那是实现细节漏到了界面上。
+   */
+  const [running, setRunning] = useState(false);
+  const [report, setReport] = useState<AcquireReport | null>(null);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -219,34 +210,13 @@ export function XConsole(
   }, [hostUrl]);
 
   /**
-   * ⭐⭐ 捕获中轮询计数 —— **只在 running 时轮**。
+   * ⭐ **不再轮询** —— 2026-10-02 用户:「上层只关注某个具体的目标」。
    *
-   * ⚠️ 为什么用轮询不用主进程推送:
-   * ① `netBus.list` / `stats()` 本来就现成,推送要新开一条通道;
-   * ② 推送要管多窗口扇出,而记忆 `project-host-broadcast-multi-ws-fanout`
-   *    记着四类坑(广播型/定向型/发起型…),为一个调试台开这个口不值。
-   * ⚠️ 这是**我的取舍**,不是用户要求 —— 哪天采集侧要实时进度条,
-   * 推送才真有必要(那时本 effect 是唯一改动点)。
-   *
-   * ⚠️⚠️ **停捕后必须停轮** —— 不停的话:
-   * ① 白耗 IPC;② 更坏的是人点了「停」而数字还在动,
-   * 会让人以为没停下来,然后去查一个不存在的 bug。
+   * ⚠️ 原来要轮询,是因为面板在**分别**盯两条腿的实时计数;
+   * 现在 `acquire` 是**一次调用跑完整件事**并回一份报告,
+   * 没有「中途要看的数」了 —— 轮询连同它防的那些坑一起消失。
+   * ⭐ 这就是把决策收进底座的直接收益:**上层的复杂度跟着没了**。
    */
-  useEffect(() => {
-    if (wcId == null || !stats?.running) return;
-    const timer = setInterval(() => {
-      void window.electronAPI?.webDomInvoke?.({ op: 'captureStats', pageRef: { wcId } })
-        .then((r) => { if (r.status === 'ok') setStats(r.value as CaptureStats); })
-        .catch(() => undefined);
-      // ⭐ 第二条腿一起轮 —— 两边的数要同时看得见才能互证
-      void window.electronAPI?.webDomInvoke?.({ op: 'hookStats', pageRef: { wcId } })
-        .then((r) => { if (r.status === 'ok') setHook(r.value as HookStats); })
-        // ⚠️ 轮询失败不进留痕(会刷满),但也不能静默 —— 由下一次轮询自愈;
-        //    真故障会在 channelFailures 计数里出现
-        .catch(() => undefined);
-    }, 1500);
-    return () => clearInterval(timer);
-  }, [wcId, stats?.running]);
 
   const call = useCallback(async (label: string, payload: WebDomInvoke) => {
     setBusy(true);
@@ -316,7 +286,8 @@ export function XConsole(
             {t.label}
             <span style={S.tabSub}>{t.sub}</span>
             {/* ⭐ 捕获中在**输出 tab 的标签上**也要看得见 —— 人可能正在控制 tab */}
-            {t.id === 'output' && stats?.running && <span style={S.dot}>●</span>}
+            {/* ⭐ 采集中在**输出 tab 的标签上**也看得见 —— 人可能正在控制 tab */}
+            {t.id === 'output' && running && <span style={S.dot}>●</span>}
           </button>
         ))}
       </div>
@@ -502,246 +473,130 @@ export function XConsole(
         {tab === 'output' && (
           <>
             <div style={S.opArea}>
+              {/*
+                ⭐⭐⭐ **一个按钮** —— 用户 2026-10-02:
+                「我需要的是**完整的数据**，而不是分这么多类别」
+                「不是选择用哪条腿 —— 你要构建**获取完整信息的函数/或者类**，
+                　底层能够可以做最小化的抽象函数，但**上层只关注某个具体的目标**呀。」
+
+                ⭐ 原来七个按钮里五个是**实现细节**(CDP 腿/钩子腿/重载/取载荷/分别停)。
+                现在底层 `acquire` 一次做完:所有腿一起上 → 重载(解竞态)
+                → 滚到够了或真到底 → 合并去重 → 回一份报告。
+              */}
               <div style={S.row}>
                 <button
                   type="button"
-                  /**
-                   * ⚠️ 同理不看 `busy`:人常常是「先滚起来再开始捕」,
-                   * 而滚动期间按钮全灰会让这条路走不通。
-                   * ⭐ `captureStart` 是幂等的(底座保证),重复点无害。
-                   */
-                  disabled={wcId == null || stats?.running === true}
+                  /** ⚠️ 不看 busy:这**就是**那个长操作,看了就永远点不到 */
+                  disabled={wcId == null || running}
                   onClick={async () => {
-                    await call('captureStart', { op: 'captureStart', pageRef: { wcId: wcId! } });
-                    const r = await window.electronAPI!.webDomInvoke({
-                      op: 'captureStats', pageRef: { wcId: wcId! },
-                    });
-                    if (r.status === 'ok') setStats(r.value as CaptureStats);
+                    setRunning(true);
+                    setReport(null);
+                    try {
+                      const r = await window.electronAPI!.webDomInvoke({
+                        op: 'acquire',
+                        pageRef: { wcId: wcId! },
+                        // ⭐ 调试台要「全都要」—— 业务方会给自己的判据
+                        goal: { maxRounds: 30 },
+                      });
+                      // ⚠️ degraded 也有数据 —— 不许当失败丢掉
+                      if (r.status === 'ok' || r.status === 'degraded') {
+                        setReport(r.value as AcquireReport);
+                      }
+                      setLog((l) => [{
+                        at: new Date().toLocaleTimeString(), label: '取全这一页', result: r,
+                      }, ...l].slice(0, 50));
+                    } finally {
+                      setRunning(false);
+                    }
                   }}
                   style={S.btn}
                 >
-                  开始捕获
+                  {running ? '采集中…' : '取全这一页'}
                 </button>
                 <button
                   type="button"
-                  /**
-                   * ⚠️⚠️ **「停」不看 `busy`** —— 用户 2026-10-02:
-                   * 「点击停它不停的呀?看到 button 没有反应?」
-                   *
-                   * 真因:`disabled` 含 `busy`,而 `scrollUntil` 跑 30 轮要 20 多秒,
-                   * 期间所有按钮都是灰的 —— 包括「停」。
-                   * ⭐ 而「停」是**取消动作**:它恰恰该在忙的时候可用,
-                   * 否则人唯一能做的就是干等,这与按钮的语义相反。
-                   * ⚠️ 只保留 `wcId == null` 与 `!running` 两个真约束。
-                   */
-                  disabled={wcId == null || !stats?.running}
-                  onClick={async () => {
-                    const r = await window.electronAPI!.webDomInvoke({
-                      op: 'captureStop', pageRef: { wcId: wcId! },
-                    });
-                    if (r.status === 'ok') setStats(r.value as CaptureStats);
-                  }}
-                  style={S.btn}
-                  title="停止取数据，并同时停止翻页"
-                >
-                  停（取数+翻页）
-                </button>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={async () => {
-                    const r = await window.electronAPI!.webDomInvoke({
-                      op: 'captureList', pageRef: { wcId: wcId! }, limit: 20,
-                    });
-                    if (r.status === 'ok') setPayloads(r.value as CapturedPayload[]);
-                    else setPayloads([]);
-                  }}
-                  style={S.btn}
-                >
-                  取载荷
-                </button>
-                <button
-                  type="button"
-                  disabled={disabled}
-                  onClick={async () => {
-                    const r = await window.electronAPI!.webDomInvoke({
-                      op: 'captureClear', pageRef: { wcId: wcId! },
-                    });
-                    if (r.status === 'ok') setStats(r.value as CaptureStats);
-                    setPayloads([]);
-                    setOpenPayload(null);
-                  }}
-                  style={S.linkBtn}
-                >
-                  清空
-                </button>
-                {/*
-                  ⭐⭐ 「捕获中重载」—— ⚠️ 这是**时序**问题的解法,不是便利功能。
-                  实测:`page-created` 与 `capture-start` 在**同一秒**,
-                  而 X 的 `HomeTimeline` 首次请求在页面加载后 1–2 秒内发出 ——
-                  attach 与首次请求是**竞态**,错过了就再也等不到
-                  (首页的后续分页要滚到很深才触发)。
-                  ⭐ 捕获已经开着时重载,必然从**第一条请求**开始收。
-                  ⚠️ 不看 busy:重载是人要的动作,滚动期间也该能点。
-                */}
-                <button
-                  type="button"
-                  disabled={wcId == null || !stats?.running}
+                  /** ⭐ 停是取消动作,必须在忙的时候可用 */
+                  disabled={wcId == null || !running}
                   onClick={() => void window.electronAPI?.webDomInvoke?.({
-                    op: 'reload', pageRef: { wcId: wcId! },
+                    op: 'scrollStop', pageRef: { wcId: wcId! },
                   })}
                   style={S.btn}
-                  title="捕获开着时重载页面 —— 从第一条请求开始收，避开 attach 竞态"
                 >
-                  捕获中重载
+                  停止
                 </button>
-            </div>
-
-          {/*
-            ⭐⭐ 三种状态分开显示 —— 这一栏是本步的**全部意义**。
-            ⚠️ 合成一个「捕获 N 条」会让「通道哑了」长得像「这页没请求」,
-            　 而 `project-x-collect-two-legs` 实测过:payloads 83→0 时
-            　 推文数还有 38,DOM 那条腿顶着,人以为只是少了点。
-          */}
-          {stats && (
-            <div style={S.statRow}>
-              <Stat label="captured" v={stats.captured} tone={stats.captured > 0 ? 'good' : 'idle'}
-                hint="真拿到了 body" />
-              <Stat label="noBody" v={stats.noBody} tone={stats.noBody > 0 ? 'warn' : 'idle'}
-                hint="⚠️ 有响应却没载荷 —— 通道哑了的指纹" />
-              <Stat label="bodyLost" v={stats.bodyLost} tone={stats.bodyLost > 0 ? 'warn' : 'idle'}
-                hint="⚠️ 有 bodyRef 但取不出 —— 与老化赛跑输了" />
-              <Stat label="通道故障" v={stats.channelFailures}
-                tone={stats.channelFailures > 0 ? 'bad' : 'idle'}
-                hint="attach 失败 / 中途被 detach" />
-              <Stat label="攒着" v={stats.held} tone="idle" hint="当前存了几条（封顶 64）" />
-            </div>
-          )}
-          {stats?.lastChannelFailure && (
-            <div style={S.failLine}>最后一条通道故障：{stats.lastChannelFailure}</div>
-          )}
-
-          {/*
-            ⭐⭐ **第二条腿**:页面内钩子(M4)—— 用户 2026-10-02:
-            「要充分利用几种方法获取数据，而不是单独依赖 CDP。」
-            ⚠️ 与上面那行**并排不合并** —— 合并就失去了互证能力,
-            　 而「没有第二个视角可以互证」正是那次七轮排查的根因。
-          */}
-          <div style={S.row}>
-            <span style={{ fontSize: 10, opacity: 0.6, width: 64 }}>页面内钩子</span>
-            <button
-              type="button"
-              disabled={wcId == null || hook?.running === true}
-              onClick={async () => {
-                await call('hookStart', { op: 'hookStart', pageRef: { wcId: wcId! } });
-                const r = await window.electronAPI!.webDomInvoke({
-                  op: 'hookStats', pageRef: { wcId: wcId! },
-                });
-                if (r.status === 'ok') setHook(r.value as HookStats);
-              }}
-              style={S.btn}
-              title="在页面里覆写 XHR/fetch —— 与 CDP 那条腿互为对照"
-            >
-              装钩子
-            </button>
-            <button
-              type="button"
-              disabled={wcId == null || !hook?.running}
-              onClick={async () => {
-                const r = await window.electronAPI!.webDomInvoke({
-                  op: 'hookStop', pageRef: { wcId: wcId! },
-                });
-                if (r.status === 'ok') setHook(r.value as HookStats);
-              }}
-              style={S.btn}
-            >
-              停钩子
-            </button>
-          </div>
-          {hook && (
-            <div style={S.statRow}>
-              <Stat label="hooked" v={hook.hooked} tone={hook.hooked > 0 ? 'good' : 'idle'}
-                hint="页面内钩到并送回来的条数" />
-              <Stat label="lost" v={hook.lost} tone={hook.lost > 0 ? 'warn' : 'idle'}
-                hint="⚠️ 钩到了但送回失败（payload 被截断／形状不对）" />
-              <Stat label="攒着" v={hook.held} tone="idle" hint="当前存了几条（封顶 64）" />
-              <div style={S.stat} title="注入是否真生效 —— 没生效时 hooked 恒 0，但那是两回事">
-                <div style={{ color: hook.injected ? '#8fd9a8' : '#888', fontSize: 15, lineHeight: 1.2 }}>
-                  {hook.injected ? '✓' : '—'}
-                </div>
-                <div style={{ fontSize: 10, opacity: 0.7 }}>已注入</div>
               </div>
-            </div>
-          )}
-
-          {/*
-            ⭐⭐⭐ **互证判读** —— 这是两条腿真正的价值所在。
-            ⚠️ 没有这一段的话,人看到两行数字也不知道该查哪边。
-          */}
-          {stats && hook && (stats.captured > 0 || hook.hooked > 0) && (
-            <div style={S.diagnose}>
-              {hook.hooked > 0 && stats.captured === 0 && (
-                <>⭐ <strong>钩子拿到了、CDP 没有</strong> —— CDP 这条腿漏了（流式响应或竞态），
-                但<strong>数据没丢</strong>。</>
-              )}
-              {stats.captured > 0 && hook.hooked === 0 && hook.running && (
-                <>⚠️ <strong>CDP 拿到了、钩子没有</strong> ——{' '}
-                {hook.injected ? '注入生效了却钩不到，可能站点用了 sendBeacon／WebSocket。'
-                  : '注入没生效（已注入＝—），先点「捕获中重载」让脚本抢在站点之前跑。'}</>
-              )}
-              {stats.captured > 0 && hook.hooked > 0 && (
-                <>✅ <strong>两条腿都拿到了</strong> —— 链路健康，可互相对账。</>
-              )}
-            </div>
-          )}
-          {stats && stats.captured === 0 && stats.noBody > 0 && (
-            /*
-              ⭐ 这句话是本栏最值钱的地方:这个组合**唯一指向**通道问题。
-              ⚠️ 没有它,人看到「captured 0」第一反应是去查选择器或页面 ——
-              　 而真因在 CDP 通道,方向完全相反。
-            */
-            <div style={S.diagnose}>
-              ⚠️ 有响应但一条载荷都没拿到 —— 这是 <strong>CDP 通道</strong>的问题，
-              不是页面或选择器的问题。查 DevTools 是否占着通道。
-            </div>
-          )}
-          {stats && !stats.running && stats.captured === 0 && stats.noBody === 0 && (
-            <div style={S.todo}>
-              还没捕到任何响应。⭐ 载荷靠**滚动**触发 —— 先点上面的
-              scrollUntil，页面不动就不会有新请求。
-            </div>
-          )}
-            </div>
-            <div style={S.resultArea}>
-              {/* ── 原样载荷 ── */}
-              {payloads.length > 0 && (
-                <div style={S.logBox}>
-                  {payloads.map((pl) => (
-                    <div key={pl.requestId} style={S.logItem}>
-                      <div
-                        style={{ ...S.logHead, cursor: 'pointer' }}
-                        onClick={() => setOpenPayload(openPayload === pl.requestId ? null : pl.requestId)}
-                      >
-                        <span style={{ ...S.badge, ...badgeStyle(pl.status === 200 ? 'ok' : 'failed') }}>
-                          {pl.status ?? '—'}
-                        </span>
-                        {/* ⭐ 只显示路径尾段 —— X 的 GraphQL URL 很长,全显示会把别的挤掉 */}
-                        <span style={{ color: '#aaa' }}>{tailOfUrl(pl.url)}</span>
-                        <span style={{ color: '#666', marginLeft: 'auto' }}>
-                          {(pl.byteLength / 1024).toFixed(1)} KB
-                        </span>
-                        <span style={{ color: '#555' }}>{openPayload === pl.requestId ? '▾' : '▸'}</span>
-            </div>
-                  {openPayload === pl.requestId && (
-                    /* ⭐ 原样,不解析、不挑字段 —— 这是调试台的本分 */
-                    <pre style={S.pre}>{pl.text.slice(0, 20000)}
-                      {pl.text.length > 20000 && `\n…（还有 ${pl.text.length - 20000} 字，已截断显示）`}
-                    </pre>
-                  )}
+              {!running && !report && (
+                <div style={S.todo}>
+                  点「取全这一页」—— 底层会把所有获取方法一起用上、
+                  重载避开时序竞态、滚到采全为止，最后给你一份合并去重的完整数据。
                 </div>
-              ))}
+              )}
             </div>
-          )}
+
+            <div style={S.resultArea}>
+              {report && (
+                <>
+                  {/* ⭐ 一行说清结果,不堆指标 */}
+                  <div style={S.statRow}>
+                    <Stat label="采到" v={report.items.length}
+                      tone={report.items.length > 0 ? 'good' : 'idle'} hint="合并去重后的总条数" />
+                    <Stat label="命中目标" v={report.wanted}
+                      tone={report.wanted > 0 ? 'good' : 'idle'} hint="符合本次目标的条数" />
+                    <Stat label="轮次" v={report.rounds} tone="idle" hint="滚了几轮" />
+                    <Stat label="像素" v={Math.round(report.scrolledPx)} tone="idle" hint="总共滚了多少" />
+                  </div>
+                  <div style={S.todo}>
+                    {report.stopReason}　·　{(report.elapsedMs / 1000).toFixed(1)}s
+                  </div>
+                  {report.problems.length > 0 && (
+                    <div style={S.diagnose}>
+                      {report.problems.map((x) => <div key={x}>⚠️ {x}</div>)}
+                    </div>
+                  )}
+                  {/*
+                    ⚠️ 各腿计数**只在出问题时显示** —— 正常时它是噪音。
+                    ⭐ 它是**证据不是选项**:回答「为什么只采到这么点」。
+                  */}
+                  {(report.problems.length > 0 || report.legs.hook === 0) && (
+                    <div style={S.failLine}>
+                      取数通路：CDP {report.legs.cdp} · 页面钩子 {report.legs.hook} ·
+                      两者都有 {report.legs.both}
+                      {!report.legs.hookInjected && '　⚠️ 页面钩子未注入'}
+                      {!report.legs.cdpAttached && '　⚠️ CDP 未接上'}
+                    </div>
+                  )}
+
+                  <div style={S.logBox}>
+                    {report.items.map((it) => (
+                      <div key={`${it.url}-${it.at}`} style={S.logItem}>
+                        <div
+                          style={{ ...S.logHead, cursor: 'pointer' }}
+                          onClick={() => setOpenPayload(
+                            openPayload === it.url + it.at ? null : it.url + it.at,
+                          )}
+                        >
+                          <span style={{ ...S.badge, ...badgeStyle(it.status === 200 ? 'ok' : 'failed') }}>
+                            {it.status || '—'}
+                          </span>
+                          <span style={{ color: '#aaa' }}>{tailOfUrl(it.url)}</span>
+                          <span style={{ color: '#666', marginLeft: 'auto' }}>
+                            {(it.byteLength / 1024).toFixed(1)} KB
+                          </span>
+                          <span style={{ color: '#555' }}>
+                            {openPayload === it.url + it.at ? '▾' : '▸'}
+                          </span>
+                        </div>
+                        {openPayload === it.url + it.at && (
+                          <pre style={S.pre}>{it.text.slice(0, 20000)}
+                            {it.text.length > 20000
+                              && `\n…（还有 ${it.text.length - 20000} 字，已截断显示）`}
+                          </pre>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           </>
         )}

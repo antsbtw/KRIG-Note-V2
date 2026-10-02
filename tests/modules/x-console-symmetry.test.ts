@@ -420,8 +420,15 @@ describe('Console 布局:能力并排,不竖排', () => {
     const s = panel();
     const i = s.indexOf('style={S.tabBar}');
     const block = s.slice(i, s.indexOf('style={S.pane}', i));
-    expect(block, 'tab 标签上没有捕获中指示 —— 切到别的 tab 就看不见了')
-      .toMatch(/stats\?\.running/);
+    /**
+     * ⚠️ 钉的是「**有没有指示**」这个行为,不是某个变量名 ——
+     * 2026-10-02 底座把多条腿的状态合并进 `acquire` 后,
+     * 面板的 `stats?.running` 变成了 `running`,而行为完全没变。
+     * ⭐ 守卫钉实现细节就会在重构时**假红**,逼人去改没坏的东西。
+     */
+    expect(block, 'tab 标签上没有采集中指示 —— 切到别的 tab 就看不见了')
+      .toMatch(/running/);
+    expect(block, '指示没挂在输出 tab 上').toMatch(/t\.id === 'output'/);
   });
 
   it('⚠️ 样式表里不留零引用的死样式', () => {
@@ -431,7 +438,16 @@ describe('Console 布局:能力并排,不竖排', () => {
      * 照着它写出第二套。
      */
     const s = panel();
-    const defined = Array.from(s.matchAll(/^ {2}(\w+):\s*\{/gm)).map((m) => m[1]);
+    /**
+     * ⚠️⚠️ **必须切到 `S` 常量块内** —— 2026-10-02 抓到:
+     * 整文件扫 `^ {2}(\w+):\s*\{` 会把**类型里的字段**也当成样式
+     * (`AcquireReport` 的 `legs: { … }` 就被误判了)。
+     * ⭐ 又是「信息来源错了」:补清单治不了,要换成只看样式表那一段。
+     */
+    const at = s.indexOf('const S: Record<string, React.CSSProperties> = {');
+    expect(at, '样式表不见了 —— 改名了?').toBeGreaterThan(-1);
+    const styleBlock = s.slice(at);
+    const defined = Array.from(styleBlock.matchAll(/^ {2}(\w+):\s*\{/gm)).map((m) => m[1]);
     expect(defined.length, '一条样式都没解析出来 —— 正则该跟上').toBeGreaterThan(8);
     const unused = defined.filter((k) => !new RegExp(`S\\.${k}\\b`).test(s));
     expect(unused, '这些样式零引用 —— 改布局后的残留:\n  ' + unused.join('\n  ')).toEqual([]);

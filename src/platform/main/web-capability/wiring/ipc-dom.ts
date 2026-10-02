@@ -39,6 +39,8 @@ import {
 import { CaptureSession } from '../net/capture-session';
 import { HookSession } from '../hook/hook-session';
 import { toHookHost } from './electron-hook-host';
+import { acquireContent } from '../acquire/acquire';
+import type { AcquireDeps, AcquiredItem } from '../acquire/types';
 import { toPageHost } from './electron-page-host';
 import { wireWebRequestSideOn, registerPageIdLookup } from './webrequest-side';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
@@ -137,6 +139,182 @@ const scrollCancelled = new Set<PageId>();
  * 而「没有第二个视角可以互证」正是那次七轮排查的根因。
  */
 const hooksByPageId = new Map<PageId, HookSession>();
+
+/**
+ * ⭐⭐⭐ 一条**合并后**的采集结果 —— 对外只有这一种形状。
+ *
+ * 用户 2026-10-02:「我需要的是**完整的数据**,而不是分这么多类别」。
+ * ⚠️ `from` 不是给人选的,是**证据**:它说明这条是从哪条腿来的,
+ * 出问题时才查得动(两条腿都有 → 可互相对账)。
+ */
+type MergedItem = {
+  readonly url: string;
+  readonly method: string;
+  readonly status: number;
+  readonly text: string;
+  readonly byteLength: number;
+  readonly at: string;
+  /** 'cdp' | 'hook' | 'both' —— ⭐ 证据,不是选项 */
+  readonly from: 'cdp' | 'hook' | 'both';
+};
+
+/**
+ * ⭐⭐ 去重键。
+ *
+ * ⚠️ 两条腿会拿到**同一条响应**(这正是互证的前提),
+ * 不去重的话人看到的条数**虚高一倍**。
+ *
+ * ⚠️ 为什么用 `url + status + byteLength` 而不是只用 url:
+ * 同一个 URL 在一次采集里会被请求多次(翻页、轮询),
+ * 只按 url 去重会把**不同轮次的数据**当成重复丢掉 —— 那是真丢数据。
+ * ⭐ 加上 `byteLength` 后,内容不同的就留得住。
+ */
+function dedupKey(url: string, status: number, byteLength: number): string {
+  return `${url.split('?')[0]}|${status}|${byteLength}`;
+}
+
+/**
+ * ⭐⭐ 合并两条腿的结果。
+ *
+ * ⚠️ 合并的是**对外视图**,两条腿的内部计数仍各记各的 ——
+ * 互证能力不能因为「界面上只给一份」而丢掉。
+ */
+function mergedItems(pageId: PageId, limit: number): MergedItem[] {
+  const byKey = new Map<string, MergedItem>();
+
+  // ① CDP 腿
+  for (const x of sessionsByPageId.get(pageId)?.list(256) ?? []) {
+    const k = dedupKey(x.url, x.status ?? 0, x.byteLength);
+    byKey.set(k, {
+      url: x.url, method: x.method ?? 'GET', status: x.status ?? 0,
+      text: x.text, byteLength: x.byteLength, at: x.at, from: 'cdp',
+    });
+  }
+
+  // ② 钩子腿 —— ⭐ 已存在的标成 `both`(**那是互证成功的证据**)
+  for (const x of hooksByPageId.get(pageId)?.list(256) ?? []) {
+    const k = dedupKey(x.url, x.status, x.byteLength);
+    const prev = byKey.get(k);
+    if (prev) {
+      byKey.set(k, { ...prev, from: 'both' });
+      continue;
+    }
+    byKey.set(k, {
+      url: x.url, method: x.method, status: x.status,
+      text: x.text, byteLength: x.byteLength, at: x.at, from: 'hook',
+    });
+  }
+
+  // ⚠️ 按时间**倒序**(最新在前)—— 人要看的是刚采到的
+  return [...byKey.values()]
+    .sort((a, b) => (a.at < b.at ? 1 : -1))
+    .slice(0, Math.max(0, limit));
+}
+
+/** 合并后的计数 —— ⭐ `viaBoth` 是互证健康度的直接指标 */
+function mergedStats(pageId: PageId): {
+  total: number; viaCdp: number; viaHook: number; viaBoth: number;
+  running: boolean; cdpRunning: boolean; hookRunning: boolean; hookInjected: boolean;
+} {
+  const items = mergedItems(pageId, Number.MAX_SAFE_INTEGER);
+  const cap = sessionsByPageId.get(pageId)?.stats();
+  const hk = hooksByPageId.get(pageId)?.stats();
+  return {
+    total: items.length,
+    viaCdp: items.filter((x) => x.from === 'cdp').length,
+    viaHook: items.filter((x) => x.from === 'hook').length,
+    viaBoth: items.filter((x) => x.from === 'both').length,
+    // ⭐ 任一条腿在跑就算「采集中」—— 少一条腿是降级不是停止
+    running: Boolean(cap?.running) || Boolean(hk?.running),
+    cdpRunning: Boolean(cap?.running),
+    hookRunning: Boolean(hk?.running),
+    hookInjected: Boolean(hk?.injected),
+  };
+}
+
+/**
+ * ⭐⭐ 把**所有获取方法**接给 `acquireContent`。
+ *
+ * 用户 2026-10-02:「底层能够可以做最小化的抽象函数,
+ * 但**上层只关注某个具体的目标**呀。」
+ *
+ * ⭐ 这个函数就是那条分界线:
+ * 下面是机制(CDP / 页面钩子 / 滚动),上面只有「取全这一页」。
+ * ⚠️ `acquireContent` 本身零 Electron、零站点知识 —— 全靠这里注入。
+ */
+function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
+  return {
+    async startAll(pageId) {
+      // ① webRequest 侧 —— CDP 的 body 要靠它配对
+      wireWebRequestSideOn(netBus, wc.session, wc.session.storagePath ?? 'default');
+
+      // ② CDP 腿
+      const cap = sessionFor(pageId);
+      cap.start();
+      const cdpAttached = bodyProvider.attach(toPageHost(wc), pageId, {
+        resourceTypes: ['fetch', 'document', 'xhr'],
+      });
+
+      // ③ 页面内钩子腿
+      let hook = hooksByPageId.get(pageId);
+      if (!hook) {
+        hook = new HookSession(toHookHost(wc), pageId);
+        hooksByPageId.set(pageId, hook);
+      }
+      /**
+       * ⚠️ 钩子装失败**不中止** —— CDP 那条腿还活着,少一条腿是**降级不是失败**。
+       * ⭐ 这正是「多条腿」的意义:单点故障不再是全局故障。
+       */
+      let hookInstalled = true;
+      try {
+        await hook.start();
+      } catch (e) {
+        hookInstalled = false;
+        console.warn('[web.acquire] 页面钩子装不上(CDP 腿仍在):', e);
+      }
+      return { cdpAttached, hookInstalled };
+    },
+
+    stopAll(pageId) {
+      sessionsByPageId.get(pageId)?.stop();
+      hooksByPageId.get(pageId)?.stop();
+    },
+
+    reload() {
+      wc.reload();
+    },
+
+    snapshot(pageId) {
+      return mergedItems(pageId, Number.MAX_SAFE_INTEGER);
+    },
+
+    legStats(pageId) {
+      return { hookInjected: Boolean(hooksByPageId.get(pageId)?.stats().injected) };
+    },
+
+    async scrollOnce(pageId) {
+      /**
+       * ⚠️ 借 `controlEngine` 滚**一轮**,不自己写滚动脚本 ——
+       * 那边有四条血泪(同步 scrollBy / 不用 DOM 条数判进度 /
+       * 连续多轮不变才算到底 / 日期不做停止判据),重写必然重踩。
+       * ⭐ 这里只要「滚了多少像素」,到底与否由 `acquireContent` 判。
+       */
+      const r = await controlEngine.scrollUntil(
+        pageId,
+        { kind: 'rounds', n: 1 },
+        { maxRounds: 1, settleMs: 0, shouldStop: () => scrollCancelled.has(pageId) },
+      );
+      const v = (r as { value?: { scrolledPx?: number } }).value;
+      return typeof v?.scrolledPx === 'number' ? v.scrolledPx : 0;
+    },
+
+    wait(ms) {
+      return new Promise((resolve) => { setTimeout(resolve, ms); });
+    },
+
+    now: () => Date.now(),
+  };
+}
 
 /** 取或建会话 —— ⚠️ 不自动 start,开始捕是人的显式动作 */
 function sessionFor(pageId: PageId): CaptureSession {
@@ -571,7 +749,57 @@ export function registerWebDomIpc(): void {
             console.log(`[web.page] 已重载(捕获中)pageId=${pageId} ${before}`);
             return { status: 'ok', value: { reloaded: true, url: before } };
           }
-          // ── ⭐⭐ 第二条腿:页面内钩子(M4)──
+          /**
+           * ⭐⭐⭐ **把这一页的内容取全** —— 用户 2026-10-02:
+           * 「你要构建**获取完整信息的函数/或者类**…上层只关注某个具体的目标呀。」
+           *
+           * ⭐ 本分支只做**接线**:把两条腿和页面操作注入 `acquireContent`,
+           * 「什么算取全了」的判断全在那个纯逻辑函数里。
+           */
+          case 'acquire': {
+            const report = await acquireContent(
+              makeAcquireDeps(wc, pageId),
+              pageId,
+              p.goal ?? {},
+            );
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: report.ok ? 'acquire-ok' : 'acquire-incomplete',
+              pageId: String(pageId),
+              detail: {
+                url: wc.getURL(),
+                total: report.items.length,
+                wanted: report.wanted,
+                rounds: report.rounds,
+                scrolledPx: report.scrolledPx,
+                elapsedMs: report.elapsedMs,
+                stopReason: report.stopReason,
+                legs: report.legs,
+                problems: report.problems,
+                /** ⭐ 采到了**什么** —— 只记尾段+KB,不记正文 */
+                items: report.items.slice(0, 40).map((x) => ({
+                  tail: x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)',
+                  kb: Math.round(x.byteLength / 102.4) / 10,
+                  from: x.from,
+                })),
+              },
+            });
+            console.log(
+              `[web.acquire] ${report.ok ? '✓ 采全' : '⚠ 不完整'} pageId=${pageId} —— `
+              + `${report.items.length} 条(命中 ${report.wanted})`
+              + ` / ${report.rounds} 轮 ${report.scrolledPx}px / ${report.stopReason}`,
+            );
+            /**
+             * ⚠️ 不完整时回 `degraded` **不是 failed** ——
+             * 采了一半的数据也是真的,当 Failed 会让调用方丢掉已有进度。
+             */
+            if (!report.ok) {
+              return { status: 'degraded', value: report, missing: [...report.problems] };
+            }
+            return { status: 'ok', value: report };
+          }
+
+          // ── ⚠️ 下面是**单条腿**的入口 —— 调试用,正常路径走 `acquire` ──
           case 'hookStart': {
             let hook = hooksByPageId.get(pageId);
             if (!hook) {

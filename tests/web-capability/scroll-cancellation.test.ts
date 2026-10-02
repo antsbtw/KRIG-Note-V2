@@ -148,7 +148,13 @@ describe('⭐⭐ 面板:「停翻页」要点得到', () => {
      * **期间所有按钮都是灰的** —— 包括「停」。
      * ⭐ 「停」是取消动作,恰恰该在忙的时候可用。
      */
-    for (const op of ['captureStop', 'scrollStop']) {
+    /**
+     * ⚠️ 2026-10-02 更新:`captureStop` 已被 `acquire` 收编
+     * (用户:「不是选择用哪条腿…上层只关注某个具体的目标」),
+     * 面板上现在只剩 `scrollStop` 这一个显式的「停」。
+     * ⭐ 钉的仍是同一条行为:**取消动作不许被 busy 挡住**。
+     */
+    for (const op of ['scrollStop']) {
       const i = panel.indexOf(op);
       expect(i, `${op} 的按钮不见了`).toBeGreaterThan(-1);
       // 往回找这个按钮的 disabled
