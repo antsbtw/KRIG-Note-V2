@@ -99,11 +99,21 @@ if (raw) {
 } else {
   for (const r of tail) {
     const t = new Date(r.ts).toLocaleString('zh-CN', { hour12: false });
-    const head = `${t}  [${r.stream}] ${r.layer ?? '-'} ${r.event ?? r.reason ?? ''}`;
-    console.log(head);
-    if (r.pageId) console.log(`    pageId=${r.pageId}`);
+    /**
+     * ⚠️ 三个流的字段**不一样**(lifecycle 有 event/detail、
+     * degradation 有 operation/category/reason/inputRef/rawSnippet)——
+     * 只按 lifecycle 的形状打印,degradation 会丢掉最要紧的 category 和 reason。
+     * ⭐ 「记了但读不好」与没记差不多。
+     */
+    const title = r.event ?? r.operation ?? '(无事件名)';
+    console.log(`${t}  [${r.stream}] ${r.layer ?? '-'} ${title}`);
+    if (r.category) console.log(`    category = ${r.category}`);
+    if (r.reason) console.log(`    reason = ${r.reason}`);
+    if (r.pageId ?? r.inputRef) console.log(`    pageId = ${r.pageId ?? r.inputRef}`);
+    if (r.rawSnippet) console.log(`    url = ${r.rawSnippet}`);
     if (r.detail) {
       for (const [k, v] of Object.entries(r.detail)) {
+        if (v === undefined) continue;   // ⚠️ 没取到的字段不显示,免得像「值是 undefined」
         console.log(`    ${k} = ${typeof v === 'string' ? v : JSON.stringify(v)}`);
       }
     }

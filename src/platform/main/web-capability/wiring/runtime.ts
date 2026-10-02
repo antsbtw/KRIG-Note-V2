@@ -21,7 +21,45 @@ import { lookupWebContents } from './page-hosts';
 
 export const pageRegistry = new PageRegistry();
 export const netBus = new NetworkEventBus();
-export const bodyProvider = new CdpBodyProvider(netBus);
+/**
+ * ⭐⭐ 载荷「没到手」时**落盘**,不只 console.warn —— 2026-10-02。
+ *
+ * ⚠️ 真机实测逼出来的:点开始捕获后接线 ✅ attach ✅ 但一条载荷都没有,
+ * 而 `body-provider` 里四处静默 return 全只打 console.warn →
+ * 「捕 0 条」这个结果**没有任何可读的成因**。
+ *
+ * ⭐ 四种 reason 各指一个方向,混在一起就查不动:
+ * · get-body-failed    CDP 取 body 报错(通道还活着,单条失败)
+ * · body-undecodable   拿到了但解不出
+ * · too-large          被 maxBodyBytes 挡了(**人自己设的上限**,最容易误判成没捕到)
+ * · correlate-failed   ⚠️ 配不上 webRequest 记录 —— 整条链最常见的死法
+ *
+ * ⚠️ 这里**不限流**:一条坏就记一条。刷屏本身就是信号
+ * (「webRequest 侧零接线」那次的症状正是它刷屏)。
+ */
+export const bodyProvider = new CdpBodyProvider(netBus, (miss) => {
+  /**
+   * ⚠️ `category` **按成因分**,不是统一一个 ——
+   * 分类学在 `types.ts` 里写着各自的含义,混成一类就失去了按类统计的意义:
+   * · 取 body 报错 / 解不出 → 依赖的 IPC 失败 = `resource-failure`
+   * · 被自己设的上限挡了   → 不是故障,是命中了未预期的构造 = `unexpected-format`
+   * · 配不上 webRequest    → 两侧编号对不上,**链路级**的失效 = `systemic`
+   */
+  const category = miss.reason === 'correlate-failed'
+    ? 'systemic' as const
+    : miss.reason === 'too-large'
+      ? 'unexpected-format' as const
+      : 'resource-failure' as const;
+  traceRecorder.degradation({
+    layer: 'web.net',
+    operation: 'capture-body',
+    category,
+    reason: `${miss.reason}: ${miss.detail ?? ''}`.trim(),
+    // ⚠️ `inputRef` 的注释明确说「指向输入的引用(如 bodyRef / pageId)」—— 就是为此准备的
+    inputRef: String(miss.pageId),
+    rawSnippet: miss.url,
+  });
+});
 /**
  * ⭐ 诊断留痕的落盘根目录。
  *

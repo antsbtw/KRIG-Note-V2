@@ -290,11 +290,31 @@ export function registerWebDomIpc(): void {
            */
           case 'goto': {
             if (!p.name) return failed('[web.dom ipc] goto 缺语义页面名');
-            return toIpc(await controlEngine.goto(
+            const r = await controlEngine.goto(
               pageId,
               { kind: 'semantic', name: p.name, params: p.params },
               { readyTimeoutMs: p.readyTimeoutMs },
-            ));
+            );
+            /**
+             * ⭐⭐ 导航结果落盘 —— 2026-10-02 补。
+             *
+             * ⚠️ 起因:载荷捕到 0 条时,我**读不到人到底去了哪一页**,
+             * 只能反过来问 —— 又回到「靠截图」(用户点破的那条)。
+             * ⭐ `landedUrl` 尤其要紧:它与 `requestedUrl` 不同就说明
+             * 站点自己接管了导航(X 常有),而那会改变后面该看什么。
+             */
+            traceRecorder.lifecycle({
+              layer: 'web.page',
+              event: r.status === 'ok' ? 'goto' : `goto-${r.status}`,
+              pageId: String(pageId),
+              detail: {
+                name: p.name,
+                params: p.params ?? {},
+                landedUrl: (r as { value?: { landedUrl?: string } }).value?.landedUrl,
+                reason: (r as { reason?: string }).reason,
+              },
+            });
+            return toIpc(r);
           }
           case 'ready': {
             if (!p.criterion) return failed('[web.dom ipc] ready 缺判据');
@@ -429,11 +449,38 @@ export function registerWebDomIpc(): void {
           }
           case 'scrollUntil': {
             if (!p.stop) return failed('[web.dom ipc] scrollUntil 缺停止判据');
-            return toIpc(await controlEngine.scrollUntil(
+            const r = await controlEngine.scrollUntil(
               pageId,
               toScrollStop(p.stop),
               { maxRounds: p.maxRounds, settleMs: p.settleMs },
-            ));
+            );
+            /**
+             * ⭐⭐ 滚动结果落盘 —— 这是「载荷为什么是 0」的**头号判据**。
+             *
+             * ⚠️ `project-x-collect-needs-scroll`:采到 0 条有两种成因 ——
+             * 链路坏 vs **页面太短滚不动**(实测 x.articles 跳转成功、
+             * 屏幕有卡片却采 0 条,因为 scrollY 8 轮未变不触发载荷)。
+             * ⭐ `scrolledPx` / `rounds` / `stopReason` 三个数一摆,
+             * 这两种成因立刻分得开 —— 不记的话只能靠人回忆点没点过。
+             */
+            const v = (r as { value?: {
+              rounds?: number; scrolledPx?: number;
+              reachedBottom?: boolean; stopReason?: string; problems?: readonly string[];
+            } }).value;
+            traceRecorder.lifecycle({
+              layer: 'web.page',
+              event: r.status === 'ok' ? 'scroll' : `scroll-${r.status}`,
+              pageId: String(pageId),
+              detail: {
+                rounds: v?.rounds,
+                scrolledPx: v?.scrolledPx,
+                reachedBottom: v?.reachedBottom,
+                stopReason: v?.stopReason,
+                problems: v?.problems,
+                reason: (r as { reason?: string }).reason,
+              },
+            });
+            return toIpc(r);
           }
           /**
            * ⚠️ 没有 `read`/`query`/`text`/`selection` —— `WebDom` 接口里

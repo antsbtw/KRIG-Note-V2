@@ -93,12 +93,40 @@ type PendingRequest = {
  * 注意它**没有 detach / release / dispose** —— 这是有意的。
  * 通道只在**页面销毁**时随宿主一起消失(`onDestroyed`)。
  */
+/**
+ * ⭐⭐ 「这条载荷为什么没到手」的回报口 —— 2026-10-02 加。
+ *
+ * ── 为什么非加不可(真机实测逼出来的)──
+ *
+ * 真机点「开始捕获」后:接线 ✅、attach ✅、**一条载荷都没有**。
+ * 而本文件里有**三处静默 return**(getResponseBody 失败 / body 解不出 /
+ * 关联失败),全都只 `console.warn` —— 于是「捕 0 条」这个结果
+ * **没有任何可读的成因**,只能靠人盯终端。
+ *
+ * ⚠️ 本文件原注释自己写着「将来接 web.trace 时改成 degradation 记录」——
+ * 现在就是那个将来。
+ *
+ * ⭐ 用回调不直接 import `trace/`:`net/` 层的边界守卫禁跨层依赖,
+ * 而 `NetMonitor` 早有同款范式(收一个可选 `recorder`)。
+ * ⚠️ 不给回调就只是不留痕,**不报错也不降级功能**。
+ */
+export type BodyMissReporter = (miss: {
+  readonly pageId: PageId;
+  readonly url: string;
+  readonly reason: 'get-body-failed' | 'body-undecodable' | 'too-large' | 'correlate-failed';
+  readonly detail?: string;
+}) => void;
+
 export class CdpBodyProvider {
   readonly providerId = 'cdp';
   /** 已经装过的宿主 —— 每个宿主只装一次(V1 字面) */
   private readonly attachedHosts = new Set<number>();
 
-  constructor(private readonly bus: NetworkEventBus) {}
+  constructor(
+    private readonly bus: NetworkEventBus,
+    /** ⚠️ 可选 —— 不给只是不留痕,功能不变(同 `NetMonitor` 的 recorder) */
+    private readonly reportMiss?: BodyMissReporter,
+  ) {}
 
   isAttached(hostId: number): boolean {
     return this.attachedHosts.has(hostId);
@@ -232,16 +260,30 @@ export class CdpBodyProvider {
       })) as { body?: string; base64Encoded?: boolean };
     } catch (error) {
       // 单条取不到 body 不是通道故障(通道还活着),所以不发 channel-lost;
-      // 但也**不静默** —— 留痕,将来接 web.trace 时改成 degradation 记录。
+      // 但也**不静默** —— ⭐ 2026-10-02 真正接上了留痕(原来只有 console.warn,
+      //   于是「捕 0 条」没有任何可读的成因)。
+      const detail = error instanceof Error ? error.message : String(error);
       console.warn('[web.net] getResponseBody 失败', {
         pageId, providerRequestId, url: pending.url, error,
       });
+      this.reportMiss?.({ pageId, url: pending.url, reason: 'get-body-failed', detail });
       return;
     }
 
     const body = decodeBody(raw);
-    if (!body) return;
-    if (policy.maxBodyBytes !== undefined && body.byteLength > policy.maxBodyBytes) return;
+    if (!body) {
+      // ⚠️ 原来这里**完全静默** —— body 解不出与「这条没内容」长得一样
+      this.reportMiss?.({ pageId, url: pending.url, reason: 'body-undecodable' });
+      return;
+    }
+    if (policy.maxBodyBytes !== undefined && body.byteLength > policy.maxBodyBytes) {
+      // ⚠️ 原来也静默 —— 人会以为没捕到,实际是被自己设的上限挡了
+      this.reportMiss?.({
+        pageId, url: pending.url, reason: 'too-large',
+        detail: `${body.byteLength}B > ${policy.maxBodyBytes}B`,
+      });
+      return;
+    }
 
     const result = this.bus.attachProviderBody(pageId, providerRequestId, {
       url: pending.url,
@@ -252,8 +294,16 @@ export class CdpBodyProvider {
       body,
     });
     if (result.status === 'failed') {
-      // ⚠️ 关联失败**不静默丢**(prompt §7)。这条留痕将来进 web.trace 的 degradation。
+      /**
+       * ⚠️⚠️ 关联失败是**最要紧**的一种:它意味着 CDP 拿到了 body,
+       * 但配不上任何 webRequest 记录 → 事件压根不发 → 订阅者看到的是「0 条」。
+       * ⭐ `project` 里那条「webRequest 侧零接线」的症状就是它刷屏。
+       * 2026-10-02:终于从 console.warn 接进了留痕。
+       */
       console.warn('[web.net] body 关联失败', { pageId, providerRequestId, reason: result.reason });
+      this.reportMiss?.({
+        pageId, url: pending.url, reason: 'correlate-failed', detail: result.reason,
+      });
     }
   }
 }
