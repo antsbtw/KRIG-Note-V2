@@ -123,7 +123,7 @@ export type BodyMissReporter = (miss: {
   readonly reason:
     | 'get-body-failed' | 'body-undecodable' | 'correlate-failed' | 'oversize-kept'
     /** ⚠️ 临时诊断,定位后删 */
-    | 'diag-request' | 'diag-cdp-graphql';
+    ;
   readonly detail?: string;
 }) => void;
 
@@ -221,30 +221,6 @@ export class CdpBodyProvider {
       const httpMethod = String(request?.method ?? 'GET').toUpperCase();
       const resourceType = typeof params.type === 'string' ? params.type.toLowerCase() : undefined;
       pending.set(providerRequestId, { url, method: httpMethod, resourceType });
-      /**
-       * ⚠️ 诊断(2026-10-02,定位后删):实测捕到的 29 条**全是视频分片/心跳**,
-       * 一条 GraphQL 都没有,而视频分片按理应是 `Media` 类型、
-       * 不在 `['fetch','document','xhr']` 清单里 —— **过滤没按我想的工作**。
-       * ⭐ 记下每条请求的真实 type 与是否通过过滤,一比就知道差在哪。
-       */
-      this.reportMiss?.({
-        pageId,
-        url,
-        reason: 'diag-request',
-        detail: `type=${resourceType ?? '(无)'} pass=${shouldCaptureBody({ url, resourceType }, policy)}`,
-      });
-      /**
-       * ⚠️ 诊断:CDP 侧看见的 graphql —— 与 webRequest 侧**对照**。
-       * ⭐ 一边有一边没有,就知道是谁漏了(搜到的线索:
-       * WebSocket/SSE/Stream 响应 CDP 拦不到)。
-       */
-      if (url.includes('/i/api/graphql/')) {
-        const op = url.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知)';
-        this.reportMiss?.({
-          pageId, url, reason: 'diag-cdp-graphql',
-          detail: `${httpMethod} ${op} type=${resourceType ?? '(无)'}`,
-        });
-      }
       this.bus.bindProviderRequest(pageId, providerRequestId, {
         url,
         method: httpMethod,
