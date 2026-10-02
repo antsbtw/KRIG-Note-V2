@@ -736,8 +736,17 @@ export function XConsole(
                     </div>
                   )}
 
+                  {/*
+                    ⭐⭐ **按大小排序** —— 2026-10-02 实测 71 条里 37 条是视频分片,
+                    而正经数据(HomeTimeline 等)混在中间,一条条翻找不到。
+                    ⚠️ 原来按时间倒序,结果滚到后面全是视频 —— **人看到的前几条毫无价值**。
+                    ⭐ 按大小排:正经载荷几百 KB,心跳/埋点 0KB,一眼分开。
+                  */}
+                  <div style={S.todo}>
+                    共 {report.items.length} 条，按大小排序（正经数据在前，心跳／埋点在后）
+                  </div>
                   <div style={S.logBox}>
-                    {report.items.map((it) => (
+                    {[...report.items].sort((a, b) => b.byteLength - a.byteLength).map((it) => (
                       <div key={`${it.url}-${it.at}`} style={S.logItem}>
                         <div
                           style={{ ...S.logHead, cursor: 'pointer' }}

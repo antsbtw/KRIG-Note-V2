@@ -796,11 +796,40 @@ export function registerWebDomIpc(): void {
                 elapsedMs: report.elapsedMs,
                 legs: report.legs,
                 problems: report.problems,
-                items: report.items.slice(0, 40).map((x) => ({
-                  tail: x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)',
-                  kb: Math.round(x.byteLength / 102.4) / 10,
-                  from: x.from,
-                })),
+                /**
+                 * ⭐⭐ 采到了**什么** —— ⚠️ **全量按类型聚合**,不截断。
+                 *
+                 * ⚠️ 2026-10-02 实测踩到:原来 `slice(0, 40)` 取的是**最新 40 条**,
+                 * 而滚到后面全是视频分片 —— `HomeTimeline` 在更早的 31 条里,
+                 * **被截掉了**。于是留痕报「37 条视频分片、0 条 GraphQL」,
+                 * 而真相是 GraphQL 就在被截掉的那半边。
+                 * ⭐ 「不量的字段永远 100%」的变体:**不记的那半边永远不存在**。
+                 */
+                byKind: (() => {
+                  const g = new Map<string, { n: number; min: number; max: number }>();
+                  for (const x of report.items) {
+                    const tail = x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)';
+                    // ⭐ 视频分片名是随机串,按**后缀**归一,否则几十个各算一类
+                    const key = /\.(m4s|mp4|m3u8|ts)$/.test(tail)
+                      ? `(视频分片 *.${tail.split('.').pop()})` : tail;
+                    const kb = Math.round(x.byteLength / 102.4) / 10;
+                    const e = g.get(key) ?? { n: 0, min: kb, max: kb };
+                    g.set(key, { n: e.n + 1, min: Math.min(e.min, kb), max: Math.max(e.max, kb) });
+                  }
+                  return Object.fromEntries(
+                    [...g.entries()].sort((a, b) => b[1].max - a[1].max)
+                      .map(([k, v]) => [k, `${v.n} 条 ${v.min}-${v.max}KB`]),
+                  );
+                })(),
+                /** ⭐ 最大的 8 条 —— 正经数据都在这里 */
+                biggest: [...report.items]
+                  .sort((a, b) => b.byteLength - a.byteLength)
+                  .slice(0, 8)
+                  .map((x) => ({
+                    tail: x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)',
+                    kb: Math.round(x.byteLength / 102.4) / 10,
+                    from: x.from,
+                  })),
               },
             });
             console.log(
