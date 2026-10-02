@@ -21,6 +21,11 @@ const ROOT = process.cwd();
 const IPC_DOM = join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts');
 
 /** ⚠️ 剥注释 —— 本文件与被扫文件的注释里都大量提到 `runDynamic` 等词 */
+/** 仓根下的绝对路径 —— ⚠️ 与本文件已有的 ROOT 同源,不另算一份 */
+function resolveFromRoot(rel: string): string {
+  return join(ROOT, rel);
+}
+
 const strip = (s: string): string =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
@@ -465,5 +470,109 @@ describe('⭐⭐ web.net 捕获 op:三条接线约束', () => {
      */
     const s = src();
     expect(s, '会话表的键不是 pageId').toMatch(/sessionsByPageId\s*=\s*new Map<\s*PageId/);
+  });
+});
+
+/**
+ * ⭐⭐ 捕获结果必须**落盘**,不能只活在 renderer 的 state 里
+ *
+ * ── 用户 2026-10-02 ──
+ * 「你在底层有读取数据的能力，而不是靠我截图，否则效率会差很多。」
+ *
+ * ⚠️ 这正是 `feedback-maintainability-over-feature-completion`:
+ * X 采集面板的判断依据「只渲染一次关掉就没」,核对只能反过来要用户截图,
+ * 被点破「**你不记录如何做验证**」。
+ * ⭐ 而那条还有后半句:**成功路径也要留痕**,不只失败。
+ *
+ * ⚠️ 本节钉的是「验证能力」本身 —— 断了的症状不是报错,
+ * 而是**下次又只能靠截图**,很难察觉。
+ */
+describe('⭐⭐ 捕获留痕:让验证不靠人截图', () => {
+  const src = (): string => ipcDom;
+
+  it('⭐ 接线这一步要留痕 —— 它是最靠前的线索', () => {
+    /**
+     * ⚠️ 没接上的话后面三个数全是 0,而那时人分不清
+     * 「没接上」与「页面没动」。两件事记下来才分得开。
+     */
+    const s = src();
+    const i = s.indexOf("case 'captureStart'");
+    const body = s.slice(i, s.indexOf("case 'captureStop'", i));
+    expect(body.length, '切片是空的').toBeGreaterThan(80);
+    expect(body, '接线没留痕 —— 后面全 0 时分不清是没接上还是页面没动')
+      .toMatch(/webrequest-side-wired/);
+  });
+
+  it('⭐⭐ attach 成功与失败**都要**留痕', () => {
+    /**
+     * ⚠️ 只记失败的话,「成功了但一条没捕到」这种最难查的情况
+     * 反而没有起点 —— 用户定的是**成功路径也要留痕**。
+     */
+    const s = src();
+    const i = s.indexOf("case 'captureStart'");
+    const body = s.slice(i, s.indexOf("case 'captureStop'", i));
+    expect(body, 'attach 结果没留痕').toMatch(/traceRecorder\.lifecycle\s*\(/);
+    expect(body, '只记了失败 —— 成功路径也要留痕')
+      .toMatch(/capture-start.*capture-attach-failed|attached \?/s);
+  });
+
+  it('⭐⭐ 停捕时把**三个数**写进留痕', () => {
+    /**
+     * ⚠️ 这是「这一轮到底捕到了什么」唯一能离开 renderer 的地方。
+     * ⭐ 三个数必须都在 —— 只写 captured 的话,
+     * 「通道哑了」(noBody)这个最该留的信号恰好丢了。
+     */
+    const s = src();
+    const i = s.indexOf("case 'captureStop'");
+    expect(i, 'captureStop 分支不见了').toBeGreaterThan(-1);
+    const branch = s.slice(i, s.indexOf("case 'captureStats'", i));
+    expect(branch.length, '切片是空的').toBeGreaterThan(80);
+
+    /**
+     * ⚠️⚠️ **必须切到 `traceRecorder.lifecycle(...)` 的参数里** ——
+     * 注入验证抓到:切整个 branch 时,同一段里的
+     * `console.log(\`…captured=\${st.captured}…\`)` 把断言全兜住了,
+     * 于是**把整段 traceRecorder 删掉照样全绿**。
+     * 正是 `feedback-guard-scope-to-the-branch`:同一 token 在切片里出现多次。
+     * ⭐ console.log 只打在终端,进程一关就没 —— 它顶不了落盘的活。
+     */
+    const call = branch.indexOf('traceRecorder.lifecycle');
+    expect(call, '停捕时压根没调 traceRecorder —— 这一轮的数就只能靠截图了')
+      .toBeGreaterThan(-1);
+    const argsEnd = branch.indexOf('});', call);
+    expect(argsEnd, 'traceRecorder 调用没收尾').toBeGreaterThan(call);
+    const args = branch.slice(call, argsEnd);
+    expect(args.length, '切出来的参数是空的 —— 断言会恒真').toBeGreaterThan(60);
+
+    for (const field of ['captured', 'noBody', 'bodyLost', 'channelFailures']) {
+      expect(args, `停捕留痕里少了 ${field} —— 这个信号就只能靠截图了`)
+        .toMatch(new RegExp(`\\b${field}\\b`));
+    }
+  });
+
+  it('⭐⭐ 首次捕到就留痕 —— 人可能忘了点停', () => {
+    /**
+     * ⚠️ 只在停捕时写的话,人忘了点停(或直接关面板)
+     * 这一轮**一个字都不会留下** —— 又回到只能靠截图。
+     */
+    const s = src();
+    expect(s, '没有首次捕获留痕 —— 人忘了点停这一轮就全没了')
+      .toMatch(/capture-first-payload/);
+    // ⭐ 且它必须接在会话上,不是写了个常量就算
+    expect(s, '首次捕获回调没传给 CaptureSession')
+      .toMatch(/new CaptureSession\s*\(\s*netBus\s*,\s*pageId\s*,/);
+  });
+
+  it('⚠️ 读留痕的工具必须在 —— 否则记了也读不到', () => {
+    /**
+     * ⭐ 「记录」与「读得到」是两件事。
+     * 本仓栽过的 `feedback-log-where-the-human-looks` 是打错地方,
+     * 这条防的是**没有读的办法**:落盘了但没人知道怎么看,等于没记。
+     */
+    const tool = resolveFromRoot('scripts/web-trace.mjs');
+    expect(existsSync(tool), '读留痕的脚本没了 —— 落盘的数据就没人读得到').toBe(true);
+    const code = readFileSync(tool, 'utf-8');
+    // ⚠️ 路径必须与 runtime.ts 的 traceRoot() 一致,否则读的是空目录
+    expect(code, '脚本没去 userData 下找 —— 会读到空目录').toContain('krig-data/web-trace');
   });
 });

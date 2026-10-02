@@ -83,9 +83,24 @@ export class CaptureSession {
   private lastChannelFailure?: string;
   private unsubscribe?: () => void;
 
+  /**
+   * ⭐⭐ 「这一轮有没有真的捕到过」的**首次**信号。
+   *
+   * ⚠️ 为什么不只在停捕时记:**人可能忘了点停**(或直接关面板),
+   * 那样这一轮的事实一个字都不会留下 ——
+   * 又回到「只能靠截图」(用户 2026-10-02 点破的那条)。
+   * ⭐ 捕到第一条就记一次,之后不再重复(免得刷屏)。
+   */
+  private firstCaptureReported = false;
+
   constructor(
     private readonly bus: NetworkEventBus,
     private readonly pageId: PageId,
+    /**
+     * ⚠️ 可选 —— 不给就只是不留痕,**不报错也不降级功能**。
+     * 单测不需要留痕,生产一定要给。
+     */
+    private readonly onFirstCapture?: (url: string, byteLength: number) => void,
   ) {}
 
   /**
@@ -120,6 +135,8 @@ export class CaptureSession {
 
   /** 计数也归零 —— 开始新一轮观察时用 */
   resetStats(): void {
+    // ⚠️ 首次标记一起复位 —— 不然新一轮捕到了也不留痕
+    this.firstCaptureReported = false;
     this.captured = 0;
     this.noBody = 0;
     this.bodyLost = 0;
@@ -192,6 +209,14 @@ export class CaptureSession {
       text: new TextDecoder().decode(body.value),
       byteLength: body.value.byteLength,
     });
+    /**
+     * ⭐ 首次捕到就报一次 —— 让「链路活了」这个事实**离开内存**。
+     * ⚠️ 放在 push 之后:报的是真存下来的那一条。
+     */
+    if (!this.firstCaptureReported) {
+      this.firstCaptureReported = true;
+      this.onFirstCapture?.(record?.url ?? '', body.value.byteLength);
+    }
     // 老化:淘汰最老的
     while (this.payloads.length > MAX_PAYLOADS) this.payloads.shift();
   }

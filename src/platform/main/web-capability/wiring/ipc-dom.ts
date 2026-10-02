@@ -34,7 +34,7 @@ import type {
 } from '@shared/ipc/web-dom-types';
 import {
   controlEngine, domRunner, pageRegistry, scriptRegistry, listPageNames,
-  identifySemanticPage, netBus, bodyProvider,
+  identifySemanticPage, netBus, bodyProvider, traceRecorder,
 } from './runtime';
 import { CaptureSession } from '../net/capture-session';
 import { toPageHost } from './electron-page-host';
@@ -64,7 +64,21 @@ const sessionsByPageId = new Map<PageId, CaptureSession>();
 function sessionFor(pageId: PageId): CaptureSession {
   const existing = sessionsByPageId.get(pageId);
   if (existing) return existing;
-  const fresh = new CaptureSession(netBus, pageId);
+  /**
+   * ⭐⭐ 首次捕到载荷时**落盘一次** —— 用户 2026-10-02:
+   * 「你在底层有读取数据的能力，而不是靠我截图」。
+   * ⚠️ 只在停捕时写是不够的:**人可能忘了点停**,那样这一轮
+   * 一个字都不会留下。这一条保证「链路活了」这个事实一定留痕。
+   */
+  const fresh = new CaptureSession(netBus, pageId, (url, byteLength) => {
+    traceRecorder.lifecycle({
+      layer: 'web.net',
+      event: 'capture-first-payload',
+      pageId: String(pageId),
+      detail: { url, byteLength },
+    });
+    console.log(`[web.net] ⭐ 首条载荷到手 pageId=${pageId} ${byteLength}B ${url}`);
+  });
   sessionsByPageId.set(pageId, fresh);
   return fresh;
 }
@@ -328,6 +342,17 @@ export function registerWebDomIpc(): void {
              * 不同 session 必然不同),它不需要等于 partition 名。
              */
             wireWebRequestSideOn(netBus, wc.session, wc.session.storagePath ?? 'default');
+            /**
+             * ⭐ 接线这件事也落盘 —— 它是**最靠前**的线索:
+             * 没接上的话后面三个数全是 0,而那时人分不清
+             * 「没接上」与「页面没动」。两件事记下来才分得开。
+             */
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: 'webrequest-side-wired',
+              pageId: String(pageId),
+              detail: { partition: wc.session.storagePath ?? 'default' },
+            });
 
             const session = sessionFor(pageId);
             session.start();
@@ -341,6 +366,22 @@ export function registerWebDomIpc(): void {
               // ⚠️ 与 AI 侧同口径(interceptor.ts):X 的 GraphQL 走 fetch/xhr
               resourceTypes: ['fetch', 'document', 'xhr'],
             });
+            /**
+             * ⭐⭐ **结果落盘** —— 用户 2026-10-02:
+             * 「你在底层有读取数据的能力，而不是靠我截图，否则效率会差很多。」
+             *
+             * ⚠️ 这正是 `feedback-maintainability-over-feature-completion`
+             * 那条:X 采集面板的判断依据「只渲染一次关掉就没」,
+             * 核对只能反过来要用户截图 —— 被点破「**你不记录如何做验证**」。
+             * ⭐ 而那条还有后半句:**成功路径也要留痕**,不只失败。
+             * 所以 attach 成功与否都写。
+             */
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: attached ? 'capture-start' : 'capture-attach-failed',
+              pageId: String(pageId),
+              detail: { url: wc.getURL(), partition: wc.session.storagePath ?? 'default' },
+            });
             if (!attached) {
               return failed('[web.net ipc] CDP 通道 attach 失败 —— 载荷一条都收不到(DevTools 占着?)');
             }
@@ -350,7 +391,32 @@ export function registerWebDomIpc(): void {
           case 'captureStop': {
             const session = sessionFor(pageId);
             session.stop();
-            return { status: 'ok', value: session.stats() };
+            const st = session.stats();
+            /**
+             * ⭐⭐ 停捕时把**三个数**落盘 —— 这是「这一轮到底捕到了什么」
+             * 唯一能离开 renderer 的地方。
+             * ⚠️ 不写的话这些数只活在 React state 里:
+             * 人一关面板就没了,下次验证只能靠截图。
+             */
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: 'capture-stop',
+              pageId: String(pageId),
+              detail: {
+                captured: st.captured,
+                noBody: st.noBody,
+                bodyLost: st.bodyLost,
+                channelFailures: st.channelFailures,
+                lastChannelFailure: st.lastChannelFailure,
+                url: wc.getURL(),
+              },
+            });
+            console.log(
+              `[web.net] 载荷捕获已停止 pageId=${pageId} —— `
+              + `captured=${st.captured} noBody=${st.noBody} bodyLost=${st.bodyLost}`
+              + ` channelFailures=${st.channelFailures}`,
+            );
+            return { status: 'ok', value: st };
           }
           case 'captureStats':
             return { status: 'ok', value: sessionFor(pageId).stats() };
