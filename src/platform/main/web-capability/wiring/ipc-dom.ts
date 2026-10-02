@@ -83,7 +83,34 @@ const sessionsByPageId = new Map<PageId, CaptureSession>();
  * webRequest 的回调可能早于人点「开始捕获」就在跑
  * (页面一导航就有请求),晚注册会丢掉那一段的记录。
  */
-registerPageIdLookup((wcId) => pageIdByWcId.get(wcId) ?? null);
+registerPageIdLookup((wcId) => {
+  const hit = pageIdByWcId.get(wcId) ?? null;
+  /**
+   * ⚠️ 诊断(2026-10-02,定位后删):第三层修完仍然每条 correlate-failed,
+   * 而 `lookup` 确实注册了 —— 那就是 **wcId 对不上**。
+   * ⭐ 只在**查不到**时打,且节流:查得到就不吵。
+   */
+  if (!hit && !loggedMiss.has(wcId)) {
+    loggedMiss.add(wcId);
+    const known = Array.from(pageIdByWcId.keys());
+    const msg = `webRequest 的 wcId=${wcId} 不在表里;表里有 [${known.join(', ') || '(空)'}]`;
+    console.warn(`[web.net 诊断] ${msg}`);
+    /**
+     * ⭐⭐ **落盘**,不只 console.warn —— 主进程终端用户看不到、
+     * 也不会转给我(`feedback-maintainability-over-feature-completion`)。
+     * ⚠️ 每个 wcId 只记一次(`loggedMiss` 去重),否则 X 每秒几十个请求会刷爆。
+     */
+    traceRecorder.lifecycle({
+      layer: 'web.net',
+      event: 'pageid-lookup-miss',
+      detail: { wcId, knownWcIds: known, knownCount: known.length },
+    });
+  }
+  return hit;
+});
+
+/** ⚠️ 诊断用,定位后与上面那段一起删 */
+const loggedMiss = new Set<number>();
 
 /** 取或建会话 —— ⚠️ 不自动 start,开始捕是人的显式动作 */
 function sessionFor(pageId: PageId): CaptureSession {

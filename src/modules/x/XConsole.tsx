@@ -460,7 +460,12 @@ export function XConsole(
               <div style={S.row}>
                 <button
                   type="button"
-                  disabled={disabled || stats?.running === true}
+                  /**
+                   * ⚠️ 同理不看 `busy`:人常常是「先滚起来再开始捕」,
+                   * 而滚动期间按钮全灰会让这条路走不通。
+                   * ⭐ `captureStart` 是幂等的(底座保证),重复点无害。
+                   */
+                  disabled={wcId == null || stats?.running === true}
                   onClick={async () => {
                     await call('captureStart', { op: 'captureStart', pageRef: { wcId: wcId! } });
                     const r = await window.electronAPI!.webDomInvoke({
@@ -474,7 +479,17 @@ export function XConsole(
                 </button>
                 <button
                   type="button"
-                  disabled={disabled || !stats?.running}
+                  /**
+                   * ⚠️⚠️ **「停」不看 `busy`** —— 用户 2026-10-02:
+                   * 「点击停它不停的呀?看到 button 没有反应?」
+                   *
+                   * 真因:`disabled` 含 `busy`,而 `scrollUntil` 跑 30 轮要 20 多秒,
+                   * 期间所有按钮都是灰的 —— 包括「停」。
+                   * ⭐ 而「停」是**取消动作**:它恰恰该在忙的时候可用,
+                   * 否则人唯一能做的就是干等,这与按钮的语义相反。
+                   * ⚠️ 只保留 `wcId == null` 与 `!running` 两个真约束。
+                   */
+                  disabled={wcId == null || !stats?.running}
                   onClick={async () => {
                     const r = await window.electronAPI!.webDomInvoke({
                       op: 'captureStop', pageRef: { wcId: wcId! },
