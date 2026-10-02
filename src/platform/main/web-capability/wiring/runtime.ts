@@ -39,7 +39,25 @@ export const netBus = new NetworkEventBus();
  * ⚠️ 这里**不限流**:一条坏就记一条。刷屏本身就是信号
  * (「webRequest 侧零接线」那次的症状正是它刷屏)。
  */
+/**
+ * ⚠️ 诊断去重(2026-10-02,与 body-provider 里的 `diag-request` 一起删)。
+ * X 一秒几十条请求,不去重会把留痕写爆 —— 按「type + 通过与否」只记一次,
+ * 足够回答「哪些类型被挡了」这个问题。
+ */
+const diagSeen = new Set<string>();
+
 export const bodyProvider = new CdpBodyProvider(netBus, (miss) => {
+  if (miss.reason === 'diag-request') {
+    const key = miss.detail ?? '';
+    if (diagSeen.has(key)) return;
+    diagSeen.add(key);
+    traceRecorder.lifecycle({
+      layer: 'web.net',
+      event: 'diag-request-type',
+      detail: { sample: miss.url.slice(0, 90), info: key },
+    });
+    return;
+  }
   /**
    * ⚠️ `category` **按成因分**,不是统一一个 ——
    * 分类学在 `types.ts` 里写着各自的含义,混成一类就失去了按类统计的意义:

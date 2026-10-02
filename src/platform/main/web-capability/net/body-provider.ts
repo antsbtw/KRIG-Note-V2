@@ -121,7 +121,9 @@ export type BodyMissReporter = (miss: {
    * (用户 2026-10-02:「自废武功」/「要保持信息的完整性,而不是片段」)。
    */
   readonly reason:
-    | 'get-body-failed' | 'body-undecodable' | 'correlate-failed' | 'oversize-kept';
+    | 'get-body-failed' | 'body-undecodable' | 'correlate-failed' | 'oversize-kept'
+    /** ⚠️ 临时诊断,定位后删 */
+    | 'diag-request';
   readonly detail?: string;
 }) => void;
 
@@ -219,6 +221,18 @@ export class CdpBodyProvider {
       const httpMethod = String(request?.method ?? 'GET').toUpperCase();
       const resourceType = typeof params.type === 'string' ? params.type.toLowerCase() : undefined;
       pending.set(providerRequestId, { url, method: httpMethod, resourceType });
+      /**
+       * ⚠️ 诊断(2026-10-02,定位后删):实测捕到的 29 条**全是视频分片/心跳**,
+       * 一条 GraphQL 都没有,而视频分片按理应是 `Media` 类型、
+       * 不在 `['fetch','document','xhr']` 清单里 —— **过滤没按我想的工作**。
+       * ⭐ 记下每条请求的真实 type 与是否通过过滤,一比就知道差在哪。
+       */
+      this.reportMiss?.({
+        pageId,
+        url,
+        reason: 'diag-request',
+        detail: `type=${resourceType ?? '(无)'} pass=${shouldCaptureBody({ url, resourceType }, policy)}`,
+      });
       this.bus.bindProviderRequest(pageId, providerRequestId, {
         url,
         method: httpMethod,
