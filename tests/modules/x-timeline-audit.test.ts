@@ -243,3 +243,64 @@ describe('⭐⭐ 多页汇总', () => {
     expect(sum.coverage['正文']).toBe(0);
   });
 });
+
+/**
+ * ⭐⭐⭐ **逐条明细** —— 用户 2026-10-02:
+ * 「对于推文中的**数据是否完整**没有显示哦。」
+ *
+ * ⚠️ 只给覆盖率百分比的话,人不知道**哪几条**不完整、缺的是什么,
+ * 也不知道采到的到底是什么内容。
+ */
+describe('⭐⭐⭐ 「数据是否完整」要逐条说清', () => {
+  it('⭐⭐ 每条带**正文开头** —— 一眼看出采到的是什么', () => {
+    const t = tweet({}, { full_text: '这是一条很长的推文内容'.repeat(20) });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].preview.length, '没有正文摘要 —— 人看不出采到了什么')
+      .toBeGreaterThan(0);
+    expect(a.items[0].preview.length, '摘要太长会把面板撑爆').toBeLessThanOrEqual(80);
+  });
+
+  it('⚠️ 摘要里的换行要去掉 —— 否则面板布局撑开', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: 'a\nb\n\nc' })]));
+    expect(a.items[0].preview, '换行没去掉').toBe('a b c');
+  });
+
+  it('⭐⭐⭐ `incomplete` 逐条列出**缺了什么**', () => {
+    const bad = tweet({}, { full_text: '', conversation_id_str: undefined });
+    const good = tweet({ rest_id: '2' }, { id_str: '2' });
+    const sum = summarizeAudits([auditTimelinePayload(payload([bad, good]))]);
+
+    expect(sum.incomplete.length, '没列出有缺失的那条').toBe(1);
+    expect(sum.incomplete[0].missing, '缺的字段没说清')
+      .toEqual(expect.arrayContaining(['正文', '会话id']));
+    // ⭐ 完好的那条不该进来
+    expect(sum.incomplete.some((x) => x.audit.id === '2'), '完好的被当成了有缺失').toBe(false);
+  });
+
+  it('⚠️ 长推/长文**不算缺失** —— 它们是种类不是必备字段', () => {
+    /** ⭐ 否则普通推文会被全部报成「缺长推、缺长文」—— 噪音淹掉真问题 */
+    const sum = summarizeAudits([auditTimelinePayload(payload([tweet()]))]);
+    expect(sum.incomplete, '普通推文被报成有缺失').toEqual([]);
+  });
+
+  it('⭐⭐ `items` 带回**去重后**的全部明细', () => {
+    const p1 = auditTimelinePayload(payload([tweet(), tweet({ rest_id: '2' }, { id_str: '2' })]));
+    const p2 = auditTimelinePayload(payload([tweet({ rest_id: '2' }, { id_str: '2' }),
+      tweet({ rest_id: '3' }, { id_str: '3' })]));
+    const sum = summarizeAudits([p1, p2]);
+    expect(sum.items.length, '明细没去重 —— 两页之间会重叠').toBe(3);
+    expect(sum.items.map((x) => x.id).sort()).toEqual(['1234567890', '2', '3']);
+  });
+
+  it('⭐ 明细里带 handle 与字数 —— 判断「这条对不对」用得上', () => {
+    const sum = summarizeAudits([auditTimelinePayload(payload([tweet()]))]);
+    expect(sum.items[0].handle, '没带作者').toBe('someone');
+    expect(sum.items[0].textLen, '没带字数').toBeGreaterThan(0);
+  });
+
+  it('⚠️ 零条时 incomplete 与 items 都是空数组,不是 undefined', () => {
+    const sum = summarizeAudits([]);
+    expect(sum.items).toEqual([]);
+    expect(sum.incomplete).toEqual([]);
+  });
+});

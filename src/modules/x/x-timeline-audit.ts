@@ -21,6 +21,12 @@
 /** 一条推文的完整性画像 —— ⚠️ 字段选取对应已知的丢失形态 */
 export type TweetAudit = {
   readonly id: string;
+  /**
+   * ⭐ 正文开头 —— 用户 2026-10-02:「对于推文中的**数据是否完整**没有显示哦。」
+   * ⚠️ 只给**开头 80 字**:面板要能一眼看出「这条采到的是什么」,
+   * 而整段正文几千字会把面板撑爆(真要看全文点开原始载荷)。
+   */
+  readonly preview: string;
   /** 正文有没有 */
   readonly hasText: boolean;
   readonly textLen: number;
@@ -137,6 +143,8 @@ export function auditTimelinePayload(text: string): TimelineAudit {
 
     return {
       id: str(legacy.id_str) || str(node.rest_id),
+      // ⚠️ 去掉换行:面板一行显示,换行会把布局撑开
+      preview: text2.slice(0, 80).replace(/\s+/g, ' '),
       hasText: text2.length > 0,
       textLen: text2.length,
       isLongText: noteText.length > 0,
@@ -202,6 +210,14 @@ export function auditTimelinePayload(text: string): TimelineAudit {
 export function summarizeAudits(audits: readonly TimelineAudit[]): {
   pages: number; tweets: number; uniqueTweets: number;
   coverage: Record<string, number>; problems: string[];
+  /**
+   * ⭐⭐ **逐条明细**(去重后)—— 用户 2026-10-02:
+   * 「对于推文中的**数据是否完整**没有显示哦。」
+   * ⚠️ 只给百分比的话,人不知道**哪几条**不完整、缺的是什么。
+   */
+  items: TweetAudit[];
+  /** ⭐ 有缺失的那些 —— 面板优先显示它们 */
+  incomplete: Array<{ audit: TweetAudit; missing: string[] }>;
 } {
   const ids = new Set<string>();
   const all: TweetAudit[] = [];
@@ -215,10 +231,37 @@ export function summarizeAudits(audits: readonly TimelineAudit[]): {
   }
   const pct = (f: (t: TweetAudit) => boolean): number =>
     (all.length === 0 ? 0 : Math.round((all.filter(f).length / all.length) * 100));
+
+  /** ⭐ 去重后的明细 —— 两页之间会重叠 */
+  const seen = new Set<string>();
+  const uniq: TweetAudit[] = [];
+  for (const t of all) {
+    if (t.id && seen.has(t.id)) continue;
+    if (t.id) seen.add(t.id);
+    uniq.push(t);
+  }
+
+  /**
+   * ⭐⭐ 逐条算**缺了什么** —— 这才是「数据是否完整」的直接答案。
+   * ⚠️ 长推/长文**不算缺失**:它们是推文的种类,不是必备字段。
+   */
+  const incomplete = uniq.map((t) => {
+    const missing: string[] = [];
+    if (!t.hasText) missing.push('正文');
+    if (!t.hasAuthor) missing.push('作者');
+    if (!t.hasCreatedAt) missing.push('发布时间');
+    if (!t.hasMetrics) missing.push('互动数');
+    if (!t.hasConversationId) missing.push('会话id');
+    if (!t.hasTweetUrl) missing.push('推文链接');
+    return { audit: t, missing };
+  }).filter((x) => x.missing.length > 0);
+
   return {
     pages: audits.length,
     tweets: all.length,
     uniqueTweets: ids.size,
+    items: uniq,
+    incomplete,
     coverage: {
       正文: pct((t) => t.hasText),
       作者: pct((t) => t.hasAuthor),

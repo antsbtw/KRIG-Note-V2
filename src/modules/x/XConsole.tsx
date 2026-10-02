@@ -710,6 +710,46 @@ export function XConsole(
                           {[...new Set(audit.problems)].map((x) => <div key={x}>⚠️ {x}</div>)}
                         </div>
                       )}
+
+                      {/*
+                        ⭐⭐⭐ **逐条明细** —— 用户 2026-10-02:
+                        「对于推文中的**数据是否完整**没有显示哦。」
+                        ⚠️ 只给百分比的话,人不知道**哪几条**不完整、缺的是什么,
+                        　 也不知道采到的到底是什么内容。
+                      */}
+                      {audit.incomplete.length > 0 && (
+                        <div style={{ marginTop: 6 }}>
+                          <div style={{ color: '#d9c48f', marginBottom: 3 }}>
+                            ⚠️ 有缺失的 {audit.incomplete.length} 条：
+                          </div>
+                          {audit.incomplete.slice(0, 8).map((x) => (
+                            <div key={x.audit.id} style={S.tweetLine}>
+                              <span style={{ color: '#d98f8f' }}>缺 {x.missing.join('／')}</span>
+                              <span style={{ opacity: 0.55 }}>　@{x.audit.handle || '?'}</span>
+                              <span style={{ opacity: 0.8 }}>　{x.audit.preview || '（无正文）'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {audit.items.length > 0 && (
+                        <details style={{ marginTop: 6 }}>
+                          <summary style={{ cursor: 'pointer', opacity: 0.75 }}>
+                            展开全部 {audit.items.length} 条推文
+                          </summary>
+                          <div style={{ marginTop: 4 }}>
+                            {audit.items.map((t) => (
+                              <div key={t.id} style={S.tweetLine}>
+                                <span style={{ color: '#8fd9a8' }}>@{t.handle || '?'}</span>
+                                <span style={{ opacity: 0.5 }}>　{t.textLen} 字</span>
+                                {t.isLongText && <span style={{ color: '#9ac' }}>　长推</span>}
+                                {t.isArticle && <span style={{ color: '#9ac' }}>　长文</span>}
+                                <span style={{ opacity: 0.8 }}>　{t.preview || '（无正文）'}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
                     </div>
                   )}
                   {report.items.length > 0 && !audit && (
@@ -932,6 +972,10 @@ const S: Record<string, React.CSSProperties> = {
     border: '1px solid #2c2c2c', borderRadius: 4, background: '#1b1b1b',
   },
   failLine: { fontSize: 10, color: '#d98f8f', lineHeight: 1.5, wordBreak: 'break-all' },
+  tweetLine: {
+    fontSize: 10, lineHeight: 1.7, whiteSpace: 'nowrap',
+    overflow: 'hidden', textOverflow: 'ellipsis',
+  },
   shapeLine: {
     fontSize: 10, lineHeight: 1.6, padding: '2px 0 0 4px',
     wordBreak: 'break-all', opacity: 0.9,
