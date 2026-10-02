@@ -146,6 +146,11 @@ export function XConsole(
    * 竖排会隐含「从上到下」的次序,而它们之间本来没有次序。
    */
   const [tab, setTab] = useState<CapTab>('control');
+  /**
+   * 滚动轮数上限 —— ⚠️ **可填,不写死**(见下面那个输入框的注释)。
+   * ⭐ 默认 30 而不是 5:X 的无限流一屏才几百像素,5 轮看着像没动。
+   */
+  const [scrollRounds, setScrollRounds] = useState('30');
 
   /**
    * ⭐ 页面名**从真表读**,面板不抄一份。
@@ -390,14 +395,30 @@ export function XConsole(
             <button
               type="button"
               disabled={disabled}
-              onClick={() => call('scrollUntil atBottom', {
+              onClick={() => call(`scrollUntil ${scrollRounds} 轮`, {
                 op: 'scrollUntil', pageRef: { wcId: wcId! },
-                stop: { kind: 'atBottom' }, maxRounds: 5,
+                stop: { kind: 'atBottom' }, maxRounds: Number(scrollRounds) || 5,
               })}
               style={S.btn}
             >
-              scrollUntil（到底／5 轮）
+              scrollUntil
             </button>
+            {/*
+              ⭐ 轮数**可填** —— 用户 2026-10-02:「x view 没有怎么滚动哦」。
+              ⚠️ 真因是这里写死 `maxRounds: 5`:留痕实测**滚了 5 轮 3321px**,
+              　 确实滚了,只是在 X 首页看着不明显。
+              ⚠️⚠️ 写死的闸门会被当成「滚不动」——
+              　 `project-x-followers-2500-ceiling` 整条就是这个教训:
+              　 我把**自己设的轮数上限**当成了平台的天花板,
+              　 不填参数实采到 2781 人才证否。
+            */}
+            <input
+              value={scrollRounds}
+              onChange={(e) => setScrollRounds(e.target.value.replace(/\D/g, ''))}
+              style={{ ...S.input, flex: 'none', width: 56 }}
+              title="滚动轮数上限"
+            />
+            <span style={{ fontSize: 10, opacity: 0.5 }}>轮</span>
           </div>
             </div>
             <div style={S.resultArea}>

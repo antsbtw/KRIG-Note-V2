@@ -38,7 +38,7 @@ import {
 } from './runtime';
 import { CaptureSession } from '../net/capture-session';
 import { toPageHost } from './electron-page-host';
-import { wireWebRequestSideOn } from './webrequest-side';
+import { wireWebRequestSideOn, registerPageIdLookup } from './webrequest-side';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
 import type { AnchorName } from '../dom/types';
 import { bindPageHost } from './page-hosts';
@@ -59,6 +59,31 @@ const pageIdByWcId = new Map<number, PageId>();
  * 不清的话会话会一直订阅一个死页面,而症状是**内存只涨不降**。
  */
 const sessionsByPageId = new Map<PageId, CaptureSession>();
+
+/**
+ * ⭐⭐⭐ **wcId → pageId 的反查** —— 2026-10-02 真机实测查出的第三层缺口。
+ *
+ * ── 完整链条(每修一层就露出下一层)──
+ *
+ *   `wireWebRequestSide` 零调用        ← 上一轮修了
+ *     → 接上了,`onBeforeRequest` 也触发了
+ *       → 但 `pageOf(wcId)` 里 **`lookup` 是 null** → 返回 null
+ *         → `recordStart` 直接 return,**一条记录都不写**
+ *           → `candidatesFor` 恒空 → 每条 CDP 载荷都 `correlate-failed`
+ *
+ * ⚠️⚠️ 真机症状:接线 ✅ attach ✅ 滚动 ✅(5 轮 3321px)、
+ * CDP 什么都抓到了(GraphQL / timeline.json / 视频流),
+ * 但**每一条都关联失败**,最终 `captured=0`。
+ *
+ * ⭐ `webrequest-side.ts` 的注释早就警告过这个后果:
+ * 「静默不记会让**关联失败看起来像 CDP 侧的问题**,排查方向完全相反」——
+ * 而我差点就去查 CDP 了(还把 correlate-failed 归类成了 systemic)。
+ *
+ * ⚠️ 注册放在**模块加载期**而不是 `captureStart` 里:
+ * webRequest 的回调可能早于人点「开始捕获」就在跑
+ * (页面一导航就有请求),晚注册会丢掉那一段的记录。
+ */
+registerPageIdLookup((wcId) => pageIdByWcId.get(wcId) ?? null);
 
 /** 取或建会话 —— ⚠️ 不自动 start,开始捕是人的显式动作 */
 function sessionFor(pageId: PageId): CaptureSession {
@@ -374,6 +399,13 @@ export function registerWebDomIpc(): void {
               detail: { partition: wc.session.storagePath ?? 'default' },
             });
 
+            /**
+             * ⚠️ `pageIdByWcId` 是在 `resolve()`(首次 IPC 调用)时才填的,
+             * 而本次调用**已经**走过 resolve,所以此刻表里一定有这条 ——
+             * 上面模块加载期注册的那个 lookup 从这一刻起就能查到了。
+             * ⭐ 更早的请求(页面刚导航那一段)仍查不到,这是**已知边界**:
+             * 人点「开始捕获」之前的请求本来就不在这一轮的范围里。
+             */
             const session = sessionFor(pageId);
             session.start();
             /**

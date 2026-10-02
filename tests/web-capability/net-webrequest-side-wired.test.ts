@@ -128,6 +128,40 @@ describe('⭐⭐ web.net:两侧都要接线,只有一侧等于整层不工作', 
     expect(callers, 'CDP 侧登记没人调,关联同样恒失败').not.toHaveLength(0);
   });
 
+  it('⭐⭐⭐ pageId 反查也得有人注册 —— 否则接线了也一条不记', () => {
+    /**
+     * ⚠️⚠️ **2026-10-02 真机查出的第三层缺口**,与前两条是同一条链:
+     *
+     *   `wireWebRequestSide` 零调用              ← 第一层(已修)
+     *     → 接上了、`onBeforeRequest` 也触发了
+     *       → 但 `pageOf(wcId)` 里 **`lookup` 是 null** → 返回 null
+     *         → `recordStart` 直接 return,**一条记录都不写**  ← 第三层
+     *           → `candidatesFor` 恒空 → 每条 CDP 载荷都 correlate-failed
+     *
+     * ⚠️ 真机症状:接线 ✅ attach ✅ 滚动 ✅(5 轮 3321px)、
+     * CDP 什么都抓到了(GraphQL/timeline.json/视频流),
+     * 但**每一条都关联失败**,最终 captured=0。
+     *
+     * ⭐ `webrequest-side.ts` 自己的注释早就警告过:
+     * 「静默不记会让**关联失败看起来像 CDP 侧的问题**,排查方向完全相反」
+     * —— 而我差点就去查 CDP 了。
+     *
+     * ⭐ 判据与前两条同款:从**注册入口**往回查,不钉内部调用。
+     */
+    const callers = FILES.filter((f) => {
+      if (f.endsWith('webrequest-side.ts')) return false;   // 它自己的定义处
+      return /\bregisterPageIdLookup\s*\(/.test(strip(readFileSync(f, 'utf-8')));
+    }).map((f) => f.slice(SRC.length + 1));
+
+    expect(
+      callers,
+      'registerPageIdLookup 零调用 —— webRequest 侧**接上了但一条记录都不写**:\n'
+      + '  pageOf(wcId) 恒 null → recordStart 直接 return\n'
+      + '  → candidatesFor 恒空 → 每条 CDP 载荷都 correlate-failed\n'
+      + '⚠️ 症状会**看起来像 CDP 侧的问题**,排查方向完全相反。',
+    ).not.toHaveLength(0);
+  });
+
   it('⭐ 依赖 captureXPayloads 的模块都受这条链影响 —— 记在案', () => {
     // 这三个模块的载荷全靠 netBus;webRequest 侧空着它们就静默超时
     const consumers = FILES.filter((f) =>
