@@ -329,3 +329,111 @@ describe('对称性:URL 与 wcId 必须同一条通路', () => {
     expect(cb, '没登记 host 状态').toMatch(/registerHost\s*\(/);
   });
 });
+
+/**
+ * ⭐⭐ Console 布局:三种能力**并排平级**(用户 2026-10-02 定)
+ *
+ * 用户原话:
+ * 「X console 中的各种能力是**并排**的，上部分是操作参数，下部分是操作结果…
+ * 　如果你把能力垂直布局，就变成一个不断向下滚动的 view，
+ * 　**没有体现能力的层级是一致的**了。」
+ *
+ * ⭐ 最后那句是判据的来源:控制/输入/输出是**平级**的,
+ * 竖排会隐含「从上到下」的次序,而它们之间本来没有次序。
+ */
+describe('Console 布局:能力并排,不竖排', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐ tab 从真表渲染,不在 JSX 里写三个按钮', () => {
+    /**
+     * ⚠️ 写死三个按钮的话,加第四个能力时必然漏 ——
+     * 本仓「写死的清单不会自己长」已栽过五次
+     * (`feedback-guard-hardcoded-list-never-grows`)。
+     *
+     * ⭐ 判据切到 tabBar 那个块,不整文件扫。
+     */
+    const s = panel();
+    const i = s.indexOf('style={S.tabBar}');
+    expect(i, 'tabBar 不见了 —— 布局被改回竖排了?').toBeGreaterThan(-1);
+    const block = s.slice(i, s.indexOf('style={S.pane}', i));
+    expect(block.length, '切出来的 tabBar 块是空的 —— 断言会恒真').toBeGreaterThan(60);
+
+    expect(block, 'tab 不是从 CAP_TABS 渲染的 —— 加能力时会漏')
+      .toMatch(/CAP_TABS\.map\s*\(/);
+    // ⚠️ 反向:块里不许出现写死的能力名(那就是手写按钮的指纹)
+    for (const lit of ['控制', '输入', '输出']) {
+      expect(block, `tabBar 里写死了「${lit}」—— 标签该来自 CAP_TABS`).not.toContain(lit);
+    }
+  });
+
+  it('⭐⭐ 三种能力**互斥**显示,不是三段都渲染', () => {
+    /**
+     * ⚠️ 判据不是「有 tab 栏」—— 光有栏而三段照样全渲染,
+     * 还是那个一直往下滚的 view(**用户点破的正是这一点**)。
+     * ⭐ 所以钉:每个能力都在 `tab === 'x' &&` 的条件里。
+     */
+    const s = panel();
+    for (const id of ['control', 'input', 'output']) {
+      expect(s, `${id} 不是条件渲染 —— 三段会同时显示,又变回竖排`)
+        .toMatch(new RegExp(`tab === '${id}'\\s*&&`));
+    }
+  });
+
+  it('⭐⭐ 每个 tab 内:上半操作、下半结果', () => {
+    /**
+     * 用户:「上部分是操作参数，下部分是操作结果」。
+     * ⭐ 判据钉**两个区都存在且顺序对** —— 只钉存在的话,
+     * 把结果区写在操作区上面也会绿。
+     */
+    const s = panel();
+    const op = s.indexOf('S.opArea');
+    const res = s.indexOf('S.resultArea');
+    expect(op, '没有操作区').toBeGreaterThan(-1);
+    expect(res, '没有结果区').toBeGreaterThan(-1);
+    expect(op, '结果区排在操作区前面 —— 与用户定的上下形态相反').toBeLessThan(res);
+  });
+
+  it('⭐ 结果区必须能自己滚 —— 否则还是整页往下长', () => {
+    /**
+     * ⚠️⚠️ `minHeight: 0` 少了会怎样:flex 子项按内容撑开,
+     * 结果区的滚动条**出不来**,面板又变回「一直往下滚」——
+     * 而这正是用户要改掉的那个毛病。它是个**纯 CSS 细节,
+     * 但决定了整个布局成不成立**。
+     */
+    const s = panel();
+    const i = s.indexOf('resultArea: {');
+    expect(i, 'resultArea 样式不见了').toBeGreaterThan(-1);
+    const block = s.slice(i, s.indexOf('},', i));
+    expect(block.length, '切出来的样式块是空的').toBeGreaterThan(20);
+    expect(block, 'resultArea 没有 minHeight:0 —— 滚动条出不来,又变回整页滚')
+      .toMatch(/minHeight:\s*0/);
+    expect(block, 'resultArea 不吃剩余高度').toMatch(/flex:\s*1/);
+  });
+
+  it('⭐ 捕获中在**输出 tab 的标签上**也看得见', () => {
+    /**
+     * ⚠️ 人可能正停在控制 tab,而捕获在后台跑着 ——
+     * 指示只画在输出 tab 内部的话,切走就看不见了,
+     * 人会以为没在捕(与 `feedback-maintainability-over-feature-completion`
+     * 「依据不能一关就没」同源)。
+     */
+    const s = panel();
+    const i = s.indexOf('style={S.tabBar}');
+    const block = s.slice(i, s.indexOf('style={S.pane}', i));
+    expect(block, 'tab 标签上没有捕获中指示 —— 切到别的 tab 就看不见了')
+      .toMatch(/stats\?\.running/);
+  });
+
+  it('⚠️ 样式表里不留零引用的死样式', () => {
+    /**
+     * ⚠️ 改布局最容易留下的垃圾:旧的 `section` / `live` 样式没人用了还在。
+     * ⭐ 死样式本身无害,但它会让下一个人以为「还有个 section 布局」,
+     * 照着它写出第二套。
+     */
+    const s = panel();
+    const defined = Array.from(s.matchAll(/^ {2}(\w+):\s*\{/gm)).map((m) => m[1]);
+    expect(defined.length, '一条样式都没解析出来 —— 正则该跟上').toBeGreaterThan(8);
+    const unused = defined.filter((k) => !new RegExp(`S\\.${k}\\b`).test(s));
+    expect(unused, '这些样式零引用 —— 改布局后的残留:\n  ' + unused.join('\n  ')).toEqual([]);
+  });
+});

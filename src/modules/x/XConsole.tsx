@@ -55,6 +55,19 @@ type PageTable = {
   optional: Record<string, string[]>;
 };
 
+/**
+ * 能力 tab —— ⭐ 三者**平级互斥**,不是三段内容。
+ * ⚠️ 加能力时只改这里和 `CAP_TABS`,JSX 里不写第四处判断。
+ */
+type CapTab = 'control' | 'input' | 'output';
+
+/** ⚠️ 标签文字与 id 同在一处 —— 分开写两份必漂 */
+const CAP_TABS: ReadonlyArray<{ id: CapTab; label: string; sub: string }> = [
+  { id: 'control', label: '控制', sub: 'web.page' },
+  { id: 'input', label: '输入', sub: 'web.input' },
+  { id: 'output', label: '输出', sub: 'web.net' },
+];
+
 /** 左栏当前页的识别结果(来自底座 `identify`,不是面板自己 parse 的) */
 type Identified = {
   /** ⭐ 记下是**哪个 URL** 认出来的 —— 免得 URL 已变而建议还是旧的 */
@@ -121,6 +134,18 @@ export function XConsole(
   const [payloads, setPayloads] = useState<CapturedPayload[]>([]);
   /** 展开看原样 JSON 的那一条 */
   const [openPayload, setOpenPayload] = useState<string | null>(null);
+  /**
+   * ⭐⭐ 当前能力 tab。
+   *
+   * ── 用户 2026-10-02 ──
+   * 「X console 中的各种能力是**并排**的，上部分是操作参数，下部分是操作结果。
+   * 　如果你把能力垂直布局，就变成一个不断向下滚动的 view，
+   * 　**没有体现能力的层级是一致的**了。」
+   *
+   * ⭐ 关键在最后那句:控制/输入/输出是**平级**的三种能力,
+   * 竖排会隐含「从上到下」的次序,而它们之间本来没有次序。
+   */
+  const [tab, setTab] = useState<CapTab>('control');
 
   /**
    * ⭐ 页面名**从真表读**,面板不抄一份。
@@ -243,276 +268,308 @@ export function XConsole(
         {wcId == null && <strong style={{ color: '#d88' }}>　⚠️ 左栏 webview 未就绪</strong>}
       </div>
 
-      {/* ── 控制 ── */}
-      <section style={S.section}>
-        <div style={S.sectionTitle}>控制（web.page）</div>
-
-        {/*
-          ⭐⭐ 对称性:左栏在哪一页 —— **建议,不自动覆盖**。
-          ⚠️ 为什么留「用它」这一下:自动写会冲掉人正在填的参数,
-          　 更贵的那次是 2026-09-07「跟着左边走」把 x.profile 静默改成 x.home
-          　 → 爬了首页 1281 条污染入库。见本文件头注释。
-        */}
-        <div style={S.suggest}>
-          {!hostUrl && <span style={{ opacity: 0.5 }}>左栏还没导航。</span>}
-          {hostUrl && identified && identified.url === hostUrl && (
-            <>
-              <span>左栏在 </span>
-              <code style={S.code}>{identified.name}</code>
-              {Object.entries(identified.params).map(([k, v]) => (
-                <code key={k} style={S.code}>{`${k}=${v}`}</code>
-              ))}
-              <button
-                type="button"
-                onClick={() => {
-                  setPageName(identified.name);
-                  // ⭐ 整份替换而非 merge:留着上一页的残参数会**混搭成一个不存在的页**
-                  setParamVals(identified.params);
-                }}
-                style={S.btn}
-              >
-                用它
-              </button>
-            </>
-          )}
-          {hostUrl && !(identified && identified.url === hostUrl) && (
-            /*
-              ⚠️ 「不认识」是**正常答案**(人可能停在设置页/登录页),
-              　 所以用灰字不用报错色 —— 染红会让人去查一个不存在的故障。
-            */
-            <span style={{ opacity: 0.5 }}>
-              这一页没有对应的语义名（{shortUrl(hostUrl)}）
-            </span>
-          )}
-        </div>
-
-        <div style={S.row}>
-          <select
-            value={pageName}
-            onChange={(e) => setPageName(e.target.value)}
-            style={S.input}
-          >
-            <option value="">（选语义页面）</option>
-            {tables.map((t) =>
-              t.names.map((n) => (
-                <option key={`${t.owner}:${n}`} value={n}>{`${n}  ·  ${t.owner}`}</option>
-              )),
-            )}
-          </select>
+      {/*
+        ⭐⭐ 能力 tab —— 用户 2026-10-02:
+        「各种能力是**并排**的…如果垂直布局，就变成一个不断向下滚动的 view，
+        　**没有体现能力的层级是一致的**了。」
+        ⚠️ 从 `CAP_TABS` 渲染,不在 JSX 里写三个按钮 ——
+        　 写死就会在加第四个能力时漏掉(本仓「清单不会自己长」栽过五次)。
+      */}
+      <div style={S.tabBar}>
+        {CAP_TABS.map((t) => (
           <button
+            key={t.id}
             type="button"
-            disabled={disabled || !pageName || missing.length > 0}
-            title={missing.length > 0 ? `还缺参数：${missing.join('、')}` : undefined}
-            onClick={() => call(`goto ${pageName}`, {
-              op: 'goto', pageRef: { wcId: wcId! }, name: pageName, params: paramVals,
-            })}
-            style={S.btn}
+            onClick={() => setTab(t.id)}
+            style={{ ...S.tab, ...(tab === t.id ? S.tabActive : null) }}
           >
-            goto
+            {t.label}
+            <span style={S.tabSub}>{t.sub}</span>
+            {/* ⭐ 捕获中在**输出 tab 的标签上**也要看得见 —— 人可能正在控制 tab */}
+            {t.id === 'output' && stats?.running && <span style={S.dot}>●</span>}
           </button>
-        </div>
-        {/* ⭐ 参数框**按真表渲染** —— 加页面时只改页面表,这里自动跟上 */}
-        {requiredParams.map((k) => (
-          <div key={k} style={S.row}>
-            {/* ⭐ 可选参数标出来 —— 否则人会以为每个框都得填 */}
-            <span style={{ width: 70, opacity: 0.8 }}>
-              {k}
-              {optionalParams.includes(k) && (
-                <span style={{ opacity: 0.5, fontSize: 10 }}>　可选</span>
-              )}
-            </span>
-            <input
-              value={paramVals[k] ?? ''}
-              onChange={(e) => setParamVals((v) => ({ ...v, [k]: e.target.value }))}
-              placeholder={ownerTable?.hints[k] ?? k}
-              style={S.input}
-            />
-          </div>
         ))}
-        {pageName && requiredParams.length === 0 && (
-          <div style={S.todo}>这个页面不需要参数。</div>
-        )}
-        <div style={S.row}>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => call('scrollUntil atBottom', {
-              op: 'scrollUntil', pageRef: { wcId: wcId! },
-              stop: { kind: 'atBottom' }, maxRounds: 5,
-            })}
-            style={S.btn}
-          >
-            scrollUntil（到底／5 轮）
-          </button>
-        </div>
-      </section>
+      </div>
 
-      {/* ── 输入 / 输出:本步占位 ── */}
-      <section style={S.section}>
-        <div style={S.sectionTitle}>输入（web.input）</div>
-        <div style={S.todo}>
-          ⏸️ 第 5 步接。⚠️⚠️ <strong>红线：永远不提供「点发布」按钮</strong> —— 只填内容，发布由人点。
-        </div>
-      </section>
-      <section style={S.section}>
-        <div style={S.sectionTitle}>
-          输出（web.net 载荷捕获）
-          {stats?.running && <span style={S.live}>● 捕获中</span>}
-        </div>
-        <div style={S.row}>
-          <button
-            type="button"
-            disabled={disabled || stats?.running === true}
-            onClick={async () => {
-              await call('captureStart', { op: 'captureStart', pageRef: { wcId: wcId! } });
-              const r = await window.electronAPI!.webDomInvoke({
-                op: 'captureStats', pageRef: { wcId: wcId! },
-              });
-              if (r.status === 'ok') setStats(r.value as CaptureStats);
-            }}
-            style={S.btn}
-          >
-            开始捕获
-          </button>
-          <button
-            type="button"
-            disabled={disabled || !stats?.running}
-            onClick={async () => {
-              const r = await window.electronAPI!.webDomInvoke({
-                op: 'captureStop', pageRef: { wcId: wcId! },
-              });
-              if (r.status === 'ok') setStats(r.value as CaptureStats);
-            }}
-            style={S.btn}
-          >
-            停
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={async () => {
-              const r = await window.electronAPI!.webDomInvoke({
-                op: 'captureList', pageRef: { wcId: wcId! }, limit: 20,
-              });
-              if (r.status === 'ok') setPayloads(r.value as CapturedPayload[]);
-              else setPayloads([]);
-            }}
-            style={S.btn}
-          >
-            取载荷
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={async () => {
-              const r = await window.electronAPI!.webDomInvoke({
-                op: 'captureClear', pageRef: { wcId: wcId! },
-              });
-              if (r.status === 'ok') setStats(r.value as CaptureStats);
-              setPayloads([]);
-              setOpenPayload(null);
-            }}
-            style={S.linkBtn}
-          >
-            清空
-          </button>
-        </div>
+      {/*
+        ⭐⭐ 每个 tab 内:**上半操作参数、下半操作结果**(用户定的形态)。
+        ⚠️ 结果区各 tab 自己带 —— 控制的结果是返回值留痕,
+        　 输出的结果是载荷列表,两者形状不同,合不到一起。
+      */}
+      <div style={S.pane}>
+        {tab === 'control' && (
+          <>
+            <div style={S.opArea}>
 
-        {/*
-          ⭐⭐ 三种状态分开显示 —— 这一栏是本步的**全部意义**。
-          ⚠️ 合成一个「捕获 N 条」会让「通道哑了」长得像「这页没请求」,
-          　 而 `project-x-collect-two-legs` 实测过:payloads 83→0 时
-          　 推文数还有 38,DOM 那条腿顶着,人以为只是少了点。
-        */}
-        {stats && (
-          <div style={S.statRow}>
-            <Stat label="captured" v={stats.captured} tone={stats.captured > 0 ? 'good' : 'idle'}
-              hint="真拿到了 body" />
-            <Stat label="noBody" v={stats.noBody} tone={stats.noBody > 0 ? 'warn' : 'idle'}
-              hint="⚠️ 有响应却没载荷 —— 通道哑了的指纹" />
-            <Stat label="bodyLost" v={stats.bodyLost} tone={stats.bodyLost > 0 ? 'warn' : 'idle'}
-              hint="⚠️ 有 bodyRef 但取不出 —— 与老化赛跑输了" />
-            <Stat label="通道故障" v={stats.channelFailures}
-              tone={stats.channelFailures > 0 ? 'bad' : 'idle'}
-              hint="attach 失败 / 中途被 detach" />
-            <Stat label="攒着" v={stats.held} tone="idle" hint="当前存了几条（封顶 64）" />
-          </div>
-        )}
-        {stats?.lastChannelFailure && (
-          <div style={S.failLine}>最后一条通道故障：{stats.lastChannelFailure}</div>
-        )}
-        {stats && stats.captured === 0 && stats.noBody > 0 && (
-          /*
-            ⭐ 这句话是本栏最值钱的地方:这个组合**唯一指向**通道问题。
-            ⚠️ 没有它,人看到「captured 0」第一反应是去查选择器或页面 ——
-            　 而真因在 CDP 通道,方向完全相反。
-          */
-          <div style={S.diagnose}>
-            ⚠️ 有响应但一条载荷都没拿到 —— 这是 <strong>CDP 通道</strong>的问题，
-            不是页面或选择器的问题。查 DevTools 是否占着通道。
-          </div>
-        )}
-        {stats && !stats.running && stats.captured === 0 && stats.noBody === 0 && (
-          <div style={S.todo}>
-            还没捕到任何响应。⭐ 载荷靠**滚动**触发 —— 先点上面的
-            scrollUntil，页面不动就不会有新请求。
-          </div>
-        )}
-
-        {/* ── 原样载荷 ── */}
-        {payloads.length > 0 && (
-          <div style={S.logBox}>
-            {payloads.map((pl) => (
-              <div key={pl.requestId} style={S.logItem}>
-                <div
-                  style={{ ...S.logHead, cursor: 'pointer' }}
-                  onClick={() => setOpenPayload(openPayload === pl.requestId ? null : pl.requestId)}
-                >
-                  <span style={{ ...S.badge, ...badgeStyle(pl.status === 200 ? 'ok' : 'failed') }}>
-                    {pl.status ?? '—'}
-                  </span>
-                  {/* ⭐ 只显示路径尾段 —— X 的 GraphQL URL 很长,全显示会把别的挤掉 */}
-                  <span style={{ color: '#aaa' }}>{tailOfUrl(pl.url)}</span>
-                  <span style={{ color: '#666', marginLeft: 'auto' }}>
-                    {(pl.byteLength / 1024).toFixed(1)} KB
-                  </span>
-                  <span style={{ color: '#555' }}>{openPayload === pl.requestId ? '▾' : '▸'}</span>
-                </div>
-                {openPayload === pl.requestId && (
-                  /* ⭐ 原样,不解析、不挑字段 —— 这是调试台的本分 */
-                  <pre style={S.pre}>{pl.text.slice(0, 20000)}
-                    {pl.text.length > 20000 && `\n…（还有 ${pl.text.length - 20000} 字，已截断显示）`}
-                  </pre>
+              {/*
+                ⭐⭐ 对称性:左栏在哪一页 —— **建议,不自动覆盖**。
+                ⚠️ 为什么留「用它」这一下:自动写会冲掉人正在填的参数,
+                　 更贵的那次是 2026-09-07「跟着左边走」把 x.profile 静默改成 x.home
+                　 → 爬了首页 1281 条污染入库。见本文件头注释。
+              */}
+              <div style={S.suggest}>
+                {!hostUrl && <span style={{ opacity: 0.5 }}>左栏还没导航。</span>}
+                {hostUrl && identified && identified.url === hostUrl && (
+                  <>
+                    <span>左栏在 </span>
+                    <code style={S.code}>{identified.name}</code>
+                    {Object.entries(identified.params).map(([k, v]) => (
+                      <code key={k} style={S.code}>{`${k}=${v}`}</code>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPageName(identified.name);
+                        // ⭐ 整份替换而非 merge:留着上一页的残参数会**混搭成一个不存在的页**
+                        setParamVals(identified.params);
+                      }}
+                      style={S.btn}
+                    >
+                      用它
+                    </button>
+                  </>
                 )}
+                {hostUrl && !(identified && identified.url === hostUrl) && (
+                  /*
+                    ⚠️ 「不认识」是**正常答案**(人可能停在设置页/登录页),
+                    　 所以用灰字不用报错色 —— 染红会让人去查一个不存在的故障。
+                  */
+                  <span style={{ opacity: 0.5 }}>
+                    这一页没有对应的语义名（{shortUrl(hostUrl)}）
+                  </span>
+                )}
+            </div>
+
+          <div style={S.row}>
+            <select
+              value={pageName}
+              onChange={(e) => setPageName(e.target.value)}
+              style={S.input}
+            >
+              <option value="">（选语义页面）</option>
+              {tables.map((t) =>
+                t.names.map((n) => (
+                  <option key={`${t.owner}:${n}`} value={n}>{`${n}  ·  ${t.owner}`}</option>
+                )),
+              )}
+            </select>
+            <button
+              type="button"
+              disabled={disabled || !pageName || missing.length > 0}
+              title={missing.length > 0 ? `还缺参数：${missing.join('、')}` : undefined}
+              onClick={() => call(`goto ${pageName}`, {
+                op: 'goto', pageRef: { wcId: wcId! }, name: pageName, params: paramVals,
+              })}
+              style={S.btn}
+            >
+              goto
+            </button>
+          </div>
+          {/* ⭐ 参数框**按真表渲染** —— 加页面时只改页面表,这里自动跟上 */}
+          {requiredParams.map((k) => (
+            <div key={k} style={S.row}>
+              {/* ⭐ 可选参数标出来 —— 否则人会以为每个框都得填 */}
+              <span style={{ width: 70, opacity: 0.8 }}>
+                {k}
+                {optionalParams.includes(k) && (
+                  <span style={{ opacity: 0.5, fontSize: 10 }}>　可选</span>
+                )}
+              </span>
+              <input
+                value={paramVals[k] ?? ''}
+                onChange={(e) => setParamVals((v) => ({ ...v, [k]: e.target.value }))}
+                placeholder={ownerTable?.hints[k] ?? k}
+                style={S.input}
+              />
+            </div>
+          ))}
+          {pageName && requiredParams.length === 0 && (
+            <div style={S.todo}>这个页面不需要参数。</div>
+          )}
+          <div style={S.row}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => call('scrollUntil atBottom', {
+                op: 'scrollUntil', pageRef: { wcId: wcId! },
+                stop: { kind: 'atBottom' }, maxRounds: 5,
+              })}
+              style={S.btn}
+            >
+              scrollUntil（到底／5 轮）
+            </button>
+          </div>
+            </div>
+            <div style={S.resultArea}>
+              <div style={S.sectionTitle}>
+                返回值（原样，最近 50 条）
+                {log.length > 0 && (
+                  <button type="button" onClick={() => setLog([])} style={S.linkBtn}>清空</button>
+                )}
+            </div>
+          <div style={S.logBox}>
+            {log.length === 0 && <div style={S.todo}>还没调用过。</div>}
+            {log.map((e, i) => (
+              <div key={`${e.at}-${i}`} style={S.logItem}>
+                <div style={S.logHead}>
+                  <span style={{ ...S.badge, ...badgeStyle(e.result.status) }}>{e.result.status}</span>
+                  <span style={{ color: '#aaa' }}>{e.label}</span>
+                  <span style={{ color: '#666', marginLeft: 'auto' }}>{e.at}</span>
+                </div>
+                {/* ⭐ 原样 JSON —— 不挑字段、不美化;挑了就看不出底座到底回了什么 */}
+                <pre style={S.pre}>{JSON.stringify(e.result, null, 2)}</pre>
               </div>
             ))}
           </div>
-        )}
-      </section>
-
-      {/* ── 留痕 ── */}
-      <section style={{ ...S.section, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <div style={S.sectionTitle}>
-          返回值（原样，最近 50 条）
-          {log.length > 0 && (
-            <button type="button" onClick={() => setLog([])} style={S.linkBtn}>清空</button>
-          )}
-        </div>
-        <div style={S.logBox}>
-          {log.length === 0 && <div style={S.todo}>还没调用过。</div>}
-          {log.map((e, i) => (
-            <div key={`${e.at}-${i}`} style={S.logItem}>
-              <div style={S.logHead}>
-                <span style={{ ...S.badge, ...badgeStyle(e.result.status) }}>{e.result.status}</span>
-                <span style={{ color: '#aaa' }}>{e.label}</span>
-                <span style={{ color: '#666', marginLeft: 'auto' }}>{e.at}</span>
-              </div>
-              {/* ⭐ 原样 JSON —— 不挑字段、不美化;挑了就看不出底座到底回了什么 */}
-              <pre style={S.pre}>{JSON.stringify(e.result, null, 2)}</pre>
             </div>
-          ))}
-        </div>
-      </section>
+          </>
+        )}
+
+        {tab === 'input' && (
+          <div style={S.opArea}>
+            <div style={S.todo}>
+              ⏸️ 第 5 步接。⚠️⚠️ <strong>红线：永远不提供「点发布」按钮</strong> —— 只填内容，发布由人点。
+          </div>
+          </div>
+        )}
+
+        {tab === 'output' && (
+          <>
+            <div style={S.opArea}>
+              <div style={S.row}>
+                <button
+                  type="button"
+                  disabled={disabled || stats?.running === true}
+                  onClick={async () => {
+                    await call('captureStart', { op: 'captureStart', pageRef: { wcId: wcId! } });
+                    const r = await window.electronAPI!.webDomInvoke({
+                      op: 'captureStats', pageRef: { wcId: wcId! },
+                    });
+                    if (r.status === 'ok') setStats(r.value as CaptureStats);
+                  }}
+                  style={S.btn}
+                >
+                  开始捕获
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled || !stats?.running}
+                  onClick={async () => {
+                    const r = await window.electronAPI!.webDomInvoke({
+                      op: 'captureStop', pageRef: { wcId: wcId! },
+                    });
+                    if (r.status === 'ok') setStats(r.value as CaptureStats);
+                  }}
+                  style={S.btn}
+                >
+                  停
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={async () => {
+                    const r = await window.electronAPI!.webDomInvoke({
+                      op: 'captureList', pageRef: { wcId: wcId! }, limit: 20,
+                    });
+                    if (r.status === 'ok') setPayloads(r.value as CapturedPayload[]);
+                    else setPayloads([]);
+                  }}
+                  style={S.btn}
+                >
+                  取载荷
+                </button>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={async () => {
+                    const r = await window.electronAPI!.webDomInvoke({
+                      op: 'captureClear', pageRef: { wcId: wcId! },
+                    });
+                    if (r.status === 'ok') setStats(r.value as CaptureStats);
+                    setPayloads([]);
+                    setOpenPayload(null);
+                  }}
+                  style={S.linkBtn}
+                >
+                  清空
+                </button>
+            </div>
+
+          {/*
+            ⭐⭐ 三种状态分开显示 —— 这一栏是本步的**全部意义**。
+            ⚠️ 合成一个「捕获 N 条」会让「通道哑了」长得像「这页没请求」,
+            　 而 `project-x-collect-two-legs` 实测过:payloads 83→0 时
+            　 推文数还有 38,DOM 那条腿顶着,人以为只是少了点。
+          */}
+          {stats && (
+            <div style={S.statRow}>
+              <Stat label="captured" v={stats.captured} tone={stats.captured > 0 ? 'good' : 'idle'}
+                hint="真拿到了 body" />
+              <Stat label="noBody" v={stats.noBody} tone={stats.noBody > 0 ? 'warn' : 'idle'}
+                hint="⚠️ 有响应却没载荷 —— 通道哑了的指纹" />
+              <Stat label="bodyLost" v={stats.bodyLost} tone={stats.bodyLost > 0 ? 'warn' : 'idle'}
+                hint="⚠️ 有 bodyRef 但取不出 —— 与老化赛跑输了" />
+              <Stat label="通道故障" v={stats.channelFailures}
+                tone={stats.channelFailures > 0 ? 'bad' : 'idle'}
+                hint="attach 失败 / 中途被 detach" />
+              <Stat label="攒着" v={stats.held} tone="idle" hint="当前存了几条（封顶 64）" />
+            </div>
+          )}
+          {stats?.lastChannelFailure && (
+            <div style={S.failLine}>最后一条通道故障：{stats.lastChannelFailure}</div>
+          )}
+          {stats && stats.captured === 0 && stats.noBody > 0 && (
+            /*
+              ⭐ 这句话是本栏最值钱的地方:这个组合**唯一指向**通道问题。
+              ⚠️ 没有它,人看到「captured 0」第一反应是去查选择器或页面 ——
+              　 而真因在 CDP 通道,方向完全相反。
+            */
+            <div style={S.diagnose}>
+              ⚠️ 有响应但一条载荷都没拿到 —— 这是 <strong>CDP 通道</strong>的问题，
+              不是页面或选择器的问题。查 DevTools 是否占着通道。
+            </div>
+          )}
+          {stats && !stats.running && stats.captured === 0 && stats.noBody === 0 && (
+            <div style={S.todo}>
+              还没捕到任何响应。⭐ 载荷靠**滚动**触发 —— 先点上面的
+              scrollUntil，页面不动就不会有新请求。
+            </div>
+          )}
+            </div>
+            <div style={S.resultArea}>
+              {/* ── 原样载荷 ── */}
+              {payloads.length > 0 && (
+                <div style={S.logBox}>
+                  {payloads.map((pl) => (
+                    <div key={pl.requestId} style={S.logItem}>
+                      <div
+                        style={{ ...S.logHead, cursor: 'pointer' }}
+                        onClick={() => setOpenPayload(openPayload === pl.requestId ? null : pl.requestId)}
+                      >
+                        <span style={{ ...S.badge, ...badgeStyle(pl.status === 200 ? 'ok' : 'failed') }}>
+                          {pl.status ?? '—'}
+                        </span>
+                        {/* ⭐ 只显示路径尾段 —— X 的 GraphQL URL 很长,全显示会把别的挤掉 */}
+                        <span style={{ color: '#aaa' }}>{tailOfUrl(pl.url)}</span>
+                        <span style={{ color: '#666', marginLeft: 'auto' }}>
+                          {(pl.byteLength / 1024).toFixed(1)} KB
+                        </span>
+                        <span style={{ color: '#555' }}>{openPayload === pl.requestId ? '▾' : '▸'}</span>
+            </div>
+                  {openPayload === pl.requestId && (
+                    /* ⭐ 原样,不解析、不挑字段 —— 这是调试台的本分 */
+                    <pre style={S.pre}>{pl.text.slice(0, 20000)}
+                      {pl.text.length > 20000 && `\n…（还有 ${pl.text.length - 20000} 字，已截断显示）`}
+                    </pre>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -577,10 +634,41 @@ const S: Record<string, React.CSSProperties> = {
   },
   title: { fontSize: 14, color: 'var(--text-primary, #ddd)' },
   hint: { fontSize: 11, opacity: 0.75, lineHeight: 1.6 },
-  section: {
-    border: '1px solid var(--border-color, #333)', borderRadius: 6,
-    padding: 10, display: 'flex', flexDirection: 'column', gap: 8,
+  /** ── tab 栏:三个能力**并排平级** ── */
+  tabBar: {
+    display: 'flex', gap: 2, borderBottom: '1px solid var(--border-color, #333)',
   },
+  tab: {
+    display: 'flex', alignItems: 'baseline', gap: 5,
+    background: 'transparent', border: 'none',
+    borderBottom: '2px solid transparent', marginBottom: -1,
+    color: '#888', cursor: 'pointer', fontSize: 12,
+    padding: '6px 12px', whiteSpace: 'nowrap',
+  },
+  tabActive: {
+    color: 'var(--text-primary, #ddd)',
+    borderBottomColor: 'var(--accent-color, #6a9fd4)',
+  },
+  tabSub: { fontSize: 9, opacity: 0.45 },
+  dot: { color: '#8fd9a8', fontSize: 8 },
+
+  /**
+   * ⭐ tab 内容区 —— **上半操作、下半结果**(用户 2026-10-02 定的形态)。
+   * ⚠️ `minHeight: 0` 不能少:不写的话 flex 子项按内容撑开,
+   * 　 下半的滚动条就出不来,整个面板又变回「一直往下滚」。
+   */
+  pane: {
+    flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8,
+    paddingTop: 10,
+  },
+  /** 上半:操作参数 —— 不抢高度,内容多少占多少 */
+  opArea: { display: 'flex', flexDirection: 'column', gap: 8, flexShrink: 0 },
+  /** 下半:操作结果 —— 吃掉剩余高度并自己滚 */
+  resultArea: {
+    flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 8,
+    borderTop: '1px solid var(--border-color, #2c2c2c)', paddingTop: 8,
+  },
+
   sectionTitle: {
     fontSize: 12, color: 'var(--text-primary, #ccc)',
     display: 'flex', alignItems: 'center', gap: 8,
@@ -598,10 +686,6 @@ const S: Record<string, React.CSSProperties> = {
     flex: 1, background: '#1b1b1b', border: '1px solid #3a3a3a',
     borderRadius: 4, color: '#ddd', fontSize: 12, padding: '4px 6px',
   },
-  textarea: {
-    background: '#1b1b1b', border: '1px solid #3a3a3a', borderRadius: 4,
-    color: '#ddd', fontSize: 12, padding: 6, resize: 'vertical', fontFamily: 'monospace',
-  },
   btn: {
     background: 'transparent', border: '1px solid #4a4a4a', borderRadius: 4,
     color: '#bbb', cursor: 'pointer', fontSize: 12, padding: '4px 10px', whiteSpace: 'nowrap',
@@ -611,7 +695,6 @@ const S: Record<string, React.CSSProperties> = {
     color: '#777', cursor: 'pointer', fontSize: 11,
   },
   todo: { fontSize: 11, opacity: 0.6, lineHeight: 1.6 },
-  live: { color: '#8fd9a8', fontSize: 10, marginLeft: 4 },
   statRow: { display: 'flex', gap: 6, flexWrap: 'wrap' },
   stat: {
     minWidth: 58, textAlign: 'center', padding: '4px 6px',
