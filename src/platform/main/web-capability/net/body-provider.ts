@@ -123,7 +123,7 @@ export type BodyMissReporter = (miss: {
   readonly reason:
     | 'get-body-failed' | 'body-undecodable' | 'correlate-failed' | 'oversize-kept'
     /** ⚠️ 临时诊断,定位后删 */
-    | 'diag-request';
+    | 'diag-request' | 'diag-cdp-graphql';
   readonly detail?: string;
 }) => void;
 
@@ -233,6 +233,18 @@ export class CdpBodyProvider {
         reason: 'diag-request',
         detail: `type=${resourceType ?? '(无)'} pass=${shouldCaptureBody({ url, resourceType }, policy)}`,
       });
+      /**
+       * ⚠️ 诊断:CDP 侧看见的 graphql —— 与 webRequest 侧**对照**。
+       * ⭐ 一边有一边没有,就知道是谁漏了(搜到的线索:
+       * WebSocket/SSE/Stream 响应 CDP 拦不到)。
+       */
+      if (url.includes('/i/api/graphql/')) {
+        const op = url.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知)';
+        this.reportMiss?.({
+          pageId, url, reason: 'diag-cdp-graphql',
+          detail: `${httpMethod} ${op} type=${resourceType ?? '(无)'}`,
+        });
+      }
       this.bus.bindProviderRequest(pageId, providerRequestId, {
         url,
         method: httpMethod,

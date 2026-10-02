@@ -158,10 +158,40 @@ function pageOf(webContentsId: number | undefined): PageId | null {
   return lookup(webContentsId);
 }
 
+/**
+ * ⚠️ 诊断(2026-10-02,定位后删):**两条腿分别看见了什么**。
+ *
+ * 实测 CDP 侧近 3 小时一条 graphql 都没见过,而 X 首页本该轮询 `HomeTimeline`。
+ * ⭐ 这是决定性的对照:
+ * · webRequest 看见了而 CDP 没有 → **CDP 侧漏了**(搜到的线索:
+ *   WebSocket/SSE/Stream 响应 CDP 拦不到)
+ * · 两边都没有 → X 真的没发(页面状态问题)
+ *
+ * ⚠️ 只记 graphql,且按**操作名**去重 —— 不然 X 每秒几十条会把留痕写爆。
+ */
+const diagGraphqlSeen = new Set<string>();
+let diagReport: ((op: string, method: string) => void) | null = null;
+
+/** 诊断出口 —— ⚠️ 与上面那个 Set 一起删 */
+export function setWebRequestDiag(fn: (op: string, method: string) => void): void {
+  diagReport = fn;
+}
+
 function recordStart(
   bus: NetworkEventBus,
   details: Electron.OnBeforeRequestListenerDetails,
 ): void {
+  // ⚠️ 诊断放在 pageOf 之前 —— 要看的是「webRequest 有没有看见」,
+  //    而不是「映射成功的有哪些」(映射失败也该知道)
+  if (details.url.includes('/i/api/graphql/')) {
+    const op = details.url.match(/\/graphql\/[^/]+\/(\w+)/)?.[1] ?? '(未知)';
+    const key = `${op}|${details.method}`;
+    if (!diagGraphqlSeen.has(key)) {
+      diagGraphqlSeen.add(key);
+      diagReport?.(op, details.method);
+    }
+  }
+
   const pageId = pageOf(details.webContentsId);
   if (!pageId) return;   // 没映射到已登记页面 —— 丢掉,不猜
 

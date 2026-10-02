@@ -7,6 +7,7 @@
 
 import { PageRegistry } from '../page';
 import { NetworkEventBus, CdpBodyProvider } from '../net';
+import { setWebRequestDiag } from './webrequest-side';
 import { TraceRecorder, HealthProbe, NetMonitor } from '../trace';
 import { ScriptRegistry, registerAIScripts, registerLocateScripts, registerRendererScripts } from '../dom';
 import { ElectronDomRunner } from './electron-dom';
@@ -46,15 +47,56 @@ export const netBus = new NetworkEventBus();
  */
 const diagSeen = new Set<string>();
 
+/**
+ * ⚠️ 诊断(2026-10-02,定位后删):webRequest 侧看见的 graphql 操作。
+ * ⭐ 与 CDP 侧对照 —— 一边有一边没有,就知道是谁漏了。
+ */
+setWebRequestDiag((op, method) => {
+  traceRecorder.lifecycle({
+    layer: 'web.net',
+    event: 'diag-webrequest-graphql',
+    detail: { op, method },
+  });
+  console.log(`[web.net 诊断] webRequest 看见 graphql: ${method} ${op}`);
+});
+
 export const bodyProvider = new CdpBodyProvider(netBus, (miss) => {
+  if (miss.reason === 'diag-cdp-graphql') {
+    const key = `cdp|${miss.detail}`;
+    if (diagSeen.has(key)) return;
+    diagSeen.add(key);
+    traceRecorder.lifecycle({
+      layer: 'web.net', event: 'diag-cdp-graphql', detail: { info: miss.detail },
+    });
+    console.log(`[web.net 诊断] CDP 看见 graphql: ${miss.detail}`);
+    return;
+  }
   if (miss.reason === 'diag-request') {
-    const key = miss.detail ?? '';
+    /**
+     * ⚠️⚠️ 去重 key **不能只用 type** —— 上一轮栽过:
+     * `.m4s` 视频分片与 `promoted_content/log.json` 都报 `type=xhr pass=true`,
+     * key 完全相同 → 视频那条被去重吃掉 → 诊断里看不到它,
+     * 我据此以为「视频没走这条路」,查错了方向。
+     *
+     * ⭐ 改成按 **host + 路径首段** 去重:既能看清有哪些来源,
+     * 又不会被 X 每秒几十条同类请求刷爆。
+     */
+    let bucket = miss.url.slice(0, 40);
+    try {
+      const u = new URL(miss.url);
+      const seg = u.pathname.split('/').filter(Boolean);
+      // ⭐ GraphQL 要看到**操作名**(最后一段),那是判断「有没有 HomeTimeline」的关键
+      bucket = u.pathname.includes('/graphql/')
+        ? `${u.hostname}/graphql/${seg[seg.length - 1]}`
+        : `${u.hostname}/${seg.slice(0, 3).join('/')}`;
+    } catch { /* 非法 URL 用前缀兜底 */ }
+    const key = `${bucket}|${miss.detail ?? ''}`;
     if (diagSeen.has(key)) return;
     diagSeen.add(key);
     traceRecorder.lifecycle({
       layer: 'web.net',
       event: 'diag-request-type',
-      detail: { sample: miss.url.slice(0, 90), info: key },
+      detail: { bucket, info: miss.detail },
     });
     return;
   }
