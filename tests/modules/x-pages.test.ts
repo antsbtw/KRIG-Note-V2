@@ -6,7 +6,7 @@
  * 见 `feedback-source-scan-cant-see-execution`。
  */
 import { describe, it, expect } from 'vitest';
-import { extractTweetId, xPageResolver, PAGE_PARAMS } from '@modules/x/x-pages';
+import { extractTweetId, xPageResolver, PAGE_PARAMS , X_TIMELINE_ENDPOINTS, X_NOISY_URLS } from '@modules/x/x-pages';
 
 describe('⭐⭐ extractTweetId:人粘什么都要能认', () => {
   /**
@@ -240,5 +240,97 @@ describe('identify:X 自己的路由不许被认成人', () => {
   it('⭐ 末尾斜杠不影响识别', () => {
     expect(xPageResolver.identify?.('https://x.com/home/')?.name).toBe('x.home');
     expect(xPageResolver.identify?.('https://x.com/elonmusk/')?.name).toBe('x.profile');
+  });
+});
+
+/**
+ * ⭐⭐ 采集判据:**要什么** 与 **不要什么**
+ *
+ * ── 2026-10-02 实测逼出来的 ──
+ * 滚 10 轮采到 59 条,**52 条是视频分片**(最大 1299KB,合计约 15MB)。
+ * 两个后果:
+ * ① 把 `CaptureSession` 的 64 条容量挤爆 —— `HomeTimeline` 存不下
+ * ② 判据 `'/i/api/graphql/'` **太宽**,`ViewerBadgeCounts`(0.2KB 角标)
+ *    被当成「时间线载荷」→ 核对报告说「1 页 · 0 条推文」,
+ *    而真相是**那根本不是时间线**
+ */
+describe('⭐⭐ 采集判据', () => {
+  it('⭐⭐⭐ 时间线端点按**操作名**认,不是「所有 graphql」', () => {
+    /**
+     * ⚠️ 用 `'/i/api/graphql/'` 的话,这些**全部**会被当成时间线:
+     * ViewerBadgeCounts / DataSaverMode / getAltTextPromptPreference …
+     * 于是报告说「采到 1 页」而那页解出 0 条推文 —— **误导**。
+     */
+    const notTimeline = [
+      'https://x.com/i/api/graphql/abc/ViewerBadgeCounts?variables=%7B%7D',
+      'https://x.com/i/api/graphql/abc/DataSaverMode',
+      'https://x.com/i/api/graphql/abc/getAltTextPromptPreference',
+      'https://x.com/i/api/graphql/abc/PinnedTimelines',
+      'https://x.com/i/api/graphql/abc/CreatorStudioTabBarItemQuery',
+    ];
+    for (const u of notTimeline) {
+      expect(
+        X_TIMELINE_ENDPOINTS.some((e) => u.includes(e)),
+        `「${u.split('/').pop()}」不是时间线,却被判成了时间线载荷`,
+      ).toBe(false);
+    }
+  });
+
+  it('⭐⭐ 真正的时间线端点要认得出来', () => {
+    /** ⚠️ 反向锁:上一条光有「别认错」会被一个「什么都不认」的清单满足 */
+    const timeline = [
+      'https://x.com/i/api/graphql/abc/HomeTimeline',
+      'https://x.com/i/api/graphql/abc/UserTweets',
+      'https://x.com/i/api/graphql/abc/SearchTimeline',
+      'https://x.com/i/api/graphql/abc/TweetDetail',
+      'https://x.com/i/api/graphql/abc/Followers',
+    ];
+    for (const u of timeline) {
+      expect(
+        X_TIMELINE_ENDPOINTS.some((e) => u.includes(e)),
+        `「${u.split('/').pop()}」是时间线却没认出来 —— 会漏采`,
+      ).toBe(true);
+    }
+  });
+
+  it('⭐⭐⭐ 噪音名单挡住视频/图片,**不挡 API**', () => {
+    /**
+     * ⚠️ 挡错了是**静默丢数据**,比多采几条坏得多 ——
+     * 所以反向那条(不许挡住 API)比正向更要紧。
+     */
+    const shouldBlock = [
+      'https://video.twimg.com/amplify_video/123/vid/avc1/x.m4s',
+      'https://video.twimg.com/a/b.m3u8',
+      'https://pbs.twimg.com/profile_images/1/a.jpg',
+      'https://abs.twimg.com/responsive-web/client-web/main.js',
+    ];
+    for (const u of shouldBlock) {
+      expect(X_NOISY_URLS.some((n) => u.includes(n)), `没挡住噪音：${u}`).toBe(true);
+    }
+
+    const mustNotBlock = [
+      'https://x.com/i/api/graphql/abc/HomeTimeline',
+      'https://x.com/i/api/graphql/abc/UserTweets',
+      'https://x.com/i/api/1.1/flow/timeline.json',
+      'https://api.x.com/1.1/account/settings.json',
+    ];
+    for (const u of mustNotBlock) {
+      expect(
+        X_NOISY_URLS.some((n) => u.includes(n)),
+        `⚠️ 把 API 挡掉了 —— 这是**静默丢数据**：${u}`,
+      ).toBe(false);
+    }
+  });
+
+  it('⚠️ 噪音名单与时间线端点**不许重叠** —— 否则自相矛盾', () => {
+    /** ⭐ 一个 URL 既「要」又「不要」时,行为取决于判断顺序 —— 那是定时炸弹 */
+    for (const t of X_TIMELINE_ENDPOINTS) {
+      for (const n of X_NOISY_URLS) {
+        expect(
+          t.includes(n) || n.includes(t),
+          `端点「${t}」与噪音「${n}」重叠 —— 要不要采取决于判断顺序`,
+        ).toBe(false);
+      }
+    }
   });
 });

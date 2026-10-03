@@ -40,7 +40,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 import { auditTimelinePayload, summarizeAudits, type TimelineAudit } from './x-timeline-audit';
-import { X_TIMELINE_ENDPOINTS } from './x-pages';
+import { X_TIMELINE_ENDPOINTS, X_NOISY_URLS } from './x-pages';
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 
@@ -553,7 +553,14 @@ export function XConsole(
                       action: '开始收', state: { running, hasReport: report !== null },
                     });
                     const r = await window.electronAPI!.webDomInvoke({
-                      op: 'acquireStart', pageRef: { wcId: wcId! },
+                      op: 'acquireStart',
+                      pageRef: { wcId: wcId! },
+                      /**
+                       * ⭐ 噪音名单是**X 的业务知识**,从这里传给底座。
+                       * ⚠️ 2026-10-02 实测:不挡的话 52 条视频分片(15MB)
+                       * 会把 64 条容量挤爆,HomeTimeline 存不下。
+                       */
+                      noisyUrlSubstrings: X_NOISY_URLS,
                     });
                     setLog((l) => [{
                       at: new Date().toLocaleTimeString(), label: '开始收', result: r,

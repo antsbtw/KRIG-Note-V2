@@ -260,7 +260,7 @@ function mergedStats(pageId: PageId): {
  */
 function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
   return {
-    async startAll(pageId) {
+    async startAll(pageId, noisy) {
       // ① webRequest 侧 —— CDP 的 body 要靠它配对
       wireWebRequestSideOn(netBus, wc.session, wc.session.storagePath ?? 'default');
 
@@ -269,6 +269,13 @@ function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
       cap.start();
       const cdpAttached = bodyProvider.attach(toPageHost(wc), pageId, {
         resourceTypes: ['fetch', 'document', 'xhr'],
+        /**
+         * ⭐ 噪音名单**由调用方给** —— 底座一条都不内置
+         * (`body-provider` 的注释:「V1 在 session-capture.ts:31 硬编码了
+         * s-cdn.anthropic.com/images/ —— 那是 Claude 的站点适配漏进了底层,
+         * 本层不重蹈」)。
+         */
+        noisyUrlSubstrings: noisy,
       });
 
       // ③ 页面内钩子腿
@@ -789,7 +796,9 @@ export function registerWebDomIpc(): void {
            * 用户 2026-10-02:「控制是控制,采集是采集…控制/输出是分开的。」
            */
           case 'acquireStart': {
-            const r = await startAcquire(makeAcquireDeps(wc, pageId), pageId);
+            const r = await startAcquire(
+              makeAcquireDeps(wc, pageId), pageId, p.noisyUrlSubstrings,
+            );
             acquireStartedAt.set(pageId, Date.now());
             traceRecorder.lifecycle({
               layer: 'web.net', event: 'acquire-start', pageId: String(pageId),

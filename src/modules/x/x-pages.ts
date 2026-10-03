@@ -158,7 +158,45 @@ const byUrlAndTweets = (fragment: string): ReadyCriterion => ({
  * 「命中一条 = 翻了一页」这个等式才成立(面板的 `wantAtLeast: 2` 靠它)。
  */
 export const X_TIMELINE_ENDPOINTS: readonly string[] = [
-  '/i/api/graphql/',
+  /**
+   * ⚠️⚠️ 2026-10-02 收窄:原来是 `'/i/api/graphql/'` —— **所有 GraphQL 都算**,
+   * 于是 `ViewerBadgeCounts`(0.2KB 角标计数)被当成「时间线载荷」,
+   * 核对报告说「1 页 · 0 条推文」,而真相是**那根本不是时间线**。
+   * ⭐ 现在按**操作名**认,一个萝卜一个坑。
+   */
+  '/HomeTimeline',
+  '/UserTweets',
+  '/UserTweetsAndReplies',
+  '/SearchTimeline',
+  '/TweetDetail',
+  '/ListLatestTweetsTimeline',
+  '/UserArticlesTweets',
+  '/Followers',
+  '/Following',
+  '/BlueVerifiedFollowers',
+];
+
+/**
+ * ⭐⭐ **采集时不要的 URL** —— X 的业务知识,底座不内置任何一条。
+ *
+ * ── 2026-10-02 实测逼出来的 ──
+ * 滚 10 轮采到 59 条,其中 **52 条是视频分片**(最大 1299KB,合计约 15MB),
+ * 把 `CaptureSession` 的 64 条容量挤爆 —— `HomeTimeline` 即使来了也存不下。
+ *
+ * ⚠️ `resourceTypes` 挡不住它们:实测 `video.twimg.com` 的 `.m4s`
+ * 报 `type=xhr`,**和 GraphQL 同类型**。
+ * ⭐ 所以必须按 **URL** 挡,而底座的 `noisyUrlSubstrings` 正是为此设计的
+ * (它的注释写着「噪音名单由调用方给,底座一条都不内置」)。
+ *
+ * ⚠️ 只挡**确定不要**的:视频流、图片、埋点。
+ * 不确定的宁可采进来 —— 挡错了是**静默丢数据**,比多采几条坏得多。
+ */
+export const X_NOISY_URLS: readonly string[] = [
+  'video.twimg.com',      // 视频分片(.m4s/.mp4/.m3u8)
+  'pbs.twimg.com',        // 图片
+  'abs.twimg.com',        // 前端静态资源
+  '/i/api/1.1/jot/',      // 埋点
+  'promoted_content/log', // 广告埋点
 ];
 
 /** 本模块用到的语义锚点名 —— 与锚点表同一份常量,不各写一份 */

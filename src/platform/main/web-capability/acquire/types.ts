@@ -123,7 +123,14 @@ export type AcquireReport = {
  */
 export interface AcquireDeps {
   /** 把所有获取方法装上。返回各条腿是否就绪 */
-  startAll(pageId: PageId): Promise<{ cdpAttached: boolean; hookInstalled: boolean }>;
+  /**
+   * 把所有获取方法装上。
+   * @param noisy ⚠️ **不要的 URL 子串** —— 由调用方给,本层不认识任何站点
+   */
+  startAll(
+    pageId: PageId,
+    noisy?: readonly string[],
+  ): Promise<{ cdpAttached: boolean; hookInstalled: boolean }>;
   /** 全部停掉 */
   stopAll(pageId: PageId): void;
   /** 取当前合并去重后的结果 */

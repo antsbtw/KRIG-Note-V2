@@ -220,7 +220,22 @@ export type WebDomInvoke =
    * ⭐ 现在:页面怎么动去**控制那栏**(goto / 滚动 / 重载),
    * 这里只负责「开始接」。两条腿同时装,调用方不选。
    */
-  | { readonly op: 'acquireStart'; readonly pageRef: WebDomPageRef }
+  | {
+      readonly op: 'acquireStart';
+      readonly pageRef: WebDomPageRef;
+      /**
+       * ⭐⭐ **采集时不要的 URL 子串** —— 由调用方给,底座一条都不内置。
+       *
+       * ⚠️ 2026-10-02 实测:滚 10 轮采到 59 条,**52 条是视频分片**(约 15MB),
+       * 把容量挤爆 —— `HomeTimeline` 即使来了也存不下。
+       * ⚠️ `resourceTypes` 挡不住:`video.twimg.com` 的 `.m4s` 报 `type=xhr`,
+       * **与 GraphQL 同类型**。所以必须按 URL 挡。
+       *
+       * ⭐ 名单是**站点知识**,放在业务模块(`x-pages.ts` 的 `X_NOISY_URLS`)——
+       * 底座内置就成了「Claude 的站点适配漏进底层」那种事(本仓栽过)。
+       */
+      readonly noisyUrlSubstrings?: readonly string[];
+    }
   /** ⭐ 看当前收到多少 —— 纯读,不停不改 */
   | {
       readonly op: 'acquirePeek';

@@ -37,8 +37,10 @@ export const POLL_MS = 400;
 export async function startAcquire(
   deps: AcquireDeps,
   pageId: PageId,
+  /** ⚠️ 不要的 URL 子串 —— 原样透传给 deps,本层不认识任何站点 */
+  noisy?: readonly string[],
 ): Promise<{ ok: boolean; cdpAttached: boolean; hookInstalled: boolean }> {
-  const legs = await deps.startAll(pageId);
+  const legs = await deps.startAll(pageId, noisy);
   return { ok: legs.cdpAttached || legs.hookInstalled, ...legs };
 }
 
