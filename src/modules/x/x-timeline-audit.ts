@@ -407,7 +407,30 @@ export function auditTimelinePayload(text: string): TimelineAudit {
     const ares = isObj(article?.article_results)
       ? ((article.article_results as Record<string, unknown>).result as Record<string, unknown> | undefined)
       : undefined;
-    const articleBody = ares && isObj(ares.content_state) ? JSON.stringify(ares.content_state) : '';
+    /**
+     * ⭐⭐⭐ 长文**正文**(DraftJS `content_state.blocks[]`)——
+     * 2026-10-03 真机在 `TweetResultByRestId` 拿到。
+     *
+     * ⚠️ 此前这里是 `JSON.stringify(content_state)`,**只当「有没有」的旗子用**:
+     * 单篇页明明把正文给了,`textLen` 照样报 23(那个 t.co 短链)——
+     * 与 `project-x-article-body-lost` 是同一个形态(23 字 vs 16081 字)。
+     *
+     * 实测块结构(非推测,记在 project-x-article-body-lost):
+     * · `unstyled` 正文段 / `header-two` 小标题
+     * · ⚠️ `atomic` 是媒体占位,`text` 是**单个空格** —— 不滤会留一堆孤立空行
+     */
+    const articleBody = ((): string => {
+      if (!ares || !isObj(ares.content_state)) return '';
+      const blocks = (ares.content_state as Record<string, unknown>).blocks;
+      if (!Array.isArray(blocks)) return '';
+      return blocks
+        .map((b) => (isObj(b) && typeof b.text === 'string' ? b.text : ''))
+        /** ⚠️ 滤掉 atomic 的单空格(trim 后为空) */
+        .filter((t) => t.trim().length > 0)
+        .join('\n');
+    })();
+    /** ⭐ 标题也算正文的一部分 —— 它**不在** blocks 里 */
+    const articleTitle = ares ? str(ares.title) : '';
     /**
      * ⭐⭐⭐ 长文的**地址**在 `entities.urls` 里(2026-10-03 真机)。
      * ⚠️ 只认 `/i/article/` 开头的 —— 别的 expanded_url 是普通外链。
@@ -418,7 +441,16 @@ export function auditTimelinePayload(text: string): TimelineAudit {
     const articleUrl = entUrls
       .map((u) => str(u.expanded_url))
       .find((u) => /^https:\/\/(x|twitter)\.com\/i\/article\/\d+/.test(u));
-    const text2 = [full, noteText].sort((a, b) => b.length - a.length)[0] ?? '';
+    /**
+     * ⭐⭐ 正文取**最长**的那个 —— 长文正文(标题+正文)也参与比较。
+     * ⚠️ 列表页的长文只有 23 字 t.co,单篇页才有几千字:
+     * 同一个字段两种深度,取长的才不会被列表页那份盖掉
+     * (`project-x-upsert-overwrites-richer-text` 的教训:深→浅降级)。
+     */
+    const articleText = articleBody.length > 0
+      ? [articleTitle, articleBody].filter((x) => x.length > 0).join('\n\n')
+      : '';
+    const text2 = [full, noteText, articleText].sort((a, b) => b.length - a.length)[0] ?? '';
 
     /**
      * ⭐⭐ 作者 —— ⚠️ 旧实现踩过:只读一个位置会漏。

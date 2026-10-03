@@ -249,6 +249,14 @@ export const X_PAGE_MATCHERS: readonly string[] = [
   `re:/i/api/graphql/[^/]+/(?!${TIMELINE_OP_EXCLUDE.join('|')})\\w*Timeline(\\?|$)`,
   // ⭐ 不以 Timeline 结尾的那些,精确列
   '/TweetDetail',
+  /**
+   * ⭐⭐⭐ **长文正文在这个端点**(2026-10-03 真机问出来的)。
+   *
+   * 进 `/i/article/<id>` 单篇页,16 条响应里只有它带 `content_state`
+   * (14KB;其余是 settings/hashflags/badge 之类)。
+   * ⚠️ 名字一点都不像「article」—— 这正是**推不出来、必须问真机**的那类事实。
+   */
+  '/TweetResultByRestId',
   '/UserArticlesTweets',
   '/Followers',
   '/Following',
@@ -475,13 +483,26 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
    * ⚠️ 到位判据**只判 URL 不判推文卡片**:长文单篇页是一篇文章,
    * 页面上**没有** `[data-testid="tweet"]` —— 用 `byUrlAndTweets`
    * 会把「已经到了」判成「没到位」,一直等到超时。
+   *
+   * ⚠️⚠️ **判据只能是 `/article/`,不能带 id**(2026-10-03 真机)。
+   * X 自己会**重定向**(载荷里那条 `ArticleRedirectScreenQuery`):
+   *
+   *   请求 `/i/article/2105111183481266176`（articleId）
+   *   落地 `/KA594594/article/2105111536603959409`（**推文 id**!）
+   *
+   * ⭐ 两个 id 不是一个数,所以判据带哪个 id 都会在重定向后不成立。
+   * ⚠️ 第一版写的 `/i/article/<id>` 实测**侥幸通过** —— 判据是在
+   * 　 重定向发生**之前**那一刻满足的;跳转快一点就会判成「没到位」
+   * 　 → 整篇不采。靠时序侥幸的判据等于没有判据。
+   * ⭐ `/article/` 不会误中:`/articles`(列表)和 `/compose/articles`
+   * 　 都不含它(实测 6 个 URL 逐个验过)。
    */
   'x.article': (p) => {
     const id = extractArticleId(p.articleId ?? p.url ?? '');
     if (!id) return null;
     return {
       url: `${BASE_URL}/i/article/${id}`,
-      arrival: byUrl(`/i/article/${id}`),
+      arrival: byUrl('/article/'),
       describe: `长文 ${id}`,
     };
   },

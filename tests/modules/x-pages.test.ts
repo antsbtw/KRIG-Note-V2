@@ -266,6 +266,53 @@ describe('⭐⭐⭐ x.article:单篇长文', () => {
   });
 
   /**
+   * ⭐⭐⭐ **X 会重定向** —— 2026-10-03 真机实测
+   *
+   *   请求 `/i/article/2105111183481266176`（articleId）
+   *   落地 `/KA594594/article/2105111536603959409`（**推文 id**）
+   *
+   * 载荷里那条 `ArticleRedirectScreenQuery` 就是干这个的。
+   * ⚠️ 两个 id 不是一个数 → 判据**带哪个 id 都会在重定向后不成立**。
+   * ⚠️ 第一版 `/i/article/<id>` 实测**侥幸通过**(判据在重定向前那一刻满足),
+   * 　 跳转快一点就会判成「没到位」→ 整篇不采。
+   */
+  it('⭐⭐⭐ 到位判据**不带 id** —— X 会把 articleId 重定向成推文 id', () => {
+    const r = xPageResolver.resolve('x.article', { articleId: '2105111183481266176' });
+    const json = JSON.stringify(r!.arrival);
+    expect(json, '判据里带了 id —— 重定向后必然不成立(靠时序侥幸才过)')
+      .not.toContain('2105111183481266176');
+    expect(json, '判据该比 URL').toContain('/article/');
+  });
+
+  it('⭐⭐ 判据对**重定向前后两种 URL 都成立**', () => {
+    const r = xPageResolver.resolve('x.article', { articleId: '2105111183481266176' });
+    const frag = (r!.arrival as { fragment?: string }).fragment ?? '';
+    expect(frag.length, '判据不是 urlIncludes —— 本条要重写').toBeGreaterThan(0);
+    for (const u of [
+      'https://x.com/i/article/2105111183481266176',           // 重定向前
+      'https://x.com/KA594594/article/2105111536603959409',     // 重定向后
+    ]) {
+      expect(u.includes(frag), `判据对 ${u} 不成立`).toBe(true);
+    }
+    /** ⚠️ 不许误中长文**列表**页和写作页 */
+    for (const u of [
+      'https://x.com/KA594594/articles',
+      'https://x.com/compose/articles',
+      'https://x.com/KA594594',
+    ]) {
+      expect(u.includes(frag), `判据误中了 ${u}`).toBe(false);
+    }
+  });
+
+  /** ⭐⭐⭐ 正文端点名是**真机问出来的**,推不出来 */
+  it('⭐⭐⭐ 采集判据认 TweetResultByRestId —— 长文正文在这个端点', () => {
+    expect(
+      X_PAGE_MATCHERS.some((m) => m.includes('TweetResultByRestId')),
+      '长文正文端点不在采集判据里 —— 进了单篇页也收不到正文',
+    ).toBe(true);
+  });
+
+  /**
    * ⭐⭐ 常量必须指向**真登记的页** —— 否则只是把漂移挪了个地方:
    * 面板点下去会得到「没登记这一页」,而 tsc 全绿。
    */

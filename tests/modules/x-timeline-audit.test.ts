@@ -633,3 +633,97 @@ describe('⭐⭐⭐ 长文正文的去处(articleUrl)', () => {
     expect(a.items[0].articleUrl, '没地址却给了值 —— 那是编的').toBeUndefined();
   });
 });
+
+/**
+ * ⭐⭐⭐ 单篇页的长文**正文** —— 2026-10-03 真机
+ *
+ * 进 `/i/article/<id>`,16 条响应里只有 **`TweetResultByRestId`**
+ * 带 `content_state`(14KB)。端点名**一点都不像 article** ——
+ * 那是推不出来、必须问真机的平台事实。
+ *
+ * ⚠️ 此前解析器把 `content_state` 只当「有没有」的旗子(JSON.stringify),
+ * 于是正文明明到手、`textLen` 照样报 23(那个 t.co 短链)——
+ * 与 `project-x-article-body-lost` 同一个形态(23 字 vs 16081 字)。
+ */
+describe('⭐⭐⭐ 长文正文:单篇页载荷里真的取出来', () => {
+  const contentState = {
+    blocks: [
+      { text: '九、两次退潮，两代女人', type: 'header-two' },
+      { text: '三十年前和今天，其实存在一个非常重要的区别。', type: 'unstyled' },
+      /** ⚠️ atomic 是媒体占位,text 是**单个空格** */
+      { text: ' ', type: 'atomic' },
+      { text: '两代女性面对的是两个不同的问题。', type: 'unstyled' },
+    ],
+  };
+  /** ⭐ 照真机形状造:`TweetResultByRestId` 是**单条推**,不走 instructions */
+  const singlePayload = (cs: unknown, title = '从深圳老板到造反者'): string => JSON.stringify({
+    data: {
+      tweetResult: {
+        result: {
+          rest_id: '2105111536603959409',
+          legacy: { id_str: '2105111536603959409', full_text: 'https://t.co/so8J01gutF' },
+          article: { article_results: { result: { title, content_state: cs } } },
+          core: { user_results: { result: { legacy: { screen_name: 'KA594594' } } } },
+        },
+      },
+    },
+  });
+
+  it('⭐⭐⭐ 单篇页载荷(非 instructions 形状)也能解出推文', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(a.items.length, '单篇页解不出来 —— 解析器只认时间线形状').toBe(1);
+    expect(a.items[0].isArticle).toBe(true);
+  });
+
+  /**
+   * ⭐⭐ 判据用**精确长度**,不用 `> 50`。
+   * ⚠️ 注入验证实测:退回 `JSON.stringify(content_state)` 时
+   * `textLen` 是一百多、`preview` 里照样有「两次退潮」(它在 JSON 里面)——
+   * **松判据放过了「只当旗子」那一版**。精确值才分得开三种实现。
+   */
+  const EXPECTED_LEN = '从深圳老板到造反者'.length + 2            // 标题 + 两个换行
+    + '九、两次退潮，两代女人'.length + 1
+    + '三十年前和今天，其实存在一个非常重要的区别。'.length + 1
+    + '两代女性面对的是两个不同的问题。'.length;
+
+  it('⭐⭐⭐ 正文**真的取出来**,不是只当「有没有」的旗子', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(
+      a.items[0].textLen,
+      '长度对不上 —— 要么还是 23 字 t.co,要么塞的是 JSON 字符串',
+    ).toBe(EXPECTED_LEN);
+    expect(a.items[0].preview, '正文内容没进来').toContain('两次退潮');
+    /** ⭐⭐ 钉死「不是 JSON」—— JSON.stringify 那版会带结构字符 */
+    expect(a.items[0].preview, '正文里有 JSON 结构字符 —— 塞的是 stringify 的结果不是正文')
+      .not.toContain('"type"');
+  });
+
+  it('⭐⭐ 标题也算进正文 —— 它**不在** blocks 里', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(a.items[0].preview, '标题丢了').toContain('从深圳老板到造反者');
+  });
+
+  /**
+   * ⚠️⚠️ 判据**不能看 preview** —— 它 `.replace(/\s+/g,' ')` 把空白全压平了,
+   * 空行在那里**永远看不见**(注入验证实测:不滤也全绿)。
+   * ⭐ 改钉精确长度:多一个 atomic 空格就是多 2 个 code unit(空格+换行)。
+   */
+  it('⚠️ atomic 的单空格要滤掉 —— 不滤会多出孤立空行', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(
+      a.items[0].textLen,
+      'atomic 的空格没滤 —— 正文里会夹一行只有空格的空行',
+    ).toBe(EXPECTED_LEN);
+  });
+
+  it('⭐⭐ 拿到正文 → **不再**报「长文没正文」', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(a.items[0].incomplete, '正文都拿到了还报缺').toBeUndefined();
+  });
+
+  /** ⚠️ 列表页那份(没 content_state)仍要照常报缺 —— 别把两种混了 */
+  it('⚠️ 列表页那份(无 content_state)照样报「长文没正文」', () => {
+    const a = auditTimelinePayload(singlePayload(undefined));
+    expect(a.items[0].incomplete, '列表页也说有正文了 —— 那会漏掉 38 篇').toBe('article-no-body');
+  });
+});
