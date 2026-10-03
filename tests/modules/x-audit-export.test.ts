@@ -161,3 +161,44 @@ describe('⭐⭐ 不完整要**显眼**', () => {
     expect(text, '空报告看起来像「采到了但都是空的」').toContain('一条推文都没解出来');
   });
 });
+
+/**
+ * ⭐⭐⭐ 报告要能**自证** —— 2026-10-03
+ *
+ * 真机报告写着「⚠️⚠️ 正文被截断」,我却**拿不出它凭什么这么说**:
+ * 原始载荷只在内存、跑完就没。回头一查那条是**误报**(链接卡片)。
+ *
+ * ⭐ 判据(用户 2026-10-02 立的):
+ * 「下次验证能不能不靠人、只靠留下的东西说清楚」。
+ */
+describe('⭐⭐⭐ 判据要留痕:报告自己说清凭什么', () => {
+  it('⭐⭐ 报了截断 → 连**依据**一起印', () => {
+    const t = tweet({}, { full_text: '开头…' });
+    const text = exportAuditText([auditTimelinePayload(payload([t]))], meta);
+    expect(text, '报了截断却不说凭什么 —— 又要回头猜判据').toContain('截断判据');
+    expect(text, '没印出是哪条判据命中').toContain('省略号');
+  });
+
+  it('⭐⭐ **没报**截断的也印依据 —— 成功路径也要留痕', () => {
+    const text = exportAuditText([auditTimelinePayload(payload([tweet()]))], meta);
+    expect(text, '只有出问题才留痕 —— 采集成功时依据照样蒸发').toContain('截断判据');
+  });
+
+  it('⭐⭐ 链接卡片 → 印出 t.co 的归属和展开地址(人一眼能核)', () => {
+    const t = tweet({}, {
+      full_text: '新人必备 跟上峰哥的节奏 https://t.co/4QMNIjlI8f',
+      entities: {
+        urls: [{ url: 'https://t.co/4QMNIjlI8f', expanded_url: 'https://example.com/landing' }],
+      },
+    });
+    const text = exportAuditText([auditTimelinePayload(payload([t]))], meta);
+    expect(text, '没印 t.co 归属 —— 判成卡片的依据读不出来').toContain('末尾t.co在entities.urls里=是');
+    expect(text, '没印展开地址 —— 人没法核这到底是不是卡片').toContain('https://example.com/landing');
+  });
+
+  it('⭐ display_text_range 命中时印出区间和正文长度', () => {
+    const t = tweet({}, { full_text: '这条正文很长但被砍了', display_text_range: [0, 4] });
+    const text = exportAuditText([auditTimelinePayload(payload([t]))], meta);
+    expect(text, '没印出 X 自己给的区间').toContain('display_text_range=[0,4]');
+  });
+});

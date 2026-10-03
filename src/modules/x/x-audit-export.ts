@@ -33,6 +33,26 @@ function renderTweet(t: TweetAudit, idx: number): string {
   if (t.incomplete === 'article-no-body') {
     L.push('            ⚠️⚠️ 长文没正文 —— 列表页只给标题+摘要，正文在单篇页');
   }
+  /**
+   * ⭐⭐ **判据凭什么** —— 不管报没报截断都印。
+   *
+   * 起因(2026-10-03):报告写着「正文被截断」而我**拿不出依据** ——
+   * 原始载荷只在内存、跑完就没,只能回头猜判据,结果那条是误报。
+   * ⭐ `feedback-maintainability-over-feature-completion`:成功路径也要留痕。
+   */
+  const ev = t.truncationEvidence;
+  if (ev !== undefined) {
+    L.push(`            截断判据  ${ev.verdict}`);
+    /** ⚠️ 只在判据真用到时才印细项,免得每条推多三行噪音 */
+    if (ev.displayTextRange !== undefined) {
+      L.push(`                      display_text_range=[${ev.displayTextRange[0]},${ev.displayTextRange[1]}]`
+        + `　正文=${ev.textUnits} 单元`);
+    }
+    if (ev.trailingUrlIsEntity !== undefined) {
+      L.push(`                      末尾t.co在entities.urls里=${ev.trailingUrlIsEntity ? '是' : '否'}`
+        + (ev.trailingExpandedUrl !== undefined ? `　→ ${ev.trailingExpandedUrl}` : ''));
+    }
+  }
   L.push(`  正文内容  ${t.preview || '（空）'}`);
   L.push('');
   L.push(`  作者      ${mark(t.hasAuthor)} @${t.handle || '?'}`);

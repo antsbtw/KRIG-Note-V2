@@ -438,12 +438,101 @@ describe('⭐⭐⭐ 截断判据:宁可漏报不要误报', () => {
     expect(a.items[0].incomplete, '省略号是 X 真截断的标记,没认出来').toBe('text-truncated');
   });
 
-  it('⭐ 没媒体却以 t.co 结尾 → 算截断(可疑)', () => {
-    /** ⚠️ 没图却挂着图片链接,那才可疑 */
+  /**
+   * ⭐⭐⭐ 2026-10-03 真机**第二次误报** —— 这次是**链接卡片**
+   *
+   *   「新人必备 跟上峰哥的节奏 https://t.co/4QMNIjlI8f」(36 字,媒体=无)
+   *
+   * 旧判据「没媒体 + t.co 结尾 = 截断」把它判成截断。它根本没截断:
+   * 那是一条**分享链接**的推,卡片既不算媒体(媒体只认
+   * `extended_entities.media`)也不算引用。
+   *
+   * ⭐ 改用 X 自己给的证据:t.co **在 `entities.urls` 里**就是卡片。
+   */
+  it('⭐⭐⭐ 末尾 t.co 在 entities.urls 里 → **不算截断**(真机误报的链接卡片)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '新人必备 跟上峰哥的节奏 https://t.co/4QMNIjlI8f',
+        entities: {
+          urls: [{
+            url: 'https://t.co/4QMNIjlI8f',
+            expanded_url: 'https://example.com/landing',
+          }],
+        },
+      }),
+    ]));
+    /** ⚠️ 先确认样本**真的造出了该现象** —— 否则测的是别的东西 */
+    expect(a.items[0].hasMedia, '样本不该有媒体,否则走的是另一条分支').toBe(false);
+    expect(
+      a.items[0].truncationEvidence?.trailingUrlIsEntity,
+      '样本没造出「t.co 在 entities.urls 里」—— 测不到该现象',
+    ).toBe(true);
+    expect(
+      a.items[0].incomplete,
+      '链接卡片被误判成截断 —— 真机 2026-10-03 第 7 条就这么报错的',
+    ).toBeUndefined();
+    /**
+     * ⭐⭐ 连**理由**一起钉 —— 「没报截断」有好几条路能到达,
+     * 只钉结论的话,把卡片分支掐掉照样全绿(注入验证实测过)。
+     */
+    expect(
+      a.items[0].truncationEvidence?.verdict,
+      '结论对了但理由不是「卡片」—— 判对是碰巧的',
+    ).toContain('链接卡片');
+    expect(a.items[0].truncationEvidence?.trailingExpandedUrl).toBe('https://example.com/landing');
+  });
+
+  it('⭐⭐ 末尾 t.co **不在** entities.urls 里且无媒体 → 算截断(可疑)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '看这个 https://t.co/abc123',
+        /** ⭐ urls 给了但**没有**末尾那条 —— 才敢说「不在里面」 */
+        entities: { urls: [{ url: 'https://t.co/other', expanded_url: 'https://e.com' }] },
+      }),
+    ]));
+    expect(a.items[0].truncationEvidence?.trailingUrlIsEntity, '样本前提不成立').toBe(false);
+    expect(a.items[0].incomplete).toBe('text-truncated');
+  });
+
+  /**
+   * ⚠️⚠️ **宁可漏报** —— 载荷压根没给 entities.urls 时不报截断。
+   * 真机那条误报正是这种:查不到归属却当成「不在里面」。
+   */
+  it('⚠️⚠️ 载荷没给 entities.urls → **不报**截断(宁可漏报不要误报)', () => {
     const a = auditTimelinePayload(payload([
       tweet({}, { full_text: '看这个 https://t.co/abc123' }),
     ]));
+    expect(
+      a.items[0].truncationEvidence?.trailingUrlIsEntity,
+      '样本该是「查不到归属」(undefined),不是 false',
+    ).toBeUndefined();
+    expect(
+      a.items[0].incomplete,
+      '查不到归属就报截断 —— 那是在猜,不是在判',
+    ).toBeUndefined();
+  });
+
+  /** ⭐⭐ X 自己说正文显示不全 —— 比我的任何推断都硬 */
+  it('⭐⭐ display_text_range 短于正文 → 算截断(X 自己说的)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '这条正文很长但被砍了', display_text_range: [0, 4] }),
+    ]));
+    expect(a.items[0].truncationEvidence?.displayTextRange, '样本前提不成立').toEqual([0, 4]);
     expect(a.items[0].incomplete).toBe('text-truncated');
+  });
+
+  /**
+   * ⭐⭐ **判据的依据必须留痕** —— 不管结论是什么。
+   * 起因:真机报告写「正文被截断」而我拿不出它凭什么这么说
+   * (原始载荷只在内存,跑完就没)。
+   */
+  it('⭐⭐ 没报截断的推**也有** verdict —— 成功路径也要留痕', () => {
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].incomplete).toBeUndefined();
+    expect(
+      a.items[0].truncationEvidence?.verdict,
+      '没报截断就不留依据 —— 下次核对又要靠人截图',
+    ).toBeTruthy();
   });
 
   it('⭐⭐ 有 note_tweet(长推全文)时**一律不算**截断', () => {

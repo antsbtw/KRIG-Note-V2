@@ -19,6 +19,42 @@
  */
 
 /**
+ * ⭐⭐ 截断判据用到的**原始证据**(X 自己给的,不是我推断的)。
+ *
+ * ⚠️ 带 `?` 的全是「载荷没带就 undefined」,**不兜底成 0/false**
+ * (`feedback-fail-loud-no-fallback`:兜底会把「没带」伪装成「是 0」)。
+ */
+export type TruncationEvidence = {
+  /**
+   * ⭐ `legacy.display_text_range` —— X 说「正文该显示到第几个字」。
+   * ⚠️ 单位是 **UTF-16 code unit**,不是字符:emoji 占 2。
+   */
+  readonly displayTextRange?: readonly [number, number];
+  /** ⭐ 正文长度(同样按 code unit 量,才能和 range 比) */
+  readonly textUnits: number;
+  /**
+   * ⭐⭐ 末尾那个 t.co **在不在 `entities.urls` 里**。
+   *
+   * 这是区分「链接卡片」和「真截断」的关键:
+   * 卡片的 t.co 是 X 为真实链接生成的,`entities.urls` 里有它 + `expanded_url`;
+   * 真截断末尾那串**不在** urls 里。
+   * ⚠️ 末尾压根没 t.co 时是 undefined,不是 false。
+   */
+  readonly trailingUrlIsEntity?: boolean;
+  /** ⭐ 末尾 t.co 展开后指向哪 —— 人一眼能判断是不是卡片 */
+  readonly trailingExpandedUrl?: string;
+  /** ⭐ 省略号结尾 —— X 真截断的显式标记 */
+  readonly endsWithEllipsis: boolean;
+  /** ⭐ 有没有媒体(带图的推末尾 t.co 是图片链接) */
+  readonly hasMedia: boolean;
+  /**
+   * ⭐⭐ **结论的一句话理由** —— 报告直接印这句。
+   * ⚠️ 不管判成截断还是没截断**都写**:成功路径也要留痕。
+   */
+  readonly verdict: string;
+};
+
+/**
  * 一条推文的完整性画像。
  *
  * ── ⭐⭐ 字段清单**照搬旧实现实际取过的**(用户 2026-10-02:
@@ -57,6 +93,18 @@ export type TweetAudit = {
    * 在库里**长得一模一样**。
    */
   readonly incomplete?: 'text-truncated' | 'article-no-body';
+  /**
+   * ⭐⭐ **判据的依据** —— `incomplete` 是怎么得出来的。
+   *
+   * ── 为什么要存这个(2026-10-03)──
+   * 真机报告写着「正文被截断」,我**拿不出它凭什么这么说**:
+   * 原始载荷只在内存,跑完就没,只能回头猜判据。
+   * 那条实测是**误报**(链接卡片,不是截断)。
+   *
+   * ⭐ `feedback-maintainability-over-feature-completion`:
+   * 成功路径也要留痕 —— 下次核对不该靠人截图,靠报告自己说清。
+   */
+  readonly truncationEvidence?: TruncationEvidence;
   readonly hasAuthor: boolean;
   readonly handle: string;
   /** ⭐ 作者数字 id —— username 会改名,rest_id 不会(旧实现实测 131/131 都有) */
@@ -181,44 +229,111 @@ function buildCoverage(items: readonly TweetAudit[]): Record<string, number> {
 }
 
 /**
- * ⭐⭐ 正文**真的被截断了吗**。
+ * ⭐⭐⭐ 这条正文**是不是没拿全** —— 连带给出判据的依据。
  *
- * ── ⚠️⚠️ 2026-10-02 实测误报 16/36 条 ──
+ * ── 为什么要重写(2026-10-03 真机)──
+ * 旧判据:「没媒体 + 以 t.co 结尾」就算截断。真机把**链接卡片**误判了:
  *
- * 我原来的判据含 `https:\/\/t\.co\/\w+$` —— 以 t.co 短链结尾就算截断。
- * 真机结果:36 条里 16 条被标「正文被截断」,而它们**根本没截断**:
+ *   「新人必备 跟上峰哥的节奏 https://t.co/4QMNIjlI8f」(36 字,无媒体)
  *
- *   「一觉醒来，粉丝超过 1k 了，谢谢各位原始股东！🎉 https://t.co/MOWj8yNqAC」
+ * 那是一条**分享链接**的推 —— 卡片既不算媒体(媒体判据只认
+ * `extended_entities.media`)也不算引用,所以旧判据看它像截断。
  *
- * ⭐ 那个 t.co 是 **X 给自己的图片/视频生成的链接** —— 几乎每条带图的推都有。
- * ⚠️ `project-x-readback-lies`:**工具谎报比采集出错更坏 —— 它让人去改没坏的代码**。
+ * ⭐⭐ 改用 **X 自己给的证据**,不靠我推断:
+ *   ① `entities.urls` 里有这个 t.co + `expanded_url` → **卡片**,不是截断
+ *   ② `display_text_range[1] < 正文长度` → X 自己说正文显示不全
+ *   ③ 省略号结尾 → 真截断的显式标记
  *
- * ── ⭐ 现在的判据 ──
- *
- * ① 结尾是 `…` / `...` —— X 截断时留的省略号,这是**真信号**
- * ② 结尾是 t.co 短链,**且这条推没有媒体** —— 没图却挂着图片链接才可疑
- *    ⚠️ 有媒体时那个短链是正常的,一律不算
- *
- * ⚠️ 判据宁可**漏报**不要误报:漏了只是少一个提示,
- * 误报会让人去查一个不存在的问题(16 条全误报时,真有问题的那条也被淹了)。
+ * ⚠️ 宁可漏报不要误报(`project-x-readback-lies`:
+ * **工具谎报比采集出错更坏 —— 它让人去改没坏的代码**)。
  */
-function isTruncated(fullText: string, hasMedia: boolean): boolean {
+function judgeTruncation(
+  fullText: string,
+  hasMedia: boolean,
+  entities: Record<string, unknown> | undefined,
+  displayRange: unknown,
+): { truncated: boolean; evidence: TruncationEvidence } {
   const t = fullText.trim();
+  /** ⚠️ 按 **code unit** 量,才能和 `display_text_range` 对齐(emoji 占 2) */
+  const textUnits = fullText.length;
+  const endsWithEllipsis = /[…]$|\.\.\.$/.test(t);
+
+  /** ⭐ `display_text_range` 必须是两个数,**别的形状一律当没带** */
+  const range = Array.isArray(displayRange)
+    && displayRange.length === 2
+    && typeof displayRange[0] === 'number'
+    && typeof displayRange[1] === 'number'
+    ? ([displayRange[0], displayRange[1]] as const)
+    : undefined;
+
+  /** ⭐ 末尾那串 t.co(有就取出来,好去 `entities.urls` 里找) */
+  const trailing = /https:\/\/t\.co\/(\w+)$/.exec(t)?.[0];
+  let trailingUrlIsEntity: boolean | undefined;
+  let trailingExpandedUrl: string | undefined;
+  if (trailing !== undefined) {
+    /**
+     * ⚠️⚠️ 只有**确实拿到了 urls 数组**才敢说「不在里面」。
+     * 载荷没给 urls 时留 `undefined` —— 「查不到」和「查过没有」
+     * 是两件事,混起来就会把判不了的当成可疑的(第一版就栽在这:
+     * 无条件写 `hit !== undefined`,让「没给」变成了「不在」)。
+     */
+    const urls = Array.isArray(entities?.urls)
+      ? entities.urls as Record<string, unknown>[]
+      : undefined;
+    if (urls !== undefined) {
+      const hit = urls.find((u) => str(u.url) === trailing);
+      trailingUrlIsEntity = hit !== undefined;
+      if (hit !== undefined) trailingExpandedUrl = str(hit.expanded_url) || undefined;
+    }
+  }
+
+  const mk = (truncated: boolean, verdict: string) => ({
+    truncated,
+    evidence: {
+      displayTextRange: range,
+      textUnits,
+      trailingUrlIsEntity,
+      trailingExpandedUrl,
+      endsWithEllipsis,
+      hasMedia,
+      verdict,
+    },
+  });
+
   /**
-   * ⚠️ 这行是**防御性冗余** —— 空串本来也通不过下面两条正则
-   * (注入验证实测:删掉它测试照样全绿)。
-   * ⭐ 留着是因为判据将来可能加「长度小于 N 就可疑」那类规则,
-   * 到时候空串会被误判。写明它现在不起作用,免得下一个人以为它在干活。
+   * ⚠️ 这行是**防御性冗余** —— 空串本来也通不过下面几条
+   * (注入验证实测:删掉它测试照样全绿)。留着是因为将来若加
+   * 「长度小于 N 就可疑」那类规则,空串会被误判。
    */
-  if (!t) return false;
-  // ① 省略号结尾 —— X 真截断时的标记
-  if (/[…]$|\.\.\.$/.test(t)) return true;
-  /**
-   * ② t.co 结尾**且没有媒体**。
-   * ⚠️ 有媒体时那是图片/视频的正常链接(实测 36 条里 13 条如此)。
-   */
-  if (!hasMedia && /https:\/\/t\.co\/\w+$/.test(t)) return true;
-  return false;
+  if (!t) return mk(false, '正文是空的 —— 那是「没正文」不是「截断」');
+
+  // ① 省略号结尾 —— X 真截断的显式标记,最硬的信号
+  if (endsWithEllipsis) return mk(true, '以省略号结尾 —— X 截断的显式标记');
+
+  // ② X 自己说正文显示不全
+  if (range !== undefined && range[1] < textUnits) {
+    return mk(true, `display_text_range 到 ${range[1]},正文有 ${textUnits} —— X 说显示不全`);
+  }
+
+  // ③ 末尾 t.co 的归属:在 entities.urls 里 = 卡片/图片链接,不是截断
+  if (trailing !== undefined) {
+    if (trailingUrlIsEntity === true) {
+      return mk(false, `末尾 t.co 在 entities.urls 里(→ ${trailingExpandedUrl ?? '未给展开地址'})—— 是链接卡片不是截断`);
+    }
+    if (hasMedia) return mk(false, '末尾 t.co 且有媒体 —— 那是图片/视频链接');
+    /**
+     * ⚠️⚠️ 走到这里 = 末尾挂着 t.co、**不在** entities.urls、也没媒体。
+     * 真机 2026-10-03 那条误报就卡在这 —— 当时载荷连 entities 都没解,
+     * 所以 `trailingUrlIsEntity` 是 undefined 而非 false。
+     * ⭐ 现在只有**确实查过 urls 且没找到**才报,查不到就不报(宁可漏报)。
+     */
+    if (trailingUrlIsEntity === false) {
+      return mk(true, '末尾 t.co 不在 entities.urls 里且无媒体 —— 可疑');
+    }
+    return mk(false, '末尾有 t.co 但载荷没给 entities.urls —— 判不了,按没截断算(宁可漏报)');
+  }
+
+  return mk(false, '正文正常结尾,无截断特征');
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -339,8 +454,19 @@ export function auditTimelinePayload(text: string): TimelineAudit {
      * ⚠️ 没有 note_tweet 而 full_text 带截断特征是 `text-truncated`。
      */
     let incomplete: TweetAudit['incomplete'];
+    /**
+     * ⭐⭐ 判据连**依据**一起算出来 —— 不管结论是什么都留痕。
+     * ⚠️ `entities` 与 `display_text_range` 都在 `legacy` 上,
+     * 从 **note_tweet 那边取不到**(长推的 entities 是另一份)。
+     */
+    const trunc = judgeTruncation(
+      full,
+      mediaArr.length > 0,
+      isObj(legacy.entities) ? legacy.entities : undefined,
+      legacy.display_text_range,
+    );
     if (article !== undefined && articleBody.length === 0) incomplete = 'article-no-body';
-    else if (noteText.length === 0 && isTruncated(full, mediaArr.length > 0)) {
+    else if (noteText.length === 0 && trunc.truncated) {
       incomplete = 'text-truncated';
     }
 
@@ -352,6 +478,11 @@ export function auditTimelinePayload(text: string): TimelineAudit {
       isLongText: noteText.length > 0,
       isArticle: article !== undefined,
       incomplete,
+      /**
+       * ⭐ 有长推全文时判据本身没意义,但**依据照样存** ——
+       * 「为什么没报截断」也是要能读出来的。
+       */
+      truncationEvidence: trunc.evidence,
       hasAuthor: handle.length > 0,
       handle,
       authorRestId: str(urr?.rest_id),
