@@ -92,6 +92,8 @@ describe('对称性:底座侧（identify 这条反向通路）', () => {
     'x.notifications': 'https://x.com/notifications',
     'x.compose': 'https://x.com/compose/post',
     'x.composeArticles': 'https://x.com/compose/articles',
+    /** ⭐ 单篇长文(2026-10-03)—— 地址取自真机载荷的 expanded_url */
+    'x.article': 'https://x.com/i/article/2105111183481266176',
   };
 
   it('⭐⭐ 每个登记的页面都必须有一条反向样本(清单从真表推)', () => {

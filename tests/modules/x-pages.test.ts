@@ -6,7 +6,7 @@
  * 见 `feedback-source-scan-cant-see-execution`。
  */
 import { describe, it, expect } from 'vitest';
-import { extractTweetId, xPageResolver, PAGE_PARAMS , X_TIMELINE_ENDPOINTS, X_NOISY_URLS , X_PAGE_MATCHERS, isTimelineOp } from '@modules/x/x-pages';
+import { extractTweetId, xPageResolver, PAGE_PARAMS , X_TIMELINE_ENDPOINTS, X_NOISY_URLS , X_PAGE_MATCHERS, X_PAGE_NAME, isTimelineOp } from '@modules/x/x-pages';
 
 describe('⭐⭐ extractTweetId:人粘什么都要能认', () => {
   /**
@@ -188,21 +188,105 @@ describe('x.search:三条实测规则', () => {
   });
 });
 
-describe('人的列表页:到位判据不能等推文', () => {
+describe('页面上没推文的:到位判据不能等推文', () => {
   /**
-   * ⚠️⚠️ 这三页上**没有推文** —— 用 `byUrlAndTweets` 会必然超时。
+   * ⚠️⚠️ 这些页上**没有推文卡片** —— 用 `byUrlAndTweets` 会必然超时。
    * ⭐ 判据直接查 arrival 的结构,不查字符串。
+   *
+   * ⚠️ 2026-10-03 加 `x.article`:长文单篇页是**一篇文章**,
+   * 同样没有 `[data-testid="tweet"]`,犯的是同一个错。
    */
-  for (const name of ['x.followers', 'x.verifiedFollowers', 'x.following']) {
+  const NO_TWEET_PAGES: ReadonlyArray<[string, Record<string, string>]> = [
+    ['x.followers', { handle: 'elonmusk' }],
+    ['x.verifiedFollowers', { handle: 'elonmusk' }],
+    ['x.following', { handle: 'elonmusk' }],
+    ['x.article', { articleId: '2105111183481266176' }],
+  ];
+  for (const [name, params] of NO_TWEET_PAGES) {
     it(`⭐ ${name} 的到位判据不含「有推文」`, () => {
-      const r = xPageResolver.resolve(name, { handle: 'elonmusk' });
+      const r = xPageResolver.resolve(name, params);
       expect(r, `${name} resolve 不出来`).not.toBeNull();
       const json = JSON.stringify(r!.arrival);
-      expect(json, `${name} 在等推文锚点 —— 这几页没推文,会必然超时`)
+      expect(json, `${name} 在等推文锚点 —— 这页没推文,会必然超时`)
         .not.toContain('tweetArticle');
       expect(json, `${name} 的判据该比 URL`).toContain('urlIncludes');
     });
   }
+});
+
+/**
+ * ⭐⭐⭐ 单篇长文页 —— 2026-10-03
+ *
+ * 真机 @KA594594 40 条里 **38 条是长文**,正文全不在列表页。
+ * 地址**就在列表页载荷里**(`entities.urls[].expanded_url`,38/38 全配上),
+ * 所以这一页存在的意义是:编排层拿到 articleUrl 直接 goto,不用点卡片。
+ */
+describe('⭐⭐⭐ x.article:单篇长文', () => {
+  it('⭐⭐ 裸 id → 拼出 /i/article/<id>', () => {
+    const r = xPageResolver.resolve('x.article', { articleId: '2105111183481266176' });
+    expect(r?.url).toBe('https://x.com/i/article/2105111183481266176');
+  });
+
+  /**
+   * ⭐ 人手上有的是**链接**(载荷里给的就是整条 URL)——
+   * 让调用方先把 id 抠出来是把代码该做的事推出去(用户 2026-10-02)。
+   */
+  it('⭐⭐ 粘整条长文链接也认 —— 不要求先抠 id', () => {
+    const r = xPageResolver.resolve('x.article', {
+      articleId: 'https://x.com/i/article/2105111183481266176',
+    });
+    expect(r?.url, '粘链接拼不出来 —— 会得到 /i/article/https://… 这种不存在的页')
+      .toBe('https://x.com/i/article/2105111183481266176');
+  });
+
+  it('⚠️ 取不出 id → 返回 null,**不拿原值硬拼**', () => {
+    expect(xPageResolver.resolve('x.article', { articleId: 'elonmusk' }), '硬拼了一个不存在的页')
+      .toBeNull();
+    expect(xPageResolver.resolve('x.article', { articleId: '' })).toBeNull();
+  });
+
+  it('⭐⭐ 反向 identify 认得出,且与正向往返一致', () => {
+    const url = 'https://x.com/i/article/2105111183481266176';
+    const got = xPageResolver.identify?.(url);
+    expect(got?.name, '长文页反向认不出 —— 正反两面漂了').toBe('x.article');
+    expect(got?.params.articleId).toBe('2105111183481266176');
+    // ⭐ 往返:identify 出来的参数再 resolve 回去,必须是同一个 URL
+    expect(xPageResolver.resolve('x.article', got!.params)?.url).toBe(url);
+  });
+
+  /**
+   * ⚠️⚠️ 两者都走 `/i/...`,判据顺序错就会**互相吃掉**。
+   * 当前靠 STATUS_PATH 要求 `/status/` 才没撞上 —— 那是碰巧,所以钉住。
+   */
+  it('⚠️⚠️ 长文页与推文页不许互相吃掉', () => {
+    expect(xPageResolver.identify?.('https://x.com/i/status/123')?.name)
+      .toBe('x.status');
+    expect(xPageResolver.identify?.('https://x.com/i/article/456')?.name)
+      .toBe('x.article');
+  });
+
+  /**
+   * ⭐⭐ 常量必须指向**真登记的页** —— 否则只是把漂移挪了个地方:
+   * 面板点下去会得到「没登记这一页」,而 tsc 全绿。
+   */
+  it('⭐⭐ X_PAGE_NAME 里的名字在页面表里真存在', () => {
+    const names = xPageResolver.names?.() ?? [];
+    expect(names.length, '页面表空了 —— 下面的断言会空转').toBeGreaterThan(4);
+    for (const [key, name] of Object.entries(X_PAGE_NAME)) {
+      expect(names, `X_PAGE_NAME.${key} = '${name}' 不在页面表里 —— 点下去会说没登记`)
+        .toContain(name);
+    }
+  });
+
+  it('⚠️ articleId **不等于**推文 id —— 别拿推文 id 拼长文页', () => {
+    /**
+     * 真机实测 5/5 都不同(推文 2105111536603959409 ↔ 长文 2105111183481266176)。
+     * 这条钉的是**文档性事实**:若将来有人以为能推导,这里会提醒他。
+     */
+    const tweetId = '2105111536603959409';
+    const articleId = '2105111183481266176';
+    expect(articleId, '两者若相同,「必须从载荷取」的理由就不成立了').not.toBe(tweetId);
+  });
 });
 
 describe('identify:X 自己的路由不许被认成人', () => {

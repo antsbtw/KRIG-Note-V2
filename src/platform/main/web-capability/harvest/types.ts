@@ -57,6 +57,22 @@ export type HarvestPlan = {
   readonly noisyUrlSubstrings?: readonly string[];
   /** 最长跑多久 —— 安全网 */
   readonly maxMs?: number;
+  /**
+   * ⭐⭐ **先去这一页再采** —— 语义页名 + 参数(2026-10-03 加)。
+   *
+   * ⚠️ 不给就是「采当前页」(原有行为,一个字没变)。
+   *
+   * ── 为什么放在底座而不是面板 ──
+   * 用户 2026-10-03:「我自己选定一个页面,**点击开始采集,就采集**。」
+   * 面板里写「先 goto 再 harvest」等于**把编排又推回给人**;
+   * 守卫「输出栏只有一个发起动作」就是钉这件事的 —— 我加按钮时
+   * 第一版正是在 onClick 里串了 goto,被它逮住。
+   *
+   * ⭐ 放这里还顺带解一个竞态:导航**必须在装腿之后**,
+   * 否则新页首屏那批请求在腿装好之前就发完了(与 reload 同一个道理)。
+   * ⚠️ 只收**语义页名**不收 URL —— 那道闸(业务页表翻译)不能绕。
+   */
+  readonly gotoPage?: { readonly name: string; readonly params?: Record<string, string> };
 };
 
 /** 采完之后的全部事实 —— ⭐ 一次说清,不用人再去别处拼 */
@@ -103,6 +119,11 @@ export interface HarvestDeps {
   // ── 控制侧 ──
   /** 重载当前页 —— ⭐ 解「装腿晚于首次请求」的竞态 */
   reload(pageId: PageId): void;
+  /**
+   * ⭐ 导航到**语义页** —— ⚠️ 与 `reload` 占同一个位置(装腿之后)。
+   * 回 `false` 表示没去成,编排据此决定还要不要往下跑。
+   */
+  goto(pageId: PageId, name: string, params?: Record<string, string>): Promise<boolean>;
   /** 滚到底或到轮次上限;每轮滚完调 `afterRound` */
   scroll(pageId: PageId, opts: {
     maxRounds?: number;

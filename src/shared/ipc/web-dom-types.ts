@@ -235,6 +235,13 @@ export type WebDomInvoke =
         /** ⚠️ 不要的 URL 子串 —— 业务给,底座一条不内置 */
         readonly noisyUrlSubstrings?: readonly string[];
         readonly maxMs?: number;
+        /**
+         * ⭐⭐ **先去这一页再采**(2026-10-03)。不给就是采当前页。
+         * ⚠️ 只收**语义页名**不收 URL —— 业务页表翻译那道闸不能绕。
+         * ⭐ 放在 plan 里(而不是让面板先 goto 再 harvest)是因为
+         * 「输出栏只有一个发起动作」——编排是底座的活,不是人的活。
+         */
+        readonly gotoPage?: { readonly name: string; readonly params?: Record<string, string> };
       };
     }
   // ── ⭐⭐ 采集(输出栏)—— **只管收,不碰页面** ──

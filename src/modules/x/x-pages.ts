@@ -49,6 +49,29 @@ function cleanHandle(h: string): string {
  */
 const STATUS_PATH = /\/(?:i|[^/]+)\/status\/(\d+)/;
 
+/**
+ * ⭐⭐ 从**长文链接或裸 id** 取出 articleId。取不出返回 null。
+ *
+ * ── 2026-10-03 真机实测 ──
+ * 长文正文只在单篇页,而单篇页地址**就在列表页载荷里**:
+ * `legacy.entities.urls[].expanded_url` = `https://x.com/i/article/<id>`
+ * (@KA594594 实测 38/38 全配上)。
+ *
+ * ⚠️⚠️ articleId **不等于**推文 id(实测 5/5 都不同)——
+ * 所以它**推不出来**,必须从载荷里拿。拿推文 id 来拼会得到
+ * 一个不存在的页面,而到位判据会诚实超时、把人指向「没到位」。
+ */
+const ARTICLE_PATH = /\/i\/article\/(\d+)/;
+
+export function extractArticleId(input: string): string | null {
+  const v = input.trim();
+  if (!v) return null;
+  /** ⭐ 裸数字 id 直接用(与 `extractTweetId` 同范式) */
+  if (/^\d+$/.test(v)) return v;
+  const m = v.match(ARTICLE_PATH);
+  return m ? m[1] : null;
+}
+
 export function extractTweetId(input: string): string | null {
   const v = input.trim();
   if (!v) return null;
@@ -207,6 +230,20 @@ const TIMELINE_OP_EXCLUDE = ['PinnedTimelines'];
  * (2026-10-03 实测:`UserOriginalsTimeline` 不在旧清单里 → 采到 0 页)。
  * ⚠️ 排除 `PinnedTimelines`(置顶时间线**列表**,实测 0 条推文)。
  */
+/**
+ * ⭐⭐ 要**按名字去**的页面 —— 给编排层用的常量。
+ *
+ * ⚠️ 为什么不让面板直接写 `'x.article'`:守卫
+ * 「Console 的页面名下拉**从真表读**,不许面板抄一份」钉的是
+ * 「面板里不许出现写死的语义页名」——**面板抄一份清单就会漂**,
+ * 而漂的表现是「面板上有这个名字、点下去说没登记」。
+ * ⭐ 名字留在**页面表这一侧**,面板引用常量,两边不可能漂。
+ */
+export const X_PAGE_NAME = {
+  /** 单篇长文 —— 正文只有这里有 */
+  article: 'x.article',
+} as const;
+
 export const X_PAGE_MATCHERS: readonly string[] = [
   /** ⭐ 正则**由排除表生成** —— 写两份时删掉一份测试照样绿 */
   `re:/i/api/graphql/[^/]+/(?!${TIMELINE_OP_EXCLUDE.join('|')})\\w*Timeline(\\?|$)`,
@@ -289,6 +326,7 @@ export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'x.withReplies': ['handle'],
   'x.articles': ['handle'],
   'x.status': ['tweetId'],
+  'x.article': ['articleId'],
   /** ⚠️ `f`/`days` 是**可选**的 —— 见 `OPTIONAL_PAGE_PARAMS`,不填也能跑 */
   'x.search': ['q', 'f', 'days'],
   // ── 人的列表页(产出的是**人**不是推文,见各自 resolver 的注释)──
@@ -331,6 +369,8 @@ export const OPTIONAL_PAGE_PARAMS: readonly string[] = ['f', 'days', 'since'];
 export const PARAM_HINTS: Readonly<Record<string, string>> = {
   handle: '账号，如 elonmusk（不带 @）',
   tweetId: '推文链接，或裸数字 id',
+  /** ⚠️ 写明「不是推文链接」—— 两者长得像但 id 不同,粘错会到一个不存在的页 */
+  articleId: '长文链接 x.com/i/article/…，或裸数字 id（⚠️ 不是推文链接）',
   /**
    * ⚠️ 提示里要说清**逗号会被当成 OR** —— 用户 2026-09-23 填 `VPN,翻墙`
    * 采回 94 条全不相干,因为 X 把逗号串当成一个短语且不报错。
@@ -419,6 +459,30 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
       url: `${BASE_URL}/${h}/articles`,
       arrival: byUrlAndTweets(`/${h}/articles`),
       describe: `@${h} 的长文`,
+    };
+  },
+
+  /**
+   * ⭐⭐⭐ **单篇长文** —— 正文只有这里有。
+   *
+   * ── 为什么要这一页(2026-10-03)──
+   * 列表页(`x.articles`)载荷只给 title + preview_text,正文
+   * (DraftJS `content_state`)**只在单篇页**。这是 X 的设计不是 bug。
+   *
+   * ⭐ 地址不用猜也不用点卡片:列表页载荷的 `entities.urls[].expanded_url`
+   * 就是它(实测 38/38)。所以编排层拿到 `articleUrl` 直接 goto 即可。
+   *
+   * ⚠️ 到位判据**只判 URL 不判推文卡片**:长文单篇页是一篇文章,
+   * 页面上**没有** `[data-testid="tweet"]` —— 用 `byUrlAndTweets`
+   * 会把「已经到了」判成「没到位」,一直等到超时。
+   */
+  'x.article': (p) => {
+    const id = extractArticleId(p.articleId ?? p.url ?? '');
+    if (!id) return null;
+    return {
+      url: `${BASE_URL}/i/article/${id}`,
+      arrival: byUrl(`/i/article/${id}`),
+      describe: `长文 ${id}`,
     };
   },
 
@@ -646,6 +710,16 @@ function identify(url: string): { name: string; params: Record<string, string> }
     const q = search.get('q') ?? '';
     return q ? { name: 'x.search', params: { q, f: search.get('f') === 'top' ? 'top' : 'live' } } : null;
   }
+
+  /**
+   * ⭐⭐ 单篇长文 —— ⚠️ 必须**排在 status 之前判**。
+   * 两者都走 `/i/...`,放后面虽然当前也能过(STATUS_PATH 要求 `/status/`),
+   * 但那是**碰巧**:判据一松就会互相吃掉。按「更具体的先判」排。
+   * ⭐ 与 `extractArticleId` 共用同一条正则 —— 另写一份会漂,
+   * 而漂的表现是「正向拼得出、反向认不出」。
+   */
+  const article = path.match(ARTICLE_PATH);
+  if (article) return { name: 'x.article', params: { articleId: article[1] } };
 
   // ⭐ 与 `extractTweetId` 共用同一条正则 —— 另写一份会漂
   const status = path.match(STATUS_PATH);

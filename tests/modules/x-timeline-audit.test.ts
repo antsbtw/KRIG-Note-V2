@@ -611,6 +611,20 @@ describe('⭐⭐⭐ 长文正文的去处(articleUrl)', () => {
     expect(a.items[0].articleUrl, '普通外链被当成了长文地址').toBeUndefined();
   });
 
+  /**
+   * ⭐⭐⭐ **面板靠它决定按钮出不出现** —— 这一环断了是静默的:
+   * 按钮永远不显示,而核对报告照样说「38 篇有地址」,
+   * 两边看着都对,就是点不到(`feedback-guard-must-pin-live-code`)。
+   */
+  it('⭐⭐⭐ articleUrl 要**活过 summarizeAudits** —— 面板从那里取', () => {
+    const sum = summarizeAudits([auditTimelinePayload(payload([articleTweet()]))]);
+    expect(
+      sum.items[0]?.articleUrl,
+      'summarizeAudits 把 articleUrl 丢了 —— 面板的「取长文正文」按钮永远不出现',
+    ).toBe('https://x.com/i/article/2105111183481266176');
+    expect(sum.items[0]?.incomplete, '按钮还要靠 incomplete 筛').toBe('article-no-body');
+  });
+
   it('⚠️ 长文但载荷**没给地址** → articleUrl 空,不编一个出来', () => {
     const a = auditTimelinePayload(payload([
       tweet({ article: { article_results: { result: {} } } }, { full_text: '标题' }),

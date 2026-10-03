@@ -42,7 +42,9 @@ import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
 } from './x-timeline-audit';
-import { X_TIMELINE_ENDPOINTS, X_NOISY_URLS, X_PAGE_MATCHERS, isTimelineOp } from './x-pages';
+import {
+  X_TIMELINE_ENDPOINTS, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME, isTimelineOp,
+} from './x-pages';
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
@@ -184,6 +186,22 @@ export function XConsole(
   const [peek, setPeek] = useState<{ total: number } | null>(null);
   /** ⭐ 核对报告落盘的位置 —— 人和 AI 看同一份 */
   const [auditFile, setAuditFile] = useState<string | null>(null);
+  /**
+   * ⭐⭐ 单篇长文页**回来了哪些端点** —— 2026-10-03。
+   * ⚠️ 这是**待答的问题不是结论**:我不知道正文在哪个端点,
+   * 所以先如实列出来,别拿猜的判据去筛。
+   */
+  const [probe, setProbe] = useState<Array<{
+    op: string; bytes: number; hasContentState: boolean; summary: string;
+  }> | null>(null);
+
+  /**
+   * ⭐ 本次采到的**缺正文长文地址** —— 从核对结果推导,**不另存一份**
+   * (两份清单必漂,见 `x_tweet 加字段要登记四处` 的教训)。
+   */
+  const articleUrls: readonly string[] = (audit?.items ?? [])
+    .filter((t) => t.incomplete === 'article-no-body' && t.articleUrl !== undefined)
+    .map((t) => t.articleUrl!);
   /** ⭐ 上次「展开全部」的结果 —— 让人看见点开了几条 */
   const [expanded, setExpanded] = useState<{ clicked: number; read: number } | null>(null);
   /**
@@ -705,6 +723,107 @@ export function XConsole(
                   停止
                 </button>
               </div>
+
+              {/*
+                ⭐⭐⭐ **补长文正文** —— 2026-10-03。
+
+                真机 @KA594594 一跑 40 条,**38 条是长文**,正文全不在列表页
+                (X 的设计:列表页只给 title + preview_text)。
+                ⭐ 地址**就在列表页载荷里**(`entities.urls[].expanded_url`,
+                　 实测 38/38 全配上)→ 不用点卡片、不用猜 URL,直接 goto。
+
+                ⚠️⚠️ 这一步**先只取一篇**。原因:单篇页的载荷端点名我**不知道**,
+                　 它不在 `X_PAGE_MATCHERS` 里。那是**平台的事实,推不出来** ——
+                　 所以先跑一篇、把回来的端点如实列出来,再决定判据怎么写。
+                　 (`feedback-dont-guess-look-at-real-data`;
+                　 　`project-x-collect-two-legs`:链路行为只有真机验得出来)
+              */}
+              {articleUrls.length > 0 && (
+                <div style={{ ...S.row, marginTop: 6 }}>
+                  <button
+                    type="button"
+                    disabled={wcId == null || running}
+                    onClick={async () => {
+                      setRunning(true);
+                      setProbe(null);
+                      try {
+                        /**
+                         * ⭐⭐ **一次调用** —— 「先去那一页再采」是底座的活。
+                         * ⚠️ 第一版我在这里串了 `goto` + `harvest`,被守卫
+                         * 「输出栏只有一个发起动作」逮住 —— 那正是把编排
+                         * 又推回给人(用户 2026-10-03:「点击开始采集,就采集」)。
+                         *
+                         * ⚠️ `pageUrlIncludes` 故意给**空数组**:单篇页的载荷
+                         * 端点名我**不知道**,先全收回来看,而不是拿猜的判据去筛
+                         * (筛错了会报「0 页」而数据就在手里)。
+                         */
+                        const r = await window.electronAPI!.webDomInvoke({
+                          op: 'harvest',
+                          pageRef: { wcId: wcId! },
+                          plan: {
+                            /** ⭐ 走语义页不传 URL —— 那道闸不能绕 */
+                            gotoPage: { name: X_PAGE_NAME.article, params: { articleId: articleUrls[0] } },
+                            wantPages: 1,
+                            pageUrlIncludes: [],
+                            noisyUrlSubstrings: X_NOISY_URLS,
+                            /** ⚠️ 长文是一篇文章,滚几轮把正文触发出来即可 */
+                            maxRounds: 8,
+                          },
+                        });
+                        setLog((l) => [{
+                          at: new Date().toLocaleTimeString(), label: '取长文正文', result: r,
+                        }, ...l].slice(0, 50));
+
+                        if (r.status === 'ok' || r.status === 'degraded') {
+                          const rep = (r as WebDomResult & { value: HarvestReport }).value;
+                          /**
+                           * ⭐⭐ 如实列出**回来的每一个端点** —— 这正是本次要问的事。
+                           * ⚠️ 不做任何筛选,也不下「哪个是正文」的结论。
+                           */
+                          setProbe(rep.items.map((it) => {
+                            const sh = describePayload(it.text);
+                            const op = it.url.split('?')[0].split('/').filter(Boolean).pop() ?? '?';
+                            return {
+                              op,
+                              bytes: it.text.length,
+                              /** ⭐ 正文在 DraftJS `content_state` 里 —— 有没有一眼可见 */
+                              hasContentState: it.text.includes('content_state'),
+                              summary: sh.summary,
+                            };
+                          }));
+                        }
+                      } finally {
+                        setRunning(false);
+                      }
+                    }}
+                    style={S.btn}
+                    title="去第一篇长文的单篇页，把回来的载荷端点如实列出来（还不知道该认哪个，所以先全收）"
+                  >
+                    取第 1 篇长文正文
+                  </button>
+                  <span style={{ fontSize: 10, opacity: 0.55 }}>
+                    本次有 {articleUrls.length} 篇长文缺正文
+                  </span>
+                </div>
+              )}
+
+              {probe !== null && (
+                <div style={S.diagnose}>
+                  <strong>单篇页回来的端点（{probe.length} 条，未筛选）</strong>
+                  {probe.length === 0 && (
+                    <div>⚠️ 一条响应都没有 —— 页面可能没发请求，或腿没装上。</div>
+                  )}
+                  {probe.map((e, i) => (
+                    <div key={i} style={{ marginTop: 3 }}>
+                      {e.hasContentState ? '⭐ ' : '　 '}
+                      <code>{e.op}</code>　{Math.round(e.bytes / 1024)}KB
+                      {e.hasContentState && <strong>　← 含 content_state（正文）</strong>}
+                      <br />
+                      <span style={{ opacity: 0.6, fontSize: 10 }}>{e.summary}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {!running && !report && (
                 <div style={S.todo}>
                   ① 去「控制」那栏选好页面（或左栏自己导航到想采的页）<br />

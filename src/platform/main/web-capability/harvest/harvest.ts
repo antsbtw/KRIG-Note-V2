@@ -92,12 +92,33 @@ export async function harvestPage(
   const legs = await deps.startAcquire(pageId, plan.noisyUrlSubstrings);
 
   /**
-   * ── ② 再重载 ──
-   * ⚠️ 顺序不能反:先重载的话首屏那批请求在装腿之前就发完了。
+   * ── ② 再去页面 ──
+   * ⚠️ 顺序不能反:先导航/重载的话首屏那批请求在装腿之前就发完了。
    * ⭐ 装腿后等一下,让页面钩子的注入生效(它要在站点脚本之前跑)。
+   *
+   * ⭐⭐ 给了 `gotoPage` 就**去那一页**,否则重载当前页 ——
+   * 两者占同一个位置,因为解的是同一个竞态。
    */
   await deps.wait(SETTLE_BEFORE_RELOAD_MS);
-  deps.reload(pageId);
+  if (plan.gotoPage !== undefined) {
+    const went = await deps.goto(pageId, plan.gotoPage.name, plan.gotoPage.params);
+    if (!went) {
+      /**
+       * ⚠️ 没去成就**别接着采** —— 接着采会在**原来那页**上滚,
+       * 然后把原页的数据当成目标页的交出去(静默串页,最难查的一种)。
+       */
+      const acq0 = deps.finishAcquire(pageId, t0);
+      return {
+        ok: false,
+        problems: [`没能去到 ${plan.gotoPage.name} —— 没有在原页上接着采（那会串页）`],
+        items: acq0.items, pages: 0, afterRound: [],
+        rounds: 0, scrolledPx: 0, reachedBottom: false,
+        stopReason: '导航失败', elapsedMs: deps.now() - t0, legs: acq0.legs,
+      };
+    }
+  } else {
+    deps.reload(pageId);
+  }
   await deps.wait(SETTLE_AFTER_RELOAD_MS);
 
   // ── ③④ 滚动 + 每轮展开,采够页数就停 ──

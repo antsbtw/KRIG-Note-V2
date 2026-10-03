@@ -352,6 +352,28 @@ function makeHarvestDeps(wc: WebContents, pid: PageId): HarvestDeps {
 
     reload: () => { wc.reload(); },
 
+    /**
+     * ⭐⭐ 去**语义页** —— 与 `reload` 占同一个位置(装腿之后)。
+     * ⚠️ 只收页面名,URL 由业务页表翻译 —— 那道闸不能绕
+     * (旧实现 2026-09-07「把首页时间线当搜索结果」整批入库,
+     * 　就是因为没有这道闸)。
+     * ⭐ 回 false 让编排**别在原页上接着采**(那会静默串页)。
+     */
+    async goto(pageId, name, params) {
+      const r = await controlEngine.goto(
+        pageId,
+        { kind: 'semantic', name, params },
+      );
+      traceRecorder.lifecycle({
+        layer: 'web.page',
+        event: r.status === 'ok' ? 'harvest-goto' : `harvest-goto-${r.status}`,
+        pageId: String(pageId),
+        detail: { name, params },
+      });
+      /** ⚠️ `degraded` 也算去到了 —— 它是「到了但有保留」,不是「没到」 */
+      return r.status === 'ok' || r.status === 'degraded';
+    },
+
     async scroll(pageId, opts) {
       /** ⚠️ 开跑前清旧的取消标记 —— 不清会「一轮都没滚就结束」 */
       scrollCancelled.delete(pageId);

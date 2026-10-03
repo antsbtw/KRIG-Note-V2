@@ -31,6 +31,8 @@ function deps(plan: {
   perRound?: AcquiredItem[][];
   cdpAttached?: boolean;
   hookInstalled?: boolean;
+  /** ⭐ 造「导航没去成」那条路 */
+  gotoFails?: boolean;
   scriptThrows?: boolean;
 } = {}) {
   const pool: AcquiredItem[] = [...(plan.initial ?? [])];
@@ -62,6 +64,14 @@ function deps(plan: {
       };
     },
     reload: () => { order.push('reload'); },
+    /**
+     * ⭐ 「先去那一页再采」—— 与 `reload` 占同一个位置(装腿之后)。
+     * ⚠️ `plan.gotoFails` 用来造「没去成」那条路。
+     */
+    async goto(_p, name) {
+      order.push(`goto:${name}`);
+      return !(plan.gotoFails ?? false);
+    },
     async scroll(_p, opts) {
       order.push('scroll');
       let rounds = 0;
@@ -243,5 +253,58 @@ describe('⭐ 报告里的过程事实', () => {
     const { d } = deps({ cdpAttached: false, hookInstalled: false, perRound: [[]] });
     const r = await harvestPage(d, PAGE, { maxRounds: 1 });
     expect(r.ok).toBe(false);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 「先去这一页再采」 —— 2026-10-03
+ *
+ * ── 为什么编排在底座而不是面板 ──
+ * 用户 2026-10-03:「我自己选定一个页面,**点击开始采集,就采集**。」
+ * 我加「取长文正文」时第一版在面板 onClick 里串了 `goto` + `harvest`,
+ * 被守卫「输出栏只有一个发起动作」逮住 —— 那正是把编排又推回给人。
+ */
+describe('⭐⭐⭐ gotoPage:先去那一页再采', () => {
+  it('⭐⭐ 给了 gotoPage → **去那一页**,不重载当前页', async () => {
+    const { d, order } = deps({ perRound: [[item(PAGE_URL)]] });
+    await harvestPage(d, PAGE, { gotoPage: { name: 'x.article', params: { articleId: '9' } } });
+    expect(order, '没去目标页').toContain('goto:x.article');
+    expect(order, '给了目标页还重载当前页 —— 那会留在原页').not.toContain('reload');
+  });
+
+  it('⭐⭐ 不给 gotoPage → 照旧重载当前页(原有行为一个字没变)', async () => {
+    const { d, order } = deps({ perRound: [[item(PAGE_URL)]] });
+    await harvestPage(d, PAGE, {});
+    expect(order, '不给目标页却跑去导航了').not.toContain('goto:x.article');
+    expect(order, '原有的重载没了').toContain('reload');
+  });
+
+  /**
+   * ⚠️⚠️ **装腿必须在导航之前** —— 与 reload 同一个竞态:
+   * 先导航的话新页首屏那批请求在腿装好之前就发完了。
+   */
+  it('⚠️⚠️ 顺序:先装腿**再**导航', async () => {
+    const { d, order } = deps({ perRound: [[item(PAGE_URL)]] });
+    await harvestPage(d, PAGE, { gotoPage: { name: 'x.article' } });
+    const legs = order.indexOf('startAcquire');
+    const nav = order.indexOf('goto:x.article');
+    expect(legs, '没装腿').toBeGreaterThan(-1);
+    expect(nav, '没导航').toBeGreaterThan(-1);
+    expect(legs, '导航在装腿之前 —— 新页首屏那批请求会漏掉').toBeLessThan(nav);
+  });
+
+  /**
+   * ⭐⭐⭐ **没去成就别接着采** —— 这是最要紧的一条。
+   * 在原页上接着采,会把**原页的数据**当成目标页的交出去:
+   * 静默串页,报告看着正常,数据全是错的。
+   */
+  it('⭐⭐⭐ 导航失败 → **不在原页上接着采**', async () => {
+    const { d, order } = deps({ gotoFails: true, perRound: [[item(PAGE_URL)]] });
+    const r = await harvestPage(d, PAGE, { gotoPage: { name: 'x.article' } });
+    expect(order, '导航失败还接着滚 —— 采回来的是原页的数据(静默串页)')
+      .not.toContain('scroll');
+    expect(r.ok, '导航都失败了还报成功').toBe(false);
+    expect(r.problems.join(''), '没说清为什么失败').toContain('没能去到');
+    expect(r.pages, '失败却报采到了页数').toBe(0);
   });
 });
