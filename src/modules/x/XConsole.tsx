@@ -42,6 +42,7 @@ import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 import { auditTimelinePayload, summarizeAudits, type TimelineAudit } from './x-timeline-audit';
 import { X_TIMELINE_ENDPOINTS } from './x-pages';
 import { describePayload } from './x-payload-shape';
+import { exportAuditText } from './x-audit-export';
 
 type PageTable = {
   owner: string;
@@ -159,6 +160,8 @@ export function XConsole(
    * **不知道翻页到底有没有收到东西**,也就不知道什么时候该停。
    */
   const [peek, setPeek] = useState<{ total: number } | null>(null);
+  /** ⭐ 核对报告落盘的位置 —— 人和 AI 看同一份 */
+  const [auditFile, setAuditFile] = useState<string | null>(null);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -175,7 +178,8 @@ export function XConsole(
    * 滚动轮数上限 —— ⚠️ **可填,不写死**(见下面那个输入框的注释)。
    * ⭐ 默认 30 而不是 5:X 的无限流一屏才几百像素,5 轮看着像没动。
    */
-  const [scrollRounds, setScrollRounds] = useState('30');
+  // ⭐ 用户 2026-10-02:「下次就滚 10 页试试」
+  const [scrollRounds, setScrollRounds] = useState('10');
 
   /**
    * ⭐ 页面名**从真表读**,面板不抄一份。
@@ -607,6 +611,26 @@ export function XConsole(
                         .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
                         .map((it) => auditTimelinePayload(it.text));
                       setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
+
+                      /**
+                       * ⭐⭐ **自动写核对报告** —— 用户 2026-10-02:
+                       * 「我不知道你采的数据是否完整…**我来一条条对**吧。」
+                       * ⚠️ 不要人再点一次:核对完就写,
+                       * 　 否则「忘了点导出」会让这一轮的事实消失
+                       * 　 (`feedback-maintainability-over-feature-completion`)。
+                       */
+                      if (audits.length > 0) {
+                        const text = exportAuditText(audits, {
+                          pages: audits.length,
+                          totalResponses: rep.items.length,
+                        });
+                        const w = await window.electronAPI!.webDomInvoke({
+                          op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-home',
+                        });
+                        if (w.status === 'ok') {
+                          setAuditFile((w.value as { file: string }).file);
+                        }
+                      }
                     }
                     setLog((l) => [{
                       at: new Date().toLocaleTimeString(), label: '停止收', result: r,
@@ -685,6 +709,12 @@ export function XConsole(
                   {audit && (
                     <div style={S.auditBox}>
                       <div style={{ color: 'var(--text-primary, #ddd)', marginBottom: 4 }}>
+                        {auditFile && (
+                          <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 4 }}>
+                            ⭐ 完整报告已写入（可逐条核对）：
+                            <span style={{ userSelect: 'all', color: '#9ac' }}>{auditFile}</span>
+                          </div>
+                        )}
                         完整性核对：{audit.pages} 页 ·
                         {' '}{audit.uniqueTweets} 条推文
                         {audit.tweets !== audit.uniqueTweets

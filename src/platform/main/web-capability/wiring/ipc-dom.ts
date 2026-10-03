@@ -23,7 +23,9 @@
  * 3. ⭐ **失败如实回三态**,不静默吞 —— 这正是本层要替换掉的那个病。
  */
 
-import { ipcMain, webContents, type WebContents } from 'electron';
+import { app, ipcMain, webContents, type WebContents } from 'electron';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type {
   WebDomInvoke,
@@ -745,6 +747,33 @@ export function registerWebDomIpc(): void {
            * 只能静态推断(查了四轮没结论)。
            * ⭐ 「人点了但没发出去」与「人没点」必须分得开。
            */
+          /**
+           * ⭐⭐ 把核对报告写成文件 —— 人和 AI 看**同一份**。
+           * ⚠️ 底座只负责「写」,内容由业务模块渲染(它不认识 X 的字段)。
+           */
+          case 'writeAudit': {
+            if (typeof p.text !== 'string' || p.text.length === 0) {
+              return failed('[web ipc] writeAudit 缺内容');
+            }
+            try {
+              const dir = join(app.getPath('userData'), 'krig-data', 'x-audit');
+              mkdirSync(dir, { recursive: true });
+              // ⚠️ 文件名带时间戳 —— **不覆盖历史**,两次采集要能对照
+              const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+              const file = join(dir, `${p.name ?? 'audit'}-${stamp}.txt`);
+              writeFileSync(file, p.text, 'utf-8');
+              traceRecorder.lifecycle({
+                layer: 'web.net', event: 'audit-written', pageId: String(pageId),
+                detail: { file, bytes: p.text.length },
+              });
+              console.log(`[x.audit] 核对报告已写入 ${file}`);
+              return { status: 'ok', value: { file } };
+            } catch (e) {
+              // ⚠️ 写失败要如实说 —— 静默会让人以为写了
+              return failed(`[web ipc] 写核对报告失败: ${e instanceof Error ? e.message : String(e)}`);
+            }
+          }
+
           case 'uiTrace': {
             traceRecorder.lifecycle({
               layer: 'web.net',

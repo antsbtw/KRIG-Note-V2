@@ -179,6 +179,24 @@ export type WebDomInvoke =
    *
    * ⭐ 它只记事实:哪个按钮、当时的状态、结果。不改任何行为。
    */
+  /**
+   * ⭐⭐ **把核对报告写成文件** —— 用户 2026-10-02:
+   * 「我不知道你采的数据是否完整…显示这些采集的内容包括元数据,**我来一条条对**吧。」
+   *
+   * ⚠️ 问题的本质:核对结果只活在面板上 —— 我读不到、人要截图,
+   * 而 22 个字段 × N 条推文**没法靠截图对**。
+   * ⭐ 落成文件,人和 AI 看**同一份**。
+   *
+   * ⚠️ 写到固定目录(`krig-data/x-audit/`),文件名带时间戳 —— 不覆盖历史。
+   */
+  | {
+      readonly op: 'writeAudit';
+      readonly pageRef: WebDomPageRef;
+      /** 报告正文(由业务模块渲染好)—— ⚠️ 底座不认识 X 的字段 */
+      readonly text: string;
+      /** 文件名前缀,如 `x-home` */
+      readonly name?: string;
+    }
   | {
       readonly op: 'uiTrace';
       readonly pageRef: WebDomPageRef;
