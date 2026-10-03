@@ -205,6 +205,38 @@ export type WebDomInvoke =
       /** 当时面板的关键状态 —— ⚠️ 只放判断用得上的,不放全量 state */
       readonly state?: Readonly<Record<string, string | number | boolean | null>>;
     }
+  /**
+   * ⭐⭐⭐ **采这一页** —— 选好页面,点一下,它自己采完。
+   *
+   * ── 用户 2026-10-03 ──
+   * 「应该是反过来,**我自己选定一个页面,点击开始采集,就采集**,
+   * 　采集完毕后再验证采集的内容才对。」「每次采集 **10 页**。」
+   *
+   * ⚠️ 此前面板上有**五个**要人点的动作(goto/开始收/重载/滚动/停止),
+   * 而且**顺序错了就采不到** —— 那是把编排推给了人。
+   *
+   * ⭐ 一次调用内部:装腿 → 重载(解竞态)→ 滚动 → 每轮展开折叠的推文
+   * → 采够页数就停 → 出报告。调用方**不需要知道**这些。
+   *
+   * ⚠️ 这是**长操作**(可能几十秒),中途停用 `scrollStop`。
+   */
+  | {
+      readonly op: 'harvest';
+      readonly pageRef: WebDomPageRef;
+      readonly plan?: {
+        /** ⭐ 采够几页就停(「页」= 命中 pageUrlIncludes 的响应) */
+        readonly wantPages?: number;
+        /** ⚠️ 什么算「一页」—— 业务知识,底座不猜 */
+        readonly pageUrlIncludes?: readonly string[];
+        /** 滚动轮次**上限** —— 安全网不是目标 */
+        readonly maxRounds?: number;
+        /** ⭐ 每轮滚完跑的脚本 id —— 只收**预注册的 id** */
+        readonly afterRoundScriptId?: string;
+        /** ⚠️ 不要的 URL 子串 —— 业务给,底座一条不内置 */
+        readonly noisyUrlSubstrings?: readonly string[];
+        readonly maxMs?: number;
+      };
+    }
   // ── ⭐⭐ 采集(输出栏)—— **只管收,不碰页面** ──
   /**
    * ⭐⭐ 开始收。**立即返回**,不等。

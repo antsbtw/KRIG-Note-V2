@@ -93,7 +93,24 @@ type Identified = {
  * ⭐ 所以面板上**没有** CaptureStats / HookStats 这些按腿分的类型了:
  * 那是实现细节,合并在底座完成,这里只认一份结果。
  */
-type AcquireReport = {
+/**
+ * ⭐⭐ 一次「采这一页」的报告 —— 与底座 `HarvestReport` 同构。
+ *
+ * ── 用户 2026-10-03 ──
+ * 「我自己选定一个页面,**点击开始采集,就采集**,采集完毕后再验证」
+ * 「每次采集 **10 页**」
+ *
+ * ⚠️ 它比 `AcquireReport` 多了**过程事实**(轮次/滚动/页数):
+ * 没有它们,「只采到 N 页」分不清是**采少了**还是**页面就这么多**。
+ */
+type HarvestReport = {
+  /** ⭐ 其中算「一页」的有几条 */
+  pages: number;
+  /** ⭐ 每轮展开的产出 —— 底座原样转,由这里解释 */
+  afterRound: unknown[];
+  rounds: number;
+  scrolledPx: number;
+  reachedBottom: boolean;
   ok: boolean;
   problems: string[];
   items: AcquiredItem[];
@@ -149,7 +166,9 @@ export function XConsole(
    * ⚠️ 原来有 stats / hook / payloads 三份(按腿分),那是实现细节漏到了界面上。
    */
   const [running, setRunning] = useState(false);
-  const [report, setReport] = useState<AcquireReport | null>(null);
+  /** ⭐ 采够几页就停 —— 用户 2026-10-03:「每次采集 10 页」 */
+  const [pagesWanted, setPagesWanted] = useState('10');
+  const [report, setReport] = useState<HarvestReport | null>(null);
   /**
    * ⭐⭐ **完整性核对**结果 —— 用户 2026-10-02:
    * 「关键是**核对爬取的数据完整没有**。」
@@ -551,208 +570,124 @@ export function XConsole(
           <>
             <div style={S.opArea}>
               {/*
-                ⭐⭐⭐ **一个按钮** —— 用户 2026-10-02:
-                「我需要的是**完整的数据**，而不是分这么多类别」
-                「不是选择用哪条腿 —— 你要构建**获取完整信息的函数/或者类**，
-                　底层能够可以做最小化的抽象函数，但**上层只关注某个具体的目标**呀。」
+                ⭐⭐⭐ **一个按钮** —— 用户 2026-10-03:
+                「应该是反过来,**我自己选定一个页面,点击开始采集,就采集**,
+                　采集完毕后再验证采集的内容才对。」「每次采集 **10 页**。」
 
-                ⭐ 原来七个按钮里五个是**实现细节**(CDP 腿/钩子腿/重载/取载荷/分别停)。
-                现在底层 `acquire` 一次做完:所有腿一起上 → 重载(解竞态)
-                → 滚到够了或真到底 → 合并去重 → 回一份报告。
-              */}
-              {/*
-                ⭐⭐ **控制是控制,采集是采集**(用户 2026-10-02)。
-                这一栏只管「开始接 / 停止接」—— 页面怎么翻去**控制那栏**。
-                ⚠️ 上一版把 reload+滚动揉进采集,实测 `rounds=0 scrolledPx=0`:
-                　 重载后首屏就够数、一轮都没滚,而人在这栏看不出来页面没动过。
+                ⚠️ 此前这里有五个要人点的动作(开始收/重载/滚动/展开/停止),
+                　 而且**顺序错了就采不到** —— 那是把编排推给了人。
+                ⭐ 现在底座 `harvest` 一次做完:装腿 → 重载(解竞态)→ 滚动
+                　 → 每轮展开折叠的推文 → 采够页数就停 → 出报告。
               */}
               <div style={S.row}>
                 <button
                   type="button"
+                  /** ⚠️ 不看 busy:这**就是**那个长操作 */
                   disabled={wcId == null || running}
                   onClick={async () => {
-                    /**
-                     * ⭐ 落痕「人点了什么」—— 2026-10-02:
-                     * 连续两轮卡在同一步而我**读不到面板状态**,只能静态推断。
-                     * ⚠️ 「人点了但没发出去」与「人没点」必须分得开。
-                     */
-                    void window.electronAPI?.webDomInvoke?.({
-                      op: 'uiTrace', pageRef: { wcId: wcId! },
-                      action: '开始收', state: { running, hasReport: report !== null },
-                    });
-                    const r = await window.electronAPI!.webDomInvoke({
-                      op: 'acquireStart',
-                      pageRef: { wcId: wcId! },
-                      /**
-                       * ⭐ 噪音名单是**X 的业务知识**,从这里传给底座。
-                       * ⚠️ 2026-10-02 实测:不挡的话 52 条视频分片(15MB)
-                       * 会把 64 条容量挤爆,HomeTimeline 存不下。
-                       */
-                      noisyUrlSubstrings: X_NOISY_URLS,
-                    });
-                    setLog((l) => [{
-                      at: new Date().toLocaleTimeString(), label: '开始收', result: r,
-                    }, ...l].slice(0, 50));
-                    if (r.status === 'ok') {
-                      setRunning(true);
-                      setReport(null);
-                      setAudit(null);
-                      // ⚠️ 清掉上一轮的 DOM 文本 —— 不清会把旧全文合进新一轮
-                      setDomTexts([]);
-                      setExpanded(null);
+                    setRunning(true);
+                    setReport(null);
+                    setAudit(null);
+                    setAuditFile(null);
+                    try {
+                      const r = await window.electronAPI!.webDomInvoke({
+                        op: 'harvest',
+                        pageRef: { wcId: wcId! },
+                        plan: {
+                          // ⭐ 用户 2026-10-03:「每次采集 10 页」
+                          wantPages: Number(pagesWanted) || 10,
+                          pageUrlIncludes: X_TIMELINE_ENDPOINTS,
+                          noisyUrlSubstrings: X_NOISY_URLS,
+                          // ⭐ 每轮自动展开折叠的推文 —— 不是人要点的一步
+                          afterRoundScriptId: X_SCRIPTS.expandAll,
+                          // ⚠️ 轮次是**安全网不是目标**:采够页数会提前停
+                          maxRounds: 60,
+                        },
+                      });
+                      setLog((l) => [{
+                        at: new Date().toLocaleTimeString(), label: '采这一页', result: r,
+                      }, ...l].slice(0, 50));
+
+                      if (r.status === 'ok' || r.status === 'degraded') {
+                        const rep = (r as WebDomResult & { value: HarvestReport }).value;
+                        setReport(rep);
+
+                        /** ⭐ 每轮展开的全文 —— 按「**只许变长**」合并 */
+                        const merged = new Map<string, string>();
+                        for (const one of rep.afterRound ?? []) {
+                          const tweets = (one as { tweets?: Array<{ id: string; text: string }> })
+                            .tweets ?? [];
+                          for (const t of tweets) {
+                            const prev = merged.get(t.id);
+                            if (!prev || t.text.length > prev.length) merged.set(t.id, t.text);
+                          }
+                        }
+                        const domList = [...merged.entries()].map(([id, text]) => ({ id, text }));
+
+                        const audits: TimelineAudit[] = rep.items
+                          .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
+                          .map((it) => auditTimelinePayload(it.text))
+                          .map((a) => mergeExpandedText(a, domList));
+                        setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
+
+                        if (audits.length > 0) {
+                          const text = exportAuditText(audits, {
+                            pages: audits.length,
+                            totalResponses: rep.items.length,
+                            rounds: rep.rounds,
+                            scrolledPx: rep.scrolledPx,
+                          });
+                          const w = await window.electronAPI!.webDomInvoke({
+                            op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-harvest',
+                          });
+                          if (w.status === 'ok') setAuditFile((w.value as { file: string }).file);
+                        }
+                      }
+                    } finally {
+                      setRunning(false);
                     }
                   }}
                   style={S.btn}
-                  title="两条取数通路同时装上；页面怎么翻请去「控制」那栏"
+                  title="装腿 → 重载 → 滚动（每轮自动展开折叠的推文）→ 采够页数就停 → 核对"
                 >
-                  开始收
+                  {running ? '采集中…' : '采这一页'}
                 </button>
+                <input
+                  value={pagesWanted}
+                  onChange={(e) => setPagesWanted(e.target.value.replace(/\D/g, ''))}
+                  style={{ ...S.input, flex: 'none', width: 46 }}
+                  title="采够几页就停"
+                />
+                <span style={{ fontSize: 10, opacity: 0.5 }}>页</span>
                 <button
                   type="button"
+                  /** ⭐ 停是取消动作,必须在忙的时候可用 */
                   disabled={wcId == null || !running}
-                  onClick={async () => {
-                    /**
-                     * ⚠️⚠️ **先把 running 置回,再做别的** —— 2026-10-02 实测:
-                     * 用户点了停,数据**还在不断进来**、提示块也不消失。
-                     * 真因:原来 `setRunning(false)` 写在 `await` **之后**,
-                     * 那次 IPC 一抛异常,整个 handler 就中断 ——
-                     * **停不下来,而且界面看不出哪里出了错**。
-                     *
-                     * ⭐ 「停」是取消动作:它必须**先生效**,
-                     * 失败也只是「没拿到报告」,不该变成「停不下来」。
-                     */
-                    void window.electronAPI?.webDomInvoke?.({
-                      op: 'uiTrace', pageRef: { wcId: wcId! },
-                      action: '停止并核对',
-                      state: { running, peekTotal: peek?.total ?? null },
-                    });
-                    setRunning(false);
-                    setPeek(null);
-                    let r: WebDomResult | { status: 'error'; reason: string };
-                    try {
-                      r = await window.electronAPI!.webDomInvoke({
-                        op: 'acquireStop', pageRef: { wcId: wcId! },
-                      });
-                    } catch (e) {
-                      // ⚠️ 不静默:停不下来时人要看得见原因
-                      r = { status: 'error' as const, reason: e instanceof Error ? e.message : String(e) };
-                    }
-                    if (r.status === 'ok' || r.status === 'degraded') {
-                      const rep = (r as WebDomResult & { value: AcquireReport }).value;
-                      setReport(rep);
-                      /**
-                       * ⭐⭐ 每轮自动展开的产出在这里 —— 不用人点任何按钮。
-                       * ⚠️ 形状由 X 的脚本定(`{expanded, tweets:[{id,text}]}`),
-                       * 底座原样转,不解释。
-                       */
-                      const roundsOut = (rep as unknown as {
-                        afterRound?: Array<{ expanded?: number; tweets?: Array<{ id: string; text: string }> }>;
-                      }).afterRound ?? [];
-                      const merged = new Map<string, string>();
-                      let clicked = 0;
-                      for (const one of roundsOut) {
-                        clicked += one.expanded ?? 0;
-                        for (const t of one.tweets ?? []) {
-                          // ⚠️ **只许变长** —— 后一轮未必比前一轮全
-                          const prev = merged.get(t.id);
-                          if (!prev || t.text.length > prev.length) merged.set(t.id, t.text);
-                        }
-                      }
-                      const domList = [...merged.entries()].map(([id, text]) => ({ id, text }));
-                      setDomTexts(domList);
-                      setExpanded({ clicked, read: domList.length });
-                      /**
-                       * ⭐⭐ **完整性核对在这里做** —— 它是 X 的活。
-                       * ⚠️ 底座只回「收到了什么」,不做研判(用户 2026-10-02:
-                       * 「采集数据就是全面的采集,**没有数据研判的功能呀?**」)。
-                       */
-                      const audits: TimelineAudit[] = rep.items
-                        .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
-                        .map((it) => auditTimelinePayload(it.text))
-                        /**
-                         * ⭐⭐ 把「展开全部」拿到的 DOM 全文合并进来。
-                         * ⚠️ **只许变长**(旧实现同一条底线):
-                         * `project-x-upsert-overwrites-richer-text` 实测过
-                         * 「16081 字被 267 字覆盖」的数据损坏。
-                         */
-                        // ⚠️ 用刚算出的 domList,**不用 state** —— setState 不同步生效
-                        .map((a) => mergeExpandedText(a, domList));
-                      setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
-
-                      /**
-                       * ⭐⭐ **自动写核对报告** —— 用户 2026-10-02:
-                       * 「我不知道你采的数据是否完整…**我来一条条对**吧。」
-                       * ⚠️ 不要人再点一次:核对完就写,
-                       * 　 否则「忘了点导出」会让这一轮的事实消失
-                       * 　 (`feedback-maintainability-over-feature-completion`)。
-                       */
-                      if (audits.length > 0) {
-                        const text = exportAuditText(audits, {
-                          pages: audits.length,
-                          totalResponses: rep.items.length,
-                        });
-                        const w = await window.electronAPI!.webDomInvoke({
-                          op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-home',
-                        });
-                        if (w.status === 'ok') {
-                          setAuditFile((w.value as { file: string }).file);
-                        }
-                      }
-                    }
-                    setLog((l) => [{
-                      at: new Date().toLocaleTimeString(), label: '停止收', result: r,
-                    }, ...l].slice(0, 50));
-                  }}
+                  onClick={() => void window.electronAPI?.webDomInvoke?.({
+                    op: 'scrollStop', pageRef: { wcId: wcId! },
+                  })}
                   style={S.btn}
                 >
-                  停止并核对
+                  停止
                 </button>
-                {running && <span style={S.live}>● 收集中</span>}
               </div>
-              {/*
-                ⭐⭐ 步骤提示**跟着状态走** —— 2026-10-02 实测踩到:
-                原来条件是 `!running && !report`,**一点「开始收」它就消失了**,
-                于是人进入第 ② 步后面板上只剩一个「● 收集中」,
-                **不告诉他接下来该做什么** —— 那一轮因此没走到「停止并核对」。
-                ⚠️ 与 `feedback-maintainability-over-feature-completion` 同族:
-                　 依据一关就没。⭐ 正在进行的那一步要**更醒目**,不是消失。
-              */}
               {!running && !report && (
                 <div style={S.todo}>
-                  <strong style={{ color: 'var(--text-primary, #ddd)' }}>① 点「开始收」</strong>
-                  　（两条取数通路同时装上）<br />
-                  ② 去「控制」那栏：重载 / goto / scrollUntil<br />
-                  ③ 回来点「停止并核对」
+                  ① 去「控制」那栏选好页面（或左栏自己导航到想采的页）<br />
+                  ② 回来点「采这一页」—— 重载、滚动、展开折叠的推文、
+                  采够页数就停，<strong>全自动</strong><br />
+                  ③ 采完直接出完整性核对 + 逐条明细
                 </div>
               )}
               {running && (
                 <div style={S.diagnose}>
-                  {/*
-                    ⚠️⚠️ **重载不是可选项,是必须的第一步** —— 2026-10-02 实测:
-                    这一轮没重载,结果 6 条全是杂项、`HomeTimeline` 一条都没有。
-                    ⭐ 真因:X 首页的 `HomeTimeline` 在**页面加载时就发完了**,
-                    　 装腿时它早已过去。重载让页面从第一条请求重新开始。
-                    ⚠️ 原来写成「重载 / goto / scrollUntil」并列,像三个可选项 ——
-                    　 那是我的表述把必须步骤降级成了选项。
-                  */}
-                  <strong>② 去「控制」那栏，按顺序做两步：</strong><br />
-                  　<strong style={{ color: '#d9c48f' }}>1. 重载</strong>
-                  　—— X 的首批推文在<strong>页面加载时就发完了</strong>，
-                  不重载就错过了。<br />
-                  　<strong style={{ color: '#d9c48f' }}>2. scrollUntil</strong>
-                  　—— 滚动触发下一页（建议 10 轮）；
-                  <span style={{ opacity: 0.7 }}>折叠的推文会<strong>自动展开</strong>，不用管</span>。
+                  采集中…（重载 → 滚动 → 每轮展开折叠的推文 → 采够 {pagesWanted} 页就停）
                   <br />
-                  两步做完<strong>回到这里点「停止并核对」</strong>。
-                  {peek && (
-                    <div style={{ marginTop: 4, opacity: 0.85 }}>
-                      {/* ⚠️ 只报**收到多少** —— 「其中几条有用」是停止后核对的事 */}
-                      已收到 {peek.total} 条
-                    </div>
-                  )}
+                  <span style={{ opacity: 0.75 }}>想提前结束就点「停止」。</span>
                 </div>
               )}
             </div>
+
 
             <div style={S.resultArea}>
               {report && (

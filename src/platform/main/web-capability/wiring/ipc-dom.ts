@@ -42,6 +42,8 @@ import { CaptureSession } from '../net/capture-session';
 import { HookSession } from '../hook/hook-session';
 import { toHookHost } from './electron-hook-host';
 import { startAcquire, peekAcquire, finishAcquire } from '../acquire/acquire';
+import { harvestPage } from '../harvest/harvest';
+import type { HarvestDeps } from '../harvest/types';
 import type { AcquireDeps, AcquiredItem } from '../acquire/types';
 import { toPageHost } from './electron-page-host';
 import { wireWebRequestSideOn, registerPageIdLookup } from './webrequest-side';
@@ -330,6 +332,57 @@ function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
       return { hookInjected: Boolean(hooksByPageId.get(pageId)?.stats().injected) };
     },
 
+    now: () => Date.now(),
+  };
+}
+
+/**
+ * ⭐⭐ 把**控制**与**采集**接给 `harvestPage`。
+ *
+ * 用户 2026-10-03:「我自己选定一个页面,点击开始采集,就采集」。
+ * ⭐ 这个函数是那条分界线:下面是两层机制,上面只有「采这一页」。
+ * ⚠️ `harvestPage` 本身零 Electron、零站点知识 —— 全靠这里注入。
+ */
+function makeHarvestDeps(wc: WebContents, pid: PageId): HarvestDeps {
+  const acq = makeAcquireDeps(wc, pid);
+  return {
+    startAcquire: (pageId, noisy) => startAcquire(acq, pageId, noisy),
+    peekAcquire: (pageId) => mergedItems(pageId, Number.MAX_SAFE_INTEGER),
+    finishAcquire: (pageId, startedAt) => finishAcquire(acq, pageId, startedAt),
+
+    reload: () => { wc.reload(); },
+
+    async scroll(pageId, opts) {
+      /** ⚠️ 开跑前清旧的取消标记 —— 不清会「一轮都没滚就结束」 */
+      scrollCancelled.delete(pageId);
+      const r = await controlEngine.scrollUntil(pageId, { kind: 'atBottom' }, {
+        maxRounds: opts.maxRounds,
+        afterRound: opts.afterRound,
+        // ⭐ 两个停止源:人点「停翻页」 或 编排说够了
+        shouldStop: () => scrollCancelled.has(pageId) || Boolean(opts.shouldStop?.()),
+      });
+      scrollCancelled.delete(pageId);
+      const v = (r as { value?: {
+        rounds?: number; scrolledPx?: number; reachedBottom?: boolean; stopReason?: string;
+      } }).value;
+      return {
+        rounds: v?.rounds ?? 0,
+        scrolledPx: v?.scrolledPx ?? 0,
+        reachedBottom: Boolean(v?.reachedBottom),
+        stopReason: v?.stopReason ?? '(未知)',
+      };
+    },
+
+    async runScript(pageId, scriptId) {
+      const r = await domRunner.run(wc, pageId, scriptId as ScriptId);
+      // ⚠️ 失败如实抛 —— 编排那边兜住,但不能静默当成「跑了没产出」
+      if (r.status !== 'ok') {
+        throw new Error(`脚本 ${scriptId} 失败: ${(r as { reason?: string }).reason ?? ''}`);
+      }
+      return r.value;
+    },
+
+    wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
     now: () => Date.now(),
   };
 }
@@ -808,6 +861,60 @@ export function registerWebDomIpc(): void {
               detail: { ...(p.state ?? {}) },
             });
             return { status: 'ok', value: { recorded: true } };
+          }
+
+          /**
+           * ⭐⭐⭐ **采这一页** —— 一次调用做完全部编排。
+           * 用户 2026-10-03:「我自己选定一个页面,点击开始采集,就采集」。
+           */
+          case 'harvest': {
+            afterRoundResults.delete(pageId);
+            const rep = await harvestPage(makeHarvestDeps(wc, pageId), pageId, p.plan ?? {});
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: rep.ok ? 'harvest-ok' : 'harvest-incomplete',
+              pageId: String(pageId),
+              detail: {
+                url: wc.getURL(),
+                total: rep.items.length,
+                pages: rep.pages,
+                rounds: rep.rounds,
+                scrolledPx: Math.round(rep.scrolledPx),
+                elapsedMs: rep.elapsedMs,
+                stopReason: rep.stopReason,
+                legs: rep.legs,
+                problems: rep.problems,
+                /** ⭐ 展开的产出摘要 —— 「跑没跑」要分得清 */
+                expand: rep.afterRound.length > 0
+                  ? {
+                    轮数: rep.afterRound.length,
+                    点开了: rep.afterRound.reduce<number>(
+                      (n, x) => n + (((x as { expanded?: number }).expanded) ?? 0), 0,
+                    ),
+                  }
+                  : '(未启用)',
+                /** ⭐ 采到了什么 —— 全量按类型聚合,不截断 */
+                byKind: (() => {
+                  const g = new Map<string, number>();
+                  for (const x of rep.items) {
+                    const tail = x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)';
+                    const key = /\.(m4s|mp4|m3u8|ts)$/.test(tail)
+                      ? `(视频分片 *.${tail.split('.').pop()})` : tail;
+                    g.set(key, (g.get(key) ?? 0) + 1);
+                  }
+                  return Object.fromEntries([...g.entries()].sort((a, b) => b[1] - a[1]));
+                })(),
+              },
+            });
+            console.log(
+              `[web.harvest] ${rep.ok ? '✓' : '⚠'} pageId=${pageId} —— `
+              + `${rep.pages} 页 / ${rep.items.length} 条 / ${rep.rounds} 轮 / ${rep.stopReason}`,
+            );
+            /** ⚠️ 不完整回 degraded **不是 failed** —— 采了一半也是真的 */
+            if (!rep.ok) {
+              return { status: 'degraded', value: rep, missing: [...rep.problems] };
+            }
+            return { status: 'ok', value: rep };
           }
 
           /**

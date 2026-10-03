@@ -466,48 +466,76 @@ describe('Console 布局:能力并排,不竖排', () => {
  * ⚠️ 与 `feedback-maintainability-over-feature-completion` 同族:
  * **依据一关就没**。⭐ 正在进行的那一步该**更醒目**,不是消失。
  */
-describe('⭐⭐ 采集是多步流程:每一步都要有指引', () => {
+describe('⭐⭐⭐ 采集是**一步到底**,不是多步流程', () => {
+  /**
+   * ── 用户 2026-10-03 ──
+   * 「应该是反过来,**我自己选定一个页面,点击开始采集,就采集**,
+   * 　采集完毕后再验证采集的内容才对。」
+   *
+   * ⚠️ 此前输出栏有五个要人点的动作(开始收/重载/滚动/展开/停止),
+   * 而且**顺序错了就采不到** —— 那是把编排推给了人。
+   * ⭐ 现在底座 `harvest` 一次做完,面板只剩「采这一页」+「停止」。
+   */
   const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
 
-  it('⭐⭐⭐ `running` 时必须有「下一步做什么」的提示', () => {
+  it('⭐⭐⭐ 输出栏**只有一个**发起动作', () => {
     /**
-     * ⚠️ 判据不是「有没有提示文案」—— 那种写法下
-     * `{!running && <提示/>}` 照样绿(文案在,但正好在该显示时消失)。
-     * ⭐ 所以钉:存在一个 `{running && ...}` 的块,且它里面提到控制那栏。
+     * ⚠️ 判据钉「旧的那些 op 不在输出栏出现」——
+     * `goto`/`reload`/`scrollUntil` 仍可在**控制**栏存在(它们是控制的活),
+     * 但输出栏不该再要人点它们。
      */
     const s = panel();
-    const i = s.indexOf('{running && (');
-    expect(i, '收集中没有任何提示 —— 人不知道下一步该干什么').toBeGreaterThan(-1);
-    const block = s.slice(i, s.indexOf(')}', i));
-    expect(block.length, '切出来的块是空的 —— 断言会恒真').toBeGreaterThan(60);
-    expect(block, '提示里没说去「控制」那栏翻页').toContain('控制');
-    expect(block, '提示里没说翻完要回来停').toContain('停止');
+    const i2 = s.indexOf("{tab === 'output' &&");
+    expect(i2, '输出 tab 不见了').toBeGreaterThan(-1);
+    const area = s.slice(i2, s.indexOf('S.resultArea', i2));
+    expect(area.length, '切片是空的 —— 断言会恒真').toBeGreaterThan(100);
+
+    expect(area, '输出栏发起的不是 harvest').toMatch(/op:\s*'harvest'/);
+    for (const old of ['acquireStart', 'acquireStop', "op: 'reload'", "op: 'goto'"]) {
+      expect(area, `输出栏还在要人点「${old}」—— 编排该在底座做`).not.toContain(old);
+    }
   });
 
-  it('⭐⭐ 收集中要显示**实时收到多少** —— 否则不知道何时该停', () => {
-    /**
-     * ⚠️ 只有一个「● 收集中」的话,人不知道翻页到底有没有收到东西。
-     * ⭐ 这正是「成功路径也要留痕」在界面上的对应物。
-     */
+  it('⭐⭐ 采集中可以**停**', () => {
+    /** ⚠️ 长操作必须能取消,否则人只能干等 */
     const s = panel();
-    expect(s, '没有实时进度 —— 人不知道翻页有没有效果').toMatch(/acquirePeek/);
-    const i = s.indexOf('{running && (');
-    const block = s.slice(i, s.indexOf(')}', i));
-    expect(block, '进度没显示在收集中的提示里').toMatch(/peek/);
+    const i2 = s.indexOf("{tab === 'output' &&");
+    const area = s.slice(i2, s.indexOf('S.resultArea', i2));
+    expect(area, '采集中停不下来').toMatch(/op:\s*'scrollStop'/);
+    // ⭐ 「停」不许被 busy/running 之外的条件挡住
+    expect(area, '「停」在采集中是灰的 —— 那它就没用').toMatch(/disabled=\{wcId == null \|\| !running\}/);
   });
 
-  it('⚠️ 停了就不再轮询进度', () => {
+  it('⭐⭐ 「采几页」可填 —— 不写死', () => {
     /**
-     * ⚠️ 人点了停而数字还在动,会让人以为没停下来,
-     * 然后去查一个不存在的 bug(本轮之前栽过同样的)。
+     * 用户 2026-10-03:「每次采集 10 页」。
+     * ⚠️ 写死的话下次要采 50 页就得改代码,
+     * 而 `project-x-followers-2500-ceiling` 的教训是:
+     * **写死的闸门会被当成平台的限制**。
      */
     const s = panel();
-    const i = s.indexOf('acquirePeek');
-    expect(i, 'peek 轮询不见了').toBeGreaterThan(-1);
-    // 往回找这个 effect 的守卫条件
-    const head = s.lastIndexOf('useEffect(', i);
-    expect(head, 'peek 不在 effect 里?').toBeGreaterThan(-1);
-    const guard = s.slice(head, i);
-    expect(guard, '没有 running 守卫 —— 停了还在轮').toMatch(/!running/);
+    expect(s, '页数写死了').toMatch(/wantPages:\s*Number\(pagesWanted\)/);
+    expect(s, '没有页数输入框').toMatch(/setPagesWanted/);
+  });
+
+  it('⭐⭐ 采集中要有「正在做什么」的提示', () => {
+    /**
+     * ⚠️ `feedback-maintainability-over-feature-completion`:
+     * 只给一个「采集中…」而不说在做什么,人不知道该等多久、也不知道卡在哪。
+     */
+    const s = panel();
+    const i2 = s.indexOf('{running && (');
+    expect(i2, '采集中没有任何提示').toBeGreaterThan(-1);
+    const block = s.slice(i2, s.indexOf(')}', i2));
+    expect(block.length, '切片是空的').toBeGreaterThan(40);
+    expect(block, '没说清在做哪几步').toMatch(/重载|滚动|展开/);
+  });
+
+  it('⭐ 没采过时给出三步说明 —— 人要知道先做什么', () => {
+    const s = panel();
+    const i2 = s.indexOf('{!running && !report && (');
+    expect(i2, '没有引导文案').toBeGreaterThan(-1);
+    const block = s.slice(i2, s.indexOf(')}', i2));
+    expect(block, '没说要先选页面').toMatch(/选好页面|控制/);
   });
 });
