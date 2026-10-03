@@ -531,6 +531,31 @@ export function XConsole(
             >
               重载
             </button>
+            {/*
+              ⭐⭐ 「读现场」—— 探针,2026-10-03 加。
+
+              ⚠️ 它**不采集任何数据**,只回报 URL / 滚动位置 / history 深度 /
+              　 首张卡 id。用来回答一个我**推断不出来**的问题:
+
+              　 用户 2026-10-02:「正常的人的浏览会怎么做呢?**点击进去观看,
+              　 观看完毕,点击返回上一下,继续往下浏览**。」
+
+              　 长文正文只在单篇页,所以非进去一趟不可。这条路成立的前提是
+              　 「后退能恢复现场」(滚动位置 + 已装的两条腿)。
+              ⭐ 用法:点一次记下数字 → 手动点进一条推 → 点返回 → 再点一次对比。
+              　 `project-x-collect-two-legs`:CDP 通道的行为**只有真机验得出来**。
+            */}
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => call('读现场（探针）', {
+                op: 'run', pageRef: { wcId: wcId! }, scriptId: X_SCRIPTS.navProbe,
+              })}
+              style={S.btn}
+              title="只读不改：URL / 滚动位置 / history 深度 / 首张卡 id。进单篇页前后各点一次，对比现场有没有回来"
+            >
+              读现场
+            </button>
           </div>
             </div>
             <div style={S.resultArea}>

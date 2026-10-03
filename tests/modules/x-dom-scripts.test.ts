@@ -76,20 +76,112 @@ function run(src: string, doc: unknown): { expanded: number; tweets: Array<{ id:
   return fn(doc) as { expanded: number; tweets: Array<{ id: string; text: string }> };
 }
 
-describe('⭐⭐⭐ 脚本必须是合法 JS 且真能跑', () => {
-  it('⭐⭐⭐ eval 不抛 —— `inject-template-escape` 唯一能挡住的测试', () => {
+/**
+ * ⭐⭐⭐ 这几条**遍历注册表**,不点名某个脚本 —— 2026-10-03 改
+ *
+ * ⚠️⚠️ 原先三条全写死 `expandAll`。加第二个脚本(navProbe)时
+ * 它天然在守卫视野之外:**新脚本可以带着反引号/可拼串进来而全绿**。
+ * ⭐ `feedback-guard-hardcoded-list-never-grows`(同族第五刀):
+ * 修法是**换信息来源**(从 X_DOM_SCRIPTS 真表推清单),不是补清单。
+ */
+describe('⭐⭐⭐ 脚本必须是合法 JS 且真能跑(**每一个**都查)', () => {
+  /** ⚠️ 先钉住「表里真有东西」—— 空数组会让下面每条 for 都空转恒绿 */
+  it('⚠️ 注册表非空,且条数与 X_SCRIPTS 的 id 数一致', () => {
+    expect(X_DOM_SCRIPTS.length, '注册表空了 —— 下面的遍历全部空转').toBeGreaterThan(0);
+    expect(
+      X_DOM_SCRIPTS.length,
+      '有 id 没注册(或注册了没 id)—— 两张清单对照不上',
+    ).toBe(Object.keys(X_SCRIPTS).length);
+  });
+
+  it('⭐⭐⭐ 每个脚本 eval 都不抛 —— `inject-template-escape` 唯一能挡住的测试', () => {
     const { doc } = makeDoc([{ id: '1', text: 'hi' }]);
-    expect(() => run(script(), doc), '脚本求值抛异常 —— 浏览器里同样整段失效').not.toThrow();
+    for (const sc of X_DOM_SCRIPTS) {
+      const src = sc.build({} as never) as string;
+      /**
+       * ⭐ 真 eval,不只 parse:短路/早返回在源码扫描下看不出来
+       * (`feedback-source-scan-cant-see-execution`)。
+       * ⚠️ 探针用到 window/location/history,得把它们也喂进去。
+       */
+      expect(() => {
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('document', 'window', 'location', 'history', `return ${src}`);
+        fn(doc, { scrollY: 0 }, { href: 'https://x.com/home' }, { length: 1 });
+      }, `脚本 ${sc.id} 求值抛异常 —— 浏览器里同样整段失效`).not.toThrow();
+    }
   });
 
-  it('⚠️ 脚本里没有模板字面量(反引号会与页面代码打架)', () => {
-    expect(script(), '脚本体里有反引号').not.toContain('`');
+  it('⚠️ 每个脚本里都没有模板字面量(反引号会与页面代码打架)', () => {
+    for (const sc of X_DOM_SCRIPTS) {
+      expect(sc.build({} as never) as string, `脚本 ${sc.id} 体里有反引号`).not.toContain('`');
+    }
   });
 
-  it('⚠️ 脚本**无参数** —— 连拼串的机会都没有', () => {
-    const s = X_DOM_SCRIPTS.find((x) => x.id === X_SCRIPTS.expandAll)!;
-    // ⭐ 给任何参数都返回同一份脚本 → 运行时值不可能被拼进去
-    expect(s.build({ evil: '"; window.x=1; "' } as never)).toBe(s.build({}));
+  it('⚠️ 每个脚本都**无参数** —— 连拼串的机会都没有', () => {
+    for (const sc of X_DOM_SCRIPTS) {
+      // ⭐ 给任何参数都返回同一份脚本 → 运行时值不可能被拼进去
+      expect(
+        sc.build({ evil: '"; window.x=1; "' } as never),
+        `脚本 ${sc.id} 的产出随参数变了 —— 有拼串的口子`,
+      ).toBe(sc.build({}));
+    }
+  });
+});
+
+/**
+ * ⭐⭐ 探针专项 —— 它要回答的是「后退后现场还在不在」,
+ * 所以**读出来的字段必须真的能区分现场**。
+ */
+describe('⭐⭐ 导航探针读的是现场', () => {
+  const probe = (doc: unknown, win: unknown, loc: unknown, hist: unknown): Record<string, unknown> => {
+    const src = X_DOM_SCRIPTS.find((x) => x.id === X_SCRIPTS.navProbe)!.build({} as never) as string;
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('document', 'window', 'location', 'history', `return ${src}`);
+    return fn(doc, win, loc, hist) as Record<string, unknown>;
+  };
+
+  it('⭐⭐ 四项现场都读到:URL / 滚动位置 / history 深度 / 卡片数', () => {
+    const r = probe(
+      { querySelectorAll: () => [] },
+      { scrollY: 1234 },
+      { href: 'https://x.com/KA594594' },
+      { length: 5 },
+    );
+    expect(r.url).toBe('https://x.com/KA594594');
+    expect(r.scrollY, '滚动位置读不到 —— 「后退后位置回没回来」就答不了').toBe(1234);
+    expect(r.historyLength, 'history 深度读不到 —— 判不了后退有没有发生').toBe(5);
+    expect(r.tweetCards).toBe(0);
+  });
+
+  /**
+   * ⭐⭐ 为什么还要首张卡 id:光看 scrollY **不够**。
+   * 页面可能整个重新加载成了另一批推文而 scrollY 碰巧相同 ——
+   * 那种情况「位置看着对了」其实现场已经没了。
+   */
+  it('⭐⭐ 首张卡 id 从 /status/ 链接取 —— scrollY 相同也能辨出换了内容', () => {
+    const card = {
+      querySelector: () => ({ getAttribute: () => '/Sanshi2799/status/2106231911194755232' }),
+    };
+    const r = probe(
+      { querySelectorAll: () => [card] },
+      { scrollY: 0 },
+      { href: 'https://x.com/home' },
+      { length: 1 },
+    );
+    expect(r.firstCardId, '正则没提出 id —— 转义被吃掉的典型症状').toBe('2106231911194755232');
+    expect(r.tweetCards).toBe(1);
+  });
+
+  it('⚠️ 卡片上没 /status/ 链接 → firstCardId 空串,不抛', () => {
+    const card = { querySelector: () => null };
+    const r = probe(
+      { querySelectorAll: () => [card] },
+      { scrollY: 0 },
+      { href: 'https://x.com/home' },
+      { length: 1 },
+    );
+    expect(r.firstCardId).toBe('');
+    expect(r.tweetCards, '卡片数该照常报 —— 「有卡但取不到 id」与「没卡」是两件事').toBe(1);
   });
 });
 
