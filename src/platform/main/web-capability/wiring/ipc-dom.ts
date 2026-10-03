@@ -1013,11 +1013,30 @@ export function registerWebDomIpc(): void {
                  * 而滚动报告里塞不下 —— 由 `acquirePeek`/`acquireStop` 一并回。
                  */
                 afterRound: p.afterRoundScriptId
-                  ? async () => {
+                  ? async (round) => {
                     const rr = await domRunner.run(
                       wc, pageId, p.afterRoundScriptId as ScriptId,
                     );
-                    if (rr.status === 'ok') collectAfterRound(pageId, rr.value);
+                    if (rr.status === 'ok') {
+                      collectAfterRound(pageId, rr.value);
+                    } else {
+                      /**
+                       * ⚠️⚠️ 失败**必须留痕** —— 2026-10-03 实测踩到:
+                       * 滚了 10 轮、流程全跑了,但我**读不到展开跑没跑**,
+                       * 只能靠猜。而「脚本没注册」与「脚本跑了但没东西可展开」
+                       * 症状完全一样(都是最长 169 字)。
+                       */
+                      traceRecorder.lifecycle({
+                        layer: 'web.page',
+                        event: 'after-round-failed',
+                        pageId: String(pageId),
+                        detail: {
+                          round,
+                          scriptId: String(p.afterRoundScriptId),
+                          reason: (rr as { reason?: string }).reason,
+                        },
+                      });
+                    }
                   }
                   : undefined,
               },
@@ -1044,6 +1063,23 @@ export function registerWebDomIpc(): void {
               detail: {
                 rounds: v?.rounds,
                 scrolledPx: v?.scrolledPx,
+                /**
+                 * ⭐⭐ 每轮脚本的产出摘要 —— 2026-10-03 加。
+                 * ⚠️ 没有它就分不清「脚本没跑」与「跑了但没东西可展开」,
+                 * 而两者的症状完全一样(正文还是截断版)。
+                 */
+                afterRound: p.afterRoundScriptId
+                  ? (() => {
+                    const got = afterRoundResults.get(pageId) ?? [];
+                    const clicked = got.reduce<number>(
+                      (n, x) => n + (((x as { expanded?: number }).expanded) ?? 0), 0,
+                    );
+                    const read = got.reduce<number>(
+                      (n, x) => n + (((x as { tweets?: unknown[] }).tweets?.length) ?? 0), 0,
+                    );
+                    return { 轮数: got.length, 点开了: clicked, 回读: read };
+                  })()
+                  : '(未启用)',
                 reachedBottom: v?.reachedBottom,
                 stopReason: v?.stopReason,
                 problems: v?.problems,
