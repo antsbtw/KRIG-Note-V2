@@ -142,9 +142,27 @@ describe('⭐ IPC 面的失败语义:不许静默', () => {
   it('⭐ 未知 op 要如实报,不许落到某个默认操作', () => {
     const i = ipcDom.indexOf('switch (p.op)');
     expect(i, '没有 op 分派').toBeGreaterThan(-1);
-    const body = ipcDom.slice(i, ipcDom.indexOf('} catch', i));
-    expect(body.length, 'slice 空了 —— 断言会恒真').toBeGreaterThan(50);
-    expect(body, 'default 分支没有如实失败').toMatch(/default:[\s\S]*?failed\(/);
+    /**
+     * ⚠️⚠️ 切到 **`default:` 为止**,不切到 `} catch` ——
+     * 2026-10-02 实测:我给 `writeAudit` 分支加了 `try/catch`(写文件要兜异常),
+     * 切片在那个 catch 就被截断了,`default` **根本没进切片** → 守卫**假红**,
+     * 而 default 分支一直是对的。
+     * ⭐ 守卫切片的边界必须选**不会被正常代码插入**的锚点。
+     */
+    const d = ipcDom.indexOf('default:', i);
+    expect(d, 'switch 里没有 default 分支 —— 未知 op 会被静默吞掉').toBeGreaterThan(i);
+    /**
+     * ⚠️⚠️ 切到 **`default:` 之后的第一个 `return`** ——
+     * 注入验证抓到:切 600 字符的固定窗口时,后面 `catch` 块里的
+     * `failed(` 把断言兜住了 → 把 default 改成静默返回 ok **照样全绿**。
+     * ⭐ `feedback-guard-scope-to-the-branch`:同一 token 在切片里出现多次。
+     */
+    const ret = ipcDom.indexOf('return', d);
+    expect(ret, 'default 分支没有 return').toBeGreaterThan(d);
+    const stmt = ipcDom.slice(ret, ipcDom.indexOf(';', ret) + 1);
+    expect(stmt.length, 'slice 空了 —— 断言会恒真').toBeGreaterThan(10);
+    expect(stmt, 'default 分支没有如实失败 —— 未知 op 会被静默吞掉')
+      .toMatch(/failed\(/);
   });
 
   it('⭐⭐ pageRef 解析不出来要失败,绝不兜底到别的页面', () => {
