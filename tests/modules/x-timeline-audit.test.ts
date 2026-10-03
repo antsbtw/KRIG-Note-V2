@@ -554,3 +554,68 @@ describe('⭐⭐⭐ 截断判据:宁可漏报不要误报', () => {
     expect(a.items[0].incomplete, '空正文被报成截断 —— 两种问题混了').toBeUndefined();
   });
 });
+
+/**
+ * ⭐⭐⭐ 长文正文的**去处** —— 2026-10-03 真机发现
+ *
+ * @KA594594 一跑 40 条,**38 条是长文**,正文全不在列表页。
+ * 本来以为要「模拟人点进卡片」,结果地址**就在载荷里**:
+ * 末尾那个 t.co 的 `expanded_url` 就是 `https://x.com/i/article/<id>`。
+ * 实测 38/38 全配上,反向(有地址却没标缺正文)0 条。
+ *
+ * ⚠️ article id **不等于**推文 id(实测 5/5 都不同)→ 推不出来,
+ * 只能从载荷取。这正是它非存不可的原因。
+ */
+describe('⭐⭐⭐ 长文正文的去处(articleUrl)', () => {
+  /** ⭐ 照真机那条的形状造:长文 + 23 字 t.co + entities 里挂着 article 地址 */
+  const articleTweet = (): ReturnType<typeof tweet> => tweet(
+    { article: { article_results: { result: { title: '从深圳老板到造反者' } } } },
+    {
+      full_text: 'https://t.co/so8J01gutF',
+      entities: {
+        urls: [{
+          url: 'https://t.co/so8J01gutF',
+          expanded_url: 'https://x.com/i/article/2105111183481266176',
+        }],
+      },
+    },
+  );
+
+  it('⭐⭐⭐ 长文缺正文时**带出地址** —— 补正文不用猜 URL', () => {
+    const a = auditTimelinePayload(payload([articleTweet()]));
+    expect(a.items[0].incomplete, '样本没造出「长文缺正文」—— 测不到该现象')
+      .toBe('article-no-body');
+    expect(
+      a.items[0].articleUrl,
+      '长文地址没带出来 —— 补正文就只能回去点卡片',
+    ).toBe('https://x.com/i/article/2105111183481266176');
+  });
+
+  it('⭐⭐ article id **不等于**推文 id —— 所以非从载荷取不可', () => {
+    const a = auditTimelinePayload(payload([articleTweet()]));
+    const aid = /\/i\/article\/(\d+)/.exec(a.items[0].articleUrl ?? '')?.[1];
+    expect(aid, '没取到 article id').toBeTruthy();
+    expect(
+      aid,
+      'article id 与推文 id 相同 —— 若真相同就能推导,这条测试的前提不成立',
+    ).not.toBe(a.items[0].id);
+  });
+
+  it('⚠️ 普通外链**不当**长文地址 —— 只认 /i/article/', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '看这个 https://t.co/abc',
+        entities: { urls: [{ url: 'https://t.co/abc', expanded_url: 'https://youtube.com/watch?v=1' }] },
+      }),
+    ]));
+    expect(a.items[0].articleUrl, '普通外链被当成了长文地址').toBeUndefined();
+  });
+
+  it('⚠️ 长文但载荷**没给地址** → articleUrl 空,不编一个出来', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({ article: { article_results: { result: {} } } }, { full_text: '标题' }),
+    ]));
+    expect(a.items[0].incomplete).toBe('article-no-body');
+    expect(a.items[0].articleUrl, '没地址却给了值 —— 那是编的').toBeUndefined();
+  });
+});

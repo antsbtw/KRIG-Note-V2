@@ -667,6 +667,9 @@ export function XConsole(
                             totalResponses: rep.items.length,
                             rounds: rep.rounds,
                             scrolledPx: rep.scrolledPx,
+                            /** ⭐ 「到上限停」与「滚到底停」要分得开 */
+                            reachedBottom: rep.reachedBottom,
+                            stopReason: rep.stopReason,
                           });
                           const w = await window.electronAPI!.webDomInvoke({
                             op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-harvest',

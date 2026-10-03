@@ -32,6 +32,11 @@ function renderTweet(t: TweetAudit, idx: number): string {
   }
   if (t.incomplete === 'article-no-body') {
     L.push('            ⚠️⚠️ 长文没正文 —— 列表页只给标题+摘要，正文在单篇页');
+    /**
+     * ⭐⭐ 连**去哪取**一起印 —— 2026-10-03 真机发现地址就在载荷里。
+     * ⚠️ 取不到时明说,别留空:「没地址」与「没印」要分得开。
+     */
+    L.push(`            正文去处  ${t.articleUrl ?? '✗ 载荷没给地址 —— 这条补不了'}`);
   }
   /**
    * ⭐⭐ **判据凭什么** —— 不管报没报截断都印。
@@ -45,8 +50,13 @@ function renderTweet(t: TweetAudit, idx: number): string {
     L.push(`            截断判据  ${ev.verdict}`);
     /** ⚠️ 只在判据真用到时才印细项,免得每条推多三行噪音 */
     if (ev.displayTextRange !== undefined) {
+      /**
+       * ⚠️ 写 `full_text=` 而不是「正文=」—— 长推时这个数比上面那行的
+       * 「正文 N 字」**小**(判据量的是 full_text,正文取的是 note 全文)。
+       * 真机 2026-10-03 第 2 条:正文 767 字、这里 135,看着像自相矛盾。
+       */
       L.push(`                      display_text_range=[${ev.displayTextRange[0]},${ev.displayTextRange[1]}]`
-        + `　正文=${ev.textUnits} 单元`);
+        + `　full_text=${ev.textUnits} 单元`);
     }
     if (ev.trailingUrlIsEntity !== undefined) {
       L.push(`                      末尾t.co在entities.urls里=${ev.trailingUrlIsEntity ? '是' : '否'}`
@@ -92,7 +102,15 @@ function renderTweet(t: TweetAudit, idx: number): string {
  */
 export function exportAuditText(
   audits: readonly TimelineAudit[],
-  meta: { pages: number; totalResponses: number; rounds?: number; scrolledPx?: number },
+  meta: {
+    pages: number; totalResponses: number; rounds?: number; scrolledPx?: number;
+    /**
+     * ⭐⭐ **为什么停的** —— 2026-10-03 加。
+     * 「滚动 60 轮」读起来一样,但**到上限停**和**滚到底停**
+     * 是两件事:前者意味着页面还有,只是没让它接着滚。
+     */
+    reachedBottom?: boolean; stopReason?: string;
+  },
 ): string {
   const out: string[] = [];
   out.push('═══════════════════════════════════════════════');
@@ -102,6 +120,17 @@ export function exportAuditText(
   out.push(`采集过程：收到 ${meta.totalResponses} 条响应，`
     + `其中 ${meta.pages} 条是时间线载荷`
     + (meta.rounds !== undefined ? `；滚动 ${meta.rounds} 轮 ${Math.round(meta.scrolledPx ?? 0)}px` : ''));
+  if (meta.stopReason !== undefined) {
+    out.push(`停止原因：${meta.stopReason}`
+      + (meta.reachedBottom === false
+        /**
+         * ⚠️ 没到底就停 = **页面还有,只是没接着滚**。
+         * 真机 2026-10-03:滚 60 轮(到上限)只拿到 2 页载荷,
+         * 而 6138 条的账号显然不止 40 条 —— 这句话就是让它别再被忽略。
+         */
+        ? '　⚠️ **没滚到底** —— 还有内容没采到，加轮数再跑'
+        : '　✓ 已到底'));
+  }
 
   const all: TweetAudit[] = [];
   const seen = new Set<string>();
@@ -123,6 +152,25 @@ export function exportAuditText(
   if (audits.some((a) => a.problems.length > 0)) {
     out.push('⚠️ 解析时的问题：');
     for (const p of new Set(audits.flatMap((a) => a.problems))) out.push(`   · ${p}`);
+    out.push('');
+  }
+
+  /**
+   * ⭐⭐ 长文缺口**一眼可见,且带去处** —— 2026-10-03。
+   *
+   * 真机 @KA594594:40 条里 **38 条是长文**,正文全在单篇页。
+   * ⚠️ 旧版只在每条底下各标一句「长文没正文」,40 条里散着看不出规模。
+   * ⭐ 这里报「几篇缺、其中几篇有地址」——「补不了的」要单独数出来,
+   * 　 否则「有地址的补完了」会被当成「全补完了」。
+   */
+  const noBody = all.filter((t) => t.incomplete === 'article-no-body');
+  if (noBody.length > 0) {
+    const withUrl = noBody.filter((t) => t.articleUrl !== undefined);
+    out.push(`⭐ 长文正文缺 ${noBody.length} 篇 —— 其中 ${withUrl.length} 篇载荷给了地址（可逐篇去取）`
+      + (withUrl.length < noBody.length
+        ? `，${noBody.length - withUrl.length} 篇**没地址,补不了**`
+        : ''));
+    for (const t of withUrl) out.push(`   · ${t.articleUrl}`);
     out.push('');
   }
 

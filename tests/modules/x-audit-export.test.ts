@@ -202,3 +202,91 @@ describe('⭐⭐⭐ 判据要留痕:报告自己说清凭什么', () => {
     expect(text, '没印出 X 自己给的区间').toContain('display_text_range=[0,4]');
   });
 });
+
+/**
+ * ⭐⭐ 长文缺口要**可行动** —— 2026-10-03
+ *
+ * 真机 40 条里 38 条长文没正文。旧报告只在每条底下各标一句,
+ * 散在 40 条中间看不出规模,也看不出「接下来去哪取」。
+ */
+describe('⭐⭐ 长文缺口:报规模,也报去处', () => {
+  const articleTweet = (id: string, aid: string): ReturnType<typeof tweet> => tweet(
+    { rest_id: id, article: { article_results: { result: { title: 't' } } } },
+    {
+      id_str: id,
+      full_text: 'https://t.co/x' + id,
+      entities: {
+        urls: [{ url: 'https://t.co/x' + id, expanded_url: `https://x.com/i/article/${aid}` }],
+      },
+    },
+  );
+
+  it('⭐⭐ 汇总报「缺几篇、其中几篇有地址」', () => {
+    const text = exportAuditText(
+      [auditTimelinePayload(payload([articleTweet('1', '91'), articleTweet('2', '92')]))],
+      meta,
+    );
+    expect(text, '没报长文缺口的规模 —— 38 条散着看不出来').toContain('长文正文缺 2 篇');
+    expect(text, '没报有几篇能补').toContain('2 篇载荷给了地址');
+  });
+
+  it('⭐⭐ 地址逐条列出来 —— 下一步直接照着取', () => {
+    const text = exportAuditText([auditTimelinePayload(payload([articleTweet('1', '91')]))], meta);
+    expect(text, '没列出长文地址').toContain('https://x.com/i/article/91');
+  });
+
+  it('⭐⭐ 每条底下也写「正文去处」', () => {
+    const text = exportAuditText([auditTimelinePayload(payload([articleTweet('1', '91')]))], meta);
+    expect(text, '条目里没写去哪取').toContain('正文去处');
+  });
+
+  /**
+   * ⚠️⚠️ **补不了的要单独数出来** —— 否则「有地址的补完了」
+   * 会被当成「全补完了」(`project-x-article-body-lost`:
+   * 不量的字段永远 100%)。
+   */
+  it('⚠️⚠️ 有长文没地址时**明说补不了**,不混进「有地址」里', () => {
+    const noUrl = tweet(
+      { rest_id: '3', article: { article_results: { result: {} } } },
+      { id_str: '3', full_text: '标题' },
+    );
+    const text = exportAuditText(
+      [auditTimelinePayload(payload([articleTweet('1', '91'), noUrl]))],
+      meta,
+    );
+    expect(text).toContain('长文正文缺 2 篇');
+    expect(text, '没地址的那篇被算进「可取」里 —— 补完了会假报 100%').toContain('1 篇载荷给了地址');
+    expect(text, '没明说有几篇补不了').toContain('1 篇**没地址,补不了**');
+  });
+});
+
+/**
+ * ⭐⭐ 「为什么停的」 —— 2026-10-03
+ *
+ * 真机:滚 **60 轮(到上限)** 只拿到 2 页载荷,而那是个 6138 条的账号。
+ * 报告当时只写「滚动 60 轮 41847px」——「到上限停」和「滚到底停」
+ * 读起来**一模一样**,差别要我自己去算才看得出来。
+ */
+describe('⭐⭐ 停止原因:到上限 vs 到底', () => {
+  it('⭐⭐ 没滚到底 → **明说还有内容没采到**', () => {
+    const text = exportAuditText([auditTimelinePayload(payload([tweet()]))], {
+      ...meta, rounds: 60, scrolledPx: 41847,
+      reachedBottom: false, stopReason: '到轮次上限 60',
+    });
+    expect(text, '没写停止原因').toContain('到轮次上限 60');
+    expect(text, '没滚到底却不提醒 —— 40 条会被当成「这账号就这些」').toContain('没滚到底');
+  });
+
+  it('⭐ 滚到底 → 写「已到底」,不发没必要的警告', () => {
+    const text = exportAuditText([auditTimelinePayload(payload([tweet()]))], {
+      ...meta, rounds: 12, reachedBottom: true, stopReason: '已到底',
+    });
+    expect(text).toContain('已到底');
+    expect(text, '到底了还喊「没滚到底」—— 狼来了').not.toContain('没滚到底');
+  });
+
+  it('⚠️ 没给停止原因时不编一个 —— 整行不出现', () => {
+    const text = exportAuditText([auditTimelinePayload(payload([tweet()]))], meta);
+    expect(text, '没给却印了停止原因').not.toContain('停止原因');
+  });
+});

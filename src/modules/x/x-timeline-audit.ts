@@ -30,7 +30,15 @@ export type TruncationEvidence = {
    * ⚠️ 单位是 **UTF-16 code unit**,不是字符:emoji 占 2。
    */
   readonly displayTextRange?: readonly [number, number];
-  /** ⭐ 正文长度(同样按 code unit 量,才能和 range 比) */
+  /**
+   * ⭐ **`legacy.full_text` 的长度**(按 code unit,才能和 range 比)。
+   *
+   * ⚠️⚠️ 这个数**可能小于报告上面那行的「正文 N 字」** —— 不是 bug:
+   * 长推(note_tweet)的「正文」取的是 full_text 与 note 全文里**长的那个**,
+   * 而截断判据必须量 `full_text` —— `display_text_range` 和 `entities`
+   * 描述的都是它。拿 note 全文去比 range 等于**跨着两个字符串比**。
+   * ⭐ 真机 2026-10-03 第 2 条:正文 767 字(note)而这里 135(full_text)。
+   */
   readonly textUnits: number;
   /**
    * ⭐⭐ 末尾那个 t.co **在不在 `entities.urls` 里**。
@@ -105,6 +113,19 @@ export type TweetAudit = {
    * 成功路径也要留痕 —— 下次核对不该靠人截图,靠报告自己说清。
    */
   readonly truncationEvidence?: TruncationEvidence;
+  /**
+   * ⭐⭐⭐ 长文正文的**去处** —— `https://x.com/i/article/<id>`
+   *
+   * ── 2026-10-03 真机发现(@KA594594,40 条里 38 条是长文)──
+   * 列表页不给正文,但**给了地址**:它就是末尾那个 t.co 在
+   * `entities.urls` 里的 `expanded_url`。38/38 全配上,反向 0 误报。
+   *
+   * ⭐⭐ 这把「补长文正文」从「模拟人点卡片」降成了「按地址逐个取」——
+   * 不用找卡片、不用猜 URL、不依赖 DOM 结构。
+   * ⚠️ article id **不等于**推文 id(实测 5/5 都不同),所以推不出来,
+   * 　 只能从载荷里拿 —— 这正是它非存不可的原因。
+   */
+  readonly articleUrl?: string;
   readonly hasAuthor: boolean;
   readonly handle: string;
   /** ⭐ 作者数字 id —— username 会改名,rest_id 不会(旧实现实测 131/131 都有) */
@@ -387,6 +408,16 @@ export function auditTimelinePayload(text: string): TimelineAudit {
       ? ((article.article_results as Record<string, unknown>).result as Record<string, unknown> | undefined)
       : undefined;
     const articleBody = ares && isObj(ares.content_state) ? JSON.stringify(ares.content_state) : '';
+    /**
+     * ⭐⭐⭐ 长文的**地址**在 `entities.urls` 里(2026-10-03 真机)。
+     * ⚠️ 只认 `/i/article/` 开头的 —— 别的 expanded_url 是普通外链。
+     */
+    const entUrls = isObj(legacy.entities) && Array.isArray(legacy.entities.urls)
+      ? legacy.entities.urls as Record<string, unknown>[]
+      : [];
+    const articleUrl = entUrls
+      .map((u) => str(u.expanded_url))
+      .find((u) => /^https:\/\/(x|twitter)\.com\/i\/article\/\d+/.test(u));
     const text2 = [full, noteText].sort((a, b) => b.length - a.length)[0] ?? '';
 
     /**
@@ -483,6 +514,7 @@ export function auditTimelinePayload(text: string): TimelineAudit {
        * 「为什么没报截断」也是要能读出来的。
        */
       truncationEvidence: trunc.evidence,
+      articleUrl,
       hasAuthor: handle.length > 0,
       handle,
       authorRestId: str(urr?.rest_id),
