@@ -43,6 +43,7 @@ import { auditTimelinePayload, summarizeAudits, type TimelineAudit } from './x-t
 import { X_TIMELINE_ENDPOINTS, X_NOISY_URLS } from './x-pages';
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
+import { X_SCRIPTS } from './x-dom-scripts';
 
 type PageTable = {
   owner: string;
@@ -162,6 +163,8 @@ export function XConsole(
   const [peek, setPeek] = useState<{ total: number } | null>(null);
   /** ⭐ 核对报告落盘的位置 —— 人和 AI 看同一份 */
   const [auditFile, setAuditFile] = useState<string | null>(null);
+  /** ⭐ 上次「展开全部」的结果 —— 让人看见点开了几条 */
+  const [expanded, setExpanded] = useState<{ clicked: number; read: number } | null>(null);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -448,6 +451,11 @@ export function XConsole(
               title="滚动轮数上限"
             />
             <span style={{ fontSize: 10, opacity: 0.5 }}>轮</span>
+            {expanded && (
+              <span style={{ fontSize: 10, opacity: 0.7, marginLeft: 4 }}>
+                展开了 {expanded.clicked} 条（页面上共 {expanded.read} 条）
+              </span>
+            )}
             {/*
               ⭐⭐ 「停翻页」—— 用户 2026-10-02:
               「停应该包含两个动作 —— 停止翻页/停止取数据吧?」
@@ -483,6 +491,35 @@ export function XConsole(
               title="重载页面 —— 先在「输出」那栏点「开始收」，再点这个，才能收到首屏那批请求"
             >
               重载
+            </button>
+            {/*
+              ⭐⭐ 「展开全部」—— 用户 2026-09-22 的原则,这次兑现:
+              「不管长文短文,如果**折叠起来就应该 show all**,然后获取完整的内容,
+              　就像人一样,但是现在却是分的零碎」。
+
+              ⚠️ 为什么非做不可:折叠时 `[data-testid="tweetText"]` 里**只有开头**,
+              　 剩下的正文**压根没渲染** —— 载荷里也是截断版。
+              ⭐ 它是**控制**的活(动页面),所以在这一栏,不在输出栏。
+            */}
+            <button
+              type="button"
+              disabled={wcId == null}
+              onClick={async () => {
+                const r = await window.electronAPI!.webDomInvoke({
+                  op: 'run', pageRef: { wcId: wcId! }, scriptId: X_SCRIPTS.expandAll,
+                });
+                setLog((l) => [{
+                  at: new Date().toLocaleTimeString(), label: '展开全部 Show more', result: r,
+                }, ...l].slice(0, 50));
+                if (r.status === 'ok') {
+                  const v = r.value as { expanded?: number; tweets?: unknown[] };
+                  setExpanded({ clicked: v.expanded ?? 0, read: v.tweets?.length ?? 0 });
+                }
+              }}
+              style={S.btn}
+              title="点开页面上所有折叠的推文（Show more），让正文完整渲染出来"
+            >
+              展开全部
             </button>
           </div>
             </div>

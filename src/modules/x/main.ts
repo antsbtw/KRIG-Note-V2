@@ -40,9 +40,11 @@
 import {
   registerAnchorTable,
   registerPageTable,
+  scriptRegistry,
 } from '@platform/main/web-capability/wiring/runtime';
 import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
+import { X_DOM_SCRIPTS } from './x-dom-scripts';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -60,6 +62,17 @@ export function registerXModule(): void {
   registered = true;
   registerPageTable(OWNER, xPageResolver);
   registerAnchorTable(OWNER, xAnchorResolver);
+  /**
+   * ⭐⭐ 注册 X 的 DOM 补全脚本(「Show more」展开)。
+   *
+   * ⚠️ 走 `scriptRegistry` 而不是让调用方拼脚本 ——
+   * `project-x-inject-template-escape`:拼串时 `\/` 被模板字面量吃掉 →
+   * 浏览器收到非法正则 → **采集恒 0,而 tsc 与单测全绿**。
+   *
+   * ⚠️ 底座在 `runtime.ts` 里写死注册了三组自己的脚本,
+   * 业务的脚本**由业务 push** —— 底座不认识 X,这条不能破。
+   */
+  for (const sc of X_DOM_SCRIPTS) scriptRegistry.register(sc);
 }
 
 
