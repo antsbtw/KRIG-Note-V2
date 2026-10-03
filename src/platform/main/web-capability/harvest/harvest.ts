@@ -34,9 +34,41 @@ export const DEFAULT_MAX_ROUNDS = 40;
 /** 时间安全网默认值 */
 export const DEFAULT_MAX_MS = 180_000;
 
+/**
+ * ⭐⭐ 数「有几页」。
+ *
+ * ── ⚠️ 为什么判据要支持正则(2026-10-03 实测踩到)──
+ *
+ * 只支持「URL 含某子串」时,业务只能写死一张操作名清单 ——
+ * 而 **X 改版加了 `UserOriginalsTimeline`**,清单里没有 →
+ * 滚了 60 轮 44621px 却**采到 0 页**,而数据就在眼前。
+ * ⭐ `feedback-search-community-before-sixth-guess`:
+ * **平台侧改动不可能从自家代码推断出来** —— 所以判据要能表达
+ * 「凡是 `*Timeline` 都算」这种**抗改版**的规则。
+ *
+ * ⚠️ 判据仍是**字符串**(以 `re:` 开头的当正则)——
+ * 底座照样不认识任何站点,也收不了函数(函数过不了 IPC)。
+ * ⚠️ 正则非法时**如实报**不静默跳过:静默会让「判据写错了」
+ * 表现成「这页没数据」,方向完全相反。
+ */
+function matchPage(url: string, want: readonly string[]): boolean {
+  for (const w of want) {
+    if (!w.startsWith('re:')) {
+      if (url.includes(w)) return true;
+      continue;
+    }
+    try {
+      if (new RegExp(w.slice(3)).test(url)) return true;
+    } catch (e) {
+      console.warn(`[web.harvest] 页面判据不是合法正则,已忽略: ${w}`, e);
+    }
+  }
+  return false;
+}
+
 function countPages(items: readonly AcquiredItem[], want: readonly string[]): number {
   if (want.length === 0) return 0;
-  return items.filter((x) => want.some((w) => x.url.includes(w))).length;
+  return items.filter((x) => matchPage(x.url, want)).length;
 }
 
 /**

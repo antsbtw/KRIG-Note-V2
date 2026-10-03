@@ -159,14 +159,29 @@ const byUrlAndTweets = (fragment: string): ReadyCriterion => ({
  */
 export const X_TIMELINE_ENDPOINTS: readonly string[] = [
   /**
-   * ⚠️⚠️ 2026-10-02 收窄:原来是 `'/i/api/graphql/'` —— **所有 GraphQL 都算**,
-   * 于是 `ViewerBadgeCounts`(0.2KB 角标计数)被当成「时间线载荷」,
-   * 核对报告说「1 页 · 0 条推文」,而真相是**那根本不是时间线**。
-   * ⭐ 现在按**操作名**认,一个萝卜一个坑。
+   * ⚠️⚠️ 2026-10-03 实测踩到:去 `x.com/KA594594`(个人主页)采集,
+   * 滚了 60 轮 44621px、每轮都展开,结果**采到 0 页** ——
+   * 而留痕里明明有 **`UserOriginalsTimeline` 2 条**。
+   *
+   * ⭐ 真因:我的清单是从**旧实现**抄的,而 **X 改版了** ——
+   * 个人主页现在用 `UserOriginalsTimeline`,不是 `UserTweets`。
+   * ⚠️ 这正是 `feedback-search-community-before-sixth-guess` 那条:
+   * **平台侧改动不可能从自家代码推断出来**。
+   *
+   * ⭐ 所以判据改成**两道**:
+   * ① 精确名(已实测见过的)—— 下面这些
+   * ② ⭐⭐ **凡是以 `Timeline` 结尾的操作**(见 `isTimelineOp`)——
+   *    X 的命名惯例一直如此(HomeTimeline / UserTweetsAndReplies /
+   *    SearchTimeline / UserOriginalsTimeline / ListLatestTweetsTimeline),
+   *    改版出新名字时**不用改代码**。
+   *
+   * ⚠️ 但 `PinnedTimelines` 要排除:它是「置顶的时间线列表」(导航用),
+   *    不是推文数据 —— 实测 38.7KB 里只有 15 个「用户」零推文。
    */
   '/HomeTimeline',
   '/UserTweets',
   '/UserTweetsAndReplies',
+  '/UserOriginalsTimeline',
   '/SearchTimeline',
   '/TweetDetail',
   '/ListLatestTweetsTimeline',
@@ -175,6 +190,54 @@ export const X_TIMELINE_ENDPOINTS: readonly string[] = [
   '/Following',
   '/BlueVerifiedFollowers',
 ];
+
+/**
+ * ⚠️⚠️ **排除项只有这一份** —— 2026-10-03 注入验证抓到:
+ * 我把排除同时写在了这里**和正则里**,清空数组时测试照样全绿。
+ * ⭐ 现在正则由它生成,改一处即可。
+ */
+const TIMELINE_OP_EXCLUDE = ['PinnedTimelines'];
+
+/**
+ * ⭐⭐ 传给底座的页面判据 —— **字符串形式**(底座收不了函数)。
+ *
+ * ⚠️ 以 `re:` 开头的是正则(底座认这个前缀)。
+ * ⭐ 第一条就是那道**抗改版**的后缀规则:
+ * X 的操作名惯例一直是 `XxxTimeline`,按后缀认就不用追着改版跑
+ * (2026-10-03 实测:`UserOriginalsTimeline` 不在旧清单里 → 采到 0 页)。
+ * ⚠️ 排除 `PinnedTimelines`(置顶时间线**列表**,实测 0 条推文)。
+ */
+export const X_PAGE_MATCHERS: readonly string[] = [
+  /** ⭐ 正则**由排除表生成** —— 写两份时删掉一份测试照样绿 */
+  `re:/i/api/graphql/[^/]+/(?!${TIMELINE_OP_EXCLUDE.join('|')})\\w*Timeline(\\?|$)`,
+  // ⭐ 不以 Timeline 结尾的那些,精确列
+  '/TweetDetail',
+  '/UserArticlesTweets',
+  '/Followers',
+  '/Following',
+  '/BlueVerifiedFollowers',
+];
+
+/**
+ * ⭐⭐ **凡是 `*Timeline` 都算时间线** —— 抗 X 改版的那道判据。
+ *
+ * ⚠️ 2026-10-03 的教训:写死清单在平台改版时**静默失效**
+ * (采到 0 页,而数据就在眼前)。
+ * ⭐ X 的操作名惯例一直是 `XxxTimeline`,按后缀认就不用追着改版跑。
+ *
+ * ⚠️ 排除项是**实测确认过不是推文数据**的:
+ * · `PinnedTimelines` —— 置顶时间线**列表**(导航用),实测 0 条推文
+ */
+
+export function isTimelineOp(url: string): boolean {
+  const op = url.split('?')[0].split('/').filter(Boolean).pop() ?? '';
+  if (TIMELINE_OP_EXCLUDE.includes(op)) return false;
+  // ① 后缀判据 —— 抗改版
+  if (/Timeline$/.test(op)) return true;
+  // ② 精确名 —— 不以 Timeline 结尾的那些(TweetDetail / Followers …)
+  return X_TIMELINE_ENDPOINTS.some((e) => url.includes(e));
+}
+
 
 /**
  * ⭐⭐ **采集时不要的 URL** —— X 的业务知识,底座不内置任何一条。

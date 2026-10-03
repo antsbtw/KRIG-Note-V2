@@ -6,7 +6,7 @@
  * 见 `feedback-source-scan-cant-see-execution`。
  */
 import { describe, it, expect } from 'vitest';
-import { extractTweetId, xPageResolver, PAGE_PARAMS , X_TIMELINE_ENDPOINTS, X_NOISY_URLS } from '@modules/x/x-pages';
+import { extractTweetId, xPageResolver, PAGE_PARAMS , X_TIMELINE_ENDPOINTS, X_NOISY_URLS , X_PAGE_MATCHERS, isTimelineOp } from '@modules/x/x-pages';
 
 describe('⭐⭐ extractTweetId:人粘什么都要能认', () => {
   /**
@@ -332,5 +332,96 @@ describe('⭐⭐ 采集判据', () => {
         ).toBe(false);
       }
     }
+  });
+});
+
+/**
+ * ⭐⭐⭐ 端点判据要**抗 X 改版** —— 2026-10-03 实测踩到
+ *
+ * 去 `x.com/KA594594`(个人主页)采集:滚了 60 轮 44621px、每轮都展开,
+ * 结果**采到 0 页** —— 而留痕里明明有 `UserOriginalsTimeline` 2 条。
+ *
+ * ⭐ 真因:清单是从**旧实现**抄的,而 **X 改版了** ——
+ * 个人主页现在用 `UserOriginalsTimeline`,不是 `UserTweets`。
+ * ⚠️ `feedback-search-community-before-sixth-guess`:
+ * **平台侧改动不可能从自家代码推断出来**。
+ */
+describe('⭐⭐⭐ 端点判据抗改版', () => {
+  it('⭐⭐⭐ 凡是 `*Timeline` 都认 —— 包括**没见过的**新名字', () => {
+    /**
+     * ⭐ 这一条是全文件最要紧的:写死清单在平台改版时**静默失效**
+     * (采到 0 页,而数据就在眼前)。
+     */
+    const neverSeen = [
+      'https://x.com/i/api/graphql/abc/UserOriginalsTimeline',   // ← 这次漏掉的那个
+      'https://x.com/i/api/graphql/abc/SomeBrandNewTimeline',    // ← 将来可能出现的
+      'https://x.com/i/api/graphql/abc/CommunityTweetsTimeline',
+    ];
+    for (const u of neverSeen) {
+      expect(isTimelineOp(u), `「${u.split('/').pop()}」没认出来 —— 改版就会静默采 0 页`)
+        .toBe(true);
+    }
+  });
+
+  it('⭐⭐ 但 `PinnedTimelines` **不算** —— 实测 0 条推文', () => {
+    /** ⚠️ 它是「置顶时间线**列表**」(导航用),38.7KB 里只有 15 个用户 */
+    expect(
+      isTimelineOp('https://x.com/i/api/graphql/abc/PinnedTimelines'),
+      'PinnedTimelines 被当成了推文数据 —— 会报「采到 N 页」而实际 0 条推文',
+    ).toBe(false);
+  });
+
+  it('⭐ 不以 Timeline 结尾的那些仍要认(精确名)', () => {
+    for (const u of [
+      'https://x.com/i/api/graphql/abc/TweetDetail',
+      'https://x.com/i/api/graphql/abc/Followers',
+      'https://x.com/i/api/graphql/abc/UserArticlesTweets',
+    ]) {
+      expect(isTimelineOp(u), `「${u.split('/').pop()}」漏了`).toBe(true);
+    }
+  });
+
+  it('⭐⭐ 杂项 GraphQL **一律不认**(反向锁)', () => {
+    /** ⚠️ 光有「别漏」会被一个「什么都认」的实现满足 —— 那更坏 */
+    for (const u of [
+      'https://x.com/i/api/graphql/abc/ViewerBadgeCounts',
+      'https://x.com/i/api/graphql/abc/UserByScreenName',
+      'https://x.com/i/api/graphql/abc/ProfileSpotlightsQuery',
+      'https://x.com/i/api/graphql/abc/CommunitiesFetchOneQuery',
+      'https://x.com/i/api/graphql/abc/UserSportsProfile',
+      'https://x.com/i/api/1.1/jot/client_event.json',
+    ]) {
+      expect(isTimelineOp(u), `「${u.split('/').pop()}」被误判成时间线`).toBe(false);
+    }
+  });
+
+  it('⭐⭐ 传给底座的判据(字符串形式)与 `isTimelineOp` **口径一致**', () => {
+    /**
+     * ⚠️ 两份判据必漂 —— 漂的表现是「底座说采到 3 页,而核对只认出 1 页」。
+     * ⭐ 这里拿同一批样本跑两边,结果必须相同。
+     */
+    const match = (url: string): boolean => X_PAGE_MATCHERS.some((w) => (w.startsWith('re:')
+      ? new RegExp(w.slice(3)).test(url)
+      : url.includes(w)));
+
+    const samples = [
+      'https://x.com/i/api/graphql/abc/HomeTimeline',
+      'https://x.com/i/api/graphql/abc/UserOriginalsTimeline',
+      'https://x.com/i/api/graphql/abc/PinnedTimelines',
+      'https://x.com/i/api/graphql/abc/ViewerBadgeCounts',
+      'https://x.com/i/api/graphql/abc/TweetDetail',
+      'https://x.com/i/api/graphql/abc/Followers',
+      'https://video.twimg.com/a.m4s',
+    ];
+    for (const u of samples) {
+      expect(match(u), `两套判据对「${u.split('/').pop()}」说法不一致`).toBe(isTimelineOp(u));
+    }
+  });
+
+  it('⚠️ 正则写错时不该崩 —— 底座会忽略并告警', () => {
+    /** ⭐ 判据本身出错不该让整轮采集作废 */
+    expect(() => X_PAGE_MATCHERS.forEach((w) => {
+      if (w.startsWith('re:')) new RegExp(w.slice(3));
+    }), '导出的判据里有非法正则').not.toThrow();
   });
 });

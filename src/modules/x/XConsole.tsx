@@ -42,7 +42,7 @@ import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
 } from './x-timeline-audit';
-import { X_TIMELINE_ENDPOINTS, X_NOISY_URLS } from './x-pages';
+import { X_TIMELINE_ENDPOINTS, X_NOISY_URLS, X_PAGE_MATCHERS, isTimelineOp } from './x-pages';
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
@@ -596,7 +596,12 @@ export function XConsole(
                         plan: {
                           // ⭐ 用户 2026-10-03:「每次采集 10 页」
                           wantPages: Number(pagesWanted) || 10,
-                          pageUrlIncludes: X_TIMELINE_ENDPOINTS,
+                          /**
+                           * ⭐ 用**抗改版**的判据(含 `*Timeline` 后缀正则)——
+                           * 2026-10-03 实测:X 改版加了 `UserOriginalsTimeline`,
+                           * 旧的写死清单里没有 → 滚 60 轮采到 0 页,而数据就在眼前。
+                           */
+                          pageUrlIncludes: X_PAGE_MATCHERS,
                           noisyUrlSubstrings: X_NOISY_URLS,
                           // ⭐ 每轮自动展开折叠的推文 —— 不是人要点的一步
                           afterRoundScriptId: X_SCRIPTS.expandAll,
@@ -625,7 +630,8 @@ export function XConsole(
                         const domList = [...merged.entries()].map(([id, text]) => ({ id, text }));
 
                         const audits: TimelineAudit[] = rep.items
-                          .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
+                          // ⚠️ 与上面**同一套判据**(isTimelineOp)—— 两份必漂
+                          .filter((it) => isTimelineOp(it.url))
                           .map((it) => auditTimelinePayload(it.text))
                           .map((a) => mergeExpandedText(a, domList));
                         setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
