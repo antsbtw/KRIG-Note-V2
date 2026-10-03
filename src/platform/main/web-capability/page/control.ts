@@ -376,6 +376,22 @@ export class ControlEngine {
       // 每轮后等渲染(给懒加载补货时间)
       await this.sleep(settleMs);
 
+      /**
+       * ⭐⭐ 每轮滚完,给业务一个做自己事情的时机(如 X 点开「Show more」)。
+       *
+       * ⚠️ **抛异常不中断滚动** —— 业务的事做砸了不该让整轮采集作废
+       * (而且症状会变成「滚了两轮就停」,离真因很远)。
+       * ⭐ 放在 `settleMs` **之后**:那时懒加载的内容才渲染出来,
+       * 折叠按钮也才存在。
+       */
+      if (options.afterRound) {
+        try {
+          await options.afterRound(i);
+        } catch (err) {
+          console.warn(`[web.page] afterRound(第 ${i} 轮)抛异常,滚动继续:`, err);
+        }
+      }
+
       // ⭐ 血泪③:只有位置**连续多轮不变**才算真到底
       if (pos.y === lastY) stuck += 1;
       else stuck = 0;

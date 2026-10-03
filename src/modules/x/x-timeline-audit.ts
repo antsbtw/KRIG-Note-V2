@@ -414,6 +414,51 @@ export function auditTimelinePayload(text: string): TimelineAudit {
 }
 
 /**
+ * ⭐⭐⭐ 把 DOM 展开后的全文**合并**进核对结果。
+ *
+ * ── 用户 2026-10-02:「你的这个流程是什么意思,我搞不懂」──
+ * 他问的是流程,而我借此发现:**「展开全部」的结果压根没接进采集** ——
+ * 展开后的全文只在 DOM 里,核对用的还是载荷里的截断版,那一步**白点**。
+ *
+ * ── ⚠️ 合并的唯一规则:**只许变长** ──
+ *
+ * 旧实现原话:「`text` 只许变长 —— 与写库那层同一条底线
+ * (2026-09-22 的数据损坏就是它防住的)」。
+ * ⚠️ `project-x-upsert-overwrites-richer-text` 实测:
+ * 重采把 **16081 字正文覆盖成 267 字** —— 深→浅降级是真发生过的数据损坏。
+ *
+ * ⭐ 所以:DOM 的全文只有**比载荷里的长**才顶上去;
+ * 反过来载荷的长文正文也不会被 DOM 摘要顶掉。
+ */
+export function mergeExpandedText(
+  audit: TimelineAudit,
+  domTweets: ReadonlyArray<{ id: string; text: string }>,
+): TimelineAudit {
+  if (domTweets.length === 0) return audit;
+  const byId = new Map(domTweets.map((t) => [t.id, t.text]));
+
+  const items = audit.items.map((t) => {
+    const dom = byId.get(t.id);
+    // ⚠️ **只许变长** —— 短的一律不动
+    if (!dom || dom.length <= t.textLen) return t;
+    return {
+      ...t,
+      textLen: dom.length,
+      preview: dom.slice(0, 80).replace(/\s+/g, ' '),
+      hasText: true,
+      /**
+       * ⭐ 拿到更长的正文 = 截断这件事已经解决了。
+       * ⚠️ 但 `article-no-body` **不清** —— DOM 上的长文摘要同样不是正文,
+       * 那个缺口要靠进单篇页才补得上。
+       */
+      incomplete: t.incomplete === 'text-truncated' ? undefined : t.incomplete,
+    };
+  });
+
+  return { ...audit, items, coverage: buildCoverage(items) };
+}
+
+/**
  * ⭐ 把多个载荷的核对结果**汇总**成一句人话。
  * ⚠️ 去重按 tweet id —— 两页之间会有重叠,不去重会把条数报虚高。
  */

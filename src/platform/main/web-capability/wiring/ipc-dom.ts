@@ -142,6 +142,25 @@ const scrollCancelled = new Set<PageId>();
  */
 const hooksByPageId = new Map<PageId, HookSession>();
 
+/**
+ * ⭐⭐ 每轮脚本的产出 —— 按 pageId 攒着,`acquireStop` 时一并回给调用方。
+ *
+ * ⚠️ 为什么要攒:滚动报告里塞不下(几十条推文的全文),
+ * 而调用方真正要的是**最终那一份**。
+ * ⚠️ 合并规则「**只许变长**」在业务侧做 —— 底座不知道什么叫「更全」。
+ */
+const afterRoundResults = new Map<PageId, unknown[]>();
+
+/** 收一轮产出。⚠️ 非法形状直接丢 —— 脚本跑在页面上下文,返回值不可信 */
+function collectAfterRound(pageId: PageId, value: unknown): void {
+  if (value === null || value === undefined) return;
+  const list = afterRoundResults.get(pageId) ?? [];
+  list.push(value);
+  // ⚠️ 封顶:滚 100 轮就是 100 份,不封顶内存会涨
+  while (list.length > 200) list.shift();
+  afterRoundResults.set(pageId, list);
+}
+
 /** 采集开始时刻 —— ⚠️ 只为算耗时,不影响任何判断 */
 const acquireStartedAt = new Map<PageId, number>();
 
@@ -800,6 +819,8 @@ export function registerWebDomIpc(): void {
               makeAcquireDeps(wc, pageId), pageId, p.noisyUrlSubstrings,
             );
             acquireStartedAt.set(pageId, Date.now());
+            // ⚠️ 清掉上一轮的产出 —— 不清会把旧全文混进新一轮
+            afterRoundResults.delete(pageId);
             traceRecorder.lifecycle({
               layer: 'web.net', event: 'acquire-start', pageId: String(pageId),
               detail: { url: wc.getURL(), ...r },
@@ -824,6 +845,13 @@ export function registerWebDomIpc(): void {
               makeAcquireDeps(wc, pageId), pageId, acquireStartedAt.get(pageId),
             );
             acquireStartedAt.delete(pageId);
+            /**
+             * ⭐⭐ 把每轮脚本的产出一并回去(X 用它拿展开后的全文)。
+             * ⚠️ 底座**不解释**这些值 —— 它不知道什么是「全文」,
+             * 原样转给业务,由业务按自己的规则合并。
+             */
+            const rounds = afterRoundResults.get(pageId) ?? [];
+            afterRoundResults.delete(pageId);
             traceRecorder.lifecycle({
               layer: 'web.net',
               event: report.ok ? 'acquire-ok' : 'acquire-incomplete',
@@ -874,10 +902,11 @@ export function registerWebDomIpc(): void {
               `[web.acquire] ${report.ok ? '✓' : '⚠'} 停止 pageId=${pageId} —— `
               + `${report.items.length} 条`,
             );
+            const withRounds = { ...report, afterRound: rounds };
             if (!report.ok) {
-              return { status: 'degraded', value: report, missing: [...report.problems] };
+              return { status: 'degraded', value: withRounds, missing: [...report.problems] };
             }
-            return { status: 'ok', value: report };
+            return { status: 'ok', value: withRounds };
           }
 
           // ── ⚠️ 下面是**单条腿**的入口 —— 调试用,正常路径走 `acquire` ──
@@ -976,6 +1005,21 @@ export function registerWebDomIpc(): void {
                 settleMs: p.settleMs,
                 // ⭐ 每轮开头问一次 —— 这就是「停」能打断翻页的那根线
                 shouldStop: () => scrollCancelled.has(pageId),
+                /**
+                 * ⭐⭐ 每轮滚完跑业务给的脚本(X 用它点开「Show more」)。
+                 * ⚠️ 只认**预注册的 id**,收不了脚本文本 ——
+                 * 那道闸是 `inject-template-escape` 换来的。
+                 * ⚠️ 结果**攒起来**:业务要的是展开后的全文,
+                 * 而滚动报告里塞不下 —— 由 `acquirePeek`/`acquireStop` 一并回。
+                 */
+                afterRound: p.afterRoundScriptId
+                  ? async () => {
+                    const rr = await domRunner.run(
+                      wc, pageId, p.afterRoundScriptId as ScriptId,
+                    );
+                    if (rr.status === 'ok') collectAfterRound(pageId, rr.value);
+                  }
+                  : undefined,
               },
             );
             // ⚠️ 跑完即清,免得标记留到下一次(表现为「下次一开始就停」)

@@ -267,6 +267,21 @@ export type WebDomInvoke =
       readonly stop: WebDomScrollStop;
       readonly maxRounds?: number;
       readonly settleMs?: number;
+      /**
+       * ⭐⭐ **每轮滚完跑一个预注册脚本** —— 业务自己的事,底座不猜。
+       *
+       * ── 用户 2026-10-02 ──
+       * 「应该是**内部的控制机制**,而不是通过一个 button 来点击去做的呀。」
+       *
+       * ⭐ 起因:X 的折叠推文要点「Show more」才有全文,
+       * 我原来做成了面板上一个按钮 —— 要人记得点、还要记得顺序。
+       * 而**人读推文时看到折叠会自然点开**,采集也该自己做。
+       *
+       * ⚠️ 只收**预注册的脚本 id**,收不了脚本文本 ——
+       * `project-x-inject-template-escape` 的那道闸不能开。
+       * ⚠️ 脚本抛异常不中断滚动(业务的事做砸了不该让整轮采集作废)。
+       */
+      readonly afterRoundScriptId?: string;
     };
 
 /**

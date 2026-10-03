@@ -39,7 +39,9 @@
 
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
-import { auditTimelinePayload, summarizeAudits, type TimelineAudit } from './x-timeline-audit';
+import {
+  auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
+} from './x-timeline-audit';
 import { X_TIMELINE_ENDPOINTS, X_NOISY_URLS } from './x-pages';
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
@@ -165,6 +167,12 @@ export function XConsole(
   const [auditFile, setAuditFile] = useState<string | null>(null);
   /** ⭐ 上次「展开全部」的结果 —— 让人看见点开了几条 */
   const [expanded, setExpanded] = useState<{ clicked: number; read: number } | null>(null);
+  /**
+   * ⭐⭐ DOM 展开后的全文 —— ⚠️ **必须存下来**:
+   * 2026-10-02 发现「展开全部」的结果只进了一个显示用的计数,
+   * 核对时用的还是载荷里的截断版 —— **那一步白点了**。
+   */
+  const [domTexts, setDomTexts] = useState<Array<{ id: string; text: string }>>([]);
   /**
    * ⭐⭐ 当前能力 tab。
    *
@@ -428,8 +436,20 @@ export function XConsole(
               type="button"
               disabled={disabled}
               onClick={() => call(`scrollUntil ${scrollRounds} 轮`, {
-                op: 'scrollUntil', pageRef: { wcId: wcId! },
-                stop: { kind: 'atBottom' }, maxRounds: Number(scrollRounds) || 5,
+                op: 'scrollUntil',
+                pageRef: { wcId: wcId! },
+                stop: { kind: 'atBottom' },
+                maxRounds: Number(scrollRounds) || 5,
+                /**
+                 * ⭐⭐⭐ **每轮滚完自动展开折叠的推文** —— 用户 2026-10-02:
+                 * 「应该是**内部的控制机制**,而不是通过一个 button 来点击去做的呀。」
+                 *
+                 * ⭐ 对的 —— 人读推文时看到「Show more」会自然点开,
+                 * 采集也该自己做,不该是人要记得点的一步。
+                 * ⚠️ 原来那个「展开全部」按钮已删:它要人记得点、还要记得顺序,
+                 * 而且**结果压根没接进采集**(只进了一个显示用的计数)。
+                 */
+                afterRoundScriptId: X_SCRIPTS.expandAll,
               })}
               style={S.btn}
             >
@@ -491,35 +511,6 @@ export function XConsole(
               title="重载页面 —— 先在「输出」那栏点「开始收」，再点这个，才能收到首屏那批请求"
             >
               重载
-            </button>
-            {/*
-              ⭐⭐ 「展开全部」—— 用户 2026-09-22 的原则,这次兑现:
-              「不管长文短文,如果**折叠起来就应该 show all**,然后获取完整的内容,
-              　就像人一样,但是现在却是分的零碎」。
-
-              ⚠️ 为什么非做不可:折叠时 `[data-testid="tweetText"]` 里**只有开头**,
-              　 剩下的正文**压根没渲染** —— 载荷里也是截断版。
-              ⭐ 它是**控制**的活(动页面),所以在这一栏,不在输出栏。
-            */}
-            <button
-              type="button"
-              disabled={wcId == null}
-              onClick={async () => {
-                const r = await window.electronAPI!.webDomInvoke({
-                  op: 'run', pageRef: { wcId: wcId! }, scriptId: X_SCRIPTS.expandAll,
-                });
-                setLog((l) => [{
-                  at: new Date().toLocaleTimeString(), label: '展开全部 Show more', result: r,
-                }, ...l].slice(0, 50));
-                if (r.status === 'ok') {
-                  const v = r.value as { expanded?: number; tweets?: unknown[] };
-                  setExpanded({ clicked: v.expanded ?? 0, read: v.tweets?.length ?? 0 });
-                }
-              }}
-              style={S.btn}
-              title="点开页面上所有折叠的推文（Show more），让正文完整渲染出来"
-            >
-              展开全部
             </button>
           </div>
             </div>
@@ -606,6 +597,9 @@ export function XConsole(
                       setRunning(true);
                       setReport(null);
                       setAudit(null);
+                      // ⚠️ 清掉上一轮的 DOM 文本 —— 不清会把旧全文合进新一轮
+                      setDomTexts([]);
+                      setExpanded(null);
                     }
                   }}
                   style={S.btn}
@@ -647,13 +641,42 @@ export function XConsole(
                       const rep = (r as WebDomResult & { value: AcquireReport }).value;
                       setReport(rep);
                       /**
+                       * ⭐⭐ 每轮自动展开的产出在这里 —— 不用人点任何按钮。
+                       * ⚠️ 形状由 X 的脚本定(`{expanded, tweets:[{id,text}]}`),
+                       * 底座原样转,不解释。
+                       */
+                      const roundsOut = (rep as unknown as {
+                        afterRound?: Array<{ expanded?: number; tweets?: Array<{ id: string; text: string }> }>;
+                      }).afterRound ?? [];
+                      const merged = new Map<string, string>();
+                      let clicked = 0;
+                      for (const one of roundsOut) {
+                        clicked += one.expanded ?? 0;
+                        for (const t of one.tweets ?? []) {
+                          // ⚠️ **只许变长** —— 后一轮未必比前一轮全
+                          const prev = merged.get(t.id);
+                          if (!prev || t.text.length > prev.length) merged.set(t.id, t.text);
+                        }
+                      }
+                      const domList = [...merged.entries()].map(([id, text]) => ({ id, text }));
+                      setDomTexts(domList);
+                      setExpanded({ clicked, read: domList.length });
+                      /**
                        * ⭐⭐ **完整性核对在这里做** —— 它是 X 的活。
                        * ⚠️ 底座只回「收到了什么」,不做研判(用户 2026-10-02:
                        * 「采集数据就是全面的采集,**没有数据研判的功能呀?**」)。
                        */
                       const audits: TimelineAudit[] = rep.items
                         .filter((it) => X_TIMELINE_ENDPOINTS.some((e) => it.url.includes(e)))
-                        .map((it) => auditTimelinePayload(it.text));
+                        .map((it) => auditTimelinePayload(it.text))
+                        /**
+                         * ⭐⭐ 把「展开全部」拿到的 DOM 全文合并进来。
+                         * ⚠️ **只许变长**(旧实现同一条底线):
+                         * `project-x-upsert-overwrites-richer-text` 实测过
+                         * 「16081 字被 267 字覆盖」的数据损坏。
+                         */
+                        // ⚠️ 用刚算出的 domList,**不用 state** —— setState 不同步生效
+                        .map((a) => mergeExpandedText(a, domList));
                       setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
 
                       /**
@@ -713,12 +736,14 @@ export function XConsole(
                     　 那是我的表述把必须步骤降级成了选项。
                   */}
                   <strong>② 去「控制」那栏，按顺序做两步：</strong><br />
-                  　<strong style={{ color: '#d9c48f' }}>必须先点「重载」</strong>
-                  　—— 首屏那批请求（含 HomeTimeline）只在页面加载时发一次，
-                  不重载就永远收不到。<br />
-                  　再点「scrollUntil」翻页（X 要滚到接近底部才请求下一批，
-                  <strong>2 轮通常不够，建议 10 轮以上</strong>）。<br />
-                  翻完<strong>回到这里点「停止并核对」</strong>。
+                  　<strong style={{ color: '#d9c48f' }}>1. 重载</strong>
+                  　—— X 的首批推文在<strong>页面加载时就发完了</strong>，
+                  不重载就错过了。<br />
+                  　<strong style={{ color: '#d9c48f' }}>2. scrollUntil</strong>
+                  　—— 滚动触发下一页（建议 10 轮）；
+                  <span style={{ opacity: 0.7 }}>折叠的推文会<strong>自动展开</strong>，不用管</span>。
+                  <br />
+                  两步做完<strong>回到这里点「停止并核对」</strong>。
                   {peek && (
                     <div style={{ marginTop: 4, opacity: 0.85 }}>
                       {/* ⚠️ 只报**收到多少** —— 「其中几条有用」是停止后核对的事 */}

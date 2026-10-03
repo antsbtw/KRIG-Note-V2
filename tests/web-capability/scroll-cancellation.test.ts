@@ -170,3 +170,73 @@ describe('⭐⭐ 面板:「停翻页」要点得到', () => {
     expect(panel, '只滚不捕时翻页停不下来').toMatch(/op: 'scrollStop'/);
   });
 });
+
+/**
+ * ⭐⭐⭐ `afterRound` —— **采集自己该做的事,不该是人点的按钮**
+ *
+ * ── 用户 2026-10-02 ──
+ * 「应该是**内部的控制机制**,而不是通过一个 button 来点击去做的呀。」
+ *
+ * ⭐ 起因:X 的折叠推文要点「Show more」才有全文,
+ * 我原来做成了面板按钮 —— 要人记得点、还要记得顺序,
+ * 而且**结果压根没接进采集**(只进了一个显示用的计数)。
+ */
+describe('⭐⭐ 每轮滚完给业务一个时机', () => {
+  it('⭐⭐ 每一轮都调一次,轮次号对得上', async () => {
+    const engine = new ControlEngine(host() as never, { resolve: () => null } as never);
+    const rounds: number[] = [];
+    await engine.scrollUntil(PAGE, { kind: 'rounds', n: 3 }, {
+      maxRounds: 3, settleMs: 0,
+      afterRound: (n) => { rounds.push(n); },
+    });
+    expect(rounds, '不是每轮都调').toEqual([1, 2, 3]);
+  });
+
+  it('⭐⭐⭐ 业务的脚本抛异常**不中断滚动**', async () => {
+    /**
+     * ⚠️ 业务的事做砸了不该让整轮采集作废 ——
+     * 而且症状会变成「滚了两轮就停」,**离真因很远**。
+     */
+    const engine = new ControlEngine(host() as never, { resolve: () => null } as never);
+    const r = await engine.scrollUntil(PAGE, { kind: 'rounds', n: 4 }, {
+      maxRounds: 4, settleMs: 0,
+      afterRound: () => { throw new Error('业务脚本炸了'); },
+    });
+    const v = (r as { value: { rounds: number } }).value;
+    expect(v.rounds, `业务抛异常把滚动中断了(只滚了 ${v.rounds} 轮)`).toBe(4);
+  });
+
+  it('⭐ 不给 afterRound 时行为不变', async () => {
+    const engine = new ControlEngine(host() as never, { resolve: () => null } as never);
+    const r = await engine.scrollUntil(PAGE, { kind: 'rounds', n: 2 }, { maxRounds: 2, settleMs: 0 });
+    expect((r as { value: { rounds: number } }).value.rounds).toBe(2);
+  });
+
+  it('⭐⭐ 接线:IPC 只收**预注册的脚本 id**,收不了脚本文本', () => {
+    /**
+     * ⚠️ 那道闸是 `project-x-inject-template-escape` 换来的:
+     * 拼串时 `\/` 被模板字面量吃掉 → 浏览器收到非法正则 →
+     * **采集恒 0 而 tsc/单测全绿**。
+     */
+    const types = readFileSync(
+      resolve(__dirname, '../../src/shared/ipc/web-dom-types.ts'), 'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(types, 'afterRound 的参数不是脚本 id').toMatch(/afterRoundScriptId\?:\s*string/);
+    expect(types, '开了「收脚本文本」的口子 —— 那道闸不能破')
+      .not.toMatch(/afterRoundScript\?:\s*string/);
+  });
+
+  it('⭐⭐ 面板上**不该有**「展开全部」按钮', () => {
+    /**
+     * ⭐ 用户点破的就是这个:它要人记得点、还要记得顺序。
+     * ⚠️ 判据钉「按钮没了」+「滚动时自动带上脚本」两条 ——
+     * 只钉前者会被一个「两边都没有」的实现满足(那就彻底不展开了)。
+     */
+    const panel = readFileSync(
+      resolve(__dirname, '../../src/modules/x/XConsole.tsx'), 'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
+    expect(panel, '「展开全部」按钮还在 —— 它该是内部机制').not.toContain('展开全部');
+    expect(panel, '滚动时没自动展开 —— 那就彻底不展开了')
+      .toMatch(/afterRoundScriptId:\s*X_SCRIPTS\.expandAll/);
+  });
+});
