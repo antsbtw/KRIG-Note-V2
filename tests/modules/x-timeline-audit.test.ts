@@ -403,3 +403,65 @@ describe('⭐⭐⭐ 「数据是否完整」要逐条说清', () => {
     expect(sum.incomplete).toEqual([]);
   });
 });
+
+/**
+ * ⭐⭐⭐ 截断判据 —— **真机误报 16/36 条**之后重写
+ *
+ * ── 2026-10-02 实测 ──
+ * 36 条推文里 **16 条被标「正文被截断」**,而它们根本没截断:
+ *
+ *   「一觉醒来，粉丝超过 1k 了，谢谢各位原始股东！🎉 https://t.co/MOWj8yNqAC」
+ *
+ * ⭐ 那个 t.co 是 **X 给自己的图片/视频生成的链接** —— 几乎每条带图的推都有。
+ * 我的判据「以 t.co 结尾就算截断」把它们全误判了。
+ *
+ * ⚠️⚠️ `project-x-readback-lies`:
+ * **工具谎报比采集出错更坏 —— 它让人去改没坏的代码**。
+ * 而且 16 条全误报时,**真有问题的那条也被淹了**。
+ */
+describe('⭐⭐⭐ 截断判据:宁可漏报不要误报', () => {
+  it('⭐⭐⭐ 带图的推以 t.co 结尾 → **不算截断**(真机误报 16 条的那种)', () => {
+    const t = tweet({}, {
+      full_text: '一觉醒来，粉丝超过 1k 了，谢谢各位原始股东！🎉 https://t.co/MOWj8yNqAC',
+      extended_entities: { media: [{ type: 'photo', media_url_https: 'https://pbs/x.jpg' }] },
+    });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].hasMedia, '样本没造出「有媒体」—— 测不到该现象').toBe(true);
+    expect(
+      a.items[0].incomplete,
+      '带图的推被误判成截断 —— 真机 36 条里误报了 16 条',
+    ).toBeUndefined();
+  });
+
+  it('⭐⭐ 省略号结尾 → **算**截断(真信号)', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: '这条很长很长…' })]));
+    expect(a.items[0].incomplete, '省略号是 X 真截断的标记,没认出来').toBe('text-truncated');
+  });
+
+  it('⭐ 没媒体却以 t.co 结尾 → 算截断(可疑)', () => {
+    /** ⚠️ 没图却挂着图片链接,那才可疑 */
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '看这个 https://t.co/abc123' }),
+    ]));
+    expect(a.items[0].incomplete).toBe('text-truncated');
+  });
+
+  it('⭐⭐ 有 note_tweet(长推全文)时**一律不算**截断', () => {
+    /** ⭐ 拿到全文了就是拿到了,末尾是什么都无所谓 */
+    const t = tweet({
+      note_tweet: { note_tweet_results: { result: { text: '全文'.repeat(500) } } },
+    }, { full_text: '截断版… https://t.co/x' });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].incomplete, '有全文却报截断').toBeUndefined();
+  });
+
+  it('⭐ 正常短推不报截断', () => {
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].incomplete).toBeUndefined();
+  });
+
+  it('⚠️ 空正文不报截断 —— 那是「没正文」不是「截断了」', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: '' })]));
+    expect(a.items[0].incomplete, '空正文被报成截断 —— 两种问题混了').toBeUndefined();
+  });
+});

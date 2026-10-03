@@ -797,20 +797,77 @@ export function XConsole(
                         </div>
                       )}
 
+                      {/*
+                        ⭐⭐⭐ **逐条全字段** —— 用户 2026-10-02:
+                        「截图中应该是显示每条推文的相关数据,**我好左右比较对对不对**呀?」
+                        「你修的还是这样呢,**我怎么无法观察数据**?」
+
+                        ⚠️ 原来只有一行摘要(@handle + 字数 + 80 字),
+                        　 22 个字段**只在文件里** —— 人要去翻文件系统才看得到。
+                        ⭐ 现在每条点开就是全字段,与报告文件**同一份内容**。
+                      */}
                       {audit.items.length > 0 && (
-                        <details style={{ marginTop: 6 }}>
+                        <details style={{ marginTop: 6 }} open>
                           <summary style={{ cursor: 'pointer', opacity: 0.75 }}>
-                            展开全部 {audit.items.length} 条推文
+                            逐条核对（{audit.items.length} 条）—— 点开看全字段
                           </summary>
                           <div style={{ marginTop: 4 }}>
-                            {audit.items.map((t) => (
-                              <div key={t.id} style={S.tweetLine}>
-                                <span style={{ color: '#8fd9a8' }}>@{t.handle || '?'}</span>
-                                <span style={{ opacity: 0.5 }}>　{t.textLen} 字</span>
-                                {t.isLongText && <span style={{ color: '#9ac' }}>　长推</span>}
-                                {t.isArticle && <span style={{ color: '#9ac' }}>　长文</span>}
-                                <span style={{ opacity: 0.8 }}>　{t.preview || '（无正文）'}</span>
-                              </div>
+                            {audit.items.map((t, i) => (
+                              <details key={t.id} style={S.tweetItem}>
+                                <summary style={{ cursor: 'pointer', fontSize: 11 }}>
+                                  <span style={{ opacity: 0.4 }}>{i + 1}.</span>
+                                  <span style={{ color: '#8fd9a8' }}>　@{t.handle || '?'}</span>
+                                  <span style={{ opacity: 0.5 }}>　{t.textLen} 字</span>
+                                  {t.isLongText && <span style={{ color: '#9ac' }}>　长推</span>}
+                                  {t.isArticle && <span style={{ color: '#9ac' }}>　长文</span>}
+                                  {t.hasMedia && <span style={{ color: '#9ac' }}>　{t.mediaTypes.join('/')}</span>}
+                                  {t.incomplete && <span style={{ color: '#d98f8f' }}>　⚠️ 不完整</span>}
+                                  <span style={{ opacity: 0.75 }}>　{t.preview || '（无正文）'}</span>
+                                </summary>
+                                <div style={S.tweetFields}>
+                                  <Field k="推文id" v={t.id} />
+                                  <Field k="正文" v={`${t.textLen} 字`} ok={t.hasText} />
+                                  {t.incomplete === 'text-truncated'
+                                    && <Field k="⚠️" v="正文被截断 —— 载荷只给了截断版" bad />}
+                                  {t.incomplete === 'article-no-body'
+                                    && <Field k="⚠️" v="长文没正文 —— 正文在单篇页" bad />}
+                                  <Field k="正文内容" v={t.preview} />
+                                  <Field k="作者" v={`@${t.handle}`} ok={t.hasAuthor} />
+                                  <Field k="显示名" v={t.authorName} ok={t.authorName.length > 0} />
+                                  <Field k="作者id" v={t.authorRestId} ok={t.authorRestId.length > 0} />
+                                  <Field k="头像" v={t.hasAvatar ? '有' : '无'} ok={t.hasAvatar} />
+                                  <Field k="作者bio" v={t.authorBio.slice(0, 60)} ok={t.authorBio.length > 0} />
+                                  <Field k="蓝V" v={tri(t.isBlueVerified)} />
+                                  <Field k="我关注他" v={tri(t.iFollow)} />
+                                  <Field k="他关注我" v={tri(t.followsMe)} />
+                                  <Field k="发布时间" v={t.hasCreatedAt ? '有' : '无'} ok={t.hasCreatedAt} />
+                                  <Field k="语言" v={t.lang} ok={t.lang.length > 0} />
+                                  <Field k="会话id" v={t.hasConversationId ? '有' : '无'} ok={t.hasConversationId} />
+                                  <Field k="推文链接" v={t.hasTweetUrl ? '有' : '无'} ok={t.hasTweetUrl} />
+                                  <Field
+                                    k="互动数"
+                                    v={`${t.metricsCount}/6　赞 ${t.metrics.likes ?? '✗'}`
+                                      + `　转 ${t.metrics.retweets ?? '✗'}　评 ${t.metrics.replies ?? '✗'}`
+                                      + `　引用 ${t.metrics.quotes ?? '✗'}　收藏 ${t.metrics.bookmarks ?? '✗'}`
+                                      + `　浏览 ${t.metrics.views ?? '✗'}`}
+                                    ok={t.metricsCount >= 6}
+                                  />
+                                  <Field
+                                    k="我的操作"
+                                    v={`赞 ${tri(t.self.favorited)}　转 ${tri(t.self.retweeted)}`
+                                      + `　收藏 ${tri(t.self.bookmarked)}`}
+                                  />
+                                  <Field k="媒体" v={t.hasMedia ? t.mediaTypes.join('/') : '无'} />
+                                  <Field
+                                    k="是回复"
+                                    v={t.inReplyToStatusId
+                                      ? `是 → ${t.inReplyToStatusId}`
+                                        + (t.inReplyToScreenName ? `（@${t.inReplyToScreenName}）` : '')
+                                      : '否'}
+                                  />
+                                  <Field k="引用推文" v={t.quotedStatusId || '无'} />
+                                </div>
+                              </details>
                             ))}
                           </div>
                         </details>
@@ -908,6 +965,33 @@ export function XConsole(
       </div>
     </div>
   );
+}
+
+/**
+ * ⭐ 一行字段 —— ⚠️ `ok` 不给时**不染色**:
+ * 「蓝V 否」「是回复 否」这些是**事实**不是缺失,染红会制造假警报。
+ */
+function Field({ k, v, ok, bad }: { k: string; v: string; ok?: boolean; bad?: boolean }): ReactElement {
+  return (
+    <div style={{ display: 'flex', gap: 6, fontSize: 10, lineHeight: 1.7 }}>
+      <span style={{ width: 62, flexShrink: 0, opacity: 0.5, textAlign: 'right' }}>{k}</span>
+      <span style={{
+        color: bad ? '#d98f8f' : ok === undefined ? '#aaa' : ok ? '#8fd9a8' : '#d98f8f',
+        wordBreak: 'break-all',
+      }}>
+        {ok === false && '✗ '}{v || '（空）'}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * ⚠️⚠️ `undefined` 与 `false` **必须分开显示** ——
+ * 「我没关注他」与「载荷没告诉我关注没有」是两件事,
+ * 混起来会让追踪名单判错人(旧实现原话)。
+ */
+function tri(v: boolean | undefined): string {
+  return v === undefined ? '—（载荷没带）' : v ? '是' : '否';
 }
 
 /**
@@ -1037,6 +1121,12 @@ const S: Record<string, React.CSSProperties> = {
     border: '1px solid #2c2c2c', borderRadius: 4, background: '#1b1b1b',
   },
   failLine: { fontSize: 10, color: '#d98f8f', lineHeight: 1.5, wordBreak: 'break-all' },
+  tweetItem: {
+    borderTop: '1px solid #2a2a2a', padding: '3px 0',
+  },
+  tweetFields: {
+    padding: '4px 0 6px 10px', borderLeft: '2px solid #333', marginLeft: 6,
+  },
   tweetLine: {
     fontSize: 10, lineHeight: 1.7, whiteSpace: 'nowrap',
     overflow: 'hidden', textOverflow: 'ellipsis',

@@ -180,6 +180,47 @@ function buildCoverage(items: readonly TweetAudit[]): Record<string, number> {
   };
 }
 
+/**
+ * ⭐⭐ 正文**真的被截断了吗**。
+ *
+ * ── ⚠️⚠️ 2026-10-02 实测误报 16/36 条 ──
+ *
+ * 我原来的判据含 `https:\/\/t\.co\/\w+$` —— 以 t.co 短链结尾就算截断。
+ * 真机结果:36 条里 16 条被标「正文被截断」,而它们**根本没截断**:
+ *
+ *   「一觉醒来，粉丝超过 1k 了，谢谢各位原始股东！🎉 https://t.co/MOWj8yNqAC」
+ *
+ * ⭐ 那个 t.co 是 **X 给自己的图片/视频生成的链接** —— 几乎每条带图的推都有。
+ * ⚠️ `project-x-readback-lies`:**工具谎报比采集出错更坏 —— 它让人去改没坏的代码**。
+ *
+ * ── ⭐ 现在的判据 ──
+ *
+ * ① 结尾是 `…` / `...` —— X 截断时留的省略号,这是**真信号**
+ * ② 结尾是 t.co 短链,**且这条推没有媒体** —— 没图却挂着图片链接才可疑
+ *    ⚠️ 有媒体时那个短链是正常的,一律不算
+ *
+ * ⚠️ 判据宁可**漏报**不要误报:漏了只是少一个提示,
+ * 误报会让人去查一个不存在的问题(16 条全误报时,真有问题的那条也被淹了)。
+ */
+function isTruncated(fullText: string, hasMedia: boolean): boolean {
+  const t = fullText.trim();
+  /**
+   * ⚠️ 这行是**防御性冗余** —— 空串本来也通不过下面两条正则
+   * (注入验证实测:删掉它测试照样全绿)。
+   * ⭐ 留着是因为判据将来可能加「长度小于 N 就可疑」那类规则,
+   * 到时候空串会被误判。写明它现在不起作用,免得下一个人以为它在干活。
+   */
+  if (!t) return false;
+  // ① 省略号结尾 —— X 真截断时的标记
+  if (/[…]$|\.\.\.$/.test(t)) return true;
+  /**
+   * ② t.co 结尾**且没有媒体**。
+   * ⚠️ 有媒体时那是图片/视频的正常链接(实测 36 条里 13 条如此)。
+   */
+  if (!hasMedia && /https:\/\/t\.co\/\w+$/.test(t)) return true;
+  return false;
+}
+
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -299,7 +340,7 @@ export function auditTimelinePayload(text: string): TimelineAudit {
      */
     let incomplete: TweetAudit['incomplete'];
     if (article !== undefined && articleBody.length === 0) incomplete = 'article-no-body';
-    else if (noteText.length === 0 && /…$|\.\.\.$|https:\/\/t\.co\/\w+$/.test(full.trim())) {
+    else if (noteText.length === 0 && isTruncated(full, mediaArr.length > 0)) {
       incomplete = 'text-truncated';
     }
 
