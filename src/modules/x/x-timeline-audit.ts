@@ -31,7 +31,11 @@ export type TruncationEvidence = {
    */
   readonly displayTextRange?: readonly [number, number];
   /**
-   * ⭐ **`legacy.full_text` 的长度**(按 code unit,才能和 range 比)。
+   * ⭐ **`legacy.full_text` 的长度**(按**码点**,与 `display_text_range` 同单位)。
+   *
+   * ⚠️⚠️ 2026-10-04 更正:我原先写「按 UTF-16 code unit」——**错的**。
+   * X 的 `display_text_range` 是**码点**偏移;拿 JS 的 `.length`(UTF-16 单元)
+   * 去比,带 emoji 的推文永远对不齐(一个 emoji = 1 码点 = 2 单元)。
    *
    * ⚠️⚠️ 这个数**可能小于报告上面那行的「正文 N 字」** —— 不是 bug:
    * 长推(note_tweet)的「正文」取的是 full_text 与 note 全文里**长的那个**,
@@ -275,8 +279,8 @@ function judgeTruncation(
   displayRange: unknown,
 ): { truncated: boolean; evidence: TruncationEvidence } {
   const t = fullText.trim();
-  /** ⚠️ 按 **code unit** 量,才能和 `display_text_range` 对齐(emoji 占 2) */
-  const textUnits = fullText.length;
+  /** ⚠️ 按**码点**量,才能和 `display_text_range` 对齐(JS `.length` 是 UTF-16 单元) */
+  const textUnits = [...fullText].length;
   const endsWithEllipsis = /[…]$|\.\.\.$/.test(t);
 
   /** ⭐ `display_text_range` 必须是两个数,**别的形状一律当没带** */
@@ -331,9 +335,47 @@ function judgeTruncation(
   // ① 省略号结尾 —— X 真截断的显式标记,最硬的信号
   if (endsWithEllipsis) return mk(true, '以省略号结尾 —— X 截断的显式标记');
 
-  // ② X 自己说正文显示不全
+  /**
+   * ② X 自己说正文显示不全 —— ⚠️⚠️ **但要先扣掉末尾的实体链接**。
+   *
+   * ── 2026-10-04 真机第三次误报(72 条里误报 50 条)──
+   * 我原先写 `range[1] < textUnits` 就算截断。实测差值分布:
+   *   **35 条差正好 24** = 一个空格 + `https://t.co/xxxxxxxxxx`(23 字符)
+   *   另有 25/26/27/28 的(多个链接)、以及几条差 1(末尾空格)
+   *
+   * 典型:「今天地铁人不多 不开车很舒服 还可以玩手机 https://t.co/3nxAcK91hb」
+   * 正文 47、range 到 23 —— 那 23 字**本来就是全文**,后面是 X 给配图
+   * 自动加的链接。**X 本来就把末尾实体 URL 排除在显示区间之外**。
+   *
+   * ⭐ 所以判据改成:range 之后**除了实体链接和空白,还剩别的字**才算截断。
+   * ⚠️ 这是同一个判据第三次误报(① 带图的 t.co ② 链接卡片 ③ 这次)——
+   * 三次都因为我拿「看起来像」的特征当判据,而不是先量真实分布。
+   */
   if (range !== undefined && range[1] < textUnits) {
-    return mk(true, `display_text_range 到 ${range[1]},正文有 ${textUnits} —— X 说显示不全`);
+    /**
+     * ⭐ range 之后那一段;t.co 链接和空白都不算「被截掉的正文」。
+     *
+     * ⚠️ **先把全文里的 t.co 全抹掉再切**,不能先切后抹:
+     * `range[1]` 可能落在链接**中间**(实测 23 落在 `https` 的 h 后面),
+     * 那样切出来是 `ttps://t.co/…` —— 正则认不出,扣不掉。
+     * ⭐ 抹成等长空格,位置才不会错位。
+     */
+    const blanked = fullText.replace(/https:\/\/t\.co\/\w+/g, (m) => ' '.repeat(m.length));
+    /**
+     * ⚠️⚠️ **按码点切,不按 `.length` 切**(2026-10-04 实测)。
+     * `display_text_range` 是**码点**偏移,JS 的 `.length` 是 UTF-16 单元 ——
+     * 一个 emoji = 1 码点 = 2 单元,**两者永远对不齐**。
+     * 实测残留的 10 条误报里有 4 条正是切在代理对中间,
+     * 切出半个 emoji(`\udf89`)被当成「还剩正文」。
+     */
+    const tail = [...blanked].slice(range[1]).join('').trim();
+    if (tail.length > 0) {
+      return mk(
+        true,
+        `display_text_range 到 ${range[1]}、正文有 ${textUnits}，`
+        + `扣掉末尾链接后仍多出 ${tail.length} 字 —— X 说显示不全`,
+      );
+    }
   }
 
   // ③ 末尾 t.co 的归属:在 entities.urls 里 = 卡片/图片链接,不是截断

@@ -512,8 +512,80 @@ describe('⭐⭐⭐ 截断判据:宁可漏报不要误报', () => {
     ).toBeUndefined();
   });
 
+  /**
+   * ⭐⭐⭐ 2026-10-04 真机**第三次误报** —— 这次 72 条里误报 **50 条**
+   *
+   *   「今天地铁人不多 不开车很舒服 还可以玩手机 https://t.co/3nxAcK91hb」
+   *   正文 47 字、display_text_range 到 23 —— 我判成「X 说显示不全」。
+   *
+   * ⚠️⚠️ 那 23 字**本来就是全文**,后面是 X 给配图自动加的链接。
+   * **X 本来就把末尾实体 URL 排除在显示区间之外**。
+   * 实测差值分布坐实:35/50 差正好 **24** = 空格 + t.co(23 字符)。
+   *
+   * ⭐ 三次误报(①带图的 t.co ②链接卡片 ③这次)都因为
+   * 我拿「看起来像」的特征当判据,而不是先量真实分布。
+   */
+  it('⭐⭐⭐ range 之后只剩 t.co → **不算截断**(真机误报 50 条的那种)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '今天地铁人不多 不开车很舒服 还可以玩手机 https://t.co/3nxAcK91hb',
+        display_text_range: [0, 23],
+        entities: { urls: [] },
+        extended_entities: { media: [{ type: 'photo' }] },
+      }),
+    ]));
+    /** ⚠️ 先确认样本真造出了「range 短于正文」 */
+    expect(a.items[0].truncationEvidence?.displayTextRange, '样本前提不成立').toEqual([0, 23]);
+    expect(
+      a.items[0].incomplete,
+      'range 后面只剩一个 t.co 却判成截断 —— 真机 72 条误报了 50 条',
+    ).toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐⭐ **`display_text_range` 是码点偏移,不是 UTF-16 单元** —— 2026-10-04
+   *
+   * 我原先在类型注释里写「单位是 UTF-16 code unit」——**那是我的假设,错的**。
+   * 一个 emoji = 1 码点 = 2 单元,于是带 emoji 的推文永远对不齐:
+   *   「突破8000了 🎉🎉 https://t.co/…」range=11,
+   *   按单元切出 `\udf89…`(半个 emoji)→ 被当成「还剩正文」→ 误报截断。
+   *
+   * ⭐ 真机回放实证:改按码点后,72 条里的误报 **50 → 3**(剩下 3 条是
+   * 报告预览只存 80 字把 URL 切断造成的,不是代码问题)。
+   */
+  it('⭐⭐⭐ 带 emoji 时按**码点**比 —— 不按 .length(真机误报的一类)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '突破8000了 🎉🎉 https://t.co/Obu512wWpx',
+        display_text_range: [0, 11],
+      }),
+    ]));
+    expect(a.items[0].truncationEvidence?.displayTextRange, '样本前提不成立').toEqual([0, 11]);
+    expect(
+      a.items[0].incomplete,
+      '按 UTF-16 单元切 → 切出半个 emoji 被当成「还剩正文」',
+    ).toBeUndefined();
+  });
+
+  it('⭐⭐ textUnits 也按码点 —— 否则它与 range 不是同一把尺', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '🎉🎉', display_text_range: [0, 2] }),
+    ]));
+    expect(
+      a.items[0].truncationEvidence?.textUnits,
+      'textUnits 按 .length 算成 4 —— 与 range 的单位对不上',
+    ).toBe(2);
+  });
+
+  it('⚠️ range 之后只剩空白 → 也不算截断', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '正文到这里 ', display_text_range: [0, 5] }),
+    ]));
+    expect(a.items[0].incomplete, '末尾一个空格就报截断').toBeUndefined();
+  });
+
   /** ⭐⭐ X 自己说正文显示不全 —— 比我的任何推断都硬 */
-  it('⭐⭐ display_text_range 短于正文 → 算截断(X 自己说的)', () => {
+  it('⭐⭐ display_text_range 短于正文**且还剩真正文** → 算截断', () => {
     const a = auditTimelinePayload(payload([
       tweet({}, { full_text: '这条正文很长但被砍了', display_text_range: [0, 4] }),
     ]));
