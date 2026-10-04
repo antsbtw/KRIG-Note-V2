@@ -117,12 +117,64 @@ describe('⭐⭐⭐ 脚本必须是合法 JS 且真能跑(**每一个**都查)',
     }
   });
 
-  it('⚠️ 每个脚本都**无参数** —— 连拼串的机会都没有', () => {
+  /**
+   * ⭐⭐⭐ 参数**可以有**,但必须 JSON 绑定 —— 2026-10-04 改。
+   *
+   * ⚠️⚠️ 原判据是「给任何参数都返回同一份脚本」。加翻页脚本(要收 URL 与
+   * 游标,是真正的运行时值)时它**没变红** —— 因为我喂的 `{evil}` 里
+   * 没有 `url`/`cursor`,两次产出碰巧相同。**假绿**。
+   *
+   * ⭐ 真正要防的是 `project-x-inject-template-escape`:
+   * 运行时值被**拼进脚本文本**,于是能从值里逃出来改脚本结构。
+   * 判据改成:**把恶意值喂进脚本真正会用的参数名**,
+   * 看它① 仍是合法 JS ② 值被当成字符串而不是代码。
+   */
+  it('⭐⭐⭐ 参数走 JSON 绑定 —— 恶意值逃不出字符串', () => {
+    /**
+     * ⚠️ 用 `globalThis` 不用 `window` —— 测试里 `window` 是**喂进去的形参**,
+     * 逃出来的代码写它只会 ReferenceError,于是**真逃逸也判不出来**
+     * (写这条时注入验证当场发现:参数原样拼进去了,测试照样全绿)。
+     */
+    const evil = '"; globalThis.__pwned = 1; var _ = "';
     for (const sc of X_DOM_SCRIPTS) {
-      // ⭐ 给任何参数都返回同一份脚本 → 运行时值不可能被拼进去
+      /** ⭐ 把恶意值喂进**所有**可能的参数名,不猜哪个有用 */
+      const src = sc.build({ url: evil, cursor: evil, q: evil, evil } as never);
+      /** ① 仍是合法 JS —— 逃出来的话这里就 throw 了 */
+      expect(() => new Function(`return ${src}`), `脚本 ${sc.id} 被参数弄坏了`).not.toThrow();
+      /**
+       * ② **真跑一遍看值逃没逃出来** —— ⚠️ 不能用 `toContain` 判:
+       * JSON.stringify 之后那串字符**仍在文本里**(只是带了 `\"` 转义),
+       * 子串判据会把**正确的实现也判红**(写这条时当场栽了一次)。
+       * ⭐ 判据是行为:注入的代码**没有被执行**。
+       */
+      const g = globalThis as unknown as Record<string, unknown>;
+      delete g.__pwned;
+      try {
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('URL', 'fetch', 'document', 'window', 'location', 'history', `return ${src}`);
+        fn(
+          class { constructor() { throw new Error('stop'); } },
+          () => Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('') }),
+          { querySelectorAll: () => [] },
+          { scrollY: 0 },
+          { href: '' },
+          { length: 1 },
+        );
+      } catch { /* ⚠️ 脚本自己抛不要紧,本条只看注入的代码有没有跑 */ }
+      expect(
+        g.__pwned,
+        `脚本 ${sc.id} 的参数**逃出了字符串** —— 值被当成代码执行了`,
+      ).toBeUndefined();
+    }
+  });
+
+  /** ⭐ 无参数的那些仍该无参数 —— 不给参数的机会就没有拼串的机会 */
+  it('⭐ 不需要参数的脚本**不许**随参数变', () => {
+    for (const sc of X_DOM_SCRIPTS) {
+      if (sc.id === X_SCRIPTS.fetchNextPage) continue; // ⚠️ 它**确实**要参数
       expect(
         sc.build({ evil: '"; window.x=1; "' } as never),
-        `脚本 ${sc.id} 的产出随参数变了 —— 有拼串的口子`,
+        `脚本 ${sc.id} 的产出随参数变了 —— 它本不需要参数`,
       ).toBe(sc.build({}));
     }
   });

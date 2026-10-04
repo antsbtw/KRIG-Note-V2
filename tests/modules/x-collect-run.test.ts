@@ -438,3 +438,104 @@ describe('⭐⭐⭐ 补的时候带出新的长文 → 同一轮里补上', () =
     expect(calls).toEqual(['list', 'article:901']);
   });
 });
+
+/**
+ * ⭐⭐⭐ **主动翻页** —— 2026-10-04 真机逼出来的
+ *
+ * 配方搜索三跑,每跑都只拿到 **1 条 `SearchTimeline`**。排除法验过:
+ * · 不是噪音(挡掉 m3u8 后 6 条响应全干净,仍是 1)
+ * · 不是滚动不够(21 条推文约 17000px,**实际滚了 47360px**)
+ * · 不是结果就这么多(**「游标 1/1 页有」—— X 自己说还有下一页**)
+ * ⭐ 对照 x.profile 同样滚 4 万 px 出 **43** 条载荷 ——
+ * **个人主页滚动会自动翻页,搜索页不会**。
+ */
+describe('⭐⭐⭐ 拿游标主动翻页', () => {
+  const SEED = 'https://x.com/i/api/graphql/qid/SearchTimeline?variables=%7B%22rawQuery%22%3A%22vpn%22%7D';
+
+  /** ⭐ 第 n 页:带 n 条推 + 一个游标(最后一页没有游标) */
+  const page = (n: number, cursor: string | null): string => {
+    const entries: unknown[] = [{
+      entryId: `tweet-${n}`,
+      content: { itemContent: { tweet_results: { result: {
+        rest_id: `t${n}`,
+        legacy: { id_str: `t${n}`, full_text: `第${n}页` },
+        core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+      } } } },
+    }];
+    if (cursor !== null) {
+      entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+    }
+    return JSON.stringify({
+      data: { search_by_raw_query: { search_timeline: { timeline: {
+        instructions: [{ type: 'TimelineAddEntries', entries }],
+      } } } },
+    });
+  };
+
+  /** ⭐ 假底座:首页给 seed,之后每次 runScript 推进一页 */
+  function pagingDeps(pages: ReadonlyArray<string | null>): {
+    deps: RunDeps; scripts: Array<{ id: string; cursor: string }>;
+  } {
+    const scripts: Array<{ id: string; cursor: string }> = [];
+    let idx = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        const cur = pages[idx];
+        return {
+          items: cur === null ? [] : [{ url: SEED, text: cur }],
+        } satisfies RunHarvest;
+      },
+      async runScript(id, params) {
+        scripts.push({ id, cursor: String(params.cursor ?? '') });
+        idx += 1;
+        return { ok: true };
+      },
+    };
+    return { deps, scripts };
+  }
+
+  it('⭐⭐⭐ 有游标就一直翻 —— 不是只采第一页', async () => {
+    const { deps, scripts } = pagingDeps([
+      page(1, 'c1'), page(2, 'c2'), page(3, null),
+    ]);
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(scripts.length, '只翻了一次或没翻 —— 搜索页会永远停在 20 条').toBe(2);
+    expect(scripts.map((x) => x.cursor), '游标没跟着往后走').toEqual(['c1', 'c2']);
+    expect(r.summary?.items.length, '后面几页的推文没进账').toBe(3);
+  });
+
+  it('⭐⭐ 没有游标 → **立刻停**,不空转', async () => {
+    const { deps, scripts } = pagingDeps([page(1, null)]);
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(scripts.length, '没游标还去翻 —— 白跑').toBe(0);
+  });
+
+  /** ⚠️ 游标不变 = 翻不动了,必须停 —— 否则 40 轮空转 */
+  it('⚠️⚠️ 游标**不再变化** → 停,不死循环', async () => {
+    const { deps, scripts } = pagingDeps([
+      page(1, 'same'), page(2, 'same'), page(3, 'same'),
+    ]);
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(scripts.length, '同一个游标翻了多次 —— 会空转到轮次上限').toBe(1);
+  });
+
+  it('⚠️ 翻页脚本抛错 → **不毁整轮**,已采到的还在', async () => {
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: page(1, 'c1') }] };
+      },
+      async runScript() { throw new Error('页面没了'); },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(r.summary?.items.length, '第一页也丢了 —— 翻页失败不该毁掉已采的').toBe(1);
+  });
+
+  it('⚠️ 调用方没给 runScript → 不翻页(老行为不变)', async () => {
+    const { deps } = pagingDeps([page(1, 'c1'), page(2, null)]);
+    const noScript: RunDeps = { harvest: deps.harvest };
+    const r = await runCollect(noScript, { wantPages: 1, depth: 'as-is' });
+    expect(r.summary?.items.length).toBe(1);
+  });
+});

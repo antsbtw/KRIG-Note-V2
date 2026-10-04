@@ -768,6 +768,23 @@ export function XConsole(
                           });
                           return g.status === 'ok' || g.status === 'degraded';
                         },
+                        /**
+                         * ⭐⭐ 翻页脚本 —— **带参数**(URL + 游标是运行时值)。
+                         * ⚠️ 只收**预注册的 id**,收不了脚本文本
+                         * (`inject-template-escape` 那道闸)。
+                         */
+                        runScript: async (scriptId, params) => {
+                          const rr = await window.electronAPI!.webDomInvoke({
+                            op: 'run',
+                            pageRef: { wcId: wcId! },
+                            scriptId,
+                            params: params as Record<string, string>,
+                          });
+                          if (rr.status !== 'ok' && rr.status !== 'degraded') {
+                            throw new Error(`翻页脚本失败：${(rr as { reason?: string }).reason ?? ''}`);
+                          }
+                          return (rr as { value?: unknown }).value;
+                        },
                         onProgress: setStep,
                       }, {
                         // ⭐ 用户 2026-10-03:「每次采集 10 页」

@@ -19,7 +19,7 @@
  * 浏览器收到非法正则 → **采集恒 0,而 tsc 与单测全绿**。
  */
 
-import type { RegisteredScript, ScriptId } from '@platform/main/web-capability/dom/types';
+import type { RegisteredScript, ScriptId, ScriptParams } from '@platform/main/web-capability/dom/types';
 
 /** ⭐ 本模块的脚本 id —— 与注册表同一份常量,不各写一份 */
 export const X_SCRIPTS = {
@@ -30,6 +30,12 @@ export const X_SCRIPTS = {
    * ⚠️ 它**不采集任何数据**,只回报现场:history 深度、滚动位置、URL。
    */
   navProbe: 'x.navBackProbe' as ScriptId,
+  /**
+   * ⭐⭐⭐ **拿游标主动翻下一页** —— 搜索页滚动不翻页,只能自己发。
+   * ⚠️ 这是**本仓第一个带参数的脚本**(URL 与游标是运行时值),
+   * 参数走 `JSON.stringify`,绝不拼进脚本文本。
+   */
+  fetchNextPage: 'x.fetchNextPage' as ScriptId,
 } as const;
 
 /**
@@ -148,6 +154,72 @@ const NAV_PROBE_SCRIPT: string = [
   '})();',
 ].join('\n');
 
+
+/**
+ * ⭐⭐⭐ **主动翻下一页** —— 2026-10-04
+ *
+ * ── 为什么非有不可(三跑实测)──
+ * 配方搜索每跑都只拿到 **1 条 `SearchTimeline`**,而:
+ * · 不是噪音(挡掉 m3u8 后 6 条响应全干净,仍是 1 条)
+ * · 不是滚动不够(21 条推文约 17000px,实际滚了 **47360px**,早在空滚)
+ * · 不是结果就这么多(**报告写「翻页游标 1/1 页有」—— X 自己说还有下一页**)
+ * ⭐ 对照:同样滚 4 万 px,**x.profile 出 43 条载荷、x.search 出 1 条** ——
+ * 个人主页滚动会自动翻页,**搜索页不会**。这是 X 的页面差异。
+ *
+ * ── 怎么翻 ──
+ * 拿**页面自己发过的那条请求**(URL 里带 queryId 与 features),
+ * 在 `variables` 里塞 `cursor`,**在页面上下文里** fetch 一次。
+ *
+ * ⚠️⚠️ 必须在页面里发,不能从 Node 发 —— 登录态/CSRF 头都在页面这边。
+ * ⭐ 发出去的响应**会被两条腿照常捕到**(fetch 被钩子覆盖、CDP 也看得见),
+ * 所以这里**不需要把正文回传** —— 回传等于绕开采集链路再造一份。
+ *
+ * ⚠️ `queryId` 从**传进来的 URL 里现取**,不写死(随 X 版本变)。
+ */
+const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
+  /**
+   * ⚠️⚠️ 参数**一律 JSON.stringify** —— 这是
+   * `project-x-inject-template-escape` 换来的那道闸:
+   * 拼串时 `\/` 会被模板字面量吃掉 → 浏览器收到非法正则 →
+   * **采集恒 0 而 tsc 与单测全绿**。
+   */
+  const url = JSON.stringify(String(params.url ?? ''));
+  const cursor = JSON.stringify(String(params.cursor ?? ''));
+  return [
+    '(function () {',
+    '  var u = ' + url + ';',
+    '  var c = ' + cursor + ';',
+    '  if (!u || !c) return { ok: false, why: "缺 url 或 cursor" };',
+    '  try {',
+    '    var parsed = new URL(u);',
+    /** ⭐ variables 是 JSON 串,塞 cursor 再放回去 */
+    '    var raw = parsed.searchParams.get("variables");',
+    '    if (!raw) return { ok: false, why: "URL 里没有 variables" };',
+    '    var vars = JSON.parse(raw);',
+    '    vars.cursor = c;',
+    '    parsed.searchParams.set("variables", JSON.stringify(vars));',
+    /**
+     * ⚠️ `credentials: "include"` 必须有 —— 少了它 X 当成未登录,
+     * 回 401 而**不报错**,表现成「翻了但没数据」。
+     */
+    '    return fetch(parsed.toString(), { credentials: "include" })',
+    '      .then(function (r) {',
+    /**
+     * ⭐ 只回**事实**(状态码、长度),**不回正文** ——
+     * 正文由两条腿照常捕获,回传等于绕开采集链路再造一份。
+     */
+    '        return r.text().then(function (t) {',
+    '          return { ok: r.ok, status: r.status, bytes: t.length };',
+    '        });',
+    '      })',
+    '      .catch(function (e) { return { ok: false, why: String(e) }; });',
+    '  } catch (e) {',
+    '    return { ok: false, why: String(e) };',
+    '  }',
+    '})();',
+  ].join('\n');
+};
+
 /** ⭐ 注册表 —— 由 `main.ts` 在启动时 push 给底座 */
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
   {
@@ -164,5 +236,14 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
     purpose: 'X:读当前页现场(URL/滚动位置/history深度/首张卡id)—— 验「进去再返回」的前提',
     /** ⚠️ 同样**无参数**,只读不写 */
     build: () => NAV_PROBE_SCRIPT,
+  },
+  {
+    id: X_SCRIPTS.fetchNextPage,
+    purpose: 'X:拿游标主动翻下一页(搜索页滚动不翻页) —— 在页面上下文里 fetch',
+    /**
+     * ⭐ **本仓第一个带参数的脚本**。参数(URL、游标)是运行时值,
+     * 走 `JSON.stringify` 绑定 —— 绝不拼进脚本文本。
+     */
+    build: FETCH_NEXT_PAGE_SCRIPT,
   },
 ];

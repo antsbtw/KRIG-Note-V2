@@ -46,6 +46,11 @@ export type RunDeps = {
     gotoPage?: { name: string; params?: Record<string, string> };
   }): Promise<RunHarvest | null>;
   /**
+   * ⭐⭐ 跑一个**带参数**的预注册脚本(翻页用)。
+   * ⚠️ 可选 —— 不给就不主动翻页(老调用方行为不变)。
+   */
+  runScript?(scriptId: string, params: Record<string, unknown>): Promise<unknown>;
+  /**
    * ⭐⭐ 回到指定 URL —— 逐篇补完之后用。
    * ⚠️ 可选:没提供就不回(老调用方行为不变),但那样下一轮会从错的页开始。
    */
@@ -116,6 +121,86 @@ function auditsOf(rep: RunHarvest): TimelineAudit[] {
     .map((a) => mergeExpandedText(a, domList));
 }
 
+/** ⚠️ 主动翻页的轮次上限 —— **安全网不是目标**,停止由数据判据定 */
+const MAX_PAGE_ROUNDS = 40;
+
+/**
+ * ⭐⭐⭐ **拿游标一直翻到没有为止**。
+ *
+ * ⚠️ 停止判据全部来自**数据**,不是猜的次数:
+ * ① 没有新游标 → X 说到头了
+ * ② 游标和上一轮一样 → 翻不动了(防死循环)
+ * ③ 这一轮没解出新推文 → 请求发了但没回数据
+ * ⭐ `MAX_PAGE_ROUNDS` 只在以上三条都没触发时兜底。
+ *
+ * ⭐ 实现上**复用 `harvest`**:发完请求用一次零滚动的 harvest 把响应收回来。
+ * ⚠️ 不新开 `peekAcquire`/`wait` 这些 dep —— 那会让这一层多认识底座两件事。
+ */
+async function pageUntilDone(
+  deps: RunDeps,
+  audits: readonly TimelineAudit[],
+  rep: RunHarvest,
+  say: (m: string) => void,
+  addResponses: (n: number) => void,
+): Promise<TimelineAudit[]> {
+  const all = [...audits];
+  /**
+   * ⭐ 翻页要用**页面自己发过的那条请求** —— queryId 与 features 都在里面,
+   * 推不出来也不该写死(随 X 版本变)。
+   */
+  const seed = rep.items.find((it) => carriesTweets(it.url) && it.url.includes('variables='));
+  if (seed === undefined) {
+    say('没有可用来翻页的请求 —— 跳过主动翻页');
+    return all;
+  }
+
+  const seenCursors = new Set<string>();
+  let round = 0;
+  while (round < MAX_PAGE_ROUNDS) {
+    /** ⭐ 游标取**最新那一份账**里的,不是第一页的 */
+    const cursor = [...all].reverse()
+      .map((a) => a.cursor)
+      .find((c) => c !== undefined && c !== '');
+    if (cursor === undefined) { say(`翻页结束：没有下一页游标（共 ${round} 轮）`); break; }
+    /** ⚠️ 同一个游标出现两次 = 翻不动了,**立刻停**,别空转 */
+    if (seenCursors.has(cursor)) { say(`翻页结束：游标不再变化（共 ${round} 轮）`); break; }
+    seenCursors.add(cursor);
+
+    round += 1;
+    say(`主动翻页 第 ${round} 页…`);
+
+    let one: RunHarvest | null;
+    try {
+      /**
+       * ⭐ 一次零滚动的 harvest:它会装腿 → 跑脚本发请求 → 把响应收回来。
+       * ⚠️ `maxRounds: 0` —— 这一步**不滚动**,只等响应。
+       */
+      await deps.runScript!(X_SCRIPTS.fetchNextPage, { url: seed.url, cursor });
+      one = await deps.harvest({
+        wantPages: 1,
+        pageUrlIncludes: X_PAGE_MATCHERS,
+        noisyUrlSubstrings: X_NOISY_URLS,
+        maxRounds: 0,
+      });
+    } catch (e) {
+      /** ⚠️ 翻页失败**不毁整轮** —— 已经采到的还在 */
+      say(`翻页第 ${round} 轮失败：${e instanceof Error ? e.message : String(e)}`);
+      break;
+    }
+    if (one === null) { say(`翻页第 ${round} 轮没收到响应`); break; }
+
+    addResponses(one.items.length);
+    const got = auditsOf(one);
+    const tweets = got.reduce((n, a) => n + a.items.length, 0);
+    if (tweets === 0) {
+      say(`翻页结束：第 ${round} 轮没解出新推文（共 ${round} 轮）`);
+      break;
+    }
+    all.push(...got);
+  }
+  return all;
+}
+
 /**
  * ⭐⭐⭐ 采一页 —— **采集 → 研判 → 按深度补全 → 再核对**。
  *
@@ -159,6 +244,25 @@ export async function runCollect(
   let audits = auditsOf(rep);
   if (audits.length === 0) {
     return { audits, totalResponses, summary: null, harvest: rep, plan: null, fetched: [] };
+  }
+
+  /**
+   * ── ①.5 **主动翻页** —— 滚动翻不动的页面靠它 ──
+   *
+   * ⚠️⚠️ 三跑实测:配方搜索每跑只拿到 **1 条 `SearchTimeline`**,而
+   * · 不是噪音(挡掉 m3u8 后 6 条响应全干净,仍是 1)
+   * · 不是滚动不够(21 条推文约 17000px,实际滚了 **47360px**,早在空滚)
+   * · 不是结果就这么多(**报告写「游标 1/1 页有」—— X 自己说还有下一页**)
+   * ⭐ 对照 `x.profile` 同样滚 4 万 px 出 **43** 条载荷 ——
+   * **个人主页滚动会自动翻页,搜索页不会**,这是 X 的页面差异。
+   *
+   * ⭐ 做法:拿**页面自己发过的那条请求**(URL 里带 queryId 与 features),
+   * 在 `variables` 里塞游标,在页面上下文里 fetch。响应**照常被两条腿捕到**。
+   * ⚠️ 停止由**数据判据**定(没有新游标 / 没采到新东西就停),
+   * 轮数上限只是安全网(`feedback-pdca-close-the-loop`)。
+   */
+  if (deps.runScript) {
+    audits = await pageUntilDone(deps, audits, rep, say, (n) => { totalResponses += n; });
   }
 
   // ── ② 研判(只判不做)──
