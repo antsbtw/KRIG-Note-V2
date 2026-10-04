@@ -6,6 +6,8 @@
  * 恰恰是最该测的(`feedback-pdca-close-the-loop`:循环要闭环)。
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { runCollect, type RunDeps, type RunHarvest } from '@modules/x/x-collect-run';
 
 const TIMELINE_URL = 'https://x.com/i/api/graphql/abc/UserTweetsTimeline';
@@ -564,20 +566,24 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
       },
       async runScript() { n += 1; return { ok: true }; },
     };
-    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
     /**
-     * ⚠️⚠️ 判据**放宽到 13** —— 2026-10-04 改。
+     * ⭐⭐⭐ **停不停由调用方说** —— 用户 2026-10-04:
+     * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+     * 　而不是你在采集中定下来。」
      *
-     * 原先断言「≤ 4」,对应 `EMPTY_ROUNDS_TO_STOP = 3` 那条刹车。
-     * 真机对照实验证否了它:窄配方 43 条、宽配方 42 条(查询放宽十几倍
-     * 结果几乎一样),而 **4/4 页都有游标** —— **是刹车踩早了**,
-     * 不是 X 没东西了。`project-x-cursor-paging` 早写过:
-     * 「几页没新人」不能当到底,当年把 2604 个账号卡死在 2244。
+     * ⚠️⚠️ 我在这上面连栽两次,**两次都是把业务判断写死进采集层**:
+     * ① `EMPTY_ROUNDS_TO_STOP = 3` → 真机对照实验证否(窄 43 / 宽 42,
+     * 　 查询放宽十几倍结果一样,而 4/4 页都有游标 —— 刹车踩早了)
+     * ② 然后我「改成 12」—— **还是同一个错误**,只换了个数。
      *
-     * ⭐ 本条现在钉的是「**不会无限空转**」(仍远小于 MAX_PAGE_ROUNDS=40),
-     * 不再钉「尽早停」。
+     * ⭐ 所以本条现在喂一个 `stopPaging` 进去,钉的是
+     * 「**采集层照业务说的办**」,不再钉某个魔法数字。
      */
-    expect(n, '无限空转了 —— 兜底闸没生效').toBeLessThanOrEqual(13);
+    const r = await runCollect(
+      { ...deps, stopPaging: (st) => (st.emptyRounds >= 3 ? { go: false, why: '业务:够了' } : { go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    expect(n, '业务说停了却还在翻 —— 采集层自作主张').toBeLessThanOrEqual(4);
     expect(r.summary?.items.length, '同一条推被算成了多条').toBe(1);
   });
 
@@ -661,5 +667,141 @@ describe('⭐⭐⭐ 翻页停止只认「X 说了算」', () => {
       r.summary?.items.map((t) => t.id).sort(),
       '连着几轮旧推就停了 —— 后面的新推文全丢（2604 卡死在 2244 就是这么来的）',
     ).toEqual(['t1', 't9']);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **分界:采集层只答「X 还给不给」** —— 用户 2026-10-04 原话
+ *
+ * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+ * 　而不是你在**采集**中定下来。」
+ *
+ * ⚠️⚠️ 我在这上面连栽两次,两次都是把业务判断写死进采集层
+ * (先 `EMPTY_ROUNDS_TO_STOP = 3`,被证否后「改成 12」——**还是同一个错误**)。
+ */
+describe('⭐⭐⭐ 停不停由业务定,不由采集层定', () => {
+  const S = 'https://x.com/i/api/graphql/q/SearchTimeline?variables=%7B%7D';
+  const mk = (id: string, cursor: string): string => JSON.stringify({
+    data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+      type: 'TimelineAddEntries',
+      entries: [
+        { entryId: `tweet-${id}`, content: { itemContent: { tweet_results: { result: {
+          rest_id: id,
+          legacy: { id_str: id, full_text: `推${id}` },
+          core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+        } } } } },
+        { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+      ],
+    }] } } } },
+  });
+
+  /** ⭐ X 一直有新东西给:每轮都是新推 + 新游标 */
+  function endless(): { deps: RunDeps; rounds: () => number } {
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: S, text: mk(`t${n}`, `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    return { deps, rounds: () => n };
+  }
+
+  it('⭐⭐⭐ 业务说「翻 3 轮就够」→ 采集层**照办**', async () => {
+    const { deps, rounds } = endless();
+    await runCollect(
+      { ...deps, stopPaging: (st) => (st.round >= 3 ? { go: false, why: '业务:翻够 3 轮' } : { go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    expect(rounds(), '业务说停了还在翻').toBe(3);
+  });
+
+  it('⭐⭐⭐ 业务说「一直翻」→ 采集层**不自作主张**停', async () => {
+    const { deps, rounds } = endless();
+    await runCollect(
+      { ...deps, stopPaging: () => ({ go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    /** ⚠️ X 一直给新的,业务也没喊停 → 只有安全网能拦住它 */
+    expect(rounds(), '采集层自己踩了刹车 —— 那是业务的判断').toBeGreaterThan(50);
+  });
+
+  /**
+   * ⚠️ 「连续几轮没新推文」**只是事实,不是判据** ——
+   * 采集层把它报给业务,**由业务决定要不要当刹车**。
+   */
+  it('⭐⭐ 连续空轮只上报,**不自己停**', async () => {
+    /** X 一直回同一条推、但游标一直变(真机那种) */
+    let n = 0;
+    const seen: number[] = [];
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: S, text: mk('same', `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+      stopPaging: (st) => {
+        seen.push(st.emptyRounds);
+        return st.emptyRounds >= 5 ? { go: false, why: '业务:连 5 轮没新的' } : { go: true };
+      },
+    };
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(seen, '没把「连续空轮」如实报给业务').toContain(5);
+    expect(n, '业务说停了却没停').toBe(5);
+  });
+
+  it('⚠️ 不给 stopPaging → 翻到 X 不给为止(游标不变就停)', async () => {
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⚠️ 游标**恒定** = X 翻不动了 —— 这条是采集层该管的 */
+        return { items: [{ url: S, text: mk(`t${n}`, 'same-cursor') }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(n, '游标不变还在翻 —— 「X 还给不给」是采集层的本职').toBe(1);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 采集层**不许**再长出「采多少算够」的常量 —— 结构守卫
+ *
+ * ⚠️ 行为测试盖不住这件事:我可以加一个新常量、把测试一起改了,
+ * 两边都绿。**而我已经连栽两次**(3 → 12,换个数还是同一个错)。
+ */
+describe('⭐⭐⭐ 采集层不许自带「够了没有」的阈值', () => {
+  it('⭐⭐⭐ 没有 EMPTY_ROUNDS_TO_STOP 这类业务阈值', () => {
+    const src = readFileSync(
+      join(__dirname, '..', '..', 'src/modules/x/x-collect-run.ts'),
+      'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '');  // ⚠️ 剥块注释 —— 注释里会提到这个名字
+
+    expect(
+      src,
+      '采集层又写死了「连续几轮没新的就停」—— 那是业务的研判\n'
+      + '⭐ 用户 2026-10-04:「判断是否停下来是由业务编排时的研判逻辑来定，'
+      + '而不是你在采集中定下来。」',
+    ).not.toMatch(/EMPTY_ROUNDS_TO_STOP|emptyRounds\s*>=\s*\d/);
+
+    /** ⭐ 安全网**可以有**,但名字要说清它是安全网,且远大于业务阈值 */
+    expect(src, '连安全网都没了 —— X 一直给新游标会永远转下去')
+      .toContain('PAGING_SAFETY_ROUNDS');
+  });
+
+  it('⭐⭐ 停止判据里只有「X 还给不给」那两条', () => {
+    const src = readFileSync(
+      join(__dirname, '..', '..', 'src/modules/x/x-collect-run.ts'),
+      'utf-8',
+    );
+    const i = src.indexOf('async function pageUntilDone');
+    expect(i, 'pageUntilDone 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const body = src.slice(i, src.indexOf('\n}', i));
+    expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(300);
+    /** ① 没游标 ② 游标不变 —— 这两条是采集层的本职 */
+    expect(body, '不判「没有下一页游标」').toContain('没有下一页游标');
+    expect(body, '不判「游标不再变化」').toContain('游标不再变化');
   });
 });

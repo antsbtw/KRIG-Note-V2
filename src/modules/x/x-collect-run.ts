@@ -51,6 +51,11 @@ export type RunDeps = {
    */
   runScript?(scriptId: string, params: Record<string, unknown>): Promise<unknown>;
   /**
+   * ⭐⭐⭐ **还翻不翻** —— 业务的研判,采集层不替它决定。
+   * ⚠️ 不给就一直翻到 X 不给为止(没游标 / 游标不变),只有安全网兜底。
+   */
+  stopPaging?(state: PagingState): PagingDecision;
+  /**
    * ⭐⭐ 回到指定 URL —— 逐篇补完之后用。
    * ⚠️ 可选:没提供就不回(老调用方行为不变),但那样下一轮会从错的页开始。
    */
@@ -121,30 +126,49 @@ function auditsOf(rep: RunHarvest): TimelineAudit[] {
     .map((a) => mergeExpandedText(a, domList));
 }
 
-/** ⚠️ 主动翻页的轮次上限 —— **安全网不是目标**,停止由数据判据定 */
-const MAX_PAGE_ROUNDS = 40;
 /**
- * ⚠️⚠️ **「几轮没新推文」不是停止判据** —— 2026-10-04 实证,
- * 而 `project-x-cursor-paging` 早就写过同一条。
+ * ⚠️ 翻页**兜底**轮次 —— 只在调用方没给 `stopPaging` 时用。
  *
- * ── 对照实验(同一条链路,只换查询)──
- *   窄配方(9关键词 AND 6求助词 AND lang:zh) → 43 条 / 5 页
- *   宽配方(3关键词,不加求助词,不限语言)     → 42 条 / 4 页
- * ⭐ 查询放宽十几倍结果几乎一样 → **42 不是「真实数量」,是刹车踩早了**。
- * ⚠️ 而那一跑 **4/4 页都有游标** —— X 一直说还有下一页。
- *
- * ⭐ 记忆里的原话:「原地打转」已由**游标重复检测**精确挡住
- * (游标不变=没翻动),这条刹车**多余**;当年它把 2604 个账号卡死在 2244,
- * 改成页数兜底后 2244 → 2634。
- * ⚠️ 我昨天又把它加了回来 —— **同一个坑第二次**。
- *
- * ⭐ 主判据只认「X 说了算」的两条:
- * ① 没有下一页游标 ② 游标不再变化(真的翻不动)
- * ⚠️ 这个数**不是**主判据,是最后一道兜底(防 X 一直给新游标却永远回旧数据);
- * 取 12 远大于「翻过几页旧的再出新的」那种正常情况,
- * 而当年那条刹车是 **3** —— 差别就在这。
+ * ⚠️⚠️ 它**不是**「采多少算够」的判据 —— 那是编排的事(见 `PagingDecision`)。
+ * 这里只防「X 一直给新游标、程序永远转下去」那种病态情况。
  */
-const EMPTY_ROUNDS_TO_STOP = 12;
+const PAGING_SAFETY_ROUNDS = 200;
+/**
+ * ⭐⭐⭐ **翻到第几页该不该继续** —— 由**调用方**答,不由采集层答。
+ *
+ * ── 用户 2026-10-04 定的分界(原话)──
+ * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+ * 　而不是你在**采集**中定下来。」
+ *
+ * ⭐ 采集层只回答一件事:**X 还给不给**(没游标 / 游标不变)。
+ * 「够了没有」「值不值得再翻」是业务的判断 —— 不同配方答案不同:
+ * 盯人可能要翻到底,热点扫一眼就够。
+ *
+ * ⚠️⚠️ 我在这上面连栽两次,**两次都是把业务判断写死进采集**:
+ * ① `EMPTY_ROUNDS_TO_STOP = 3` —— 连 3 轮没新推就停。
+ * 　 真机对照实验证否:窄配方 43 条 / 宽配方 42 条(查询放宽十几倍结果一样),
+ * 　 而 **4/4 页都有游标** —— 是刹车踩早了。
+ * 　 `project-x-cursor-paging` 早写过:当年这条把 2604 账号卡死在 2244。
+ * ② 然后我「改成 12」—— **还是同一个错误**,只是换了个数。
+ */
+export type PagingDecision = {
+  /** ⭐ 还要不要翻下一页 */
+  readonly go: boolean;
+  /** ⚠️ 不翻了的话**说清为什么** —— 报告要印得出来 */
+  readonly why?: string;
+};
+
+/** ⭐ 翻完一页之后问调用方:继续吗 */
+export type PagingState = {
+  /** 已经翻了几轮 */
+  readonly round: number;
+  /** 到目前为止一共多少条**不重复**推文 */
+  readonly uniqueTweets: number;
+  /** 这一轮**新增**了几条(0 = 这一页全是见过的) */
+  readonly freshThisRound: number;
+  /** ⚠️ 连续多少轮没有新的 —— 业务要用它定自己的刹车 */
+  readonly emptyRounds: number;
+};
 
 /**
  * ⭐⭐⭐ **拿游标一直翻到没有为止**。
@@ -182,7 +206,7 @@ async function pageUntilDone(
   for (const a of all) for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
   let emptyRounds = 0;
   let round = 0;
-  while (round < MAX_PAGE_ROUNDS) {
+  while (round < PAGING_SAFETY_ROUNDS) {
     /** ⭐ 游标取**最新那一份账**里的,不是第一页的 */
     const cursor = [...all].reverse()
       .map((a) => a.cursor)
@@ -235,21 +259,27 @@ async function pageUntilDone(
       for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
     }
     const fresh = seenTweetIds.size - before;
-    if (fresh === 0) {
-      emptyRounds += 1;
-      /**
-       * ⚠️ 不是一轮空就停 —— X 偶尔回一页重复的,下一页又有新的
-       * (`project-x-cursor-paging` 的实证:3 页刹车把 2604 账号卡死在 2244)。
-       * ⭐ 连续几轮都没新的才算到头。
-       */
-      if (emptyRounds >= EMPTY_ROUNDS_TO_STOP) {
-        say(`翻页结束：连续 ${emptyRounds} 轮没有新推文（共 ${round} 轮）`);
+    emptyRounds = fresh === 0 ? emptyRounds + 1 : 0;
+    all.push(...got);
+
+    /**
+     * ⭐⭐⭐ **问调用方:还翻吗** —— 用户 2026-10-04:
+     * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+     * 　而不是你在**采集**中定下来。」
+     *
+     * ⚠️ 采集层已经把它知道的事实都摆出来了(翻了几轮、共多少条、
+     * 这轮新增几条、连续几轮没新的)——**怎么用是业务的事**。
+     * ⚠️ 不给 `stopPaging` 就一直翻到 X 不给为止(只有安全网兜底)。
+     */
+    if (deps.stopPaging) {
+      const d = deps.stopPaging({
+        round, uniqueTweets: seenTweetIds.size, freshThisRound: fresh, emptyRounds,
+      });
+      if (!d.go) {
+        say(`翻页结束：${d.why ?? '业务判定够了'}（共 ${round} 轮）`);
         break;
       }
-    } else {
-      emptyRounds = 0;
     }
-    all.push(...got);
   }
   return all;
 }

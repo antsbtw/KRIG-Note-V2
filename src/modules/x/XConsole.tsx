@@ -792,6 +792,32 @@ export function XConsole(
                           }
                           return (rr as { value?: unknown }).value;
                         },
+                        /**
+                         * ⭐⭐⭐ **还翻不翻,业务说了算** —— 用户 2026-10-04:
+                         * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+                         * 　而不是你在采集中定下来。」
+                         *
+                         * ⭐ 这里的业务判断就是面板上那个「**页**」——
+                         * 人填 10 页就翻到 10 页为止。
+                         * ⚠️ 采集层只管「X 还给不给」(没游标 / 游标不变),
+                         * **它不知道也不该知道「够了没有」**。
+                         */
+                        stopPaging: (st) => {
+                          const want = Number(pagesWanted) || 10;
+                          if (st.uniqueTweets > 0 && st.round >= want) {
+                            return { go: false, why: `已翻够 ${want} 页` };
+                          }
+                          /**
+                           * ⚠️ 连续空轮**不是**停止理由(X 翻页会从头翻,
+                           * 头几页全是见过的很正常)—— 但连着太多轮一条新的都没有,
+                           * 多半是 X 在原地打转,这时才收手。
+                           * ⭐ 这个数在**业务这边**定,改它不用动采集层。
+                           */
+                          if (st.emptyRounds >= 15) {
+                            return { go: false, why: `连续 ${st.emptyRounds} 轮没有新推文` };
+                          }
+                          return { go: true };
+                        },
                         onProgress: setStep,
                       }, {
                         // ⭐ 用户 2026-10-03:「每次采集 10 页」
