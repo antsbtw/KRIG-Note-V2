@@ -924,6 +924,28 @@ export function registerWebDomIpc(): void {
                 stopReason: rep.stopReason,
                 legs: rep.legs,
                 problems: rep.problems,
+                /**
+                 * ⭐⭐ **收到的是什么** —— 2026-10-04 补。
+                 *
+                 * ⚠️ 起因:配方搜索滚了 60 轮 39983px,却只有 **1 条**时间线载荷,
+                 * 而我**读不出那 40 条响应里都是些什么** —— 只能回头猜。
+                 * ⭐ 这正是 2026-10-02 补过的那条(「我知道捕到 37 条,
+                 * 却不知道捕到的是什么」),`harvest` 取代手动流程时**漏带了**。
+                 *
+                 * ⚠️ 只记**路径尾段 + 条数**,不记完整 URL(带长 queryId)、
+                 * 更不记正文(几十 KB 会把留痕写爆)。
+                 */
+                endpoints: (() => {
+                  const n = new Map<string, number>();
+                  for (const it of rep.items) {
+                    const tail = it.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)';
+                    n.set(tail, (n.get(tail) ?? 0) + 1);
+                  }
+                  return [...n.entries()]
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 20)
+                    .map(([tail, count]) => `${count}× ${tail}`);
+                })(),
                 /** ⭐ 展开的产出摘要 —— 「跑没跑」要分得清 */
                 expand: rep.afterRound.length > 0
                   ? {

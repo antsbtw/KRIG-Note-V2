@@ -630,3 +630,32 @@ describe('⭐⭐⭐ 开始收之前先清空', () => {
     ).toBeLessThan(body.indexOf('cap.start()'));
   });
 });
+
+/**
+ * ⭐⭐⭐ 采完要能读出**收到的是什么** —— 2026-10-04
+ *
+ * 配方搜索滚了 60 轮 39983px,却只有 1 条时间线载荷。
+ * ⚠️ 而我**读不出那 40 条响应里都是些什么** —— 只能回头猜。
+ * ⭐ 这正是 2026-10-02 补过的那条(「我知道捕到 37 条,却不知道捕到的是什么」),
+ * `harvest` 取代手动流程时**漏带了** —— 同一个教训第二次。
+ */
+describe('⭐⭐⭐ harvest 留痕要带「收到的是什么」', () => {
+  it('⭐⭐⭐ 留痕里有端点清单,不只有条数', () => {
+    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    const i = src.indexOf("case 'harvest':");
+    expect(i, "harvest 分支不见了 —— 本条要重写").toBeGreaterThan(-1);
+    const end = src.indexOf('case ', i + 10);
+    const body = src.slice(i, end > i ? end : undefined);
+    expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(200);
+
+    expect(
+      body,
+      'harvest 留痕只记条数不记端点 —— 「采到 40 条」却不知道是些什么,查不动',
+    ).toContain('endpoints');
+    /** ⚠️ 不许记完整 URL(带长 queryId)——只记路径尾段 */
+    expect(
+      body,
+      '把完整 URL 写进留痕了 —— queryId 很长且可能含敏感参数',
+    ).not.toMatch(/endpoints[\s\S]{0,200}it\.url[,)]/);
+  });
+});
