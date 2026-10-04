@@ -411,6 +411,22 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
  */
 export function auditTimelinePayload(text: string): TimelineAudit {
   const problems: string[] = [];
+  /**
+   * ⭐⭐ **空响应体**单独说 —— 2026-10-04 真机。
+   *
+   * ⚠️ 本函数的文档注释写着「『这个载荷读不懂』与『这个载荷是空的』
+   * 是两件事,混起来就查不动」—— 而代码**正是混着的**:
+   * 空串走 JSON.parse 会抛 `Unexpected end of JSON input`,
+   * 于是报成「可能被截断了」,把人指向「腿把响应切了」这个错方向。
+   * ⭐ 真相是**压根没有响应体**(CDP 的 noBody),那是另一类问题。
+   */
+  if (text.trim() === '') {
+    return {
+      tweets: 0, hasCursor: false, items: [], coverage: {},
+      problems: ['**响应体是空的** —— 不是解析失败,是这条响应根本没拿到内容'
+        + '(多半是 CDP 读 body 失败,看 legs 里的 noBody)'],
+    };
+  }
   let root: unknown;
   try {
     root = JSON.parse(text);

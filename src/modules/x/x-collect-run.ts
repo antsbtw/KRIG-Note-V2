@@ -123,6 +123,12 @@ function auditsOf(rep: RunHarvest): TimelineAudit[] {
 
 /** ⚠️ 主动翻页的轮次上限 —— **安全网不是目标**,停止由数据判据定 */
 const MAX_PAGE_ROUNDS = 40;
+/**
+ * ⚠️ 连续几轮没有新推文才算到头。
+ * ⭐ 不是一轮空就停 —— `project-x-cursor-paging` 实证过:
+ * 「几页没新人」当成到底,把 2604 个账号卡死在 2244,三跑同数。
+ */
+const EMPTY_ROUNDS_TO_STOP = 3;
 
 /**
  * ⭐⭐⭐ **拿游标一直翻到没有为止**。
@@ -155,6 +161,10 @@ async function pageUntilDone(
   }
 
   const seenCursors = new Set<string>();
+  /** ⭐ 已经见过的推文 id —— 判「这一轮有没有收到新东西」靠它 */
+  const seenTweetIds = new Set<string>();
+  for (const a of all) for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
+  let emptyRounds = 0;
   let round = 0;
   while (round < MAX_PAGE_ROUNDS) {
     /** ⭐ 游标取**最新那一份账**里的,不是第一页的 */
@@ -191,10 +201,37 @@ async function pageUntilDone(
 
     addResponses(one.items.length);
     const got = auditsOf(one);
-    const tweets = got.reduce((n, a) => n + a.items.length, 0);
-    if (tweets === 0) {
-      say(`翻页结束：第 ${round} 轮没解出新推文（共 ${round} 轮）`);
-      break;
+    /**
+     * ⭐⭐⭐ 判据是「**有没有没见过的推**」,不是「这一页有几条推」。
+     *
+     * ⚠️⚠️ 真机 2026-10-04 踩到:原先写 `tweets === 0` 就停,
+     * 而 X **每页照样回 15 条、却是同一批**(游标也每轮都给新的)——
+     * 于是停止条件**永远到不了**,跑满 40 轮上限,
+     * 44 页载荷去重后只剩 **42 条推文**(680 原始 → 42)。
+     *
+     * ⭐ 又是 `feedback-pdca-close-the-loop` 的「数错元素」:
+     * 数了「页里有几条」而不是「新收了几条」,该数恒 > 0 等于没在判。
+     * ⚠️ `project-x-cursor-paging` 早记过同族:**「几页没新人」不能当到底** ——
+     * 反过来「有人」也不能当还有,要看的是**新不新**。
+     */
+    const before = seenTweetIds.size;
+    for (const a of got) {
+      for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
+    }
+    const fresh = seenTweetIds.size - before;
+    if (fresh === 0) {
+      emptyRounds += 1;
+      /**
+       * ⚠️ 不是一轮空就停 —— X 偶尔回一页重复的,下一页又有新的
+       * (`project-x-cursor-paging` 的实证:3 页刹车把 2604 账号卡死在 2244)。
+       * ⭐ 连续几轮都没新的才算到头。
+       */
+      if (emptyRounds >= EMPTY_ROUNDS_TO_STOP) {
+        say(`翻页结束：连续 ${emptyRounds} 轮没有新推文（共 ${round} 轮）`);
+        break;
+      }
+    } else {
+      emptyRounds = 0;
     }
     all.push(...got);
   }

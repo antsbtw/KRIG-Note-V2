@@ -862,3 +862,32 @@ describe('⭐⭐⭐ 同一条推的两份:留更全的', () => {
     expect(s.items.length, '没 id 的被当成同一条去重掉了').toBe(2);
   });
 });
+
+/**
+ * ⭐⭐ 「空的」与「读不懂」是两件事 —— 2026-10-04 真机
+ *
+ * 配方搜索翻 44 页,报告里一条
+ * 「不是合法 JSON(Unexpected end of JSON input)—— **可能被截断了**」。
+ * ⚠️ 真相是**空响应体**(CDP 没读到 body),而那句话把人指向
+ * 「腿把响应切了」这个错方向。
+ * ⭐ 本函数的文档注释早就写着这两件事要分开 —— 代码却混着。
+ */
+describe('⭐⭐ 空响应体 ≠ 解析失败', () => {
+  it('⭐⭐ 空串 → 说「响应体是空的」,不说「可能被截断」', () => {
+    const a = auditTimelinePayload('');
+    expect(a.problems.join(''), '把「没拿到内容」说成了「被截断」—— 指向错方向')
+      .toContain('响应体是空的');
+    expect(a.problems.join('')).not.toContain('可能被截断');
+  });
+
+  it('⭐ 只有空白也算空', () => {
+    expect(auditTimelinePayload('   \n ').problems.join('')).toContain('响应体是空的');
+  });
+
+  /** ⚠️ 真正读不懂的仍要说「不是合法 JSON」—— 别把两类又并回去 */
+  it('⚠️ 半截 JSON 仍报「不是合法 JSON」', () => {
+    const a = auditTimelinePayload('{"data":{"search');
+    expect(a.problems.join(''), '真的解析失败却说成空的').toContain('不是合法 JSON');
+    expect(a.problems.join('')).not.toContain('响应体是空的');
+  });
+});

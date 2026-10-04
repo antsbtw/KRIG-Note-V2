@@ -532,6 +532,63 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
     expect(r.summary?.items.length, '第一页也丢了 —— 翻页失败不该毁掉已采的').toBe(1);
   });
 
+  /**
+   * ⭐⭐⭐ **X 会一直给新游标、却回同一批推** —— 2026-10-04 真机
+   *
+   * 那一跑翻满 40 轮上限:44 页载荷、原始 680 条,**去重后只剩 42 条**。
+   * ⚠️⚠️ 原判据写 `这一页有几条推 === 0` 才停 —— 而 X 每页照样回 15 条,
+   * 停止条件**永远到不了**。
+   * ⭐ `feedback-pdca-close-the-loop` 的「数错元素」:
+   * 数「页里有几条」而不是「**新收了几条**」,该数恒 > 0 等于没在判。
+   */
+  it('⭐⭐⭐ 游标一直变但推文是同一批 → **按「没有新推文」停**', async () => {
+    /** ⭐ 每页都有推、都有新游标,但**推文 id 永远是 t1** */
+    const samePage = (cursorNo: number): string => JSON.stringify({
+      data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          { entryId: 'tweet-1', content: { itemContent: { tweet_results: { result: {
+            rest_id: 't1',
+            legacy: { id_str: 't1', full_text: '同一条' },
+            core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+          } } } } },
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: `c${cursorNo}` } },
+        ],
+      }] } } } },
+    });
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: samePage(n) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    /** ⚠️ 连续 3 轮没新的才停 → 应该在第 3 轮左右收手,远不到 40 */
+    expect(n, '跑满了轮次上限 —— 停止判据永远到不了（真机 40 轮、680 条只去重出 42）')
+      .toBeLessThanOrEqual(4);
+    expect(r.summary?.items.length, '同一条推被算成了多条').toBe(1);
+  });
+
+  /** ⚠️ 一轮重复不许立刻停 —— X 偶尔回一页旧的,下一页又有新的 */
+  it('⚠️⚠️ 中间夹一页重复的 → **不停**,继续往后翻', async () => {
+    const pages = [page(1, 'c1'), page(1, 'c2'), page(2, 'c3'), page(3, null)];
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: pages[Math.min(n, pages.length - 1)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(
+      r.summary?.items.length,
+      '夹了一页重复就停了 —— 后面的新推文全丢（2604 账号卡死在 2244 就是这么来的）',
+    ).toBe(3);
+  });
+
   it('⚠️ 调用方没给 runScript → 不翻页(老行为不变)', async () => {
     const { deps } = pagingDeps([page(1, 'c1'), page(2, null)]);
     const noScript: RunDeps = { harvest: deps.harvest };
