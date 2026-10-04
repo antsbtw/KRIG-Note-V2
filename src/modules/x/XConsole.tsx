@@ -48,6 +48,8 @@ import {
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
+import { runCollect } from './x-collect-run';
+import type { FetchDepth, TweetNeed } from './x-fetch-plan';
 
 type PageTable = {
   owner: string;
@@ -187,21 +189,24 @@ export function XConsole(
   /** ⭐ 核对报告落盘的位置 —— 人和 AI 看同一份 */
   const [auditFile, setAuditFile] = useState<string | null>(null);
   /**
-   * ⭐⭐ 单篇长文页**回来了哪些端点** —— 2026-10-03。
-   * ⚠️ 这是**待答的问题不是结论**:我不知道正文在哪个端点,
-   * 所以先如实列出来,别拿猜的判据去筛。
+   * ⭐⭐⭐ **补到哪一层** —— 用户 2026-10-03:
+   * 「是否需要逐层获取,**根据采集的要求定下来**就可以了。」
+   *
+   * ⚠️ 默认 `expand-only`:**不离开页面**,最稳也最快。
+   * 要 38 篇长文正文才选 `full`(一篇约 9 秒,38 篇约 6 分钟)。
    */
-  const [probe, setProbe] = useState<Array<{
-    op: string; bytes: number; hasContentState: boolean; summary: string;
-  }> | null>(null);
+  const [depth, setDepth] = useState<FetchDepth>('expand-only');
+  /** ⭐ 长流程的进度 —— 不让人对着一个「采集中」干等 */
+  const [step, setStep] = useState('');
+  /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
+  const [plan, setPlan] = useState<{
+    depth: FetchDepth;
+    todo: readonly TweetNeed[];
+    skipped: readonly TweetNeed[];
+    impossible: readonly TweetNeed[];
+    fetched: ReadonlyArray<{ id: string; url: string; ok: boolean; textLen?: number; why?: string }>;
+  } | null>(null);
 
-  /**
-   * ⭐ 本次采到的**缺正文长文地址** —— 从核对结果推导,**不另存一份**
-   * (两份清单必漂,见 `x_tweet 加字段要登记四处` 的教训)。
-   */
-  const articleUrls: readonly string[] = (audit?.items ?? [])
-    .filter((t) => t.incomplete === 'article-no-body' && t.articleUrl !== undefined)
-    .map((t) => t.articleUrl!);
   /** ⭐ 上次「展开全部」的结果 —— 让人看见点开了几条 */
   const [expanded, setExpanded] = useState<{ clicked: number; read: number } | null>(null);
   /**
@@ -632,68 +637,59 @@ export function XConsole(
                     setReport(null);
                     setAudit(null);
                     setAuditFile(null);
+                    setPlan(null);
+                    setStep('');
                     try {
-                      const r = await window.electronAPI!.webDomInvoke({
-                        op: 'harvest',
-                        pageRef: { wcId: wcId! },
-                        plan: {
-                          // ⭐ 用户 2026-10-03:「每次采集 10 页」
-                          wantPages: Number(pagesWanted) || 10,
-                          /**
-                           * ⭐ 用**抗改版**的判据(含 `*Timeline` 后缀正则)——
-                           * 2026-10-03 实测:X 改版加了 `UserOriginalsTimeline`,
-                           * 旧的写死清单里没有 → 滚 60 轮采到 0 页,而数据就在眼前。
-                           */
-                          pageUrlIncludes: X_PAGE_MATCHERS,
-                          noisyUrlSubstrings: X_NOISY_URLS,
-                          // ⭐ 每轮自动展开折叠的推文 —— 不是人要点的一步
-                          afterRoundScriptId: X_SCRIPTS.expandAll,
-                          // ⚠️ 轮次是**安全网不是目标**:采够页数会提前停
-                          maxRounds: 60,
+                      /**
+                       * ⭐⭐⭐ **一次调用跑完全程** —— 编排在 `x-collect-run`。
+                       *
+                       * 用户 2026-10-03:「先 tweetid,然后**研判**这个推文是需要
+                       * showall 还是需要点击进入 article,最后**根据业务的要求**
+                       * 来执行是否要获取全部内容。」
+                       *
+                       * ⚠️ 此前这 60 行全挤在这个 onClick 里 ——
+                       * 写在 onClick 里的东西**测不了**,而「逐篇补 38 篇」
+                       * 这种循环恰恰是最该测的。
+                       */
+                      const run = await runCollect({
+                        harvest: async (plan) => {
+                          const rr = await window.electronAPI!.webDomInvoke({
+                            op: 'harvest', pageRef: { wcId: wcId! }, plan,
+                          });
+                          setLog((l) => [{
+                            at: new Date().toLocaleTimeString(),
+                            label: plan.gotoPage ? `取长文 ${plan.gotoPage.params?.articleId ?? ''}` : '采这一页',
+                            result: rr,
+                          }, ...l].slice(0, 50));
+                          if (rr.status !== 'ok' && rr.status !== 'degraded') return null;
+                          return (rr as WebDomResult & { value: HarvestReport }).value;
                         },
+                        onProgress: setStep,
+                      }, {
+                        // ⭐ 用户 2026-10-03:「每次采集 10 页」
+                        wantPages: Number(pagesWanted) || 10,
+                        /** ⭐⭐ 补到哪一层 —— **采集要求说了算**,不是代码定 */
+                        depth,
                       });
-                      setLog((l) => [{
-                        at: new Date().toLocaleTimeString(), label: '采这一页', result: r,
-                      }, ...l].slice(0, 50));
 
-                      if (r.status === 'ok' || r.status === 'degraded') {
-                        const rep = (r as WebDomResult & { value: HarvestReport }).value;
-                        setReport(rep);
+                      if (run.harvest) setReport(run.harvest as HarvestReport);
+                      setAudit(run.summary);
+                      setPlan(run.plan === null ? null : { ...run.plan, fetched: run.fetched });
 
-                        /** ⭐ 每轮展开的全文 —— 按「**只许变长**」合并 */
-                        const merged = new Map<string, string>();
-                        for (const one of rep.afterRound ?? []) {
-                          const tweets = (one as { tweets?: Array<{ id: string; text: string }> })
-                            .tweets ?? [];
-                          for (const t of tweets) {
-                            const prev = merged.get(t.id);
-                            if (!prev || t.text.length > prev.length) merged.set(t.id, t.text);
-                          }
-                        }
-                        const domList = [...merged.entries()].map(([id, text]) => ({ id, text }));
-
-                        const audits: TimelineAudit[] = rep.items
-                          // ⚠️ 与上面**同一套判据**(isTimelineOp)—— 两份必漂
-                          .filter((it) => isTimelineOp(it.url))
-                          .map((it) => auditTimelinePayload(it.text))
-                          .map((a) => mergeExpandedText(a, domList));
-                        setAudit(audits.length > 0 ? summarizeAudits(audits) : null);
-
-                        if (audits.length > 0) {
-                          const text = exportAuditText(audits, {
-                            pages: audits.length,
-                            totalResponses: rep.items.length,
-                            rounds: rep.rounds,
-                            scrolledPx: rep.scrolledPx,
-                            /** ⭐ 「到上限停」与「滚到底停」要分得开 */
-                            reachedBottom: rep.reachedBottom,
-                            stopReason: rep.stopReason,
-                          });
-                          const w = await window.electronAPI!.webDomInvoke({
-                            op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-harvest',
-                          });
-                          if (w.status === 'ok') setAuditFile((w.value as { file: string }).file);
-                        }
+                      if (run.audits.length > 0) {
+                        const text = exportAuditText(run.audits, {
+                          pages: run.audits.length,
+                          totalResponses: run.harvest?.items.length ?? 0,
+                          rounds: run.harvest?.rounds,
+                          scrolledPx: run.harvest?.scrolledPx,
+                          /** ⭐ 「到上限停」与「滚到底停」要分得开 */
+                          reachedBottom: run.harvest?.reachedBottom,
+                          stopReason: run.harvest?.stopReason,
+                        });
+                        const w = await window.electronAPI!.webDomInvoke({
+                          op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-harvest',
+                        });
+                        if (w.status === 'ok') setAuditFile((w.value as { file: string }).file);
                       }
                     } finally {
                       setRunning(false);
@@ -711,6 +707,23 @@ export function XConsole(
                   title="采够几页就停"
                 />
                 <span style={{ fontSize: 10, opacity: 0.5 }}>页</span>
+                {/*
+                  ⭐⭐⭐ **补到哪一层** —— 用户 2026-10-03:
+                  「是否需要逐层获取,**根据采集的要求定下来**就可以了。」
+                  ⚠️ 不是代码决定「缺就补」—— 有的采集只要互动数,
+                  　 为此进 38 篇详情页纯属浪费。
+                */}
+                <select
+                  value={depth}
+                  onChange={(e) => setDepth(e.target.value as FetchDepth)}
+                  disabled={running}
+                  style={{ ...S.input, flex: 'none', width: 128 }}
+                  title="补到哪一层：as-is 一个不补 / 只展开 不离开页面 / 全部 含逐篇进长文页"
+                >
+                  <option value="as-is">只采，不补</option>
+                  <option value="expand-only">展开折叠（不离页）</option>
+                  <option value="full">全部（含长文正文）</option>
+                </select>
                 <button
                   type="button"
                   /** ⭐ 停是取消动作,必须在忙的时候可用 */
@@ -725,101 +738,46 @@ export function XConsole(
               </div>
 
               {/*
-                ⭐⭐⭐ **补长文正文** —— 2026-10-03。
+                ⭐⭐⭐ **研判与执行的账** —— 三类分开,不许混(2026-10-03)。
 
-                真机 @KA594594 一跑 40 条,**38 条是长文**,正文全不在列表页
-                (X 的设计:列表页只给 title + preview_text)。
-                ⭐ 地址**就在列表页载荷里**(`entities.urls[].expanded_url`,
-                　 实测 38/38 全配上)→ 不用点卡片、不用猜 URL,直接 goto。
-
-                ⚠️⚠️ 这一步**先只取一篇**。原因:单篇页的载荷端点名我**不知道**,
-                　 它不在 `X_PAGE_MATCHERS` 里。那是**平台的事实,推不出来** ——
-                　 所以先跑一篇、把回来的端点如实列出来,再决定判据怎么写。
-                　 (`feedback-dont-guess-look-at-real-data`;
-                　 　`project-x-collect-two-legs`:链路行为只有真机验得出来)
+                ⚠️⚠️ 「这次不补」**不等于**「不缺」,「补不了」又是第三件事。
+                混起来报告就会显得「全都齐了」——
+                `project-x-article-body-lost`:**不量的字段永远 100%**。
               */}
-              {articleUrls.length > 0 && (
-                <div style={{ ...S.row, marginTop: 6 }}>
-                  <button
-                    type="button"
-                    disabled={wcId == null || running}
-                    onClick={async () => {
-                      setRunning(true);
-                      setProbe(null);
-                      try {
-                        /**
-                         * ⭐⭐ **一次调用** —— 「先去那一页再采」是底座的活。
-                         * ⚠️ 第一版我在这里串了 `goto` + `harvest`,被守卫
-                         * 「输出栏只有一个发起动作」逮住 —— 那正是把编排
-                         * 又推回给人(用户 2026-10-03:「点击开始采集,就采集」)。
-                         *
-                         * ⚠️ `pageUrlIncludes` 故意给**空数组**:单篇页的载荷
-                         * 端点名我**不知道**,先全收回来看,而不是拿猜的判据去筛
-                         * (筛错了会报「0 页」而数据就在手里)。
-                         */
-                        const r = await window.electronAPI!.webDomInvoke({
-                          op: 'harvest',
-                          pageRef: { wcId: wcId! },
-                          plan: {
-                            /** ⭐ 走语义页不传 URL —— 那道闸不能绕 */
-                            gotoPage: { name: X_PAGE_NAME.article, params: { articleId: articleUrls[0] } },
-                            wantPages: 1,
-                            pageUrlIncludes: [],
-                            noisyUrlSubstrings: X_NOISY_URLS,
-                            /** ⚠️ 长文是一篇文章,滚几轮把正文触发出来即可 */
-                            maxRounds: 8,
-                          },
-                        });
-                        setLog((l) => [{
-                          at: new Date().toLocaleTimeString(), label: '取长文正文', result: r,
-                        }, ...l].slice(0, 50));
-
-                        if (r.status === 'ok' || r.status === 'degraded') {
-                          const rep = (r as WebDomResult & { value: HarvestReport }).value;
-                          /**
-                           * ⭐⭐ 如实列出**回来的每一个端点** —— 这正是本次要问的事。
-                           * ⚠️ 不做任何筛选,也不下「哪个是正文」的结论。
-                           */
-                          setProbe(rep.items.map((it) => {
-                            const sh = describePayload(it.text);
-                            const op = it.url.split('?')[0].split('/').filter(Boolean).pop() ?? '?';
-                            return {
-                              op,
-                              bytes: it.text.length,
-                              /** ⭐ 正文在 DraftJS `content_state` 里 —— 有没有一眼可见 */
-                              hasContentState: it.text.includes('content_state'),
-                              summary: sh.summary,
-                            };
-                          }));
-                        }
-                      } finally {
-                        setRunning(false);
-                      }
-                    }}
-                    style={S.btn}
-                    title="去第一篇长文的单篇页，把回来的载荷端点如实列出来（还不知道该认哪个，所以先全收）"
-                  >
-                    取第 1 篇长文正文
-                  </button>
-                  <span style={{ fontSize: 10, opacity: 0.55 }}>
-                    本次有 {articleUrls.length} 篇长文缺正文
-                  </span>
-                </div>
-              )}
-
-              {probe !== null && (
+              {plan !== null && (
                 <div style={S.diagnose}>
-                  <strong>单篇页回来的端点（{probe.length} 条，未筛选）</strong>
-                  {probe.length === 0 && (
-                    <div>⚠️ 一条响应都没有 —— 页面可能没发请求，或腿没装上。</div>
+                  <strong>研判（深度：{
+                    plan.depth === 'as-is' ? '只采，不补'
+                      : plan.depth === 'expand-only' ? '展开折叠（不离页）' : '全部'
+                  }）</strong>
+                  <div style={{ marginTop: 3 }}>
+                    本次执行 <strong>{plan.todo.length}</strong> 条
+                    {plan.skipped.length > 0 && (
+                      <>　·　<span style={{ opacity: 0.8 }}>
+                        缺但本次不补 <strong>{plan.skipped.length}</strong> 条
+                      </span></>
+                    )}
+                    {plan.impossible.length > 0 && (
+                      <>　·　<span style={{ opacity: 0.8 }}>
+                        ⚠️ 补不了 <strong>{plan.impossible.length}</strong> 条
+                      </span></>
+                    )}
+                  </div>
+                  {/* ⭐ 逐篇结果:成/败都列,失败要说清为什么 */}
+                  {plan.fetched.length > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      取回长文正文 {plan.fetched.filter((f) => f.ok).length}/{plan.fetched.length}：
+                      {plan.fetched.filter((f) => !f.ok).map((f, i) => (
+                        <div key={i} style={{ opacity: 0.75 }}>
+                          ⚠️ {f.id} 没取到 —— {f.why ?? '未说明'}
+                        </div>
+                      ))}
+                    </div>
                   )}
-                  {probe.map((e, i) => (
-                    <div key={i} style={{ marginTop: 3 }}>
-                      {e.hasContentState ? '⭐ ' : '　 '}
-                      <code>{e.op}</code>　{Math.round(e.bytes / 1024)}KB
-                      {e.hasContentState && <strong>　← 含 content_state（正文）</strong>}
-                      <br />
-                      <span style={{ opacity: 0.6, fontSize: 10 }}>{e.summary}</span>
+                  {/* ⚠️ 补不了的要列出来,别只报个数 */}
+                  {plan.impossible.map((n, i) => (
+                    <div key={i} style={{ opacity: 0.7, marginTop: 2 }}>
+                      ⚠️ {n.id}：{n.why}
                     </div>
                   ))}
                 </div>
@@ -834,6 +792,8 @@ export function XConsole(
               )}
               {running && (
                 <div style={S.diagnose}>
+                  {/* ⭐ 有具体进度就显示具体的 —— 「取长文 7/38」比「采集中」有用得多 */}
+                  {step !== '' ? <><strong>{step}</strong><br /></> : null}
                   采集中…（重载 → 滚动 → 每轮展开折叠的推文 → 采够 {pagesWanted} 页就停）
                   <br />
                   <span style={{ opacity: 0.75 }}>想提前结束就点「停止」。</span>

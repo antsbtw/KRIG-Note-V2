@@ -679,13 +679,31 @@ export function summarizeAudits(audits: readonly TimelineAudit[]): {
       if (t.id) ids.add(t.id);
     }
   }
-  /** ⭐ 去重后的明细 —— 两页之间会重叠 */
-  const seen = new Set<string>();
+  /**
+   * ⭐⭐ 去重后的明细 —— 两页之间会重叠。
+   *
+   * ⚠️⚠️ **同一条推的两份要留「更全」的那份**(2026-10-03 改)。
+   *
+   * 长文会出现两次:列表页那份只有 23 字 t.co,单篇页那份才有正文。
+   * 原先「保留先出现的」会把**补回来的正文整个丢掉** ——
+   * 逐篇跑完 38 趟,报告照样说「缺 38 篇」。
+   * ⭐ 那正是 `project-x-upsert-overwrites-richer-text` 的同一形态
+   * (深→浅降级),也是「跑了一趟、看着做了事、正文还是没有」。
+   *
+   * ⭐ 判据用 `textLen`:**只许变长**,与 `mergeExpandedText` 同一条规矩。
+   */
+  const byId = new Map<string, number>();
   const uniq: TweetAudit[] = [];
   for (const t of all) {
-    if (t.id && seen.has(t.id)) continue;
-    if (t.id) seen.add(t.id);
-    uniq.push(t);
+    if (!t.id) { uniq.push(t); continue; }
+    const at = byId.get(t.id);
+    if (at === undefined) {
+      byId.set(t.id, uniq.length);
+      uniq.push(t);
+      continue;
+    }
+    /** ⚠️ 只在**真的更长**时替换 —— 一样长就不动,免得来回横跳 */
+    if (t.textLen > uniq[at].textLen) uniq[at] = t;
   }
 
   /**

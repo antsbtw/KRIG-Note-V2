@@ -727,3 +727,66 @@ describe('⭐⭐⭐ 长文正文:单篇页载荷里真的取出来', () => {
     expect(a.items[0].incomplete, '列表页也说有正文了 —— 那会漏掉 38 篇').toBe('article-no-body');
   });
 });
+
+/**
+ * ⭐⭐⭐ 去重要留**更全**的那份 —— 2026-10-03
+ *
+ * 长文会出现两次:列表页那份只有 23 字 t.co,单篇页那份才有正文。
+ * ⚠️⚠️ 原先「保留先出现的」会把**补回来的正文整个丢掉** ——
+ * 逐篇跑完 38 趟,报告照样说「缺 38 篇」。
+ * 写采集编排时实测证出来的(不是推断),与
+ * `project-x-upsert-overwrites-richer-text` 是同一形态(深→浅降级)。
+ */
+describe('⭐⭐⭐ 同一条推的两份:留更全的', () => {
+  const art = (cs: unknown): string => JSON.stringify({
+    data: { tweetResult: { result: {
+      rest_id: '111',
+      legacy: { id_str: '111', full_text: 'https://t.co/x' },
+      article: { article_results: { result: { title: 'T', content_state: cs } } },
+      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+    } } },
+  });
+  const listPage = art(undefined);
+  const fullPage = art({ blocks: [{ text: '正文'.repeat(50), type: 'unstyled' }] });
+
+  it('⭐⭐⭐ 先列表页后单篇页 → 留**单篇页**那份(补回来的不许被丢)', () => {
+    const a1 = auditTimelinePayload(listPage);
+    const a2 = auditTimelinePayload(fullPage);
+    /** ⚠️ 先确认样本真造出了「一浅一深」 */
+    expect(a1.items[0].incomplete, '样本的浅那份不缺正文 —— 测不到该现象').toBe('article-no-body');
+    expect(a2.items[0].incomplete, '样本的深那份没正文 —— 测不到该现象').toBeUndefined();
+
+    const s = summarizeAudits([a1, a2]);
+    expect(s.items.length, '没去重').toBe(1);
+    expect(
+      s.items[0].incomplete,
+      '补回来的正文被丢了 —— 跑完 38 趟报告还说「缺 38 篇」',
+    ).toBeUndefined();
+    expect(s.items[0].textLen).toBe(a2.items[0].textLen);
+  });
+
+  it('⭐⭐ 顺序反过来也留深的 —— 不是靠「后面覆盖前面」', () => {
+    const s = summarizeAudits([auditTimelinePayload(fullPage), auditTimelinePayload(listPage)]);
+    expect(s.items.length).toBe(1);
+    expect(s.items[0].incomplete, '浅的那份把深的盖掉了 —— 深→浅降级').toBeUndefined();
+  });
+
+  it('⚠️ 一样长就不换 —— 免得来回横跳', () => {
+    const a = auditTimelinePayload(fullPage);
+    const b = auditTimelinePayload(fullPage);
+    const s = summarizeAudits([a, b]);
+    expect(s.items.length).toBe(1);
+    expect(s.items[0].textLen).toBe(a.items[0].textLen);
+  });
+
+  it('⚠️ 没 id 的条目照样留下 —— 不许被去重吃掉', () => {
+    const noId = JSON.stringify({
+      data: { tweetResult: { result: {
+        legacy: { full_text: '没有 id 的推' },
+        core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+      } } },
+    });
+    const s = summarizeAudits([auditTimelinePayload(noId), auditTimelinePayload(noId)]);
+    expect(s.items.length, '没 id 的被当成同一条去重掉了').toBe(2);
+  });
+});

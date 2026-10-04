@@ -283,6 +283,34 @@ export function isTimelineOp(url: string): boolean {
   return X_TIMELINE_ENDPOINTS.some((e) => url.includes(e));
 }
 
+/**
+ * ⭐⭐ **单条推**的端点(不是时间线)—— 2026-10-03。
+ *
+ * 目前只有一个:`TweetResultByRestId`(长文正文就在它里面)。
+ *
+ * ⚠️⚠️ 为什么不塞进 `isTimelineOp`:那个判据的语义是
+ * **「命中一条 = 翻了一页」**(面板的 `wantPages` 全靠这个等式)。
+ * 单篇页回的是**一条推不是一页**,混进去会让页数虚高。
+ * ⭐ 「带不带推文」与「算不算一页」是两件事,所以分两个判据。
+ */
+export function isSingleTweetOp(url: string): boolean {
+  const op = url.split('?')[0].split('/').filter(Boolean).pop() ?? '';
+  return op === 'TweetResultByRestId';
+}
+
+/**
+ * ⭐⭐⭐ **这个响应里带不带推文** —— 要不要拿去解析,看它。
+ *
+ * ⚠️ 此前采集侧只用 `isTimelineOp` 筛,于是补回来的长文载荷
+ * (`TweetResultByRestId`)**整个被筛掉** —— 逐篇跑完 38 趟,
+ * 一条都没进账。写采集编排时被测试逼出来的,不是推断。
+ * ⭐ 两张清单描述同一件事就一定会漂(`x_tweet 加字段要登记四处`),
+ * 所以解析侧统一问这一个函数。
+ */
+export function carriesTweets(url: string): boolean {
+  return isTimelineOp(url) || isSingleTweetOp(url);
+}
+
 
 /**
  * ⭐⭐ **采集时不要的 URL** —— X 的业务知识,底座不内置任何一条。

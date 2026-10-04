@@ -541,3 +541,64 @@ describe('⭐⭐⭐ 采集是**一步到底**,不是多步流程', () => {
     expect(block, '没说要先选页面').toMatch(/选好页面|控制/);
   });
 });
+
+/**
+ * ⭐⭐⭐ **深度由人选,不由代码定** —— 用户 2026-10-03
+ *
+ * 「最后**根据业务的要求**来执行是否要获取全部内容。」
+ * 「是否需要逐层获取,**根据采集的要求定下来**就可以了。」
+ *
+ * ⚠️ 之前是「缺就补」写死在代码里 —— 有的采集只要互动数,
+ * 为此进 38 篇详情页纯属浪费。
+ */
+describe('⭐⭐⭐ 补到哪一层:采集要求说了算', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐⭐ 深度是**可选的**(state),不是写死的常量', () => {
+    const s = panel();
+    expect(s, '没有深度选择 —— 又变回「代码替人决定补不补」')
+      .toMatch(/useState<FetchDepth>/);
+    /** ⭐ 三档都要能选到,少一档就等于那档用不上 */
+    for (const d of ['as-is', 'expand-only', 'full']) {
+      expect(s, `深度 ${d} 选不到`).toContain(`"${d}"`);
+    }
+  });
+
+  it('⭐⭐ 传给编排的是**选中的那个**,不是写死的字面量', () => {
+    const s = panel();
+    const i = s.indexOf('runCollect(');
+    expect(i, '面板没调 runCollect —— 编排又回到 onClick 里了').toBeGreaterThan(-1);
+    /**
+     * ⚠️ 切到 `wantPages` 那个参数对象为止。
+     * 第一版切到第一个 `});` —— 那落在 `harvest` 回调里面,
+     * **根本够不着 depth 那一行**(切片写错了,不是代码错了)。
+     */
+    const from = s.indexOf('wantPages', i);
+    expect(from, 'runCollect 调用里没有 wantPages —— 本条要重写').toBeGreaterThan(i);
+    const call = s.slice(from, s.indexOf('});', from));
+    expect(call.length, '切片空了 —— 断言会恒真').toBeGreaterThan(20);
+    expect(call, '传的是写死的深度 —— 人选了也没用').not.toMatch(/depth:\s*'/);
+    expect(call, '没把选中的深度传进去').toMatch(/depth,/);
+  });
+
+  /**
+   * ⚠️⚠️ 三类账必须都显示 —— 只显示「做了几条」
+   * 会让报告显得「全齐了」(`不量的字段永远 100%`)。
+   */
+  it('⚠️⚠️ 三类账都要露面:执行 / 本次不补 / 补不了', () => {
+    const s = panel();
+    for (const [field, label] of [
+      ['todo', '本次执行的'],
+      ['skipped', '缺但本次不补的'],
+      ['impossible', '根本补不了的'],
+    ] as const) {
+      expect(s, `${label}(plan.${field})没显示 —— 账是不全的`)
+        .toContain(`plan.${field}`);
+    }
+  });
+
+  it('⭐ 长流程要报进度 —— 不让人对着「采集中」干等', () => {
+    const s = panel();
+    expect(s, '没有进度显示').toMatch(/onProgress/);
+  });
+});
