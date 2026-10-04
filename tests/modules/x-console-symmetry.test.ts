@@ -700,3 +700,41 @@ describe('⭐⭐⭐ 配方栏:能配、能看见实际搜什么', () => {
       .not.toContain("op: 'harvest'");
   });
 });
+
+/**
+ * ⭐⭐⭐ 面板报的数字要是**人问的那个** —— 2026-10-04
+ *
+ * 用户看着面板问:「怎么才采到 7 条呢?」
+ * ⚠️⚠️ 那个 7 是**第一趟 harvest 的响应条数**,而同一跑的报告里写着
+ * 「56 条响应 / **43 条推文**」—— 三个数字说同一件事,
+ * 面板挑了最没用的那个,标签还写着「合并去重后的总条数」
+ * (**既没合并也没去重**,更不含翻页那几趟)。
+ */
+describe('⭐⭐⭐ 面板首要指标 = 推文数', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐⭐ 头一个数字是**推文**,不是响应条数', () => {
+    const s = panel();
+    const i = s.indexOf('S.statRow');
+    expect(i, 'statRow 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const area = s.slice(i, s.indexOf('</div>', i) + 200);
+    expect(area.length, '切片空了 —— 断言会恒真').toBeGreaterThan(80);
+    expect(area, '面板没报推文数 —— 人问「采到几条」看不到答案')
+      .toMatch(/label="推文"/);
+    expect(
+      area,
+      '首要指标还是 report.items.length —— 那只是第一趟的响应数',
+    ).not.toMatch(/label="采到"\s*v=\{report\.items\.length\}/);
+  });
+
+  it('⭐⭐ 响应数要算**整轮**,不是第一趟', () => {
+    const s = panel();
+    expect(s, '响应数仍取第一趟 —— 翻页和补长文那些趟全没算')
+      .toContain('setTotalResponses(run.totalResponses)');
+  });
+
+  it('⚠️ 重新开跑要清零 —— 否则上一跑的数字赖着不走', () => {
+    const s = panel();
+    expect(s, '没清零 —— 新一跑会显示上一跑的数').toContain('setTotalResponses(0)');
+  });
+});

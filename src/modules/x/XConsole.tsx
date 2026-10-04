@@ -265,6 +265,12 @@ export function XConsole(
 
   /** ⭐ 长流程的进度 —— 不让人对着一个「采集中」干等 */
   const [step, setStep] = useState('');
+  /**
+   * ⭐ **整轮**的响应总数(含翻页与补长文)。
+   * ⚠️ 不能用 `report.items.length` —— 那只是**第一趟**的
+   * (用户 2026-10-04:「怎么才采到 7 条呢?」而报告写着 56 条响应/43 条推文)。
+   */
+  const [totalResponses, setTotalResponses] = useState(0);
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
   const [plan, setPlan] = useState<{
     depth: FetchDepth;
@@ -711,6 +717,7 @@ export function XConsole(
                     setAuditFile(null);
                     setPlan(null);
                     setStep('');
+                    setTotalResponses(0);
                     try {
                       /**
                        * ⭐⭐⭐ **一次调用跑完全程** —— 编排在 `x-collect-run`。
@@ -794,6 +801,7 @@ export function XConsole(
                       });
 
                       if (run.harvest) setReport(run.harvest as HarvestReport);
+                      setTotalResponses(run.totalResponses);
                       setAudit(run.summary);
                       setPlan(run.plan === null ? null : { ...run.plan, fetched: run.fetched });
 
@@ -928,9 +936,35 @@ export function XConsole(
               {report && (
                 <>
                   {/* ⭐ 一行说清结果,不堆指标 */}
+                  {/*
+                    ⭐⭐⭐ **报「推文」不报「响应」** —— 用户 2026-10-04:
+                    「怎么才采到 7 条呢?」
+
+                    ⚠️⚠️ 那个 7 是**第一趟 harvest 的响应条数**,而同一跑
+                    报告里写着「56 条响应 / **43 条推文**」—— 三个数字说同一件事,
+                    而面板挑了最没用的那个,标签还写着「合并去重后的总条数」
+                    (**既没合并也没去重**,更不含翻页那几趟)。
+                    ⭐ 人要知道的是「采到几条推文」,响应数是排查用的,放后面。
+                  */}
                   <div style={S.statRow}>
-                    <Stat label="采到" v={report.items.length}
-                      tone={report.items.length > 0 ? 'good' : 'idle'} hint="合并去重后的总条数" />
+                    <Stat
+                      label="推文"
+                      v={audit?.uniqueTweets ?? 0}
+                      tone={(audit?.uniqueTweets ?? 0) > 0 ? 'good' : 'idle'}
+                      hint="去重后的推文条数（含主动翻页采到的）"
+                    />
+                    <Stat
+                      label="页"
+                      v={audit?.pages ?? 0}
+                      tone="idle"
+                      hint="时间线载荷条数 —— 一条约等于一页"
+                    />
+                    <Stat
+                      label="响应"
+                      v={totalResponses}
+                      tone="idle"
+                      hint="整轮收到的响应总数（含翻页与补长文）—— 排查用"
+                    />
                     {/* ⚠️ 轮次/像素是**控制**那栏的报告,采集不重复记一份 */}
                   </div>
                   <div style={S.todo}>
