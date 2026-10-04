@@ -45,6 +45,11 @@ export type RunDeps = {
     maxRounds?: number;
     gotoPage?: { name: string; params?: Record<string, string> };
   }): Promise<RunHarvest | null>;
+  /**
+   * ⭐⭐ 回到指定 URL —— 逐篇补完之后用。
+   * ⚠️ 可选:没提供就不回(老调用方行为不变),但那样下一轮会从错的页开始。
+   */
+  goBack?(): Promise<boolean>;
   /** ⭐ 每做完一步报一次 —— 长流程必须让人看见进度 */
   onProgress?(msg: string): void;
 };
@@ -132,6 +137,19 @@ export async function runCollect(
   /** ⭐ 从第一趟开始累计 —— 后面每补一篇都加上 */
   let totalResponses = rep.items.length;
 
+  /**
+   * ⭐⭐⭐ **采完要回到原来那一页** —— 用户 2026-10-03 原话:
+   * 「点击进去观看,观看完毕,**点击返回上一下**,继续往下浏览。」
+   *
+   * ⚠️⚠️ 我上一版只做了前半句。真机后果(四次跑的实测):
+   *   推文 97 → 40 → 21,每次都报「滚到底 ✓」
+   * 因为每轮跑完都**停在最后一篇长文页**,而「采这一页」采的是当前页 ——
+   * 下一次跑时当前页已经不是主页而是一篇文章,自然越采越少。
+   * ⭐ 三张截图的地址栏逐次坐实了这一点(停在 /article/…)。
+   *
+   * ⚠️ 起点由**调用方给**(它知道人选的是哪一页)——
+   * 底座的 `harvest` 读不到当前 URL,为此改底座不值当。
+   */
   let audits = auditsOf(rep);
   if (audits.length === 0) {
     return { audits, totalResponses, summary: null, harvest: rep, plan: null, fetched: [] };
@@ -182,7 +200,21 @@ export async function runCollect(
      * (`feedback-pdca-close-the-loop`:我踩过「数错元素致该数恒为 0」)。
      */
     const all = got.flatMap((a) => a.items);
-    const hit = all.find((t) => t.isArticle && t.incomplete === undefined);
+    /**
+     * ⭐⭐⭐ **只认 `n.id` 那一条** —— 2026-10-04 真机逼出来的。
+     *
+     * ⚠️⚠️ 原先是 `find(t => t.isArticle && t.incomplete === undefined)` ——
+     * **任意一条**有正文的长文都算数。但单篇页载荷里不止一条推
+     * (引用的、相关的都在里面),于是:
+     *   面板报「取回长文正文 **19/19**」,报告里却只有 **17 篇**有正文。
+     * 成功判据认的根本不是我要的那一条。
+     *
+     * ⭐ `feedback-pdca-close-the-loop` 的原话:
+     * **「我踩过:数错元素致该数恒为 0,等于没在看」** —— 这次是反过来,
+     * 数错元素致该数恒为满,一样等于没在看。
+     * ⚠️ 回读真实产出,必须回读**那一条**的产出。
+     */
+    const hit = all.find((t) => t.id === n.id && t.incomplete === undefined);
     /**
      * ⭐⭐ 失败要说清**是哪一种** —— 2026-10-04 真机 38 篇里 2 篇失败,
      * 而「进去了但没解出正文」这一句**三种成因都盖住了**,
@@ -199,11 +231,28 @@ export async function runCollect(
           ? '单篇页一条响应都没有 —— 多半没到位或腿没装上'
           : all.length === 0
             ? `收到 ${one.items.length} 条响应但**没有一条带推文** —— 端点判据可能不认`
-            : `解出 ${all.length} 条推文但**都没正文** —— 这一篇可能真的没给 content_state`,
+            : all.some((t) => t.id === n.id)
+              /** ⭐ 这一条在载荷里、但没正文 —— 与「整页都没解出这条」是两回事 */
+              ? `载荷里有这一条但**它没正文**（同页另有 ${all.length - 1} 条）`
+              : `解出 ${all.length} 条推文但**没有这一条** —— 多半是跳转去了别的页`,
       });
   }
 
-  // ── ④ 把补回来的并进账 ──
+  /**
+   * ── ④ 回到原来那一页 ──
+   * ⚠️ 只要**离开过**就要回,哪怕只补了一篇。
+   * ⭐ 回不去不算整轮失败(数据已经采到了),但要留痕 ——
+   * 下一轮会从错的页开始,人得知道。
+   */
+  if (capped.length > 0 && deps.goBack) {
+    say('采完了，回到原来那一页…');
+    const back = await deps.goBack();
+    if (!back) {
+      console.warn('[x.collect] 回不到原页 —— 下一轮会从当前这页开始采');
+    }
+  }
+
+  // ── ⑤ 把补回来的并进账 ──
   audits = [...audits, ...extraAudits];
   return {
     audits,

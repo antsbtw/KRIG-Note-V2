@@ -227,6 +227,138 @@ describe('⭐⭐ 响应数算整轮,不是只算第一趟', () => {
     expect(
       r.fetched[0].why,
       '失败原因没说清是哪一种 —— 留了痕也等于没留',
-    ).toContain('都没正文');
+    ).toContain('它没正文');
+  });
+});
+
+/**
+ * ⭐⭐⭐ 回读产出要回读**那一条**的 —— 2026-10-04 真机
+ *
+ * 面板报「取回长文正文 **19/19**」,报告里却只有 **17 篇**有正文。
+ * ⚠️⚠️ 真因:成功判据是 `find(t => t.isArticle && !t.incomplete)` ——
+ * **任意一条**有正文的长文都算数。而单篇页载荷里不止一条推
+ * (引用的、相关的都在),于是认的根本不是我要的那一条。
+ *
+ * ⭐ `feedback-pdca-close-the-loop`:「数错元素致该数恒为 0」——
+ * 这次是反过来,**数错元素致该数恒为满**,一样等于没在看。
+ */
+describe('⭐⭐⭐ 成功判据只认目标那一条', () => {
+  /** ⭐ 单篇页载荷里**另有**一条带正文的长文(引用/相关),但目标那条没有 */
+  function depsWithBystander(): RunDeps {
+    return {
+      async harvest(plan) {
+        if (plan.gotoPage) {
+          return {
+            items: [{
+              url: ARTICLE_URL,
+              text: JSON.stringify({
+                data: { threaded_conversation: { instructions: [{
+                  type: 'TimelineAddEntries',
+                  entries: [
+                    // 目标那条:**没有**正文
+                    { entryId: 'a', content: { itemContent: { tweet_results: {
+                      result: articleTweet('901', false),
+                    } } } },
+                    // 旁边那条:有正文 —— 旧判据会认它
+                    { entryId: 'b', content: { itemContent: { tweet_results: {
+                      result: articleTweet('999', true),
+                    } } } },
+                  ],
+                }] } },
+              }),
+            }],
+          } satisfies RunHarvest;
+        }
+        return {
+          items: [{ url: TIMELINE_URL, text: timelinePayload([articleTweet('901', false)]) }],
+        } satisfies RunHarvest;
+      },
+    };
+  }
+
+  it('⭐⭐⭐ 同页另一条有正文 → 目标那条仍记**失败**', async () => {
+    const r = await runCollect(depsWithBystander(), { wantPages: 1, depth: 'full' });
+    /** ⚠️ 先确认样本真造出了「旁边那条有正文」 */
+    const got = r.summary?.items.find((t) => t.id === '999');
+    expect(got?.incomplete, '样本里旁边那条没正文 —— 测不到该现象').toBeUndefined();
+
+    expect(
+      r.fetched[0].ok,
+      '认了旁边那条 —— 面板会报 19/19 而报告只有 17 篇',
+    ).toBe(false);
+    expect(r.fetched[0].why, '没说清是「它没正文」').toContain('它没正文');
+  });
+
+  it('⭐⭐ 面板的「取回 N/N」要与报告里真有正文的篇数**对得上**', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false), articleTweet('902', false)],
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const okCount = r.fetched.filter((f) => f.ok).length;
+    const withBody = (r.summary?.items ?? [])
+      .filter((t) => t.isArticle && t.incomplete === undefined).length;
+    expect(
+      okCount,
+      `面板说取回 ${okCount} 篇、报告里有正文的 ${withBody} 篇 —— 两边对不上`,
+    ).toBe(withBody);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 采完要**回到原来那一页** —— 2026-10-04 真机
+ *
+ * 用户 2026-10-03 原话:
+ * 「点击进去观看,观看完毕,**点击返回上一下**,继续往下浏览。」
+ *
+ * ⚠️⚠️ 我上一版只做了前半句。四次跑的实测后果:
+ *   推文 **97 → 40 → 21**,而每次都报「滚到底 ✓」。
+ * 因为每轮跑完都停在最后一篇长文页,而「采这一页」采的是**当前页** ——
+ * 下一次跑时当前页已经不是主页而是一篇文章。三张截图的地址栏坐实了这点。
+ */
+describe('⭐⭐⭐ 采完回到原来那一页', () => {
+  function withBack(listTweets: unknown[]): { deps: RunDeps; calls: string[] } {
+    const base = makeDeps({ listTweets });
+    const calls = base.calls;
+    return {
+      calls,
+      deps: {
+        ...base.deps,
+        goBack: async () => { calls.push('goBack'); return true; },
+      },
+    };
+  }
+
+  it('⭐⭐⭐ 补过长文 → **最后要回去**', async () => {
+    const { deps, calls } = withBack([articleTweet('901', false)]);
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls, '补完没回原页 —— 下一轮会从长文页开始采')
+      .toEqual(['list', 'article:901', 'goBack']);
+  });
+
+  it('⭐⭐ 回去必须在**所有篇都补完之后** —— 不是补一篇回一次', async () => {
+    const { deps, calls } = withBack([articleTweet('901', false), articleTweet('902', false)]);
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toEqual(['list', 'article:901', 'article:902', 'goBack']);
+  });
+
+  it('⚠️ 一篇都没补 → **不必回**(压根没离开过)', async () => {
+    const { deps, calls } = withBack([articleTweet('901', false)]);
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(calls, '没离开页面却跑去导航了 —— 白跑一趟还可能打断现场')
+      .toEqual(['list']);
+  });
+
+  it('⚠️ 回不去**不算整轮失败** —— 数据已经采到了,但要留痕', async () => {
+    const base = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const deps: RunDeps = { ...base.deps, goBack: async () => false };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok, '回不去把已经采到的也判成失败了').toBe(true);
+    expect(r.summary?.items.length, '数据没留下').toBeGreaterThan(0);
+  });
+
+  it('⚠️ 调用方没给 goBack → 不崩(老行为不变)', async () => {
+    const { deps } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok).toBe(true);
   });
 });

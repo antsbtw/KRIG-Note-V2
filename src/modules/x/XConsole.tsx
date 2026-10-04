@@ -651,6 +651,14 @@ export function XConsole(
                        * 写在 onClick 里的东西**测不了**,而「逐篇补 38 篇」
                        * 这种循环恰恰是最该测的。
                        */
+                      /**
+                       * ⭐⭐ **开跑前抓拍起点** —— 跑完再读就晚了(那时已在长文页)。
+                       * ⚠️ `identified` 是 hostUrl 变化时算的,这里直接用它的快照。
+                       */
+                      const origin = identified === null
+                        ? null
+                        : { name: identified.name, params: identified.params };
+
                       const run = await runCollect({
                         harvest: async (plan) => {
                           const rr = await window.electronAPI!.webDomInvoke({
@@ -663,6 +671,30 @@ export function XConsole(
                           }, ...l].slice(0, 50));
                           if (rr.status !== 'ok' && rr.status !== 'degraded') return null;
                           return (rr as WebDomResult & { value: HarvestReport }).value;
+                        },
+                        /**
+                         * ⭐⭐⭐ **采完回到原来那一页** —— 用户 2026-10-03:
+                         * 「点击进去观看,观看完毕,**点击返回上一下**,继续往下浏览。」
+                         *
+                         * ⚠️⚠️ 我上一版只做了前半句,真机四次跑的后果:
+                         * 推文 97 → 40 → 21,每次都报「滚到底 ✓」——
+                         * 因为每轮都停在最后一篇长文页,而「采这一页」采的是当前页,
+                         * 下一次跑时当前页已经不是主页而是一篇文章。
+                         *
+                         * ⭐ 走**语义页**回去(不是裸 URL)—— 那道闸不绕;
+                         * 起点由开跑前抓拍的 `identified` 定,不是现读
+                         * (`project-x-pm-panel-instance-id` 的教训:
+                         * 　现读到的已经是长文页了)。
+                         */
+                        goBack: async () => {
+                          if (origin === null) return false;
+                          const g = await window.electronAPI!.webDomInvoke({
+                            op: 'goto',
+                            pageRef: { wcId: wcId! },
+                            name: origin.name,
+                            params: origin.params,
+                          });
+                          return g.status === 'ok' || g.status === 'degraded';
                         },
                         onProgress: setStep,
                       }, {

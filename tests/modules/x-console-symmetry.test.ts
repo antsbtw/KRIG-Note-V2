@@ -493,8 +493,36 @@ describe('⭐⭐⭐ 采集是**一步到底**,不是多步流程', () => {
     expect(area.length, '切片是空的 —— 断言会恒真').toBeGreaterThan(100);
 
     expect(area, '输出栏发起的不是 harvest').toMatch(/op:\s*'harvest'/);
-    for (const old of ['acquireStart', 'acquireStop', "op: 'reload'", "op: 'goto'"]) {
-      expect(area, `输出栏还在要人点「${old}」—— 编排该在底座做`).not.toContain(old);
+    /**
+     * ⚠️⚠️ 判据钉的是「**没有按钮去点这些 op**」,不是「这些字不许出现」
+     * (2026-10-04 改)。
+     *
+     * 起因:编排补完长文后要**回到原来那一页**(用户原话「点击返回上一下」),
+     * 那一步在 `goBack` 回调里调 `goto` —— **没有按钮,人点不到**,
+     * 可它让原来的整段 `toContain` 判据变红了。
+     * ⭐ 原判据的本意写在它自己的注释里:「输出栏不该再**要人点**它们」。
+     * 按本意钉:只看 `onClick` 里有没有这些 op。
+     * ⚠️ 松判据(直接删掉这条)会把真正的回潮也放过去,所以不是删,是**改准**。
+     */
+    const clickHandlers = [...area.matchAll(/onClick=\{([\s\S]*?)\n\s{18}\}\}/g)]
+      .map((m) => m[1]);
+    expect(clickHandlers.length, '输出栏一个 onClick 都没切出来 —— 断言会恒真')
+      .toBeGreaterThan(0);
+    for (const bad of ['acquireStart', 'acquireStop', "op: 'reload'", "op: 'goto'"]) {
+      for (const h of clickHandlers) {
+        /** ⚠️ 排除 harvest 那个(它内部的回调里允许有,因为那是编排不是人点) */
+        if (h.includes('runCollect(')) continue;
+        expect(h, `输出栏还有按钮直接点「${bad}」—— 编排该在底座做`).not.toContain(bad);
+      }
+    }
+    /** ⭐ 并且:`goto` 只许出现在 goBack 那个回调里,不许另起炉灶 */
+    const gotoCount = (area.match(/op:\s*'goto'/g) ?? []).length;
+    expect(gotoCount, '输出栏有不止一处 goto —— 编排又散开了').toBeLessThanOrEqual(1);
+    if (gotoCount === 1) {
+      const i = area.indexOf("op: 'goto'");
+      const before = area.slice(Math.max(0, i - 400), i);
+      expect(before, 'goto 不在 goBack 回调里 —— 那就是人点得到的动作了')
+        .toContain('goBack:');
     }
   });
 
