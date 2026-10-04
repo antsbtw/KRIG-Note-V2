@@ -565,9 +565,19 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
       async runScript() { n += 1; return { ok: true }; },
     };
     const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
-    /** ⚠️ 连续 3 轮没新的才停 → 应该在第 3 轮左右收手,远不到 40 */
-    expect(n, '跑满了轮次上限 —— 停止判据永远到不了（真机 40 轮、680 条只去重出 42）')
-      .toBeLessThanOrEqual(4);
+    /**
+     * ⚠️⚠️ 判据**放宽到 13** —— 2026-10-04 改。
+     *
+     * 原先断言「≤ 4」,对应 `EMPTY_ROUNDS_TO_STOP = 3` 那条刹车。
+     * 真机对照实验证否了它:窄配方 43 条、宽配方 42 条(查询放宽十几倍
+     * 结果几乎一样),而 **4/4 页都有游标** —— **是刹车踩早了**,
+     * 不是 X 没东西了。`project-x-cursor-paging` 早写过:
+     * 「几页没新人」不能当到底,当年把 2604 个账号卡死在 2244。
+     *
+     * ⭐ 本条现在钉的是「**不会无限空转**」(仍远小于 MAX_PAGE_ROUNDS=40),
+     * 不再钉「尽早停」。
+     */
+    expect(n, '无限空转了 —— 兜底闸没生效').toBeLessThanOrEqual(13);
     expect(r.summary?.items.length, '同一条推被算成了多条').toBe(1);
   });
 
@@ -594,5 +604,62 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
     const noScript: RunDeps = { harvest: deps.harvest };
     const r = await runCollect(noScript, { wantPages: 1, depth: 'as-is' });
     expect(r.summary?.items.length).toBe(1);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **「几轮没新推文」不许当主判据** —— 2026-10-04 对照实验
+ *
+ * 同一条链路只换查询:
+ *   窄配方(9关键词 AND 6求助词 AND lang:zh) → **43 条 / 5 页**
+ *   宽配方(3关键词,不加求助词,不限语言)     → **42 条 / 4 页**
+ * ⚠️ 查询放宽十几倍结果几乎一样 → 42 不是「真实数量」,**是刹车踩早了**。
+ * 而那一跑 **4/4 页都有游标** —— X 一直说还有下一页。
+ *
+ * ⭐ `project-x-cursor-paging` 早写过同一条:
+ * 「几页没新人」当到底,把 2604 个账号卡死在 2244(三跑同数),
+ * 拆掉刹车后 2244 → 2634。**我昨天又加了回来,同一个坑第二次。**
+ */
+describe('⭐⭐⭐ 翻页停止只认「X 说了算」', () => {
+  const SEED2 = 'https://x.com/i/api/graphql/qid/SearchTimeline?variables=%7B%7D';
+
+  /** ⭐ 前 5 轮全是旧推(真机那种),第 6 轮才出新的 —— 刹车=3 会在此之前停 */
+  it('⭐⭐⭐ 中间连着好几轮旧推 → **不停**,后面的新推文要采到', async () => {
+    const tweet = (id: string): unknown => ({
+      rest_id: id,
+      legacy: { id_str: id, full_text: `推${id}` },
+      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+    });
+    const mk = (ids: string[], cursor: string): string => JSON.stringify({
+      data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((id) => ({
+            entryId: `tweet-${id}`,
+            content: { itemContent: { tweet_results: { result: tweet(id) } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } },
+    });
+    /** 第 0 页新,1~5 页全旧,第 6 页又有新的 */
+    const pages = [
+      mk(['t1'], 'c0'), mk(['t1'], 'c1'), mk(['t1'], 'c2'),
+      mk(['t1'], 'c3'), mk(['t1'], 'c4'), mk(['t1'], 'c5'),
+      mk(['t9'], 'c6'),
+    ];
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED2, text: pages[Math.min(n, pages.length - 1)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(
+      r.summary?.items.map((t) => t.id).sort(),
+      '连着几轮旧推就停了 —— 后面的新推文全丢（2604 卡死在 2244 就是这么来的）',
+    ).toEqual(['t1', 't9']);
   });
 });
