@@ -217,3 +217,49 @@ describe('⭐⭐⭐ 不信任页面送回来的东西', () => {
     expect(s.stats().hooked).toBe(0);
   });
 });
+
+/**
+ * ⭐⭐⭐ 噪音名单**两条腿都要管** —— 2026-10-04 真机
+ *
+ * 配方搜索滚 60 轮只采到 1 页。端点清单一看:47 条响应里
+ * **19 条是 `.m3u8`**(视频播放列表),把 64 条的池子挤爆,
+ * 真正的 `SearchTimeline` 只剩 1 条。
+ *
+ * ⚠️⚠️ 而 `video.twimg.com` **本来就在噪音名单里** ——
+ * 名单只接到了 CDP 腿(`shouldCaptureBody`),
+ * **M4 页面钩子这条腿压根没接**。加腿时漏了这一环。
+ */
+describe('⭐⭐⭐ 钩子腿也要挡噪音', () => {
+  const noisy = ['video.twimg.com', 'pbs.twimg.com'];
+
+  it('⭐⭐⭐ 噪音 URL **不入池** —— 否则把真正要的挤掉', async () => {
+    const { host, emit } = fakeHost();
+    const s = new HookSession(host, PAGE, undefined, noisy);
+    await s.start();
+    emit(rec({ url: 'https://video.twimg.com/amplify_video/1/pl/a.m3u8' }));
+    emit(rec({ url: 'https://x.com/i/api/graphql/abc/SearchTimeline' }));
+    const got = s.list();
+    expect(got.length, '噪音也收进来了 —— 池子会被视频挤爆').toBe(1);
+    expect(got[0].url, '留下的不是真正要的那条').toContain('SearchTimeline');
+  });
+
+  /**
+   * ⚠️ 噪音**不计数** —— 计进 `hooked` 会让「钩到 47 条」看着很健康,
+   * 而真正要的那一条早被挤掉了。
+   */
+  it('⚠️ 噪音不计进 hooked —— 别让数字看着健康', async () => {
+    const { host, emit } = fakeHost();
+    const s = new HookSession(host, PAGE, undefined, noisy);
+    await s.start();
+    for (let i = 0; i < 5; i += 1) emit(rec({ url: `https://video.twimg.com/x/${i}.m3u8` }));
+    expect(s.stats().hooked, '噪音被计进了钩到的条数').toBe(0);
+  });
+
+  it('⭐ 不给名单时**一条都不挡**(老行为不变)', async () => {
+    const { host, emit } = fakeHost();
+    const s = new HookSession(host, PAGE);
+    await s.start();
+    emit(rec({ url: 'https://video.twimg.com/a.m3u8' }));
+    expect(s.list().length, '没给名单却挡了 —— 那是底座内置了站点知识').toBe(1);
+  });
+});

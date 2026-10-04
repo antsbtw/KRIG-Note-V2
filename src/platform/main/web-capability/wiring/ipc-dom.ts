@@ -143,6 +143,18 @@ const scrollCancelled = new Set<PageId>();
  * 而「没有第二个视角可以互证」正是那次七轮排查的根因。
  */
 const hooksByPageId = new Map<PageId, HookSession>();
+/**
+ * ⭐ 每个 page 当前钩子用的噪音名单 —— 名单变了要重建 HookSession,
+ * 否则「改了配置不生效」而且**一点症状都没有**。
+ */
+const hookNoisyByPageId = new Map<PageId, readonly string[]>();
+
+/** ⭐ 两份名单是不是同一份(顺序也算)—— 判「要不要重建钩子」 */
+function sameList(a: readonly string[] | undefined, b: readonly string[] | undefined): boolean {
+  const x = a ?? [];
+  const y = b ?? [];
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+}
 
 /**
  * ⭐⭐ 每轮脚本的产出 —— 按 pageId 攒着,`acquireStop` 时一并回给调用方。
@@ -319,9 +331,17 @@ function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
 
       // ③ 页面内钩子腿
       let hook = hooksByPageId.get(pageId);
-      if (!hook) {
-        hook = new HookSession(toHookHost(wc), pageId);
+      /**
+       * ⚠️⚠️ 噪音名单**两条腿都要给**(2026-10-04)。
+       * 此前只给了 CDP 腿,钩子腿照单全收 → 搜索页 47 条响应里
+       * 19 条 `.m3u8` 把池子挤爆,真正的 SearchTimeline 只剩 1 条。
+       * ⭐ 名单变了要重建 —— 否则改了配置也不生效。
+       */
+      if (!hook || !sameList(hookNoisyByPageId.get(pageId), noisy)) {
+        hook?.stop();
+        hook = new HookSession(toHookHost(wc), pageId, undefined, noisy ?? []);
         hooksByPageId.set(pageId, hook);
+        hookNoisyByPageId.set(pageId, noisy ?? []);
       }
       /**
        * ⚠️ 钩子装失败**不中止** —— CDP 那条腿还活着,少一条腿是**降级不是失败**。

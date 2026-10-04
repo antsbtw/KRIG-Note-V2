@@ -659,3 +659,55 @@ describe('⭐⭐⭐ harvest 留痕要带「收到的是什么」', () => {
     ).not.toMatch(/endpoints[\s\S]{0,200}it\.url[,)]/);
   });
 });
+
+/**
+ * ⭐⭐⭐ 噪音名单**两条腿都要给** —— 2026-10-04 真机
+ *
+ * 配方搜索滚 60 轮只采到 1 页。端点清单一看:47 条响应里
+ * **19 条是 `.m3u8`**,把 64 条的池子挤爆,真正的 SearchTimeline 只剩 1 条。
+ * ⚠️⚠️ 而 `video.twimg.com` **本来就在噪音名单里** ——
+ * 名单只接到了 CDP 腿,**M4 页面钩子这条腿压根没接**。
+ *
+ * ⚠️ 这一处 **tsc 查不出来**(HookSession 第四参可选),
+ * 行为测试也盖不住(那测的是 HookSession 本身,不是这里有没有传)——
+ * 所以必须有这条守卫。
+ */
+describe('⭐⭐⭐ 噪音名单两条腿都要接', () => {
+  it('⭐⭐⭐ `startAll` 把名单**同时给** CDP 腿和钩子腿', () => {
+    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    const i = src.indexOf('async startAll(');
+    expect(i, 'startAll 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const end = src.indexOf('\n    },', i);
+    const body = src.slice(i, end > i ? end : undefined);
+    expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(200);
+
+    /** ① CDP 腿 */
+    expect(body, 'CDP 腿没收到噪音名单').toMatch(/noisyUrlSubstrings:\s*noisy/);
+    /** ② 钩子腿 —— ⚠️ 正是这条漏了才有 19 条 m3u8 */
+    /**
+     * ⚠️ 别用 `[^)]*` —— 它会停在 `toHookHost(wc)` 的那个右括号上,
+     * 于是**代码是对的也判红**(写这条时当场栽了一次)。
+     * ⭐ 改成「同一行里有 HookSession 且有 noisy」。
+     */
+    const hookLine = body.split('\n').find((l) => l.includes('new HookSession('));
+    expect(hookLine, 'startAll 里没有 new HookSession —— 本条要重写').toBeTruthy();
+    expect(
+      hookLine,
+      '钩子腿没收到噪音名单 —— 视频分片会把池子挤爆（真机 47 条里 19 条 m3u8）',
+    ).toContain('noisy');
+  });
+
+  /**
+   * ⚠️ 名单变了要**重建**钩子 —— 否则改了配置不生效,
+   * 而且**一点症状都没有**(看起来仍在采,只是噪音照样进来)。
+   */
+  it('⚠️ 名单变了要重建钩子,不复用旧的', () => {
+    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    const i = src.indexOf('async startAll(');
+    const body = src.slice(i, src.indexOf('\n    },', i));
+    expect(
+      body,
+      '钩子只按「有没有」复用 —— 名单换了也不重建,改了配置不生效',
+    ).toMatch(/sameList\(/);
+  });
+});
