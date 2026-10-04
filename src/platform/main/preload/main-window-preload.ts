@@ -31,6 +31,9 @@ import type {
 } from '@shared/auth/auth-types';
 import type { Profile, ProfileColor } from '@shared/types/profile-types';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
+import {
+  X_RECIPE_CHANNEL, type XRecipeInvoke, type XRecipeResult,
+} from '@shared/ipc/x-recipe-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /**
@@ -961,6 +964,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
    */
   webDomInvoke(payload: WebDomInvoke): Promise<WebDomResult> {
     return ipcRenderer.invoke(IPC_CHANNELS.WEB_DOM_INVOKE, payload) as Promise<WebDomResult>;
+  },
+
+  /**
+   * ⭐ X 配方 CRUD —— ⚠️ 通道名**从 X 模块的契约里取**,不进 `channel-names.ts`
+   * (删 X 时这一行跟着删,不留孤儿常量)。
+   */
+  xRecipeInvoke(payload: XRecipeInvoke): Promise<XRecipeResult> {
+    return ipcRenderer.invoke(X_RECIPE_CHANNEL, payload) as Promise<XRecipeResult>;
   },
 
   /** ⭐ 列已注册的语义页面名(Console 下拉用,**从真表读**) */

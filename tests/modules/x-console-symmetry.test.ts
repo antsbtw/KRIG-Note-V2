@@ -630,3 +630,73 @@ describe('⭐⭐⭐ 补到哪一层:采集要求说了算', () => {
     expect(s, '没有进度显示').toMatch(/onProgress/);
   });
 });
+
+/**
+ * ⭐⭐⭐ 配方配置 —— 用户 2026-10-04:「配方的配置功能也要增加上来哦。」
+ */
+describe('⭐⭐⭐ 配方栏:能配、能看见实际搜什么', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐ 配方是**第四个并排 tab**,不是堆在输出下面', () => {
+    const s = panel();
+    const i = s.indexOf('const CAP_TABS');
+    expect(i, 'CAP_TABS 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const block = s.slice(i, s.indexOf('];', i));
+    expect(block, '配方没进 CAP_TABS —— tab 根本不显示').toContain("id: 'recipe'");
+    /** ⚠️ 四个都要在 —— 少一个就是那个能力点不到 */
+    for (const id of ['control', 'input', 'output', 'recipe']) {
+      expect(block, `tab ${id} 不在真表里`).toContain(`id: '${id}'`);
+    }
+  });
+
+  it('⭐⭐ 增删改三样**都要有** —— 只能看不能改不算「配置功能」', () => {
+    const s = panel();
+    const i = s.indexOf("{tab === 'recipe' &&");
+    expect(i, '配方栏的 JSX 不见了').toBeGreaterThan(-1);
+    const area = s.slice(i);
+    expect(area.length, '切片空了 —— 断言会恒真').toBeGreaterThan(200);
+    for (const [fn, what] of [
+      ["op: 'list'", '读'], ["op: 'upsert'", '存'], ["op: 'delete'", '删'],
+    ] as const) {
+      expect(s, `配方栏少了「${what}」—— 配不全`).toContain(fn);
+    }
+  });
+
+  /**
+   * ⭐⭐⭐ 配方填的词与**真正发出去的串**不是一回事
+   * (会加 OR、引号、from:、min_faves、since:)。
+   * 不显示的话人只能靠猜 —— 而猜错了要等采回一堆噪音才发现。
+   */
+  it('⭐⭐⭐ 每条配方都显示**实际会搜什么**', () => {
+    const s = panel();
+    expect(s, '面板没调 recipeToQuery —— 显示的是配方不是真查询')
+      .toContain('recipeToQuery');
+    const i = s.indexOf("{tab === 'recipe' &&");
+    const area = s.slice(i);
+    expect(area, '没把查询串显示出来').toContain('q.q');
+    expect(area, '没把「为什么这么搜」显示出来').toContain('q.explain');
+  });
+
+  it('⚠️⚠️ 翻译不出来的配方**点不了** —— 不许点了才失败', () => {
+    const s = panel();
+    const i = s.indexOf("{tab === 'recipe' &&");
+    const area = s.slice(i);
+    expect(
+      area,
+      '「按它搜索」没按 problems 禁用 —— 残缺配方也能点,搜回一堆不相干的',
+    ).toMatch(/disabled=\{[^}]*q\.problems\.length > 0/);
+  });
+
+  /**
+   * ⚠️ 配方栏**只导航不采集** —— 用户 2026-10-03:
+   * 「我自己选定一个页面,点击开始采集,就采集」。
+   * 配方替人把页面选好,**不替人决定采不采**。
+   */
+  it('⚠️ 配方栏只 goto,**不自己发起采集**', () => {
+    const s = panel();
+    const i = s.indexOf("{tab === 'recipe' &&");
+    const area = s.slice(i);
+    expect(area, '配方栏自己采起来了 —— 采集该是输出栏那一个按钮的事')
+      .not.toContain("op: 'harvest'");
+  });
+});

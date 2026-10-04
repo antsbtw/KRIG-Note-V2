@@ -242,6 +242,8 @@ const TIMELINE_OP_EXCLUDE = ['PinnedTimelines'];
 export const X_PAGE_NAME = {
   /** 单篇长文 —— 正文只有这里有 */
   article: 'x.article',
+  /** ⭐ 搜索 —— 配方翻译出查询串后去这一页 */
+  search: 'x.search',
 } as const;
 
 export const X_PAGE_MATCHERS: readonly string[] = [

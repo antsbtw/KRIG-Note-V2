@@ -49,6 +49,8 @@ import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect } from './x-collect-run';
+import { recipeToQuery } from './x-recipe-query';
+import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
 
 type PageTable = {
@@ -70,13 +72,21 @@ type PageTable = {
  * 能力 tab —— ⭐ 三者**平级互斥**,不是三段内容。
  * ⚠️ 加能力时只改这里和 `CAP_TABS`,JSX 里不写第四处判断。
  */
-type CapTab = 'control' | 'input' | 'output';
+type CapTab = 'control' | 'input' | 'output' | 'recipe';
 
 /** ⚠️ 标签文字与 id 同在一处 —— 分开写两份必漂 */
 const CAP_TABS: ReadonlyArray<{ id: CapTab; label: string; sub: string }> = [
   { id: 'control', label: '控制', sub: 'web.page' },
   { id: 'input', label: '输入', sub: 'web.input' },
   { id: 'output', label: '输出', sub: 'web.net' },
+  /**
+   * ⭐⭐ 配方 —— 前三个是**底座能力**(web.page/input/net),这一个是 **X 的业务**。
+   * 用户 2026-10-04:「配方的配置功能也要增加上来哦。」
+   * ⚠️ 仍然并排平级 —— 用户 2026-10-02 的原话是「X console 中的**各种能力**
+   * 是并排的」,配方配置也是这个台子的一项能力,不该竖着堆在输出下面。
+   */
+  /** ⚠️ `sub` 从**常量**取,不写字面量 —— 面板里不许出现写死的语义页名 */
+  { id: 'recipe', label: '配方', sub: X_PAGE_NAME.search },
 ];
 
 /** 左栏当前页的识别结果(来自底座 `identify`,不是面板自己 parse 的) */
@@ -196,6 +206,63 @@ export function XConsole(
    * 要 38 篇长文正文才选 `full`(一篇约 9 秒,38 篇约 6 分钟)。
    */
   const [depth, setDepth] = useState<FetchDepth>('expand-only');
+  // ── ⭐⭐ 配方(X 的业务,不是底座能力)──
+  const [recipes, setRecipes] = useState<SearchRecipe[]>([]);
+  const [recipeBusy, setRecipeBusy] = useState(false);
+  /** ⚠️ 读写失败要**看得见** —— 静默的话人以为「还没建过配方」 */
+  const [recipeErr, setRecipeErr] = useState<string | null>(null);
+  /** 正在编辑的那条;null = 没在编辑 */
+  const [editing, setEditing] = useState<SearchRecipe | null>(null);
+
+  /** ⭐ 读配方 —— 失败如实报,不回空数组充数 */
+  const loadRecipes = useCallback(async () => {
+    setRecipeBusy(true);
+    setRecipeErr(null);
+    try {
+      const r = await window.electronAPI!.xRecipeInvoke({ op: 'list' });
+      if (r.status === 'ok') setRecipes(r.value as SearchRecipe[]);
+      else setRecipeErr(r.reason);
+    } catch (e) {
+      setRecipeErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRecipeBusy(false);
+    }
+  }, []);
+
+  /** ⚠️ 存完**重新读一遍** —— 不拿本地那份充数(库里可能改了别的字段) */
+  const saveRecipe = useCallback(async (r: SearchRecipe) => {
+    setRecipeErr(null);
+    const res = await window.electronAPI!.xRecipeInvoke({ op: 'upsert', recipe: r });
+    if (res.status !== 'ok') { setRecipeErr(res.reason); return; }
+    setEditing(null);
+    await loadRecipes();
+  }, [loadRecipes]);
+
+  const removeRecipe = useCallback(async (r: SearchRecipe) => {
+    setRecipeErr(null);
+    const res = await window.electronAPI!.xRecipeInvoke({ op: 'delete', recipeId: r.id });
+    if (res.status !== 'ok') { setRecipeErr(res.reason); return; }
+    await loadRecipes();
+  }, [loadRecipes]);
+
+  /**
+   * ⭐⭐ 按配方去搜 —— **只导航,不采集**。
+   * ⚠️ 采集仍是「输出」栏那一个按钮的事(用户 2026-10-03:
+   * 「我自己选定一个页面,点击开始采集,就采集」)——
+   * 配方栏替人把页面选好,不替人决定采不采。
+   */
+  const runRecipe = useCallback(async (q: { q: string; resultType: string }) => {
+    const g = await window.electronAPI!.webDomInvoke({
+      op: 'goto',
+      pageRef: { wcId: wcId! },
+      name: X_PAGE_NAME.search,
+      params: { q: q.q, f: q.resultType },
+    });
+    setLog((l) => [{
+      at: new Date().toLocaleTimeString(), label: `按配方搜索`, result: g,
+    }, ...l].slice(0, 50));
+  }, [wcId]);
+
   /** ⭐ 长流程的进度 —— 不让人对着一个「采集中」干等 */
   const [step, setStep] = useState('');
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
@@ -227,6 +294,11 @@ export function XConsole(
    * 竖排会隐含「从上到下」的次序,而它们之间本来没有次序。
    */
   const [tab, setTab] = useState<CapTab>('control');
+  /** ⭐ 切到配方栏时自动读一次 —— 省得人还要先点「刷新」 */
+  useEffect(() => {
+    if (tab === 'recipe' && recipes.length === 0 && !recipeBusy) void loadRecipes();
+  }, [tab, recipes.length, recipeBusy, loadRecipes]);
+
   /**
    * 滚动轮数上限 —— ⚠️ **可填,不写死**(见下面那个输入框的注释)。
    * ⭐ 默认 30 而不是 5:X 的无限流一屏才几百像素,5 轮看着像没动。
@@ -1105,6 +1177,264 @@ export function XConsole(
             </div>
           </>
         )}
+
+        {/*
+          ⭐⭐⭐ **配方** —— 用户 2026-10-04:「配方的配置功能也要增加上来哦。」
+
+          ⚠️ 配方记的是**意图**(要哪些词、谁发的、多久以内、热度门槛),
+          真正发出去的查询串由 `recipeToQuery` 翻译 —— 两者**不是一回事**,
+          所以每条都把「实际会搜什么」显示出来,人点之前看得见。
+        */}
+        {tab === 'recipe' && (
+          <>
+            <div style={S.opArea}>
+              <div style={S.row}>
+                <button
+                  type="button"
+                  disabled={recipeBusy}
+                  onClick={() => void loadRecipes()}
+                  style={S.btn}
+                >
+                  {recipeBusy ? '读取中…' : '刷新'}
+                </button>
+                <button
+                  type="button"
+                  disabled={recipeBusy}
+                  onClick={() => setEditing(blankRecipe())}
+                  style={S.btn}
+                >
+                  新建配方
+                </button>
+                <span style={{ fontSize: 10, opacity: 0.55 }}>
+                  共 {recipes.length} 条
+                </span>
+              </div>
+              {recipeErr !== null && (
+                <div style={{ ...S.todo, color: '#f87171' }}>⚠️ {recipeErr}</div>
+              )}
+            </div>
+
+            <div style={S.resultArea}>
+              {editing !== null && (
+                <RecipeEditor
+                  value={editing}
+                  onCancel={() => setEditing(null)}
+                  onSave={(r) => void saveRecipe(r)}
+                />
+              )}
+              <div style={S.sectionTitle}>配方列表</div>
+              <div style={S.logBox}>
+                {recipes.length === 0 && <div style={S.todo}>还没有配方。</div>}
+                {recipes.map((r) => {
+                  const q = recipeToQuery(r);
+                  return (
+                    <div key={r.id} style={{ marginBottom: 8 }}>
+                      <div>
+                        <strong>{r.name}</strong>
+                        <span style={{ opacity: 0.55 }}>　{r.template}</span>
+                        {!r.enabled && <span style={{ opacity: 0.55 }}>　（已停用）</span>}
+                      </div>
+                      {/* ⭐⭐ 实际会搜什么 —— 配方填的词与发出去的串不是一回事 */}
+                      <div style={{ fontSize: 11, opacity: 0.7 }}>{q.explain}</div>
+                      <div style={{ fontSize: 11, opacity: 0.55, wordBreak: 'break-all' }}>
+                        <code>{q.q}</code>
+                      </div>
+                      {/* ⚠️ 翻译不出来的要**挡住**,不许点了才失败 */}
+                      {q.problems.map((p, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#f87171' }}>⚠️ {p}</div>
+                      ))}
+                      <div style={{ ...S.row, marginTop: 3 }}>
+                        <button
+                          type="button"
+                          disabled={wcId == null || q.problems.length > 0}
+                          onClick={() => void runRecipe(q)}
+                          style={S.btn}
+                          title={q.problems.length > 0 ? '这条配方还搜不出东西' : '按这条配方去搜，然后回「输出」栏采'}
+                        >
+                          按它搜索
+                        </button>
+                        <button type="button" onClick={() => setEditing(r)} style={S.btn}>编辑</button>
+                        <button
+                          type="button"
+                          onClick={() => void removeRecipe(r)}
+                          style={S.btn}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ⭐ 新配方的空壳 —— ⚠️ `id` 空串表示「新增」(由 repo 生成 ULID)。
+ * ⭐ 默认值照搬 `SearchRecipe` 注释里的实测结论:
+ * `sinceHours` 默认 24、`resultType` 默认 latest。
+ */
+function blankRecipe(): SearchRecipe {
+  return {
+    id: '', name: '', enabled: true, template: 'trending',
+    keywords: [], fromAccounts: [], helpSignals: [],
+    sinceHours: 24, resultType: 'latest', intervalMinutes: 60,
+  };
+}
+
+/** ⭐ 逗号/空格分隔 ↔ 数组 —— 人填的是一行字,库里存的是数组 */
+const toList = (v: string): string[] =>
+  v.split(/[,，、\n]+/).map((x) => x.trim()).filter(Boolean);
+const fromList = (v: readonly string[] | undefined): string => (v ?? []).join('，');
+
+/**
+ * ⭐⭐ 配方编辑器 —— 用户 2026-10-04:「配方的配置功能也要增加上来哦。」
+ *
+ * ⚠️ 字段**按模板显示**:盯人模板不显示关键词(它根本不筛词),
+ * 求助模板才显示信号词 —— 显示用不上的框等于请人填错。
+ */
+function RecipeEditor(
+  { value, onSave, onCancel }:
+  { value: SearchRecipe; onSave: (r: SearchRecipe) => void; onCancel: () => void },
+): ReactElement {
+  const [r, setR] = useState<SearchRecipe>(value);
+  /** ⚠️ 换一条编辑时要跟着换 —— 否则点「编辑」第二条还显示第一条 */
+  useEffect(() => { setR(value); }, [value]);
+  const set = <K extends keyof SearchRecipe>(k: K, v: SearchRecipe[K]): void =>
+    setR((x) => ({ ...x, [k]: v }));
+
+  const preview = recipeToQuery(r);
+  const isVip = r.template === 'vip-tracking';
+  const isHelp = r.template === 'help-wanted';
+
+  return (
+    <div style={{ ...S.diagnose, marginBottom: 8 }}>
+      <div style={S.sectionTitle}>{r.id ? '编辑配方' : '新建配方'}</div>
+      <div style={S.row}>
+        <input
+          value={r.name}
+          onChange={(e) => set('name', e.target.value)}
+          placeholder="配方名字（必填）"
+          style={S.input}
+        />
+        <select
+          value={r.template}
+          onChange={(e) => set('template', e.target.value as SearchRecipe['template'])}
+          style={{ ...S.input, flex: 'none', width: 150 }}
+        >
+          <option value="trending">关键词</option>
+          <option value="vip-tracking">盯人（只看这些账号）</option>
+          <option value="help-wanted">求助（词 + 信号词）</option>
+          <option value="custom">自定义</option>
+        </select>
+      </div>
+
+      {/* ⚠️ 盯人模板不显示关键词 —— 它根本不筛词,显示出来只会请人填错 */}
+      {!isVip && (
+        <div style={S.row}>
+          <input
+            value={fromList(r.keywords)}
+            onChange={(e) => set('keywords', toList(e.target.value))}
+            placeholder="关键词（逗号分隔，任一命中）"
+            style={S.input}
+          />
+        </div>
+      )}
+      {isHelp && (
+        <div style={S.row}>
+          <input
+            value={fromList(r.helpSignals)}
+            onChange={(e) => set('helpSignals', toList(e.target.value))}
+            placeholder="求助信号词（逗号分隔，与关键词同时命中才算）"
+            style={S.input}
+          />
+        </div>
+      )}
+      <div style={S.row}>
+        <input
+          value={fromList(r.fromAccounts)}
+          onChange={(e) => set('fromAccounts', toList(e.target.value))}
+          placeholder={isVip ? '盯哪些账号（逗号分隔，必填）' : '限这些账号（可留空）'}
+          style={S.input}
+        />
+      </div>
+      <div style={S.row}>
+        <input
+          value={r.minLikes ?? ''}
+          onChange={(e) => set('minLikes', Number(e.target.value.replace(/\D/g, '')) || undefined)}
+          placeholder="赞≥"
+          style={{ ...S.input, flex: 'none', width: 64 }}
+        />
+        <input
+          value={r.minRetweets ?? ''}
+          onChange={(e) => set('minRetweets', Number(e.target.value.replace(/\D/g, '')) || undefined)}
+          placeholder="转≥"
+          style={{ ...S.input, flex: 'none', width: 64 }}
+        />
+        <input
+          value={r.lang ?? ''}
+          onChange={(e) => set('lang', e.target.value.trim() || undefined)}
+          placeholder="语言 zh/en"
+          style={{ ...S.input, flex: 'none', width: 90 }}
+        />
+        <input
+          value={r.sinceHours ?? ''}
+          onChange={(e) => set('sinceHours', Number(e.target.value.replace(/\D/g, '')) || undefined)}
+          placeholder="几小时内"
+          style={{ ...S.input, flex: 'none', width: 90 }}
+        />
+        <select
+          value={r.resultType}
+          onChange={(e) => set('resultType', e.target.value as SearchRecipe['resultType'])}
+          style={{ ...S.input, flex: 'none', width: 90 }}
+        >
+          <option value="latest">最新</option>
+          <option value="top">热门</option>
+        </select>
+      </div>
+      <div style={S.row}>
+        <label style={{ fontSize: 11 }}>
+          <input
+            type="checkbox"
+            checked={r.includeReplies ?? false}
+            onChange={(e) => set('includeReplies', e.target.checked)}
+          />
+          {' '}连回复一起（filter:replies）
+        </label>
+        <label style={{ fontSize: 11 }}>
+          <input
+            type="checkbox"
+            checked={r.enabled}
+            onChange={(e) => set('enabled', e.target.checked)}
+          />
+          {' '}启用
+        </label>
+      </div>
+
+      {/* ⭐⭐ 改一个字就看得见最终会搜什么 —— 不用存了再看 */}
+      <div style={{ fontSize: 11, opacity: 0.7, marginTop: 4 }}>
+        实际会搜：<code style={{ wordBreak: 'break-all' }}>{preview.q || '（还搜不出东西）'}</code>
+      </div>
+      {preview.problems.map((p, i) => (
+        <div key={i} style={{ fontSize: 11, color: '#f87171' }}>⚠️ {p}</div>
+      ))}
+
+      <div style={{ ...S.row, marginTop: 4 }}>
+        <button
+          type="button"
+          disabled={r.name.trim() === ''}
+          onClick={() => onSave(r)}
+          style={S.btn}
+          title={r.name.trim() === '' ? '配方必须有名字' : '存进库'}
+        >
+          保存
+        </button>
+        <button type="button" onClick={onCancel} style={S.btn}>取消</button>
       </div>
     </div>
   );

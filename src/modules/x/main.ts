@@ -45,6 +45,7 @@ import {
 import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
+import { registerXRecipeIpc } from './x-recipe-ipc';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -73,6 +74,17 @@ export function registerXModule(): void {
    * 业务的脚本**由业务 push** —— 底座不认识 X,这条不能破。
    */
   for (const sc of X_DOM_SCRIPTS) scriptRegistry.register(sc);
+
+  /**
+   * ⭐⭐ 配方 CRUD 的 IPC —— **X 自带**(通道名也在 X 这边)。
+   *
+   * ⚠️ 不挂到 `web-dom.invoke` 上:那是 web 能力层的通道,
+   * 而配方是库里的业务数据 —— 挂上去就要在能力层 import 业务 repo,
+   * 撞「能力层不许 import 业务层」那道守卫。
+   * ⚠️ 也不进 `channel-names.ts`:删 X 时会留下孤儿
+   * (守卫 `x-module-detachable` 的改法原话:「X 自带视图/IPC/repo/schema」)。
+   */
+  registerXRecipeIpc();
 }
 
 
