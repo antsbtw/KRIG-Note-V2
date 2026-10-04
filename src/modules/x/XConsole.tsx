@@ -679,7 +679,8 @@ export function XConsole(
                       if (run.audits.length > 0) {
                         const text = exportAuditText(run.audits, {
                           pages: run.audits.length,
-                          totalResponses: run.harvest?.items.length ?? 0,
+                          /** ⭐ **整轮**的(含逐篇长文页)——不是只有第一趟 */
+                          totalResponses: run.totalResponses,
                           rounds: run.harvest?.rounds,
                           scrolledPx: run.harvest?.scrolledPx,
                           /** ⭐ 「到上限停」与「滚到底停」要分得开 */

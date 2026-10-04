@@ -51,6 +51,14 @@ export type RunDeps = {
 
 export type RunResult = {
   readonly audits: readonly TimelineAudit[];
+  /**
+   * ⭐⭐ **整轮**的响应总数(列表页 + 逐篇长文页)。
+   *
+   * ⚠️⚠️ 不能用 `harvest.items.length` 当这个数:那只是**第一趟**的。
+   * 真机 2026-10-04 的报告因此写出「收到 **20** 条响应,其中 **64** 条是
+   * 时间线载荷」—— 64 > 20,一眼假。两个数来自不同的跑,却摆在一句话里。
+   */
+  readonly totalResponses: number;
   readonly summary: ReturnType<typeof summarizeAudits> | null;
   readonly harvest: RunHarvest | null;
   /** ⭐⭐ 研判与执行的账 —— 三类分开,不许混 */
@@ -118,11 +126,15 @@ export async function runCollect(
     afterRoundScriptId: X_SCRIPTS.expandAll,
     maxRounds: opts.maxRounds ?? 60,
   });
-  if (!rep) return { audits: [], summary: null, harvest: null, plan: null, fetched: [] };
+  if (!rep) {
+    return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, fetched: [] };
+  }
+  /** ⭐ 从第一趟开始累计 —— 后面每补一篇都加上 */
+  let totalResponses = rep.items.length;
 
   let audits = auditsOf(rep);
   if (audits.length === 0) {
-    return { audits, summary: null, harvest: rep, plan: null, fetched: [] };
+    return { audits, totalResponses, summary: null, harvest: rep, plan: null, fetched: [] };
   }
 
   // ── ② 研判(只判不做)──
@@ -161,6 +173,7 @@ export async function runCollect(
       });
       continue;
     }
+    totalResponses += one.items.length;
     const got = auditsOf(one);
     extraAudits.push(...got);
     /**
@@ -168,16 +181,33 @@ export async function runCollect(
      * 要这一篇的正文**真的变长了**才算
      * (`feedback-pdca-close-the-loop`:我踩过「数错元素致该数恒为 0」)。
      */
-    const hit = got.flatMap((a) => a.items).find((t) => t.isArticle && t.incomplete === undefined);
+    const all = got.flatMap((a) => a.items);
+    const hit = all.find((t) => t.isArticle && t.incomplete === undefined);
+    /**
+     * ⭐⭐ 失败要说清**是哪一种** —— 2026-10-04 真机 38 篇里 2 篇失败,
+     * 而「进去了但没解出正文」这一句**三种成因都盖住了**,
+     * 看了也不知道该查哪:页面没载荷 / 载荷里没推文 / 有推文但没正文。
+     * ⚠️ 一句话盖住多种成因 = 留了痕也等于没留。
+     */
     (fetched as Array<RunResult['fetched'][number]>).push(hit !== undefined
       ? { id: n.id, url, ok: true, textLen: hit.textLen }
-      : { id: n.id, url, ok: false, why: '进去了但没解出正文' });
+      : {
+        id: n.id,
+        url,
+        ok: false,
+        why: one.items.length === 0
+          ? '单篇页一条响应都没有 —— 多半没到位或腿没装上'
+          : all.length === 0
+            ? `收到 ${one.items.length} 条响应但**没有一条带推文** —— 端点判据可能不认`
+            : `解出 ${all.length} 条推文但**都没正文** —— 这一篇可能真的没给 content_state`,
+      });
   }
 
   // ── ④ 把补回来的并进账 ──
   audits = [...audits, ...extraAudits];
   return {
     audits,
+    totalResponses,
     /**
      * ⚠️⚠️ 重新汇总 —— 补回来的那几篇必须体现在账上。
      *

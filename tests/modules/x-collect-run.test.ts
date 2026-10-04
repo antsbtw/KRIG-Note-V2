@@ -185,3 +185,48 @@ describe('⚠️ 边界', () => {
     expect(r.plan?.todo).toEqual([]);
   });
 });
+
+/**
+ * ⭐⭐ 响应数要**算整轮** —— 2026-10-04 真机
+ *
+ * 那份报告写着「收到 **20** 条响应,其中 **64** 条是时间线载荷」——
+ * 64 > 20,一眼假。真因:`pages` 算的是整轮(列表页 + 38 篇长文页),
+ * 而 `totalResponses` 只拿了**第一趟**的 `harvest.items.length`。
+ * ⚠️ 两个数来自不同的跑,却摆在同一句话里。
+ */
+describe('⭐⭐ 响应数算整轮,不是只算第一趟', () => {
+  it('⭐⭐ 补了几篇,响应数就要把那几篇算进去', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false), articleTweet('902', false)],
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    /** 列表页 1 条 + 两篇各 1 条 = 3 */
+    expect(
+      r.totalResponses,
+      '响应数只算了第一趟 —— 报告会写出「收到 20 条、其中 64 条」这种话',
+    ).toBe(3);
+  });
+
+  it('⭐ 不补时就是第一趟那个数', async () => {
+    const { deps } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(r.totalResponses).toBe(1);
+  });
+
+  /**
+   * ⭐⭐ 失败原因要**分得开** —— 真机 2 篇失败时
+   * 「进去了但没解出正文」一句话盖住了三种成因,看了不知道查哪。
+   */
+  it('⭐⭐ 失败原因按成因分:没响应 / 没推文 / 有推文没正文', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false)],
+      emptyArticles: new Set(['901']),
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok).toBe(false);
+    expect(
+      r.fetched[0].why,
+      '失败原因没说清是哪一种 —— 留了痕也等于没留',
+    ).toContain('都没正文');
+  });
+});

@@ -290,3 +290,52 @@ describe('⭐⭐ 停止原因:到上限 vs 到底', () => {
     expect(text, '没给却印了停止原因').not.toContain('停止原因');
   });
 });
+
+/**
+ * ⭐⭐⭐ 报告与面板**必须说同一件事** —— 2026-10-04 真机
+ *
+ * 那一跑:面板说「取回长文正文 36/38」「第 3 条 4072 字」,
+ * 报告说「第 3 条 23 字、长文没正文」「长文正文缺 94 篇」——
+ * **36 篇正文取回来了,报告里一篇都看不见**。
+ *
+ * ⚠️⚠️ 真因:`exportAuditText` 里有**第三份**去重实现(「保留先出现的」)。
+ * 我把 `summarizeAudits` 改成「留更全的那份」时**它没跟上**。
+ * ⭐ 又是「两处做同一件事必漂」—— 修法是换信息来源,不是把第三份也改一遍。
+ */
+describe('⭐⭐⭐ 报告的去重 = summarizeAudits 的去重', () => {
+  const art = (cs: unknown): string => JSON.stringify({
+    data: { tweetResult: { result: {
+      rest_id: '777',
+      legacy: { id_str: '777', full_text: 'https://t.co/x' },
+      article: { article_results: { result: { title: 'T', content_state: cs } } },
+      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+    } } },
+  });
+  const listPage = art(undefined);
+  const fullPage = art({ blocks: [{ text: '正文'.repeat(80), type: 'unstyled' }] });
+
+  it('⭐⭐⭐ 补回来的正文**要出现在报告里**,不是只在面板上', () => {
+    const text = exportAuditText(
+      [auditTimelinePayload(listPage), auditTimelinePayload(fullPage)],
+      meta,
+    );
+    expect(text, '报告还说这条长文没正文 —— 跑完 36 篇报告里看不见').not.toContain('长文没正文');
+    expect(text, '报告里还是 23 字那份').not.toContain('✓ 23 字');
+  });
+
+  it('⭐⭐ 汇总也不该再报它缺 —— 「缺 94 篇」就是这么来的', () => {
+    const text = exportAuditText(
+      [auditTimelinePayload(listPage), auditTimelinePayload(fullPage)],
+      meta,
+    );
+    expect(text, '补回来了还报缺').not.toContain('长文正文缺');
+  });
+
+  it('⭐ 顺序反过来结论一样 —— 不是靠「后面覆盖前面」', () => {
+    const text = exportAuditText(
+      [auditTimelinePayload(fullPage), auditTimelinePayload(listPage)],
+      meta,
+    );
+    expect(text, '浅的那份把深的盖掉了').not.toContain('长文没正文');
+  });
+});

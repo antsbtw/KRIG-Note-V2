@@ -13,6 +13,7 @@
  * 字段用中文名、每条推文一块、缺什么直接标在那一行。
  */
 
+import { summarizeAudits } from './x-timeline-audit';
 import type { TimelineAudit, TweetAudit } from './x-timeline-audit';
 
 /** 一条推文的全部字段 —— ⭐ 顺序按「先看什么」排,不按类型 */
@@ -132,15 +133,18 @@ export function exportAuditText(
         : '　✓ 已到底'));
   }
 
-  const all: TweetAudit[] = [];
-  const seen = new Set<string>();
-  for (const a of audits) {
-    for (const t of a.items) {
-      if (t.id && seen.has(t.id)) continue;
-      if (t.id) seen.add(t.id);
-      all.push(t);
-    }
-  }
+  /**
+   * ⭐⭐⭐ 去重**问 `summarizeAudits`**,不在这里再写一遍(2026-10-04 改)。
+   *
+   * ⚠️⚠️ 真机实测的后果:这里原先是**第三份**去重实现(「保留先出现的」)。
+   * 我把 `summarizeAudits` 改成「留更全的那份」时**它没跟上** ——
+   * 于是同一次采集,面板说「第 3 条 4072 字」,报告说「第 3 条 23 字、
+   * 长文没正文」:**36 篇正文取回来了,报告里一篇都看不见**。
+   *
+   * ⭐ 又是「两处做同一件事必漂」(`x_tweet 加字段要登记四处` 同族)。
+   * 修法是**换信息来源**,不是把第三份也改一遍 —— 再加一份还会漂。
+   */
+  const all = summarizeAudits(audits).items as TweetAudit[];
   out.push(`解析结果：${all.length} 条推文（已按 id 去重）`);
 
   /** ⭐ 翻页游标 —— 它回答「还能不能继续翻」 */
