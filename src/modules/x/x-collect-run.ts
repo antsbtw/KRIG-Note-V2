@@ -56,6 +56,20 @@ export type RunDeps = {
    */
   stopPaging?(state: PagingState): PagingDecision;
   /**
+   * ⭐⭐⭐ **人点了「停止」吗** —— 2026-10-04 用户:
+   * 「停止按钮不起作用的,怎么点击停止也不停止?」
+   *
+   * ⚠️⚠️ 真因:「停止」发的是底座的 `scrollStop`,它只能停**滚动**。
+   * 而一跑有三段,后两段是本模块自己的循环:
+   * 　① 首轮 harvest(滚动)—— scrollStop 停得了
+   * 　② 主动翻页循环 —— **听不见**
+   * 　③ 逐篇补长文循环 —— **听不见**
+   * 人点停止时多半正在 ②③,所以「点了没反应」。
+   *
+   * ⭐ 长流程的每一段都要能叫停,否则「停止」就是个摆设。
+   */
+  cancelled?(): boolean;
+  /**
    * ⭐⭐ 回到指定 URL —— 逐篇补完之后用。
    * ⚠️ 可选:没提供就不回(老调用方行为不变),但那样下一轮会从错的页开始。
    */
@@ -207,6 +221,8 @@ async function pageUntilDone(
   let emptyRounds = 0;
   let round = 0;
   while (round < PAGING_SAFETY_ROUNDS) {
+    /** ⭐ 每轮开头先看人有没有喊停 —— 停在轮次之间,已采到的都留着 */
+    if (deps.cancelled?.()) { say(`已停止（翻了 ${round} 轮）`); break; }
     /** ⭐ 游标取**最新那一份账**里的,不是第一页的 */
     const cursor = [...all].reverse()
       .map((a) => a.cursor)
@@ -437,8 +453,11 @@ export async function runCollect(
     pass += 1;
     const batch = pending.slice(0, MAX_ARTICLE_FETCH - done.size);
     for (let i = 0; i < batch.length; i += 1) {
+      /** ⭐ 补长文一篇约 9 秒,38 篇就是 6 分钟 —— **必须能中途叫停** */
+      if (deps.cancelled?.()) { say(`已停止（补了 ${done.size} 篇长文）`); break; }
       await fetchOne(batch[i], `${i + 1}/${batch.length}` + (pass > 1 ? `（第 ${pass} 轮）` : ''));
     }
+    if (deps.cancelled?.()) break;
     /** ⭐ 拿这一轮之后的**总账**再判一次;已经试过的不再排进来 */
     pending = summarizeAudits([...audits, ...extraAudits])
       .items.map(judgeTweet)

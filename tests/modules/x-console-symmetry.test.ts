@@ -738,3 +738,53 @@ describe('⭐⭐⭐ 面板首要指标 = 推文数', () => {
     expect(s, '没清零 —— 新一跑会显示上一跑的数').toContain('setTotalResponses(0)');
   });
 });
+
+/**
+ * ⭐⭐⭐ 「停止」要**停得住整跑** —— 用户 2026-10-04:
+ * 「停止按钮不起作用的,怎么点击停止也不停止?」
+ *
+ * ⚠️⚠️ 原先只发底座的 `scrollStop`,那**只能停滚动**。
+ * 一跑有三段,后两段是编排自己的循环(主动翻页 / 逐篇补长文)——
+ * 人点停止时多半正在那两段,所以「点了没反应」。
+ */
+describe('⭐⭐⭐ 停止按钮要停得住整跑', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐⭐ 停止**既**停滚动**也**置取消标记', () => {
+    const s = panel();
+    const i = s.lastIndexOf("op: 'scrollStop'");
+    expect(i, '停止按钮不见了 —— 本条要重写').toBeGreaterThan(-1);
+    /** ⭐ 往前切到 onClick 开头,看这个 handler 里两件事都做了没 */
+    const from = s.lastIndexOf('onClick=', i);
+    const handler = s.slice(from, i + 60);
+    expect(handler.length, '切片空了 —— 断言会恒真').toBeGreaterThan(40);
+    expect(
+      handler,
+      '停止只发 scrollStop —— 翻页和补长文那两段听不见，人点了没反应',
+    ).toContain('cancelRef.current = true');
+  });
+
+  it('⭐⭐ 取消标记传给编排 —— 否则置了也没人看', () => {
+    const s = panel();
+    expect(s, '没把 cancelled 传进 runCollect —— 标记置了白置')
+      .toContain('cancelled: () => cancelRef.current');
+  });
+
+  /**
+   * ⚠️ 必须用 `useRef` 不能用 `useState` ——
+   * 编排在 async 函数里跑,闭包捕获的 state 永远是开跑那一刻的值。
+   */
+  it('⚠️⚠️ 取消标记用 useRef —— useState 在闭包里看不见改动', () => {
+    const s = panel();
+    expect(
+      s,
+      '取消标记不是 useRef —— async 编排闭包捕获的是旧值，改了也看不见',
+    ).toMatch(/const cancelRef = useRef\(/);
+  });
+
+  it('⚠️ 开跑要清零 —— 否则上一次的「停」会把新一跑立刻掐掉', () => {
+    const s = panel();
+    expect(s, '没清零 —— 点过一次停止之后再也采不了')
+      .toContain('cancelRef.current = false');
+  });
+});

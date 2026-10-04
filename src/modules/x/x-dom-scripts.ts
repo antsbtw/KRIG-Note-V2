@@ -197,6 +197,36 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
     '    if (!raw) return { ok: false, why: "URL 里没有 variables" };',
     '    var vars = JSON.parse(raw);',
     '    vars.cursor = c;',
+    '    var feats = parsed.searchParams.get("features");',
+    /** ⭐ queryId 在**路径里**,从路径现取 —— 随 X 版本变,不写死 */
+    '    var segs = parsed.pathname.split("/").filter(Boolean);',
+    '    var op = segs[segs.length - 1];',
+    '    var queryId = segs[segs.length - 2] || "";',
+    '',
+    /**
+     * ⭐⭐⭐ **先按抄到的形状发(GET),404-非JSON 才换 POST 重试**。
+     *
+     * ⚠️⚠️ `project-x-cursor-paging` 实证:X 把这些 endpoint 改成**只认 POST**,
+     * GET 一律 **404 + 空 body**,而 `queryId` 并没过期。
+     * ⭐ 「404 + 空 body」是这个改动的**指纹** —— GraphQL 的业务错误
+     * 一定带 JSON 说明;空 body 说明请求**根本没进 GraphQL handler**。
+     *
+     * ⚠️ 为什么不直接写死 POST:本机留痕显示 **X 自己用的就是 GET 且成功** ——
+     * 写死等于拿别人的 issue 覆盖本机实测。
+     * ⚠️ POST 不是「换个 method」:URL **不带 query string**,
+     * 参数要搬进 body `{variables, features, queryId}`。
+     */
+    '    function asPost() {',
+    '      var body = { variables: vars, queryId: queryId };',
+    '      if (feats) { try { body.features = JSON.parse(feats); } catch (e) { void e; } }',
+    '      return fetch(parsed.origin + parsed.pathname, {',
+    '        method: "POST",',
+    '        credentials: "include",',
+    '        headers: { "content-type": "application/json" },',
+    '        body: JSON.stringify(body),',
+    '      });',
+    '    }',
+    '',
     '    parsed.searchParams.set("variables", JSON.stringify(vars));',
     /**
      * ⚠️ `credentials: "include"` 必须有 —— 少了它 X 当成未登录,
@@ -204,12 +234,26 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
      */
     '    return fetch(parsed.toString(), { credentials: "include" })',
     '      .then(function (r) {',
-    /**
-     * ⭐ 只回**事实**(状态码、长度),**不回正文** ——
-     * 正文由两条腿照常捕获,回传等于绕开采集链路再造一份。
-     */
     '        return r.text().then(function (t) {',
-    '          return { ok: r.ok, status: r.status, bytes: t.length };',
+    /**
+     * ⭐ 只在**这个指纹**上重试:404 且响应体不是 JSON。
+     * ⚠️ 业务错误(带 `errors[]` 的 JSON)重发一次还是错,
+     * 还会把真正的错误信息盖掉。
+     */
+    '          var looksBlocked = r.status === 404 && t.trim().charAt(0) !== "{";',
+    '          if (!looksBlocked) {',
+    '            return { ok: r.ok, status: r.status, bytes: t.length, shape: "GET" };',
+    '          }',
+    '          return asPost().then(function (r2) {',
+    '            return r2.text().then(function (t2) {',
+    /** ⭐⭐ `shapeSwitched` 要留痕 —— 「X 的 GET 已不认」是外部事实,不留就随这跑消失 */
+    '              return {',
+    '                ok: r2.ok, status: r2.status, bytes: t2.length,',
+    '                shape: "POST", shapeSwitched: true,',
+    '                why: "GET 被 X 挡下（404+非 JSON），改用 POST 形状重试",',
+    '              };',
+    '            });',
+    '          });',
     '        });',
     '      })',
     '      .catch(function (e) { return { ok: false, why: String(e) }; });',

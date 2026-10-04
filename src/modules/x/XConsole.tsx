@@ -37,7 +37,7 @@
  * ⭐ 所以这里只**显示**识别结果,人点「用它」才写进下拉与参数框。
  */
 
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
 import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
@@ -271,6 +271,13 @@ export function XConsole(
    * (用户 2026-10-04:「怎么才采到 7 条呢?」而报告写着 56 条响应/43 条推文)。
    */
   const [totalResponses, setTotalResponses] = useState(0);
+  /**
+   * ⭐⭐⭐ 人点了「停止」—— 用户 2026-10-04:「怎么点击停止也不停止?」
+   *
+   * ⚠️ 用 `useRef` 不用 `useState`:编排是在一个 async 函数里跑的,
+   * 它闭包捕获的 state **永远是开跑那一刻的值**,改了也看不见。
+   */
+  const cancelRef = useRef(false);
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
   const [plan, setPlan] = useState<{
     depth: FetchDepth;
@@ -718,6 +725,7 @@ export function XConsole(
                     setPlan(null);
                     setStep('');
                     setTotalResponses(0);
+                    cancelRef.current = false;
                     try {
                       /**
                        * ⭐⭐⭐ **一次调用跑完全程** —— 编排在 `x-collect-run`。
@@ -818,6 +826,7 @@ export function XConsole(
                           }
                           return { go: true };
                         },
+                        cancelled: () => cancelRef.current,
                         onProgress: setStep,
                       }, {
                         // ⭐ 用户 2026-10-03:「每次采集 10 页」
@@ -884,10 +893,24 @@ export function XConsole(
                   type="button"
                   /** ⭐ 停是取消动作,必须在忙的时候可用 */
                   disabled={wcId == null || !running}
-                  onClick={() => void window.electronAPI?.webDomInvoke?.({
-                    op: 'scrollStop', pageRef: { wcId: wcId! },
-                  })}
+                  onClick={() => {
+                    /**
+                     * ⭐⭐⭐ **两件事都要做** —— 用户 2026-10-04:
+                     * 「停止按钮不起作用的,怎么点击停止也不停止?」
+                     *
+                     * ⚠️⚠️ 原先只发 `scrollStop`,那**只能停滚动**。
+                     * 而一跑有三段,后两段是编排自己的循环:
+                     * 　① 首轮 harvest(滚动)② 主动翻页 ③ 逐篇补长文
+                     * 人点停止时多半正在 ②③ —— 所以「点了没反应」。
+                     */
+                    cancelRef.current = true;
+                    setStep('正在停止…');
+                    void window.electronAPI?.webDomInvoke?.({
+                      op: 'scrollStop', pageRef: { wcId: wcId! },
+                    });
+                  }}
                   style={S.btn}
+                  title="停止采集 —— 滚动、翻页、补长文都会停，已采到的留着"
                 >
                   停止
                 </button>

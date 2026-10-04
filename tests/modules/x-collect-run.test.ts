@@ -805,3 +805,74 @@ describe('⭐⭐⭐ 采集层不许自带「够了没有」的阈值', () => {
     expect(body, '不判「游标不再变化」').toContain('游标不再变化');
   });
 });
+
+/**
+ * ⭐⭐⭐ **「停止」要停得住** —— 用户 2026-10-04:
+ * 「停止按钮不起作用的,怎么点击停止也不停止?」
+ *
+ * ⚠️⚠️ 真因:「停止」只发底座的 `scrollStop`,那**只能停滚动**。
+ * 一跑有三段,后两段是编排自己的循环(主动翻页 / 逐篇补长文),
+ * **听不见** —— 而人点停止时多半正在这两段里。
+ */
+describe('⭐⭐⭐ 停止要停得住每一段', () => {
+  const S2 = 'https://x.com/i/api/graphql/q/SearchTimeline?variables=%7B%7D';
+  const mkPage = (id: string, cursor: string): string => JSON.stringify({
+    data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+      type: 'TimelineAddEntries',
+      entries: [
+        { entryId: `tweet-${id}`, content: { itemContent: { tweet_results: { result: {
+          rest_id: id,
+          legacy: { id_str: id, full_text: `推${id}` },
+          core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+        } } } } },
+        { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+      ],
+    }] } } } },
+  });
+
+  it('⭐⭐⭐ 翻页中途喊停 → **立刻停**,已采到的留着', async () => {
+    let n = 0;
+    let stopped = false;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: S2, text: mkPage(`t${n}`, `c${n}`) }] };
+      },
+      async runScript() { n += 1; if (n >= 3) stopped = true; return { ok: true }; },
+      cancelled: () => stopped,
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(n, '喊停了还在翻 —— 「停止」是个摆设').toBe(3);
+    expect(r.summary?.items.length, '停下来就把已采的丢了').toBeGreaterThan(0);
+  });
+
+  it('⭐⭐⭐ 补长文中途喊停 → **立刻停**(一篇 9 秒,38 篇 6 分钟)', async () => {
+    let stopped = false;
+    const base = makeDeps({
+      listTweets: [
+        articleTweet('901', false), articleTweet('902', false), articleTweet('903', false),
+      ],
+    });
+    const calls = base.calls;
+    const deps: RunDeps = {
+      ...base.deps,
+      async harvest(plan) {
+        const r = await base.deps.harvest(plan);
+        if (plan.gotoPage && calls.filter((c) => c.startsWith('article:')).length >= 2) {
+          stopped = true;
+        }
+        return r;
+      },
+      cancelled: () => stopped,
+    };
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const tries = calls.filter((c) => c.startsWith('article:')).length;
+    expect(tries, '喊停了还在逐篇补 —— 人要干等 6 分钟').toBe(2);
+  });
+
+  it('⚠️ 不给 cancelled → 照常跑完(老调用方行为不变)', async () => {
+    const { deps, calls } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toContain('article:901');
+  });
+});
