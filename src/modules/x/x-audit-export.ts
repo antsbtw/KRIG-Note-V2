@@ -170,6 +170,15 @@ export function exportAuditText(
   const noBody = all.filter((t) => t.incomplete === 'article-no-body');
   if (noBody.length > 0) {
     const withUrl = noBody.filter((t) => t.articleUrl !== undefined);
+    /**
+     * ⚠️⚠️ **「缺」不等于「取失败」**(2026-10-04 真机写明)。
+     *
+     * 那一跑:面板报「取回长文正文 **38/38**」零失败,报告却说「缺 19 篇」。
+     * 两个数都对 —— 因为补长文时,**单篇页载荷里还夹着别的长文**
+     * (引用的、相关的),它们被一起收进账,但**从来没被请求过**。
+     * ⭐ 所以这一行说的是「这份账里还有多少篇没正文」,
+     * 不是「取失败了多少篇」。想知道取的结果看面板那一行。
+     */
     out.push(`⭐ 长文正文缺 ${noBody.length} 篇 —— 其中 ${withUrl.length} 篇载荷给了地址（可逐篇去取）`
       + (withUrl.length < noBody.length
         ? `，${noBody.length - withUrl.length} 篇**没地址,补不了**`

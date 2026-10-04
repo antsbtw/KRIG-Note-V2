@@ -85,6 +85,12 @@ export type RunResult = {
 
 /** ⚠️ 补全有上限 —— 安全网,不是目标(`feedback-pdca-close-the-loop`) */
 const MAX_ARTICLE_FETCH = 50;
+/**
+ * ⚠️ 再判几轮的**上限** —— 安全网不是目标。
+ * ⭐ 正常情况 2~3 轮就没新的了(停止由数据判据定);
+ * 这个数只防「每篇都带出新的」那种病态情况把一轮跑无限拖下去。
+ */
+const MAX_PASSES = 5;
 
 /** ⭐ 从一次 harvest 的响应里解析出核对结果 */
 function auditsOf(rep: RunHarvest): TimelineAudit[] {
@@ -169,14 +175,15 @@ export async function runCollect(
    * ⭐ 只有「进单篇页」这条路要在这里跑;
    * `expand-in-place` 已经由 `afterRoundScriptId` 每轮做掉了。
    */
-  const articles = decided.todo.filter((n) => n.route.kind === 'open-article');
-  const capped = articles.slice(0, MAX_ARTICLE_FETCH);
   const extraAudits: TimelineAudit[] = [];
+  /** ⭐ 已经试过的 —— 取不到正文的那几篇不许让循环空转 */
+  const done = new Set<string>();
 
-  for (let i = 0; i < capped.length; i += 1) {
-    const n = capped[i];
+  /** ⭐ 补一篇:导航进去、采、回读**那一条**的产出 */
+  async function fetchOne(n: TweetNeed, label: string): Promise<void> {
     const url = n.route.kind === 'open-article' ? n.route.url : '';
-    say(`取长文正文 ${i + 1}/${capped.length}…`);
+    done.add(n.id);
+    say(`取长文正文 ${label}…`);
     const one = await deps.harvest({
       gotoPage: { name: X_PAGE_NAME.article, params: { articleId: url } },
       wantPages: 1,
@@ -189,37 +196,26 @@ export async function runCollect(
       (fetched as Array<RunResult['fetched'][number]>).push({
         id: n.id, url, ok: false, why: '导航或采集失败',
       });
-      continue;
+      return;
     }
     totalResponses += one.items.length;
     const got = auditsOf(one);
     extraAudits.push(...got);
-    /**
-     * ⭐⭐ **回读真实产出** —— 不是「跑完了」就算成,
-     * 要这一篇的正文**真的变长了**才算
-     * (`feedback-pdca-close-the-loop`:我踩过「数错元素致该数恒为 0」)。
-     */
+
     const all = got.flatMap((a) => a.items);
     /**
      * ⭐⭐⭐ **只认 `n.id` 那一条** —— 2026-10-04 真机逼出来的。
      *
      * ⚠️⚠️ 原先是 `find(t => t.isArticle && t.incomplete === undefined)` ——
      * **任意一条**有正文的长文都算数。但单篇页载荷里不止一条推
-     * (引用的、相关的都在里面),于是:
-     *   面板报「取回长文正文 **19/19**」,报告里却只有 **17 篇**有正文。
-     * 成功判据认的根本不是我要的那一条。
-     *
-     * ⭐ `feedback-pdca-close-the-loop` 的原话:
-     * **「我踩过:数错元素致该数恒为 0,等于没在看」** —— 这次是反过来,
-     * 数错元素致该数恒为满,一样等于没在看。
-     * ⚠️ 回读真实产出,必须回读**那一条**的产出。
+     * (引用的、相关的都在里面),于是面板报「取回 19/19」而报告里只有 17 篇。
+     * ⭐ `feedback-pdca-close-the-loop`:「数错元素致该数恒为 0」——
+     * 这次是反过来,**数错元素致该数恒为满**,一样等于没在看。
      */
     const hit = all.find((t) => t.id === n.id && t.incomplete === undefined);
     /**
-     * ⭐⭐ 失败要说清**是哪一种** —— 2026-10-04 真机 38 篇里 2 篇失败,
-     * 而「进去了但没解出正文」这一句**三种成因都盖住了**,
-     * 看了也不知道该查哪:页面没载荷 / 载荷里没推文 / 有推文但没正文。
-     * ⚠️ 一句话盖住多种成因 = 留了痕也等于没留。
+     * ⭐⭐ 失败要说清**是哪一种** —— 一句话盖住多种成因 = 留了痕也等于没留。
+     * (真机实证:正是把这句拆开之后,「串轮」那个 bug 当场就露了。)
      */
     (fetched as Array<RunResult['fetched'][number]>).push(hit !== undefined
       ? { id: n.id, url, ok: true, textLen: hit.textLen }
@@ -232,10 +228,37 @@ export async function runCollect(
           : all.length === 0
             ? `收到 ${one.items.length} 条响应但**没有一条带推文** —— 端点判据可能不认`
             : all.some((t) => t.id === n.id)
-              /** ⭐ 这一条在载荷里、但没正文 —— 与「整页都没解出这条」是两回事 */
               ? `载荷里有这一条但**它没正文**（同页另有 ${all.length - 1} 条）`
               : `解出 ${all.length} 条推文但**没有这一条** —— 多半是跳转去了别的页`,
       });
+  }
+
+  /**
+   * ⭐⭐⭐ **判断-执行-再判断-再执行** —— `feedback-pdca-close-the-loop` 的①。
+   *
+   * ⚠️⚠️ 原先是「判一次 → 照单做完 → 收工」。真机 2026-10-04 的后果:
+   * 面板报「取回长文正文 **38/38**」零失败,报告却说「**缺 19 篇**」——
+   * 两个数都对:补长文时**单篇页载荷里还夹着别的长文**(引用的、相关的),
+   * 它们被一起收进账,**却从来没被请求过**。
+   *
+   * ⭐ 停止由**数据判据**定(没有新的要补就停),不由预先猜的次数定;
+   * 轮数上限只是安全网。⚠️ 每轮都**回读真实总账**再判,不凭印象。
+   */
+  let pending = decided.todo.filter((n) => n.route.kind === 'open-article');
+  let pass = 0;
+  while (pending.length > 0 && done.size < MAX_ARTICLE_FETCH && pass < MAX_PASSES) {
+    pass += 1;
+    const batch = pending.slice(0, MAX_ARTICLE_FETCH - done.size);
+    for (let i = 0; i < batch.length; i += 1) {
+      await fetchOne(batch[i], `${i + 1}/${batch.length}` + (pass > 1 ? `（第 ${pass} 轮）` : ''));
+    }
+    /** ⭐ 拿这一轮之后的**总账**再判一次;已经试过的不再排进来 */
+    pending = summarizeAudits([...audits, ...extraAudits])
+      .items.map(judgeTweet)
+      .filter((n) => n.route.kind === 'open-article' && !done.has(n.id));
+    if (pending.length > 0) {
+      say(`又冒出 ${pending.length} 篇长文（补的时候带出来的）`);
+    }
   }
 
   /**
@@ -244,7 +267,7 @@ export async function runCollect(
    * ⭐ 回不去不算整轮失败(数据已经采到了),但要留痕 ——
    * 下一轮会从错的页开始,人得知道。
    */
-  if (capped.length > 0 && deps.goBack) {
+  if (done.size > 0 && deps.goBack) {
     say('采完了，回到原来那一页…');
     const back = await deps.goBack();
     if (!back) {

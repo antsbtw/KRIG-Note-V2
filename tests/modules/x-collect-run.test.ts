@@ -362,3 +362,79 @@ describe('⭐⭐⭐ 采完回到原来那一页', () => {
     expect(r.fetched[0].ok).toBe(true);
   });
 });
+
+/**
+ * ⭐⭐⭐ **判断-执行-再判断** —— 2026-10-04 真机
+ *
+ * 那一跑:面板报「取回长文正文 **38/38**」零失败,报告却说「**缺 19 篇**」。
+ * ⚠️ 两个数都对 —— 补长文时**单篇页载荷里还夹着别的长文**(引用的、相关的),
+ * 它们被一起收进账,**却从来没被请求过**。
+ *
+ * ⭐ `feedback-pdca-close-the-loop` 的①:
+ * 反复执行的循环必须「判断-执行-**再判断**-再执行」。
+ */
+describe('⭐⭐⭐ 补的时候带出新的长文 → 同一轮里补上', () => {
+  /** ⭐ 取 901 时,单篇页载荷里**夹带**一篇没正文的 902 */
+  function depsBringsAlong(): { deps: RunDeps; calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      deps: {
+        async harvest(plan) {
+          if (plan.gotoPage) {
+            const id = /\/i\/article\/(\d+)/.exec(plan.gotoPage.params?.articleId ?? '')?.[1] ?? '?';
+            calls.push(`article:${id}`);
+            const tweets = [articleTweet(id, true)];
+            // ⭐ 取第一篇时夹带出 902(没正文)
+            if (id === '901') tweets.push(articleTweet('902', false));
+            return {
+              items: [{ url: ARTICLE_URL, text: timelinePayload(tweets) }],
+            } satisfies RunHarvest;
+          }
+          calls.push('list');
+          return {
+            items: [{ url: TIMELINE_URL, text: timelinePayload([articleTweet('901', false)]) }],
+          } satisfies RunHarvest;
+        },
+      },
+    };
+  }
+
+  it('⭐⭐⭐ 夹带出来的那篇**同一轮补上**,不留到下次', async () => {
+    const { deps, calls } = depsBringsAlong();
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls, '夹带出来的 902 没被补 —— 报告会说「缺 1 篇」而面板说零失败')
+      .toEqual(['list', 'article:901', 'article:902']);
+    expect(r.fetched.length).toBe(2);
+    expect(r.fetched.every((f) => f.ok), '补回来的报了失败').toBe(true);
+  });
+
+  it('⭐⭐ 补完之后账上**不再缺** —— 面板与报告说同一件事', async () => {
+    const { deps } = depsBringsAlong();
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const stillMissing = (r.summary?.items ?? [])
+      .filter((t) => t.incomplete === 'article-no-body');
+    expect(
+      stillMissing.length,
+      `面板说取回 ${r.fetched.filter((f) => f.ok).length} 篇零失败，账上却还缺 ${stillMissing.length} 篇`,
+    ).toBe(0);
+  });
+
+  /** ⚠️ 取不到正文的那几篇**不许**让循环空转 */
+  it('⚠️⚠️ 取不到正文的不重试 —— 否则循环空转', async () => {
+    const { deps, calls } = makeDeps({
+      listTweets: [articleTweet('901', false)],
+      emptyArticles: new Set(['901']),
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const tries = calls.filter((c) => c === 'article:901').length;
+    expect(tries, '同一篇试了多次 —— 取不到的会把循环拖死').toBe(1);
+    expect(r.fetched[0].ok).toBe(false);
+  });
+
+  it('⭐ 没有夹带时只跑一轮 —— 不做无谓的再判', async () => {
+    const { deps, calls } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toEqual(['list', 'article:901']);
+  });
+});
