@@ -594,3 +594,39 @@ describe('⭐⭐ 捕获留痕:让验证不靠人截图', () => {
     expect(code, '脚本没去 userData 下找 —— 会读到空目录').toContain('krig-data/web-trace');
   });
 });
+
+/**
+ * ⭐⭐⭐ 「开始收」必须从**干净的池子**开始 —— 2026-10-04 真机
+ *
+ * `start()` 只订阅、不清上一轮攒的内容(那是它的契约)。
+ * 所以**清空这件事必须由 `startAll` 做** —— 它才知道「新一轮开始了」。
+ * ⚠️ 漏了这一步的后果是**静默串轮**:逐篇补长文时每一篇都把前面
+ * 那些页的载荷当成自己的,报「解出 42 条推文但都没正文」,
+ * 而且挤爆池子让总数从 97 掉到 40。
+ *
+ * ⭐ 判据钉在 `startAll` 这个函数体里,不是整文件找 `clearPayloads`
+ * (`feedback-guard-scope-to-the-branch`:整文件 toMatch 必然假绿 ——
+ * 手动的 `captureClear` 分支里也有这个词)。
+ */
+describe('⭐⭐⭐ 开始收之前先清空', () => {
+  it('⭐⭐⭐ `startAll` 里**真的**调了 clearPayloads', () => {
+    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    const i = src.indexOf('async startAll(');
+    expect(i, 'startAll 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    /** ⚠️ 切到函数体结束(下一个顶层成员)为止,别把整文件圈进来 */
+    const end = src.indexOf('\n    },', i);
+    expect(end, '切不出 startAll 的函数体').toBeGreaterThan(i);
+    const body = src.slice(i, end);
+    expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(100);
+
+    expect(
+      body,
+      'startAll 没清上一轮的载荷 —— 下一轮会把上一轮的当成自己的（静默串轮）',
+    ).toContain('clearPayloads');
+    /** ⭐ 顺序也要钉:清要在 start 之前,否则清掉的可能是刚收到的 */
+    expect(
+      body.indexOf('clearPayloads'),
+      '清空排在 start() 之后 —— 可能把这一轮刚收到的清掉',
+    ).toBeLessThan(body.indexOf('cap.start()'));
+  });
+});

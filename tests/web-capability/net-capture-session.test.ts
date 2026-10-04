@@ -438,3 +438,64 @@ describe('⭐⭐⭐ 两条腿合流:CDP 的 body 必须让订阅者知道', () =
     expect(s.stats().noBody, '同一条请求被算了多次').toBe(1);
   });
 });
+
+/**
+ * ⭐⭐⭐ 一轮一轮地收:**上一轮的东西不许混进这一轮** —— 2026-10-04 真机
+ *
+ * ── 症状 ──
+ * 逐篇补长文时(一轮 38 次 start/finish 共用同一个 session),
+ * 单篇长文页报「解出 **42 条**推文但都没正文」——
+ * 一篇文章不可能有 42 条推文,**那是列表页的量**。
+ * 而且池子有上限,列表页那批被挤掉 →
+ * 同一个账号两次跑,推文从 **97 条掉到 40 条**。
+ *
+ * ⚠️ 真因:`start()` 只订阅,**从不清上一轮攒的内容**;
+ * `clearPayloads()` 本来就有,但**只有手动 captureClear 会调**。
+ */
+describe('⭐⭐⭐ 多轮复用同一个 session:不许串轮', () => {
+  it('⭐⭐⭐ 第二轮 `start()` 前清空 → 只看得到这一轮的', () => {
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE);
+
+    // 第一轮:列表页
+    s.start();
+    bus.recordResponseComplete(rec('r1', 'https://x.com/i/api/graphql/a/UserTweetsTimeline'), bytes('{"list":1}'));
+    expect(s.list().length, '第一轮没收到 —— 样本不成立').toBe(1);
+    s.stop();
+
+    // 第二轮:单篇长文页 —— ⭐ 这正是 startAll 现在做的
+    s.clearPayloads();
+    s.start();
+    bus.recordResponseComplete(rec('r2', 'https://x.com/i/api/graphql/a/TweetResultByRestId'), bytes('{"one":1}'));
+
+    const got = s.list();
+    expect(got.length, '上一轮的载荷混进来了 —— 单篇页会「解出 42 条推文」').toBe(1);
+    expect(got[0].url, '留下的是上一轮那条').toContain('TweetResultByRestId');
+  });
+
+  it('⚠️ 不清就会串轮 —— 这条钉住「为什么非清不可」', () => {
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE);
+    s.start();
+    bus.recordResponseComplete(rec('r1', 'https://x.com/i/api/graphql/a/UserTweetsTimeline'), bytes('{"list":1}'));
+    s.stop();
+    /** ⚠️ 故意**不清**,直接开第二轮 */
+    s.start();
+    bus.recordResponseComplete(rec('r2', 'https://x.com/i/api/graphql/a/TweetResultByRestId'), bytes('{"one":1}'));
+    expect(
+      s.list().length,
+      '不清居然也只有一条 —— 那本条的前提不成立,串轮的解释要重查',
+    ).toBe(2);
+  });
+
+  it('⭐ 清内容**不清计数** —— 人要知道这一轮总共来过多少', () => {
+    const bus = new NetworkEventBus();
+    const s = new CaptureSession(bus, PAGE);
+    s.start();
+    bus.recordResponseComplete(rec('r1', 'https://x.com/i/api/graphql/a/X'), bytes('{"a":1}'));
+    const before = s.stats().captured;
+    s.clearPayloads();
+    expect(s.list().length, '内容没清掉').toBe(0);
+    expect(s.stats().captured, '计数被一起清了 —— 「来过多少」就看不见了').toBe(before);
+  });
+});

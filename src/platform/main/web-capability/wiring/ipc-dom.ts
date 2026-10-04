@@ -287,6 +287,24 @@ function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
 
       // ② CDP 腿
       const cap = sessionFor(pageId);
+      /**
+       * ⭐⭐⭐ **开始收之前先清空** —— 2026-10-04 真机逼出来的。
+       *
+       * ⚠️⚠️ `start()` 只负责订阅,**从不清掉上一轮攒的内容**。
+       * 于是逐篇补长文时(一轮 38 次 start/finish 共用同一个 session):
+       * 每一篇都把**前面那些页的载荷**当成自己的收获。
+       *
+       * 真机症状:单篇长文页报「解出 **42 条**推文但都没正文」——
+       * 一篇文章不可能有 42 条推文,那是列表页的量。
+       * 而且池子有上限(MAX_HELD),列表页那批被挤掉 →
+       * **同一个账号两次跑,推文从 97 条掉到 40 条**。
+       *
+       * ⭐ `clearPayloads()` 本来就有,只是**只有手动 `captureClear` 会调** ——
+       * 自动流程里一次都没调过。「开始收」理应从干净的池子开始。
+       * ⚠️ 只清内容**不清计数**(`clearPayloads` 的契约):
+       * 人要知道这一轮总共来过多少。
+       */
+      cap.clearPayloads();
       cap.start();
       const cdpAttached = bodyProvider.attach(toPageHost(wc), pageId, {
         resourceTypes: ['fetch', 'document', 'xhr'],
