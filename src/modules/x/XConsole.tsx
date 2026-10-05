@@ -39,6 +39,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
+import type { XDataResult } from './x-data-types';
 import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
 } from './x-timeline-audit';
@@ -156,7 +157,11 @@ type AcquiredItem = {
 type LogEntry = {
   at: string;
   label: string;
-  result: WebDomResult | { status: 'error'; reason: string };
+  /**
+   * ⚠️ 三种来源:底座的 `WebDomResult`、X 自己的 `XDataResult`(落库/配方)、
+   * 以及 catch 里兜的那种。**原样存**,三态都要看得见。
+   */
+  result: WebDomResult | XDataResult | { status: 'error'; reason: string };
 };
 
 export function XConsole(
@@ -219,7 +224,7 @@ export function XConsole(
     setRecipeBusy(true);
     setRecipeErr(null);
     try {
-      const r = await window.electronAPI!.xRecipeInvoke({ op: 'list' });
+      const r = await window.electronAPI!.xDataInvoke({ op: 'list' });
       if (r.status === 'ok') setRecipes(r.value as SearchRecipe[]);
       else setRecipeErr(r.reason);
     } catch (e) {
@@ -232,7 +237,7 @@ export function XConsole(
   /** ⚠️ 存完**重新读一遍** —— 不拿本地那份充数(库里可能改了别的字段) */
   const saveRecipe = useCallback(async (r: SearchRecipe) => {
     setRecipeErr(null);
-    const res = await window.electronAPI!.xRecipeInvoke({ op: 'upsert', recipe: r });
+    const res = await window.electronAPI!.xDataInvoke({ op: 'upsert', recipe: r });
     if (res.status !== 'ok') { setRecipeErr(res.reason); return; }
     setEditing(null);
     await loadRecipes();
@@ -240,7 +245,7 @@ export function XConsole(
 
   const removeRecipe = useCallback(async (r: SearchRecipe) => {
     setRecipeErr(null);
-    const res = await window.electronAPI!.xRecipeInvoke({ op: 'delete', recipeId: r.id });
+    const res = await window.electronAPI!.xDataInvoke({ op: 'delete', recipeId: r.id });
     if (res.status !== 'ok') { setRecipeErr(res.reason); return; }
     await loadRecipes();
   }, [loadRecipes]);
@@ -271,6 +276,14 @@ export function XConsole(
    * (用户 2026-10-04:「怎么才采到 7 条呢?」而报告写着 56 条响应/43 条推文)。
    */
   const [totalResponses, setTotalResponses] = useState(0);
+  /**
+   * ⭐⭐ 落库结果 —— **inserted / updated 分开显示**。
+   * ⚠️ 合成一个「保存了 N 条」的话,「全是重复的」和「全是新的」
+   * 长得一模一样 —— 而那正是 `INSERT IGNORE` 当年藏住的东西。
+   */
+  const [saved, setSaved] = useState<{
+    inserted: number; updated: number; failed: unknown[];
+  } | null>(null);
   /**
    * ⭐⭐⭐ 人点了「停止」—— 用户 2026-10-04:「怎么点击停止也不停止?」
    *
@@ -725,6 +738,7 @@ export function XConsole(
                     setPlan(null);
                     setStep('');
                     setTotalResponses(0);
+                    setSaved(null);
                     cancelRef.current = false;
                     try {
                       /**
@@ -839,6 +853,50 @@ export function XConsole(
                       setTotalResponses(run.totalResponses);
                       setAudit(run.summary);
                       setPlan(run.plan === null ? null : { ...run.plan, fetched: run.fetched });
+
+                      /**
+                       * ⭐⭐⭐ **采完就存** —— 2026-10-05 接上。
+                       *
+                       * ⚠️⚠️ 在这之前,采到的数据**跑完就蒸发**:长文正文 23446 字、
+                       * 主动翻页、研判分层 —— 修了一串,库里一个字都没留下。
+                       *
+                       * ⚠️ 存的是 `record`(解析器产出的**完整记录**),
+                       * 不是面板那份核对结果(preview 只 80 字、媒体只有 type)。
+                       * ⭐ 【空】这一维由这里补 —— 解析器不知道自己在哪采的。
+                       */
+                      const records = (run.summary?.items ?? [])
+                        .map((t) => t.record)
+                        .filter((r) => r.id !== '');
+                      if (records.length > 0) {
+                        const sv = await window.electronAPI!.xDataInvoke({
+                          op: 'saveTweets',
+                          records,
+                          ctx: {
+                            /**
+                             * ⭐ 【空】从哪采的 —— 解析器不知道,由这里补。
+                             * ⚠️ `origin` 是开跑前抓拍的识别结果;
+                             * 认不出来就**如实留空**,别编一个 'x.unknown' 出来
+                             * (守卫「面板不许写死语义页名」当场逮到了那次编造)。
+                             */
+                            source: origin?.name ?? identified?.name ?? '',
+                            searchRecipe: origin?.params.q,
+                          },
+                        });
+                        setLog((l) => [{
+                          at: new Date().toLocaleTimeString(), label: '落库', result: sv,
+                        }, ...l].slice(0, 50));
+                        /**
+                         * ⭐⭐ 存的结果**要显示出来** —— 不显示的话
+                         * 「存进去了」和「静默失败了」长得一模一样
+                         * (`project-x-upsert-insert-ignore` 就是这么藏了两个月)。
+                         */
+                        setSaved(sv.status === 'ok'
+                          ? (sv.value as { inserted: number; updated: number; failed: unknown[] })
+                          : null);
+                        if (sv.status !== 'ok') {
+                          setStep(`落库失败：${(sv as { reason?: string }).reason ?? ''}`);
+                        }
+                      }
 
                       if (run.audits.length > 0) {
                         const text = exportAuditText(run.audits, {
@@ -1008,6 +1066,36 @@ export function XConsole(
                       tone="idle"
                       hint="时间线载荷条数 —— 一条约等于一页"
                     />
+                    {/*
+                      ⭐⭐⭐ **入库了几条** —— 2026-10-05。
+                      ⚠️ `inserted` 与 `updated` **分开报**:合成一个数的话
+                      「全是重复的」和「全是新的」长得一模一样 ——
+                      那正是 `INSERT IGNORE` 当年藏了两个月的东西。
+                    */}
+                    {saved !== null && (
+                      <>
+                        <Stat
+                          label="新入库"
+                          v={saved.inserted}
+                          tone={saved.inserted > 0 ? 'good' : 'idle'}
+                          hint="第一次见到的推文"
+                        />
+                        <Stat
+                          label="已更新"
+                          v={saved.updated}
+                          tone="idle"
+                          hint="库里已有、这次把采集字段刷新了（人工/AI 填的不动）"
+                        />
+                        {saved.failed.length > 0 && (
+                          <Stat
+                            label="入库失败"
+                            v={saved.failed.length}
+                            tone="bad"
+                            hint="⚠️ 这几条没存进去 —— 展开「返回值」看原因"
+                          />
+                        )}
+                      </>
+                    )}
                     <Stat
                       label="响应"
                       v={totalResponses}

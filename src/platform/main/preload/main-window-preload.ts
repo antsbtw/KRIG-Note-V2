@@ -31,9 +31,6 @@ import type {
 } from '@shared/auth/auth-types';
 import type { Profile, ProfileColor } from '@shared/types/profile-types';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
-import {
-  X_RECIPE_CHANNEL, type XRecipeInvoke, type XRecipeResult,
-} from '@shared/ipc/x-recipe-types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   /**
@@ -967,11 +964,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /**
-   * ⭐ X 配方 CRUD —— ⚠️ 通道名**从 X 模块的契约里取**,不进 `channel-names.ts`
-   * (删 X 时这一行跟着删,不留孤儿常量)。
+   * ⭐ X 的数据通道(配方 CRUD + 推文落库)。
+   * ⚠️ 用 `import(...)` 写类型**而不是顶部 import** —— preload 是单一文件、
+   * 无法自注册,顶部 import `@modules/x` 会让「X 可卸载」守卫必红。
+   * ⭐ 通道名在 `IPC_CHANNELS`,删 X 时留一行孤儿常量(比守卫永远红便宜)。
    */
-  xRecipeInvoke(payload: XRecipeInvoke): Promise<XRecipeResult> {
-    return ipcRenderer.invoke(X_RECIPE_CHANNEL, payload) as Promise<XRecipeResult>;
+  xDataInvoke(
+    payload: import('@modules/x/x-data-types').XDataInvoke,
+  ): Promise<import('@modules/x/x-data-types').XDataResult> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DATA_INVOKE, payload) as Promise<import('@modules/x/x-data-types').XDataResult>;
   },
 
   /** ⭐ 列已注册的语义页面名(Console 下拉用,**从真表读**) */

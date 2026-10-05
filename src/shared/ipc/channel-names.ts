@@ -381,6 +381,16 @@ export const IPC_CHANNELS = {
    */
   WEB_DOM_INVOKE: 'web-dom.invoke',
   /**
+   * ⭐ X 模块的数据通道(配方 CRUD + 推文落库)。
+   * ⚠️⚠️ **只有通道名在这里,契约类型在 `modules/x/x-data-types.ts`** ——
+   * 2026-10-05 的取舍:通道名放 X 那边更干净(删 X 时跟着走),
+   * 但 **preload 是单一文件、无法自注册**,放 X 就逼得它 import `@modules/x`,
+   * 「X 可卸载」守卫必红。
+   * ⭐ 权衡:删 X 时留**一行孤儿常量**,比守卫永远红或加白名单便宜
+   * (本仓的 KNOWN_DEBT 从来没有被清掉过)。
+   */
+  X_DATA_INVOKE: 'x-data.invoke',
+  /**
    * ⭐ 列出已注册的**语义页面名**(按 owner 分组)。
    * ⚠️ Console 的下拉**必须从这里读** —— 面板自己抄一份就会漂,
    * 而漂的表现是「面板上有这个名字、点下去说没登记」(旧实现的血泪)。

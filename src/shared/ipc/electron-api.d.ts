@@ -919,9 +919,9 @@ declare global {
        * ⭐ X 配方 CRUD（list / upsert / delete）。
        * ⚠️ 通道名在 X 模块自己的契约里 —— 删 X 时这一行跟着删,不留孤儿常量。
        */
-      xRecipeInvoke(
-        payload: import('./x-recipe-types').XRecipeInvoke,
-      ): Promise<import('./x-recipe-types').XRecipeResult>;
+      xDataInvoke(
+        payload: import('@modules/x/x-data-types').XDataInvoke,
+      ): Promise<import('@modules/x/x-data-types').XDataResult>;
       /** ⭐ 列已注册的语义页面名(Console 下拉用,从真表读) */
       webPageListNames(): Promise<Array<{
         owner: string;

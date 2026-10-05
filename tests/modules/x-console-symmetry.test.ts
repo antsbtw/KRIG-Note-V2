@@ -788,3 +788,53 @@ describe('⭐⭐⭐ 停止按钮要停得住整跑', () => {
       .toContain('cancelRef.current = false');
   });
 });
+
+/**
+ * ⭐⭐⭐ **采完要落库** —— 2026-10-05
+ *
+ * ⚠️⚠️ 在这之前,采到的数据**跑完就蒸发**:
+ * 长文正文 23446 字、主动翻页、研判分层 —— 修了一长串,库里一个字没留下。
+ */
+describe('⭐⭐⭐ 采完就存,且存的结果看得见', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐⭐ 采完调 saveTweets', () => {
+    expect(panel(), '采完不存 —— 跑完就蒸发').toContain("op: 'saveTweets'");
+  });
+
+  /**
+   * ⚠️⚠️ 存的必须是 `record`(完整记录),不是面板那份核对结果 ——
+   * 后者 `preview` 只 80 字、媒体只有 type,存进去等于存了个摘要。
+   */
+  it('⭐⭐⭐ 存的是**完整记录**,不是 80 字的核对结果', () => {
+    const s = panel();
+    const i = s.indexOf("op: 'saveTweets'");
+    const from = s.lastIndexOf('const records', i);
+    expect(from, '没看到 records 的来源 —— 本条要重写').toBeGreaterThan(-1);
+    const block = s.slice(from, i);
+    expect(block, '存的不是 record —— preview 只有 80 字,媒体只有 type')
+      .toContain('.map((t) => t.record)');
+  });
+
+  /**
+   * ⚠️⚠️ inserted / updated **必须分开显示**。
+   * 合成一个「保存了 N 条」的话,「全是重复的」和「全是新的」长得一模一样 ——
+   * 那正是 `INSERT IGNORE` 当年藏了两个月的东西。
+   */
+  it('⭐⭐⭐ 新入库与已更新**分开报**', () => {
+    const s = panel();
+    expect(s, '没报「新入库」').toContain('label="新入库"');
+    expect(s, '没报「已更新」—— 全是重复的和全是新的会长得一样')
+      .toContain('label="已更新"');
+  });
+
+  it('⚠️⚠️ 入库失败要**显眼**,不许静默', () => {
+    const s = panel();
+    expect(s, '入库失败不显示 —— 「存进去了」和「静默失败」长得一样')
+      .toContain('label="入库失败"');
+  });
+
+  it('⚠️ 重新开跑要清掉上一跑的入库数', () => {
+    expect(panel(), '没清零 —— 新一跑会显示上一跑的入库数').toContain('setSaved(null)');
+  });
+});

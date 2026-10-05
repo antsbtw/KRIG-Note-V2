@@ -45,7 +45,7 @@ import {
 import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
-import { registerXRecipeIpc } from './x-recipe-ipc';
+import { registerXDataIpc } from './x-data-ipc';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -84,7 +84,7 @@ export function registerXModule(): void {
    * ⚠️ 也不进 `channel-names.ts`:删 X 时会留下孤儿
    * (守卫 `x-module-detachable` 的改法原话:「X 自带视图/IPC/repo/schema」)。
    */
-  registerXRecipeIpc();
+  registerXDataIpc();
 }
 
 

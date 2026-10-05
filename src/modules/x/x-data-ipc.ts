@@ -1,5 +1,5 @@
 /**
- * ⭐⭐ 配方 CRUD 的 IPC —— **X 自带,与 X 同生共死**
+ * ⭐⭐ X 的**数据** IPC(配方 CRUD + 推文落库)—— **X 自带,与 X 同生共死**
  *
  * ⚠️ `search-recipe-repo` 本来就在(表、CRUD 都齐),
  * 缺的只是「renderer 怎么调到它」这一环。
@@ -12,18 +12,20 @@ import { ipcMain } from 'electron';
 import {
   listAllRecipes, upsertRecipe, deleteRecipe,
 } from '@platform/main/db/search-recipe-repo';
-import { X_RECIPE_CHANNEL, type XRecipeInvoke, type XRecipeResult } from '@shared/ipc/x-recipe-types';
+import { saveTweets } from './x-tweet-repo';
+import { IPC_CHANNELS } from '@shared/ipc/channel-names';
+import type { XDataInvoke, XDataResult } from './x-data-types';
 
-const failed = (reason: string): XRecipeResult => ({ status: 'failed', reason });
+const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
 
 /** ⚠️ 幂等 —— 多窗口/热重载下可能被调多次 */
 let wired = false;
 
-export function registerXRecipeIpc(): void {
+export function registerXDataIpc(): void {
   if (wired) return;
   wired = true;
 
-  ipcMain.handle(X_RECIPE_CHANNEL, async (_e, p: XRecipeInvoke): Promise<XRecipeResult> => {
+  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, async (_e, p: XDataInvoke): Promise<XDataResult> => {
     try {
       switch (p?.op) {
         case 'list':
@@ -40,6 +42,26 @@ export function registerXRecipeIpc(): void {
             return failed('[x.recipe] 配方必须有名字');
           }
           return { status: 'ok', value: await upsertRecipe(r) };
+        }
+
+        /**
+         * ⭐⭐⭐ **采到的推文落库** —— 2026-10-05。
+         * ⚠️ 返回 `inserted / updated / failed` 原样回去 ——
+         * 合成一个「保存了 N 条」的话,「全是重复的」和「全是新的」
+         * 长得一模一样,而那正是 `INSERT IGNORE` 当年藏住的东西。
+         */
+        case 'saveTweets': {
+          if (!Array.isArray(p.records) || p.records.length === 0) {
+            return failed('[x.data] saveTweets 没给记录');
+          }
+          /**
+           * ⚠️⚠️ `source` 空**不拒收** —— 2026-10-05 想清楚的:
+           * 「认不出这是哪一页」与「这批数据不要了」是**两件事**,
+           * 为一个元数据丢掉真数据不值当。
+           * ⭐ 由 repo 记成 `unknown`(事实:确实不知道),而不是让面板
+           * 编一个页名出来(那次编造被守卫当场逮到)。
+           */
+          return { status: 'ok', value: await saveTweets(p.records, p.ctx) };
         }
 
         case 'delete':

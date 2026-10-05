@@ -167,7 +167,12 @@ export async function saveTweets(
         liked: r.liked,
         retweeted: r.retweeted,
         bookmarked: r.bookmarked,
-        source: ctx.source,
+        /**
+         * ⚠️ `source` 是 `TYPE string`(非 option),空串会让整行写不进去。
+         * ⭐ 认不出页面时记 `unknown` —— 那是**事实**(确实不知道从哪采的),
+         * 不是兜底:它与「x.search」一样是个真实的取值,查询时分得出来。
+         */
+        source: ctx.source || 'unknown',
         search_recipe: opt(ctx.searchRecipe),
         ws_id: opt(ctx.wsId),
       };
