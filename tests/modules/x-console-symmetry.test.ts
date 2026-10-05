@@ -838,3 +838,40 @@ describe('⭐⭐⭐ 采完就存,且存的结果看得见', () => {
     expect(panel(), '没清零 —— 新一跑会显示上一跑的入库数').toContain('setSaved(null)');
   });
 });
+
+/**
+ * ⭐⭐⭐ **并排的数字必须同口径,否则标签要说清** —— 用户 2026-10-05:
+ * 「从观察的数字看,好像有点问题吧?」
+ *
+ * 面板当时并排摆着:
+ *   页 32          ← 时间线载荷条数(首轮滚动 + 翻页都算)
+ *   翻页 28 轮     ← 只数翻页
+ * ⚠️ 数字**各自都对**(实测逐个对过),但两个标签都像在说「翻了多少」,
+ * 于是 32 vs 28 看起来自相矛盾 —— **错的是名字,不是数**。
+ */
+describe('⭐⭐⭐ 并排的数字不许看起来自相矛盾', () => {
+  const panel = (): string => strip(read('src/modules/x/XConsole.tsx'));
+
+  it('⭐⭐⭐ 载荷数不叫「页」—— 它与「翻页 N 轮」不是一个口径', () => {
+    const s = panel();
+    const i = s.indexOf('S.statRow');
+    const area = s.slice(i, s.indexOf('</div>', i) + 600);
+    expect(area.length, '切片空了 —— 断言会恒真').toBeGreaterThan(100);
+    expect(
+      area,
+      '载荷数还叫「页」—— 与旁边的「翻页 N 轮」口径不同却同名，看起来自相矛盾',
+    ).not.toMatch(/label="页"/);
+    expect(area, '没报载荷数').toMatch(/label="载荷"/);
+  });
+
+  it('⭐⭐ 它的 hint 要说清**和翻页轮数不是一回事**', () => {
+    const s = panel();
+    const i = s.indexOf('label="载荷"');
+    expect(i, '载荷那格不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const hint = s.slice(i, s.indexOf('/>', i));
+    expect(
+      hint,
+      'hint 没说清口径 —— 人看到两个数不一样还是会以为出错了',
+    ).toMatch(/不是一个口径|滚动|翻页/);
+  });
+});
