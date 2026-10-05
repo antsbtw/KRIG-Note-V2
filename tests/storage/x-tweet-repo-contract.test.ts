@@ -157,18 +157,36 @@ describe('⭐⭐ 存库的字段名要对得上 schema', () => {
  * 守卫能钉「用没用对关键字」,钉不了「这条语句到底写没写进去」。
  */
 describe('⭐⭐⭐ 三条只有真库能验的规矩', () => {
-  it('⭐⭐⭐ ① datetime 字段要 cast —— 直传 ISO 串会被整条拒收', () => {
-    /**
-     * 真机报错:`Couldn't coerce value for field \`fetched_at\`:
-     * Expected \`datetime\` but found '2026-10-05T...'`
-     * ⚠️ 这一条就足以让**每一次写入都失败**。
-     */
-    for (const f of ['fetched_at', 'metrics_at']) {
-      expect(
-        CODE,
-        `\`${f}\` 没 cast 成 datetime —— 传 ISO 字符串会被库整条拒收`,
-      ).toMatch(new RegExp(`${f}\\s*=\\s*type::datetime`));
-    }
+  /**
+   * ⭐⭐⭐ **清单从 schema 推,不写死** —— 2026-10-05 的教训。
+   *
+   * ⚠️⚠️ 第一版这条守卫写死了 `['fetched_at', 'metrics_at']`,
+   * 于是 `created_at` **天然在视野之外** —— 它也是 datetime,也没 cast,
+   * **41 条推文全军覆没**而守卫全绿。
+   * ⭐ `feedback-guard-hardcoded-list-never-grows`:
+   * 修法是**换信息来源**(从 schema 真表推),不是补清单。
+   */
+  it('⭐⭐⭐ ① 每个 datetime 字段都要 cast —— 清单从 schema 推', () => {
+    const SCHEMA = readFileSync(
+      join(__dirname, '..', '..', 'src/storage/surreal/x-schema.ts'),
+      'utf-8',
+    );
+    /** ⭐ schema 里所有 `ON x_tweet TYPE ...datetime` 的字段 */
+    const dtFields = [...SCHEMA.matchAll(/EXISTS\s+(\w+)\s+ON x_tweet TYPE[^;]*datetime/g)]
+      .map((m) => m[1]);
+    expect(dtFields.length, 'schema 里一个 datetime 字段都没解析到 —— 本条要重写')
+      .toBeGreaterThan(2);
+
+    const i = CODE.indexOf("UPSERT type::record('x_tweet', $id) SET");
+    const stmt = CODE.slice(i, CODE.indexOf('`', i));
+    /** ⚠️ 只查**语句里真的写了**的那些 —— 没写的由「必填字段」那条管 */
+    const written = dtFields.filter((f) => new RegExp(`\\b${f}\\s*=`).test(stmt));
+    const notCast = written.filter((f) => !new RegExp(`${f}\\s*=[^,]*type::datetime`).test(stmt));
+    expect(
+      notCast,
+      '这些 datetime 字段没 cast —— 传 ISO 字符串会被库**整条拒收**（真机实证：41 条全失败）：\n  '
+      + notCast.join('\n  '),
+    ).toEqual([]);
   });
 
   it('⭐⭐⭐ ② 必填字段一个都不能漏 —— 漏一个整行写不进去', () => {

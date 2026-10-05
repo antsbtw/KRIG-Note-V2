@@ -228,7 +228,9 @@ export async function saveTweets(
            following = $following, followed_by = $followed_by,
            media = $media, links = $links,
            hashtags = $hashtags, mentions = $mentions,
-           created_at = $created_at,
+           -- created_at 也是 datetime,同样要 cast;但它是 option,
+           -- 没值时必须给 NONE 而不是 type::datetime(undefined)
+           created_at = IF $created_at != NONE THEN type::datetime($created_at) ELSE NONE END,
            metrics = $metrics,
            -- datetime 字段必须 cast:直接传 ISO 字符串会被库拒收
            -- (真机 2026-10-05 实证,这一条就足以让每一次写入都失败)
