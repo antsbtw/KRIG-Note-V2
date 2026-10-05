@@ -1,5 +1,19 @@
 /**
- * ⭐⭐⭐ **人流载荷的解析** —— followers / following / verifiedFollowers
+ * ⭐⭐⭐ **用户列表载荷的解析** —— followers / following / verifiedFollowers
+ *
+ * ── ⚠️ 名字用 X 的词(用户 2026-10-05:「人,就是 x 的用户呀」)──
+ * 载荷里的原词全是 **user**(`user_results` / `UserCell` / `screen_name`),
+ * 我原先写 `Person` / `people` —— **又是自造的说法**,
+ * 与 `iFollow`→`following` 同一个毛病(2026-10-04 刚被指出过)。
+ *
+ * ⭐⭐ 更要紧的是你这句点出的**实体归一**:
+ * follower 和「推文作者」**是同一个东西** —— 一个 X 用户,两种发现途径:
+ * 　· 从推文行推出来(发过推的)
+ * 　· 从用户列表页采来(含从没发过推的)
+ * 所以**不建新表**:`x_author` 那张表已经装着
+ * `followers_count` / `location` / `watched` / `blocked` —— 它本来就是用户表,
+ * 只是名字叫 author。按数据模型总纲(实体优先),一个实体一张表。
+ * ⚠️ 表名暂不改(存量数据与一串引用),但**代码里一律叫 user**。
  *
  * ── 为什么要单独一个 ──
  * 这三页的条目是**人不是推**。此前它们被 `carriesTweets` 认成时间线,
@@ -17,8 +31,11 @@
  * (`project-data-model-charter` 原则一:实体优先)。
  */
 
-/** ⭐ 一个人的完整记录 —— 落库用,与 `TweetRecord` 并列 */
-export type PersonRecord = {
+/**
+ * ⭐ 一个 **X 用户**的完整记录 —— 落库用,与 `TweetRecord` 并列。
+ * ⚠️ 落到 `x_author` 表(它本来就是用户表,见文件头)。
+ */
+export type XUserRecord = {
   /** ⭐ handle 是业务主键 —— ⚠️ 空的要在**入库前**挡掉,见 `problems` */
   readonly handle: string;
   /** ⭐ X 的数字 id —— 改名不会变,比 handle 稳 */
@@ -48,9 +65,10 @@ export type PersonRecord = {
   readonly seq: number;
 };
 
-export type PeopleAudit = {
-  readonly people: number;
-  readonly items: readonly PersonRecord[];
+export type XUserAudit = {
+  /** ⭐ 这一页解出几个用户 */
+  readonly users: number;
+  readonly items: readonly XUserRecord[];
   /** ⭐ 翻页游标 —— 它回答「还能不能继续翻」 */
   readonly hasCursor: boolean;
   readonly cursor?: string;
@@ -96,9 +114,9 @@ function collectBy(
  * 「这个载荷读不懂」与「这个载荷是空的」是两件事,混起来就查不动
  * (推文那边正是这么踩过)。
  */
-export function auditPeoplePayload(text: string, seqFrom = 0): PeopleAudit {
-  const empty = (problems: string[]): PeopleAudit => ({
-    people: 0, items: [], hasCursor: false, terminated: false, coverage: {}, problems,
+export function auditUserPayload(text: string, seqFrom = 0): XUserAudit {
+  const empty = (problems: string[]): XUserAudit => ({
+    users: 0, items: [], hasCursor: false, terminated: false, coverage: {}, problems,
   });
 
   /** ⚠️ 空响应体单独说 —— 不是解析失败,是根本没拿到内容 */
@@ -136,7 +154,7 @@ export function auditPeoplePayload(text: string, seqFrom = 0): PeopleAudit {
   });
 
   const problems: string[] = [];
-  const items: PersonRecord[] = nodes.map((node, i) => {
+  const items: XUserRecord[] = nodes.map((node, i) => {
     const legacy = isObj(node.legacy) ? node.legacy : {};
     const core = isObj(node.core) ? node.core : {};
     const persp = isObj(node.relationship_perspectives) ? node.relationship_perspectives : undefined;
@@ -195,11 +213,11 @@ export function auditPeoplePayload(text: string, seqFrom = 0): PeopleAudit {
       + '否则整批写入 0 条（一条 ASSERT 失败全灭）');
   }
 
-  const pct = (f: (p: PersonRecord) => boolean): number =>
+  const pct = (f: (p: XUserRecord) => boolean): number =>
     (items.length === 0 ? 0 : Math.round((items.filter(f).length / items.length) * 100));
 
   return {
-    people: items.length,
+    users: items.length,
     items,
     hasCursor: cursor !== '',
     cursor: cursor === '' ? undefined : cursor,

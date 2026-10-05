@@ -311,18 +311,18 @@ export function isSingleTweetOp(url: string): boolean {
  */
 export function carriesTweets(url: string): boolean {
   /**
-   * ⚠️⚠️ **人流不带推文** —— 2026-10-05。
+   * ⚠️⚠️ **用户列表不带推文** —— 2026-10-05。
    * `Followers` / `Following` / `BlueVerifiedFollowers` 以 `Timeline` 判据看
    * 都算「时间线」,但它们的条目是**人不是推**。
    * 喂给推文解析器的后果:0 条 + 报「一条推文都没解出来,可能结构变了」——
    * **误导性告警比报错还坏**(它把人指向「X 改版了」这个错方向)。
    */
-  if (isPeopleOp(url)) return false;
+  if (isUserListOp(url)) return false;
   return isTimelineOp(url) || isSingleTweetOp(url);
 }
 
 /**
- * ⭐⭐⭐ **这个响应里装的是「人」** —— 2026-10-05。
+ * ⭐⭐⭐ **这个响应里装的是「X 用户」** —— 2026-10-05。
  *
  * ⚠️ 判据用**精确名**不用后缀:`Followers` 结尾的还有
  * `BlueVerifiedFollowers`,而 `FollowersYouKnow` 之类将来可能出现,
@@ -331,20 +331,24 @@ export function carriesTweets(url: string): boolean {
  * ⚠️ 交接文档记着:`Followers` 端点**必须走 POST**(GET 恒 404 + 空 body),
  * 那是**翻页**时的事,与「这是不是人流」无关 —— 两件事别混。
  */
-const X_PEOPLE_ENDPOINTS: readonly string[] = [
+const X_USER_LIST_ENDPOINTS: readonly string[] = [
   'Followers',
   'Following',
   'BlueVerifiedFollowers',
 ];
 
-export function isPeopleOp(url: string): boolean {
+export function isUserListOp(url: string): boolean {
   const op = url.split('?')[0].split('/').filter(Boolean).pop() ?? '';
-  return X_PEOPLE_ENDPOINTS.includes(op);
+  return X_USER_LIST_ENDPOINTS.includes(op);
 }
 
-/** ⭐ 带人的响应 —— 与 `carriesTweets` 并列,两者**互斥** */
-export function carriesPeople(url: string): boolean {
-  return isPeopleOp(url);
+/**
+ * ⭐ 带**用户**的响应 —— 与 `carriesTweets` 并列,两者**互斥**。
+ * ⚠️ 名字用 X 的词(用户 2026-10-05:「人,就是 x 的用户呀」)——
+ * 载荷里是 `user_results` / `UserCell`,不是 person/people。
+ */
+export function carriesUsers(url: string): boolean {
+  return isUserListOp(url);
 }
 
 

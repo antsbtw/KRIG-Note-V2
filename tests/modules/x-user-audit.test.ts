@@ -9,8 +9,10 @@
  * 不是我新发明的。
  */
 import { describe, it, expect } from 'vitest';
-import { auditPeoplePayload } from '@modules/x/x-people-audit';
-import { carriesTweets, carriesPeople } from '@modules/x/x-pages';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { auditUserPayload } from '@modules/x/x-user-audit';
+import { carriesTweets, carriesUsers } from '@modules/x/x-pages';
 
 /** ⭐ 照真机形状造一个人 */
 const person = (i: number, over: Record<string, unknown> = {}): unknown => ({
@@ -45,14 +47,14 @@ describe('⭐⭐⭐ 人流与推文流必须分开', () => {
         carriesTweets(u),
         `${ep} 被当成推文流 —— 人的载荷喂给推文解析器会报「一条推文都没解出来」`,
       ).toBe(false);
-      expect(carriesPeople(u), `${ep} 没被认成人流`).toBe(true);
+      expect(carriesUsers(u), `${ep} 没被认成人流`).toBe(true);
     }
   });
 
   it('⭐⭐ 推文端点**不**算带人 —— 两者互斥', () => {
     for (const ep of ['SearchTimeline', 'HomeTimeline', 'TweetResultByRestId']) {
       const u = `https://x.com/i/api/graphql/abc/${ep}`;
-      expect(carriesPeople(u), `${ep} 被认成人流了`).toBe(false);
+      expect(carriesUsers(u), `${ep} 被认成人流了`).toBe(false);
       expect(carriesTweets(u)).toBe(true);
     }
   });
@@ -60,7 +62,7 @@ describe('⭐⭐⭐ 人流与推文流必须分开', () => {
 
 describe('⭐⭐ 解析一页人', () => {
   it('⭐⭐ 身份四样都取到:handle / id / 名字 / 头像', () => {
-    const a = auditPeoplePayload(payload([person(0)]));
+    const a = auditUserPayload(payload([person(0)]));
     const p = a.items[0];
     expect(p.handle).toBe('user0');
     expect(p.restId).toBe('900');
@@ -76,12 +78,12 @@ describe('⭐⭐ 解析一页人', () => {
     const old = { content: { itemContent: { user_results: { result: {
       rest_id: '1', legacy: { screen_name: 'oldstyle', name: '老形状' },
     } } } } };
-    const a = auditPeoplePayload(payload([old]));
+    const a = auditUserPayload(payload([old]));
     expect(a.items[0]?.handle, '只认 core 的话,老形状的载荷会一个人都解不出').toBe('oldstyle');
   });
 
   it('⭐ 关系用 X 的原词 following / followedBy', () => {
-    const p = auditPeoplePayload(payload([person(0)])).items[0];
+    const p = auditUserPayload(payload([person(0)])).items[0];
     expect(p.following).toBe(false);
     expect(p.followedBy).toBe(true);
   });
@@ -91,7 +93,7 @@ describe('⭐⭐ 解析一页人', () => {
     const noFc = { content: { itemContent: { user_results: { result: {
       rest_id: '1', core: { screen_name: 'a', name: 'A' }, legacy: {},
     } } } } };
-    const p = auditPeoplePayload(payload([noFc])).items[0];
+    const p = auditUserPayload(payload([noFc])).items[0];
     expect(p.followersCount, '没带却说成 0 粉丝 —— 「不知道」不是「零」').toBeUndefined();
   });
 
@@ -100,7 +102,7 @@ describe('⭐⭐ 解析一页人', () => {
    * **X 的 followers 严格按关注时间倒序**,新人全落在最前面。
    */
   it('⭐⭐ seq 跨页连续 —— 差集靠它', () => {
-    const a = auditPeoplePayload(payload([person(0), person(1)]), 100);
+    const a = auditUserPayload(payload([person(0), person(1)]), 100);
     expect(a.items.map((p) => p.seq), '名次没接着上一页数,跨页就对不上').toEqual([100, 101]);
   });
 });
@@ -111,7 +113,7 @@ describe('⭐⭐⭐ 到底的判据', () => {
    * **但仍附带游标**(值还在倒退)—— 光看游标会以为还能翻。
    */
   it('⭐⭐⭐ 到底那页:**有游标但 terminated** —— 两个都要报', () => {
-    const a = auditPeoplePayload(payload(
+    const a = auditUserPayload(payload(
       [person(0), cursor('STILL-HERE')],
       [{ type: 'TimelineTerminateTimeline', direction: 'Bottom' }],
     ));
@@ -120,7 +122,7 @@ describe('⭐⭐⭐ 到底的判据', () => {
   });
 
   it('⭐ 没到底时 terminated 为 false', () => {
-    const a = auditPeoplePayload(payload([person(0), cursor('C1')]));
+    const a = auditUserPayload(payload([person(0), cursor('C1')]));
     expect(a.terminated).toBe(false);
     expect(a.cursor).toBe('C1');
   });
@@ -138,8 +140,8 @@ describe('⚠️⚠️ 空 handle 要在解析层就喊', () => {
       legacy: { screen_name: '', description: 'x' },
     } } } } };
     /** ⚠️ 先确认样本真造出了该现象 —— 没 handle 的人要能被解出来 */
-    const a = auditPeoplePayload(payload([person(0), bad]));
-    expect(a.people, '样本里那个空 handle 的人没被解出来 —— 测不到该现象').toBe(2);
+    const a = auditUserPayload(payload([person(0), bad]));
+    expect(a.users, '样本里那个空 handle 的人没被解出来 —— 测不到该现象').toBe(2);
     expect(
       a.problems.join(''),
       '空 handle 不报 —— 到写库时会整批 0 条，那时才查就晚了',
@@ -149,26 +151,69 @@ describe('⚠️⚠️ 空 handle 要在解析层就喊', () => {
 
 describe('⚠️ 读不懂与是空的,分开说', () => {
   it('⚠️ 空响应体 → 说「响应体是空的」,不说解析失败', () => {
-    expect(auditPeoplePayload('').problems.join('')).toContain('响应体是空的');
+    expect(auditUserPayload('').problems.join('')).toContain('响应体是空的');
   });
 
   it('⚠️ 半截 JSON → 说「不是合法 JSON」', () => {
-    expect(auditPeoplePayload('{"data":{"us').problems.join('')).toContain('不是合法 JSON');
+    expect(auditUserPayload('{"data":{"us').problems.join('')).toContain('不是合法 JSON');
   });
 
   it('⚠️ 合法但一个人都没有 → 明说,不交空报告', () => {
-    const a = auditPeoplePayload('{"data":{}}');
-    expect(a.people).toBe(0);
+    const a = auditUserPayload('{"data":{}}');
+    expect(a.users).toBe(0);
     expect(a.problems.join('')).toContain('一个人都没解出来');
   });
 });
 
 describe('⭐ 覆盖率只报事实', () => {
   it('⭐ 不是人人都有位置 → 不该报 100%', () => {
-    const a = auditPeoplePayload(payload([
+    const a = auditUserPayload(payload([
       person(0, { legacy: { screen_name: 'a', location: '北京' } }),
       person(1),
     ]));
     expect(a.coverage.位置, '位置报成 100% —— 「不量的字段永远 100%」的反面').toBeLessThan(100);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **名字用 X 的词** —— 用户 2026-10-05:「人,就是 x 的用户呀」
+ *
+ * ⚠️⚠️ 这是**第二次**:2026-10-04 刚把 `iFollow`/`followsMe` 改成
+ * X 的 `following`/`followedBy`,转头我又写了 `Person`/`people` ——
+ * 而载荷里的原词全是 **user**(`user_results` / `UserCell` / `screen_name`)。
+ * ⭐ 少一层翻译就少一层漂移;自造的词还会让人以为是**另一个实体**。
+ */
+describe('⭐⭐⭐ 用 X 的词,不自造', () => {
+  const SRC = readFileSync(
+    join(__dirname, '..', '..', 'src/modules/x/x-user-audit.ts'),
+    'utf-8',
+  );
+  /** ⚠️ 剥注释 —— 注释里要解释「原先叫 Person」,不该被判违规 */
+  const CODE = SRC.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+
+  it('⭐⭐⭐ 代码里不许出现自造的 Person / people', () => {
+    expect(
+      CODE,
+      '又用自造的词了 —— X 的原词是 user（user_results / UserCell）',
+    ).not.toMatch(/\bPerson\b|\bpeople\b/i);
+  });
+
+  it('⭐⭐ 导出的名字都带 user', () => {
+    const exported = [...CODE.matchAll(/export (?:type|function) (\w+)/g)].map((m) => m[1]);
+    expect(exported.length, '一个导出都没解析到 —— 本条要重写').toBeGreaterThan(1);
+    for (const n of exported) {
+      expect(n, `导出 ${n} 没带 user —— 名字要对得上它描述的那件事`).toMatch(/User/i);
+    }
+  });
+
+  /**
+   * ⭐⭐ **实体归一**:follower 和「推文作者」是同一个东西 ——
+   * 一个 X 用户,两种发现途径。所以不建新表,落到已有的 `x_author`。
+   */
+  it('⭐⭐ 文件头要写明「落到 x_author,不建新表」', () => {
+    expect(
+      SRC,
+      '没说清落到哪 —— 下一个人会以为要新建一张 user 表，于是同一个实体两张表',
+    ).toContain('x_author');
   });
 });
