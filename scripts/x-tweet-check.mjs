@@ -9,12 +9,28 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+/** ⭐ 一个常量管超时与提示两处 —— 写死两遍迟早漂 */
+const CONNECT_TIMEOUT_MS = 8000;
 const CRED = join(homedir(), 'Library/Application Support/KRIG Note V2/.db-credentials');
 const { username, password } = JSON.parse(readFileSync(CRED, 'utf-8'));
 
 const db = new Surreal();
 try {
-  await db.connect('ws://127.0.0.1:8533/rpc');
+  await Promise.race([
+    db.connect('ws://127.0.0.1:8533/rpc'),
+    new Promise((_, reject) => setTimeout(
+      /**
+       * ⚠️⚠️ app 没启动时 `db.connect` **不报错也不返回** —— 脚本就那么吊着,
+       * 最后只吐一句「unsettled top-level await」,长得完全不像「app 没开」。
+       * ⭐ 2026-10-05 在 x-user-check 上实测到,同族三个脚本一起补。
+       */
+      () => reject(new Error(
+        `连不上库(等了 ${CONNECT_TIMEOUT_MS / 1000}s)—— `
+        + 'app 没在跑吧?库是 app 起的,先把 app 打开再跑本脚本。',
+      )),
+      CONNECT_TIMEOUT_MS,
+    )),
+  ]);
   await db.signin({ username, password });
   await db.use({ namespace: 'krig', database: 'krig_x' });
 
