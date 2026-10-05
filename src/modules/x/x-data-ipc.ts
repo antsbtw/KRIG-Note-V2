@@ -12,6 +12,7 @@ import { ipcMain } from 'electron';
 import {
   listAllRecipes, upsertRecipe, deleteRecipe,
 } from '@platform/main/db/search-recipe-repo';
+import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
@@ -61,7 +62,31 @@ export function registerXDataIpc(): void {
            * ⭐ 由 repo 记成 `unknown`(事实:确实不知道),而不是让面板
            * 编一个页名出来(那次编造被守卫当场逮到)。
            */
-          return { status: 'ok', value: await saveTweets(p.records, p.ctx) };
+          const r = await saveTweets(p.records, p.ctx);
+          /**
+           * ⭐⭐⭐ **落库结果落盘** —— 2026-10-05 第三跑逼出来的。
+           *
+           * ⚠️⚠️ 三跑都是「面板报入库 N 条、库里 0 行」,而我**读不出为什么**:
+           * `console.log` 只在启动 app 的终端里,留痕文件里一个字都没有 ——
+           * 于是每一跑都只能去真库里猜,**猜错了三次**。
+           * ⭐ 写进留痕,下一跑我自己读得到,不用再问人。
+           */
+          traceRecorder.lifecycle({
+            layer: 'web.net',
+            event: r.failed.length > 0 || r.inserted + r.updated === 0
+              ? 'x-save-incomplete' : 'x-save-ok',
+            pageId: 'x-data',
+            detail: {
+              given: p.records.length,
+              inserted: r.inserted,
+              updated: r.updated,
+              failed: r.failed.length,
+              /** ⚠️ 只记第一条原因 —— 整批同因时 N 条一模一样 */
+              firstFailure: r.failed[0]?.why ?? '(none)',
+              source: p.ctx?.source ?? '(empty)',
+            },
+          });
+          return { status: 'ok', value: r };
         }
 
         case 'delete':
