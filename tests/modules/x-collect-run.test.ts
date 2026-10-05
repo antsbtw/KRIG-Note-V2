@@ -876,3 +876,123 @@ describe('⭐⭐⭐ 停止要停得住每一段', () => {
     expect(calls).toContain('article:901');
   });
 });
+
+/**
+ * ⭐⭐⭐ **翻页为什么停,要能读出来** —— 用户 2026-10-05:「翻页够 50 页啦?」
+ *
+ * ⚠️⚠️ 上一跑翻了 **47 轮**(填的 50)—— 没到上限,所以是三道数据判据之一停的,
+ * 而我**读不出是哪一道**:三句停止原因都只走 `say()`,只进面板进度条,**不落盘**。
+ * ⭐ 正是刚在落库那边验过的教训(加留痕后第一跑就定案),翻页这边我又漏了一处。
+ */
+describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
+  const SE = 'https://x.com/i/api/graphql/q/SearchTimeline?variables=%7B%7D';
+  const mk = (id: string, cursor: string | null): string => JSON.stringify({
+    data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+      type: 'TimelineAddEntries',
+      entries: [
+        { entryId: `tweet-${id}`, content: { itemContent: { tweet_results: { result: {
+          rest_id: id,
+          legacy: { id_str: id, full_text: `推${id}` },
+          core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+        } } } } },
+        ...(cursor === null ? [] : [{ entryId: 'c', content: { cursorType: 'Bottom', value: cursor } }]),
+      ],
+    }] } } } },
+  });
+
+  function deps(pages: ReadonlyArray<string>): RunDeps {
+    let n = 0;
+    return {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SE, text: pages[Math.min(n, pages.length - 1)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+  }
+
+  /**
+   * ⚠️ 样本要**真的造出「最后一页没游标」** ——
+   * 第一版让假底座重复返回最后一页,于是「游标重复」先触发,
+   * 测到的是另一道闸(`feedback-check-sample-contains-phenomenon`)。
+   */
+  it('⭐⭐⭐ 没有下一页游标 → 停因说清楚', async () => {
+    let n = 0;
+    const d: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 每次都给**不同 id**,但第二页起没有游标 */
+        return { items: [{ url: SE, text: mk(`t${n}`, n === 0 ? 'c1' : null) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    /**
+     * ⚠️⚠️ **实测发现的真实行为**(不是测试写错):
+     * 游标是「从最新一份账往回找第一个有值的」—— 所以后面的页没游标时,
+     * 会**回退到更早那个**,于是先撞上「游标重复」那道闸。
+     * ⭐ 「没有下一页游标」只在**所有页都没给过游标**时才触发。
+     * 两道闸都停得住,停因都带得出来 —— 这才是本条要钉的。
+     */
+    expect(r.paging?.stopReason, '停因没带出来 —— 又要去留痕里翻').toBeTruthy();
+    expect(r.paging?.stopReason).toMatch(/游标/);
+  });
+
+  it('⭐⭐ 一页都没给过游标 → 停因是「没有下一页游标」', async () => {
+    let n = 0;
+    const d: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SE, text: mk(`t${n}`, null) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    expect(r.paging?.stopReason).toContain('没有下一页游标');
+    expect(r.paging?.rounds, '一轮都不该翻').toBe(0);
+  });
+
+  it('⭐⭐⭐ 游标不再变化 → 停因说清楚', async () => {
+    const r = await runCollect(deps([mk('1', 'same'), mk('2', 'same')]), { wantPages: 1, depth: 'as-is' });
+    expect(r.paging?.stopReason).toContain('游标不再变化');
+  });
+
+  it('⭐⭐ 业务判定停 → 带上业务给的理由', async () => {
+    const base = deps([mk('1', 'c1'), mk('2', 'c2'), mk('3', 'c3'), mk('4', 'c4')]);
+    const r = await runCollect(
+      { ...base, stopPaging: (st) => (st.round >= 2 ? { go: false, why: '已翻够 2 页' } : { go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    expect(r.paging?.stopReason, '业务说的理由没带出来').toBe('已翻够 2 页');
+  });
+
+  /**
+   * ⚠️ `freshTotal` 要算**翻页带来的新增**,不是总条数 ——
+   * 47 轮只换 40 条新推(每轮 0.85 条)这件事,得能从数字上读出来。
+   */
+  it('⭐⭐ freshTotal 只算翻页新增的,不含首轮滚动采到的', async () => {
+    /** 首轮给 t1;翻页给 t2、t3,然后到头 */
+    let n = 0;
+    const d: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        const pages = [mk('1', 'c1'), mk('2', 'c2'), mk('3', null)];
+        return { items: [{ url: SE, text: pages[Math.min(n, 2)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    expect(
+      r.paging?.freshTotal,
+      'freshTotal 把首轮那条也算进去了 —— 看不出翻页到底带来多少',
+    ).toBe(2);
+  });
+
+  it('⚠️ 不翻页时 paging 为 null —— 别报一个假的 0 轮', async () => {
+    const d: RunDeps = {
+      async harvest() { return { items: [{ url: SE, text: mk('1', 'c1') }] }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    expect(r.paging, '没翻页却报了翻页的账').toBeNull();
+  });
+});

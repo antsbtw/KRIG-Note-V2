@@ -281,6 +281,14 @@ export function XConsole(
    * ⚠️ 合成一个「保存了 N 条」的话,「全是重复的」和「全是新的」
    * 长得一模一样 —— 而那正是 `INSERT IGNORE` 当年藏住的东西。
    */
+  /**
+   * ⭐⭐ 翻页的账 —— 用户 2026-10-05:「翻页够 50 页啦?」
+   * ⚠️ 上一跑翻了 47 轮(填 50),**没到上限**却读不出是哪道闸停的 ——
+   * 三句停止原因只走进度条,关掉就没。
+   */
+  const [paging, setPaging] = useState<{
+    rounds: number; stopReason: string; freshTotal: number;
+  } | null>(null);
   const [saved, setSaved] = useState<{
     inserted: number; updated: number; failed: unknown[];
   } | null>(null);
@@ -739,6 +747,7 @@ export function XConsole(
                     setStep('');
                     setTotalResponses(0);
                     setSaved(null);
+                    setPaging(null);
                     cancelRef.current = false;
                     try {
                       /**
@@ -851,6 +860,7 @@ export function XConsole(
 
                       if (run.harvest) setReport(run.harvest as HarvestReport);
                       setTotalResponses(run.totalResponses);
+                      setPaging(run.paging);
                       setAudit(run.summary);
                       setPlan(run.plan === null ? null : { ...run.plan, fetched: run.fetched });
 
@@ -1120,6 +1130,18 @@ export function XConsole(
                     />
                     {/* ⚠️ 轮次/像素是**控制**那栏的报告,采集不重复记一份 */}
                   </div>
+                  {/*
+                    ⭐⭐ 翻页为什么停 —— 用户 2026-10-05 问「翻够 50 页啦?」
+                    ⚠️ 光报轮数不够:47 轮(填 50)是**哪道闸**停的,
+                    不写出来就只能去留痕里翻。
+                  */}
+                  {paging !== null && (
+                    <div style={S.todo}>
+                      翻页 {paging.rounds} 轮 · 新采到 {paging.freshTotal} 条
+                      <br />
+                      停因：{paging.stopReason}
+                    </div>
+                  )}
                   <div style={S.todo}>
                     {report.stopReason}
                     {report.elapsedMs > 0 && `　·　${(report.elapsedMs / 1000).toFixed(1)}s`}

@@ -97,6 +97,21 @@ export type RunResult = {
     readonly skipped: readonly TweetNeed[];
     readonly impossible: readonly TweetNeed[];
   } | null;
+  /**
+   * ⭐⭐⭐ **翻页的账** —— 2026-10-05 补。
+   *
+   * ⚠️⚠️ 上一跑翻了 47 轮(填的 50),**没到上限**,
+   * 所以是三道数据判据之一停的 —— 而我**读不出是哪一道**:
+   * 三句停止原因都只走 `say()`,只进面板进度条,**不落盘**。
+   * ⭐ 正是刚验过的那条教训(落库留痕救了一跑),我在翻页这边又漏了一处。
+   */
+  readonly paging: {
+    readonly rounds: number;
+    /** ⭐ 哪道闸停的 —— 没游标 / 游标不变 / 业务判定 / 跑满安全网 */
+    readonly stopReason: string;
+    /** ⚠️ 47 轮只换 40 条新推 = 每页高度重复,这个数要能读出来 */
+    readonly freshTotal: number;
+  } | null;
   /** ⭐ 逐篇补正文的结果 —— 成/败都记 */
   readonly fetched: ReadonlyArray<{
     readonly id: string;
@@ -202,8 +217,10 @@ async function pageUntilDone(
   rep: RunHarvest,
   say: (m: string) => void,
   addResponses: (n: number) => void,
-): Promise<TimelineAudit[]> {
+): Promise<{ audits: TimelineAudit[]; paging: NonNullable<RunResult['paging']> }> {
   const all = [...audits];
+  /** ⭐ 停止原因**要带出去**,不能只 say() —— say 的东西关掉就没了 */
+  let stopReason = '跑满安全网（未触发任何数据判据）';
   /**
    * ⭐ 翻页要用**页面自己发过的那条请求** —— queryId 与 features 都在里面,
    * 推不出来也不该写死(随 X 版本变)。
@@ -211,25 +228,36 @@ async function pageUntilDone(
   const seed = rep.items.find((it) => carriesTweets(it.url) && it.url.includes('variables='));
   if (seed === undefined) {
     say('没有可用来翻页的请求 —— 跳过主动翻页');
-    return all;
+    return { audits: all, paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0 } };
   }
 
   const seenCursors = new Set<string>();
   /** ⭐ 已经见过的推文 id —— 判「这一轮有没有收到新东西」靠它 */
   const seenTweetIds = new Set<string>();
   for (const a of all) for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
+  /** ⭐ 翻页**开始前**已有多少条 —— 用来算「翻页带来了多少新的」 */
+  const seedCount = seenTweetIds.size;
   let emptyRounds = 0;
   let round = 0;
   while (round < PAGING_SAFETY_ROUNDS) {
     /** ⭐ 每轮开头先看人有没有喊停 —— 停在轮次之间,已采到的都留着 */
-    if (deps.cancelled?.()) { say(`已停止（翻了 ${round} 轮）`); break; }
+    if (deps.cancelled?.()) {
+      stopReason = '人点了停止';
+      say(`已停止（翻了 ${round} 轮）`); break;
+    }
     /** ⭐ 游标取**最新那一份账**里的,不是第一页的 */
     const cursor = [...all].reverse()
       .map((a) => a.cursor)
       .find((c) => c !== undefined && c !== '');
-    if (cursor === undefined) { say(`翻页结束：没有下一页游标（共 ${round} 轮）`); break; }
+    if (cursor === undefined) {
+      stopReason = '没有下一页游标（X 说到头了）';
+      say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
+    }
     /** ⚠️ 同一个游标出现两次 = 翻不动了,**立刻停**,别空转 */
-    if (seenCursors.has(cursor)) { say(`翻页结束：游标不再变化（共 ${round} 轮）`); break; }
+    if (seenCursors.has(cursor)) {
+      stopReason = '游标不再变化（真的翻不动了）';
+      say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
+    }
     seenCursors.add(cursor);
 
     round += 1;
@@ -250,10 +278,14 @@ async function pageUntilDone(
       });
     } catch (e) {
       /** ⚠️ 翻页失败**不毁整轮** —— 已经采到的还在 */
-      say(`翻页第 ${round} 轮失败：${e instanceof Error ? e.message : String(e)}`);
+      stopReason = `第 ${round} 轮失败：${e instanceof Error ? e.message : String(e)}`;
+      say(stopReason);
       break;
     }
-    if (one === null) { say(`翻页第 ${round} 轮没收到响应`); break; }
+    if (one === null) {
+      stopReason = `第 ${round} 轮没收到响应`;
+      say(stopReason); break;
+    }
 
     addResponses(one.items.length);
     const got = auditsOf(one);
@@ -292,12 +324,21 @@ async function pageUntilDone(
         round, uniqueTweets: seenTweetIds.size, freshThisRound: fresh, emptyRounds,
       });
       if (!d.go) {
-        say(`翻页结束：${d.why ?? '业务判定够了'}（共 ${round} 轮）`);
+        stopReason = d.why ?? '业务判定够了';
+        say(`翻页结束：${stopReason}（共 ${round} 轮）`);
         break;
       }
     }
   }
-  return all;
+  /**
+   * ⚠️ `freshTotal` 用**新收到的推文条数**,不是 `all.length` ——
+   * 后者含首轮滚动采到的那些,混在一起看不出「翻页到底带来了多少」。
+   * ⭐ 47 轮只换 40 条新推 = 每页高度重复,这个数就是用来看这个的。
+   */
+  return {
+    audits: all,
+    paging: { rounds: round, stopReason, freshTotal: seenTweetIds.size - seedCount },
+  };
 }
 
 /**
@@ -322,7 +363,7 @@ export async function runCollect(
     maxRounds: opts.maxRounds ?? 60,
   });
   if (!rep) {
-    return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, fetched: [] };
+    return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, paging: null, fetched: [] };
   }
   /** ⭐ 从第一趟开始累计 —— 后面每补一篇都加上 */
   let totalResponses = rep.items.length;
@@ -342,7 +383,7 @@ export async function runCollect(
    */
   let audits = auditsOf(rep);
   if (audits.length === 0) {
-    return { audits, totalResponses, summary: null, harvest: rep, plan: null, fetched: [] };
+    return { audits, totalResponses, summary: null, harvest: rep, plan: null, paging: null, fetched: [] };
   }
 
   /**
@@ -360,8 +401,11 @@ export async function runCollect(
    * ⚠️ 停止由**数据判据**定(没有新游标 / 没采到新东西就停),
    * 轮数上限只是安全网(`feedback-pdca-close-the-loop`)。
    */
+  let paging: RunResult['paging'] = null;
   if (deps.runScript) {
-    audits = await pageUntilDone(deps, audits, rep, say, (n) => { totalResponses += n; });
+    const r = await pageUntilDone(deps, audits, rep, say, (n) => { totalResponses += n; });
+    audits = r.audits;
+    paging = r.paging;
   }
 
   // ── ② 研判(只判不做)──
@@ -486,6 +530,7 @@ export async function runCollect(
   return {
     audits,
     totalResponses,
+    paging,
     /**
      * ⚠️⚠️ 重新汇总 —— 补回来的那几篇必须体现在账上。
      *
