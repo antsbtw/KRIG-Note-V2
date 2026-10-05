@@ -891,3 +891,109 @@ describe('⭐⭐ 空响应体 ≠ 解析失败', () => {
     expect(a.problems.join('')).not.toContain('响应体是空的');
   });
 });
+
+/**
+ * ⭐⭐⭐ **完整记录(五维)** —— 用户 2026-10-04:
+ * 「真正的分析,可以分**人、事、物、时、空**五个维度。」
+ *
+ * ⚠️⚠️ 在这之前,解析器**只产出给人看的核对结果**:
+ * `preview` 80 字、媒体只有 `['photo']` —— 于是辛苦取回的
+ * **长文正文 23446 字在解析这一步就被扔了**,接 repo 也没东西可存。
+ *
+ * ⭐ 「物」这一维在原先的三分法里**没有位置** —— 被归进「事」,
+ * 媒体和链接就当成附属品丢掉。五维一摆缺口立刻显形。
+ */
+describe('⭐⭐⭐ TweetRecord:五维都要留下来', () => {
+  const rich = (): string => payload([tweet({}, {
+    full_text: '看这个 #VPN @someone https://t.co/abc',
+    created_at: 'Fri Oct 04 12:00:00 +0000 2026',
+    favorited: true,
+    entities: {
+      hashtags: [{ text: 'VPN' }],
+      user_mentions: [{ screen_name: 'someone' }],
+      urls: [{ url: 'https://t.co/abc', expanded_url: 'https://example.com/real' }],
+    },
+    extended_entities: { media: [{ type: 'photo', media_url_https: 'https://pbs.twimg.com/a.jpg' }] },
+  })]);
+
+  it('⭐⭐⭐【事】全文**不截断** —— 核对结果那份只有 80 字', () => {
+    const long = '正'.repeat(500);
+    const a = auditTimelinePayload(payload([tweet({
+      note_tweet: { note_tweet_results: { result: { text: long } } },
+    }, { full_text: '截断版…' })]));
+    expect(a.items[0].preview.length, '核对结果本就该短').toBeLessThanOrEqual(80);
+    expect(
+      a.items[0].record.text.length,
+      '记录里也被截了 —— 长文正文 23446 字就是这么丢的',
+    ).toBe(500);
+  });
+
+  it('⭐⭐⭐【物】媒体要带 **URL**,不只是 type', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.media, '媒体只有 type —— 「配了什么图」永远答不上来')
+      .toEqual([{ type: 'photo', url: 'https://pbs.twimg.com/a.jpg' }]);
+  });
+
+  it('⭐⭐【物】外链存**展开后**的地址 —— t.co 是 X 的包装', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.links, '存了 t.co —— 那不是我们要的链接').toEqual(['https://example.com/real']);
+  });
+
+  it('⭐⭐【物】话题标签与 @提及', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.hashtags).toEqual(['VPN']);
+    expect(r.mentions).toEqual(['someone']);
+  });
+
+  it('⭐⭐【时】互动数要带**读到它的时刻**', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.metricsAt, '没有 metricsAt —— 「赞 7」是今天还是上周分不出来').toBeTruthy();
+    expect(Number.isNaN(Date.parse(r.metricsAt)), 'metricsAt 不是合法时间').toBe(false);
+  });
+
+  /** ⚠️ 发布时间没带就 undefined —— **别拿采集时间顶替** */
+  it('⚠️【时】载荷没给发布时间 → undefined,不拿当前时间充数', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { created_at: undefined })]));
+    expect(a.items[0].record.createdAt, '拿采集时间顶替了发布时间 —— 时序分析会全错')
+      .toBeUndefined();
+  });
+
+  it('⭐⭐【事】推文链接要**拼出来存**,不只是「能不能拼」', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.tweetUrl, 'URL 本身没留 —— 原先只有 hasTweetUrl 这个布尔')
+      .toMatch(/^https:\/\/x\.com\/.+\/status\/\d+$/);
+  });
+
+  /**
+   * ⚠️ 载荷**真的没带**时才该是 undefined。
+   * ⭐ 默认 fixture 是带 `relationship_perspectives` 的(following: false),
+   * 所以这里要**显式删掉**才测得到该现象
+   * (`feedback-check-sample-contains-phenomenon`:
+   * 　别拿不含某现象的样本论证该现象 —— 第一版就栽在这)。
+   */
+  it('⚠️【人】载荷**没带**关系字段 → undefined,不兜底成 false', () => {
+    const t = tweet();
+    const u = (t as Record<string, unknown>).core as Record<string, unknown>;
+    const res = ((u.user_results as Record<string, unknown>).result) as Record<string, unknown>;
+    delete res.relationship_perspectives;
+    delete (res.legacy as Record<string, unknown>).following;
+    delete (res.legacy as Record<string, unknown>).followed_by;
+
+    const r = auditTimelinePayload(payload([t])).items[0].record;
+    expect(r.iFollow, '没带却说成「不关注」—— 那是编的').toBeUndefined();
+    expect(r.followsMe).toBeUndefined();
+  });
+
+  it('⭐ 载荷**带了** false 时就是 false —— 别矫枉过正', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    expect(r.iFollow, '带了 false 却报成 undefined').toBe(false);
+  });
+
+  it('⭐ 没有【物】的推:四样都是空数组,不是 undefined', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    expect(r.media).toEqual([]);
+    expect(r.links).toEqual([]);
+    expect(r.hashtags).toEqual([]);
+    expect(r.mentions).toEqual([]);
+  });
+});

@@ -67,6 +67,85 @@ export type TruncationEvidence = {
 };
 
 /**
+ * ⭐⭐⭐ **一条推文的完整记录** —— 落库用,按用户 2026-10-04 的五维组织。
+ *
+ * ── 为什么与 `TweetAudit` 分开 ──
+ * `TweetAudit` 是**给人看的核对结果**:`preview` 只留 80 字(整段几千字会把
+ * 面板撑爆)、媒体只留 `['photo']` 不留 URL。它从来不是为存储设计的。
+ * ⚠️⚠️ 后果是我们辛苦取回的**长文正文 23446 字,在解析这一步就被扔了** ——
+ * 接个 repo 到末尾也没东西可存。
+ *
+ * ── 五维(用户 2026-10-04:「可以分人、事、物、时、空五个维度」)──
+ * 【人】作者是谁       —— `author*`
+ * 【事】发生了什么     —— `text` / `isReply` / `metrics`
+ * 【物】涉及什么东西   —— `media` / `links` / `hashtags` / `mentions`
+ * 【时】什么时候       —— `createdAt` / `metricsAt`
+ * 【空】从哪来         —— 采集来源由调用方补(配方/ws),解析器不知道
+ *
+ * ⭐ 「物」这一维在原先的三分法里**没有位置** —— 被归进「事」,
+ * 于是媒体和链接就当成推文的附属品丢掉了。五维一摆缺口立刻显形。
+ * ⚠️ 但**不独立成表**:它们现在连存都没存过,形态是猜的
+ * (用户 2026-09-01 定过:「边的形态在真实数据跑出来之前是猜的」)。
+ */
+export type TweetRecord = {
+  // ── 【事】本体 ──
+  readonly id: string;
+  /**
+   * ⭐⭐ **完整正文**,不截断。
+   * ⚠️ 取最长的那份:长文正文 > 长推 note_tweet > `legacy.full_text`
+   * (`project-x-upsert-overwrites-richer-text`:16081 字被 267 字盖掉过)。
+   */
+  readonly text: string;
+  readonly lang: string;
+  readonly isLongText: boolean;
+  readonly isArticle: boolean;
+  /** ⭐ 长文正文的去处 —— 只在列表页缺正文时有 */
+  readonly articleUrl?: string;
+  /** ⚠️ 没拿全以及为什么 —— 与 `TweetAudit.incomplete` 同义 */
+  readonly incomplete?: 'text-truncated' | 'article-no-body';
+  readonly conversationId: string;
+  readonly tweetUrl: string;
+  readonly isReply: boolean;
+  readonly inReplyToStatusId: string;
+  readonly inReplyToScreenName: string;
+  readonly quotedStatusId: string;
+
+  // ── 【人】作者 ──
+  readonly authorHandle: string;
+  readonly authorRestId: string;
+  readonly authorName: string;
+  readonly authorAvatar: string;
+  readonly authorBio: string;
+  /** ⚠️ 载荷没带就是 undefined,**不兜底成 false** */
+  readonly isBlueVerified?: boolean;
+  readonly iFollow?: boolean;
+  readonly followsMe?: boolean;
+
+  // ── 【物】涉及什么 ──
+  /** ⭐⭐ 媒体 **带 URL** —— 只存 type 等于没采(现状就是这样) */
+  readonly media: ReadonlyArray<{ readonly type: string; readonly url: string }>;
+  /** ⭐ 外链(已展开)—— `t.co` 是包装,存展开后的真地址 */
+  readonly links: readonly string[];
+  readonly hashtags: readonly string[];
+  readonly mentions: readonly string[];
+
+  // ── 【时】 ──
+  /** ⚠️ 发布时间 —— 载荷没带就 undefined,别拿采集时间顶替 */
+  readonly createdAt?: string;
+  /**
+   * ⭐⭐ 互动数是**哪一刻**的 —— 解析这条载荷的时刻。
+   * ⚠️ 没有它的话「赞 7」是今天还是上周的分不出来。
+   */
+  readonly metricsAt: string;
+  readonly metrics: Readonly<Record<string, number>>;
+
+  // ── 【我的动作】—— 不是推文本体,是「我对它做过什么」 ──
+  readonly liked?: boolean;
+  readonly retweeted?: boolean;
+  readonly bookmarked?: boolean;
+};
+
+/**
  * 一条推文的完整性画像。
  *
  * ── ⭐⭐ 字段清单**照搬旧实现实际取过的**(用户 2026-10-02:
@@ -84,6 +163,12 @@ export type TruncationEvidence = {
  */
 export type TweetAudit = {
   readonly id: string;
+  /**
+   * ⭐⭐⭐ **这条推的完整记录** —— 落库取它,不要从核对结果反推。
+   * ⚠️ 核对结果是给人看的(preview 80 字、媒体只有 type),
+   * 拿它落库会把全文和媒体 URL 丢掉。
+   */
+  readonly record: TweetRecord;
   /**
    * ⭐ 正文开头 —— 一眼看出采到的是什么。
    * ⚠️ 只给 80 字:整段几千字会把面板撑爆(看全文点开原始载荷)。
@@ -568,6 +653,31 @@ export function auditTimelinePayload(text: string): TimelineAudit {
     const extEnt = legacy.extended_entities as Record<string, unknown> | undefined;
     const mediaArr = Array.isArray(extEnt?.media) ? extEnt.media as Record<string, unknown>[] : [];
     const mediaTypes = [...new Set(mediaArr.map((m) => str(m.type)).filter(Boolean))];
+    /**
+     * ⭐⭐⭐ 【物】这一维 —— 2026-10-04 按用户的五维补。
+     *
+     * ⚠️⚠️ 这些路径**解析器一直在读**(截断判据就在用 `entities.urls`),
+     * 只是读完就扔 —— 于是「媒体」只剩一个 `['photo']`,
+     * **URL、外链、话题标签、@提及全丢**。采了等于没采。
+     *
+     * ⭐ 媒体存 **type + URL**:只存 type 的话,
+     * 「这条推配了什么图」永远答不上来。
+     */
+    const ent = isObj(legacy.entities) ? legacy.entities : undefined;
+    const media = mediaArr
+      .map((m) => ({ type: str(m.type), url: str(m.media_url_https) || str(m.expanded_url) }))
+      .filter((m) => m.type !== '' || m.url !== '');
+    /** ⭐ 外链存**展开后**的真地址 —— `t.co` 是 X 的包装,不是我们要的链接 */
+    const links = (Array.isArray(ent?.urls) ? ent.urls as Record<string, unknown>[] : [])
+      .map((u) => str(u.expanded_url))
+      .filter((u) => u.length > 0);
+    const hashtags = (Array.isArray(ent?.hashtags) ? ent.hashtags as Record<string, unknown>[] : [])
+      .map((h) => str(h.text))
+      .filter((h) => h.length > 0);
+    const mentions = (Array.isArray(ent?.user_mentions)
+      ? ent.user_mentions as Record<string, unknown>[] : [])
+      .map((m) => str(m.screen_name))
+      .filter((m) => m.length > 0);
 
     /**
      * ⭐⭐ **这条没拿全,以及为什么**(旧实现的 `incomplete`)。
@@ -591,8 +701,59 @@ export function auditTimelinePayload(text: string): TimelineAudit {
       incomplete = 'text-truncated';
     }
 
+    /**
+     * ⭐⭐⭐ **完整记录** —— 落库用的那份(五维),与核对结果分开。
+     * ⚠️ `text` 取 `text2`:它已经是「长文正文 / 长推全文 / full_text」里
+     * **最长的那份**(只许变长,见 `project-x-upsert-overwrites-richer-text`)。
+     * ⭐ 挂在 audit 条目上**而不是另开一条链路** —— 两条链路必漂。
+     */
+    const record: TweetRecord = {
+      id: str(legacy.id_str) || str(node.rest_id),
+      text: text2,
+      lang: str(legacy.lang),
+      isLongText: noteText.length > 0,
+      isArticle: article !== undefined,
+      articleUrl,
+      incomplete,
+      conversationId: str(legacy.conversation_id_str),
+      /**
+       * ⭐ 推文链接 —— **拼出来存**,不是只记「能不能拼」。
+       * ⚠️ 原先只有 `hasTweetUrl: boolean`,URL 本身从没留过。
+       */
+      tweetUrl: handle && str(legacy.id_str)
+        ? `https://x.com/${handle}/status/${str(legacy.id_str)}`
+        : '',
+      isReply: str(legacy.in_reply_to_status_id_str).length > 0,
+      inReplyToStatusId: str(legacy.in_reply_to_status_id_str),
+      inReplyToScreenName: str(legacy.in_reply_to_screen_name),
+      quotedStatusId: str(legacy.quoted_status_id_str),
+      authorHandle: handle,
+      authorRestId: str(urr?.rest_id),
+      authorName,
+      authorAvatar: avatarUrl,
+      authorBio: authorBio,
+      isBlueVerified: blue,
+      iFollow,
+      followsMe,
+      media,
+      links,
+      hashtags,
+      mentions,
+      /** ⚠️ 载荷没带就 undefined —— **别拿采集时间顶替发布时间** */
+      createdAt: typeof legacy.created_at === 'string' ? legacy.created_at : undefined,
+      /** ⭐ 互动数是**这一刻**读到的 —— 没有它「赞 7」是今天还是上周分不出来 */
+      metricsAt: new Date().toISOString(),
+      metrics: Object.fromEntries(
+        Object.entries(metrics).filter(([, v]) => typeof v === 'number'),
+      ) as Record<string, number>,
+      liked: typeof legacy.favorited === 'boolean' ? legacy.favorited : undefined,
+      retweeted: typeof legacy.retweeted === 'boolean' ? legacy.retweeted : undefined,
+      bookmarked: typeof legacy.bookmarked === 'boolean' ? legacy.bookmarked : undefined,
+    };
+
     return {
       id: str(legacy.id_str) || str(node.rest_id),
+      record,
       preview: text2.slice(0, 80).replace(/\s+/g, ' '),
       hasText: text2.length > 0,
       textLen: text2.length,
