@@ -1629,6 +1629,65 @@ DEFINE FIELD IF NOT EXISTS auto          ON x_reply_draft TYPE option<bool>;
 `;
 
 /**
+ * ⭐⭐⭐ 1.2.14 —— 按**五维**补齐落库字段(用户 2026-10-04)
+ *
+ * 「真正的分析,可以分**人、事、物、时、空**五个维度。」
+ *
+ * ⚠️⚠️ 补的大多是**【物】**这一维 —— 它在原先的三分法里**没有位置**,
+ * 被归进「事」,于是媒体和链接当成推文的附属品丢掉了:
+ * 旧表只有 `has_media` 这类布尔,**媒体 URL / 外链 / 话题标签 / @提及 一个都没存**。
+ *
+ * ⭐ 【物】**不独立成表**:它们连存都没存过,形态是猜的
+ * (用户 2026-09-01:「边的形态在真实数据跑出来之前是猜的」)。
+ * 先作为推文字段存,等真跑出量再说要不要抽实体。
+ *
+ * ⚠️ 关系字段用 **X 自己的词** `following` / `followed_by`
+ * (用户 2026-10-04:「还是按照 x 的分类吧」)—— 少一层翻译少一层漂移。
+ */
+const X_SCHEMA_1_2_14 = `
+-- 【事】
+DEFINE FIELD IF NOT EXISTS is_long_text     ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS article_url      ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS quoted_status_id ON x_tweet TYPE option<string>;
+
+-- 【人】⚠️ 名字照抄 X 的 relationship_perspectives
+DEFINE FIELD IF NOT EXISTS author_rest_id   ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS author_bio       ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS is_blue_verified ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS following        ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS followed_by      ON x_tweet TYPE option<bool>;
+
+-- 【物】⚠️ media 存 type+URL;只存 type 等于没采
+-- ⚠️⚠️ \`array<object>\` 的 FLEXIBLE **不下传到元素**
+--    (project-x-surreal-flexible-parse-error:自动派生的 .* 不继承),
+--    所以元素形状不另外约束,存什么是什么。
+DEFINE FIELD IF NOT EXISTS media            ON x_tweet TYPE option<array>;
+DEFINE FIELD IF NOT EXISTS links            ON x_tweet TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS hashtags         ON x_tweet TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS mentions         ON x_tweet TYPE option<array<string>>;
+
+-- 【我的动作】⚠️ 这是「我对它做过什么」,不是推文本体
+DEFINE FIELD IF NOT EXISTS liked            ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS retweeted        ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS bookmarked       ON x_tweet TYPE option<bool>;
+
+-- ⭐ 查询速度:用户 2026-10-04 明确要求。按最常用的三条路建索引。
+-- ⚠️ 不预建用不上的索引 —— 索引不是越多越好,写入要维护它们。
+DEFINE INDEX IF NOT EXISTS idx_tweet_author   ON x_tweet FIELDS author_handle;
+DEFINE INDEX IF NOT EXISTS idx_tweet_created  ON x_tweet FIELDS created_at;
+DEFINE INDEX IF NOT EXISTS idx_tweet_recipe   ON x_tweet FIELDS search_recipe;
+`;
+
+export async function x_migration_1_2_14(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_14);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.14', appliedAt = $now,
+      description = 'x_tweet 五维字段:物(媒体URL/外链/标签/提及)+人(关系用 X 原词)+我的动作'`,
+    { rid: new RecordId('schema_version', '1.2.14'), now: Date.now() },
+  );
+}
+
+/**
  * 1.2.13 —— 搜索水位:按**搜索词**记「采到最新一条是什么时候发的」(2026-09-27)
  *
  * ── 用户拍板 ──

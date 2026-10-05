@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11, x_migration_1_2_12, x_migration_1_2_13 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11, x_migration_1_2_12, x_migration_1_2_13, x_migration_1_2_14 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -187,6 +187,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.2.13',
     description: 'x_search_watermark —— 按搜索词记「采到的最新一条」(全局,不按 ws)',
     up: x_migration_1_2_13,
+  },
+  {
+    version: '1.2.14',
+    description: 'x_tweet 五维字段:物(媒体URL/外链/标签/提及)+人(关系用 X 原词)+我的动作',
+    up: x_migration_1_2_14,
   },
 ];
 
