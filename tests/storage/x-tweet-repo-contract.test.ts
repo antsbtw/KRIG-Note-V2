@@ -195,3 +195,35 @@ describe('⭐⭐⭐ 三条只有真库能验的规矩', () => {
     ).toMatch(/type::record\('x_tweet',\s*\$id\)/);
   });
 });
+
+/**
+ * ⭐⭐⭐ **落库要留痕** —— 2026-10-05 的教训
+ *
+ * 两跑「面板报入库 44/45 条、库里 0 行」,而留痕里只有 `harvest-ok`,
+ * 没有一条跟写库有关 —— 「压根没调」和「调了但每条都失败」长得一模一样,
+ * 只能去真库里猜。
+ */
+describe('⭐⭐⭐ 写库要留痕,不能只在失败时留', () => {
+  it('⭐⭐ 每次落库都打一行 —— 成功路径也要留痕', () => {
+    expect(
+      CODE,
+      '落库不留痕 —— 「没调」和「调了全失败」分不出来，下次又要去库里猜',
+    ).toMatch(/console\.(log|warn)[\s\S]{0,120}落库/);
+  });
+
+  it('⭐⭐ 留痕里要有**三个数** —— 新增/更新/失败', () => {
+    /**
+     * ⚠️ 切片要**切到 console.log 那条语句为止** ——
+     * 第一版切到「下一行 +200 字」,把后面的代码也圈了进来,
+     * 于是删掉失败那段**照样全绿**(`failed` 在别处还有)。
+     * ⭐ `feedback-guard-scope-to-the-branch`:整段扫必然假绿。
+     */
+    const start = CODE.lastIndexOf('console.log(', CODE.indexOf('[x.tweet-repo] 落库'));
+    expect(start, '留痕那行不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const line = CODE.slice(start, CODE.indexOf(');', start) + 2);
+    expect(line.length, '切片空了 —— 断言会恒真').toBeGreaterThan(40);
+    for (const [v, what] of [['inserted', '新增'], ['updated', '更新'], ['failed', '失败']] as const) {
+      expect(line, `留痕没带 ${what} —— 只报好消息等于没留`).toContain(v);
+    }
+  });
+});

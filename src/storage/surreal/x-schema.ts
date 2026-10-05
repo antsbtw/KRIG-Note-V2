@@ -1629,6 +1629,39 @@ DEFINE FIELD IF NOT EXISTS auto          ON x_reply_draft TYPE option<bool>;
 `;
 
 /**
+ * ⭐⭐⭐ 1.2.15 —— `media` 的**数组元素**要 FLEXIBLE(2026-10-05 真机)
+ *
+ * ⚠️⚠️ 1.2.14 把 media 定成 `option<array>`,写入时被拒:
+ * `Found field 'media[0].type', but no such field exists for table 'x_tweet'`
+ * —— **SCHEMAFULL 表会校验数组里每个元素的字段**。
+ *
+ * ⭐ 这是 `project-surreal-flexible-parse-error` 记的**第二刀**:
+ * `DEFINE FIELD media` 会**自动派生**一条 `media[*] TYPE object`,
+ * 它**不继承**父字段的 FLEXIBLE → 元素是严格 object,未声明子字段全拒。
+ *
+ * ⚠️⚠️ **坑中坑**:自动派生的那条已占位,`DEFINE FIELD IF NOT EXISTS media[*]`
+ * 会被**静默跳过**(它认为已存在)——看着跑了其实没生效。
+ * ⭐ 所以必须 `REMOVE` 再 `DEFINE`,且**不带 IF NOT EXISTS**。
+ *
+ * ⚠️ `links/hashtags/mentions` 是 `array<string>` —— 元素是标量,不受影响。
+ */
+const X_SCHEMA_1_2_15 = `
+REMOVE FIELD IF EXISTS media ON x_tweet;
+DEFINE FIELD media ON x_tweet TYPE option<array<object>> FLEXIBLE;
+REMOVE FIELD IF EXISTS media[*] ON x_tweet;
+DEFINE FIELD media[*] ON x_tweet TYPE object FLEXIBLE;
+`;
+
+export async function x_migration_1_2_15(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_15);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.15', appliedAt = $now,
+      description = 'media 数组元素 FLEXIBLE —— 否则 media[0].type 被整条拒收'`,
+    { rid: new RecordId('schema_version', '1.2.15'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐⭐ 1.2.14 —— 按**五维**补齐落库字段(用户 2026-10-04)
  *
  * 「真正的分析,可以分**人、事、物、时、空**五个维度。」

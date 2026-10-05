@@ -895,6 +895,22 @@ export function XConsole(
                           : null);
                         if (sv.status !== 'ok') {
                           setStep(`落库失败：${(sv as { reason?: string }).reason ?? ''}`);
+                        } else {
+                          /**
+                           * ⭐⭐⭐ **一条都没存进去 = 失败**,别让它看着像成功。
+                           *
+                           * ⚠️⚠️ 2026-10-05 连栽两跑:面板报「新入库 44 条」而库里 0 行。
+                           * 那次 `status` 是 ok(IPC 没出错)、数字也不是 0 ——
+                           * 因为 repo 在 `await db.query` 之后就 `inserted += 1`,
+                           * 而那条语句**不报错也不写**。
+                           * ⭐ 现在以「失败条数」为准:有失败就直说,别只报好消息。
+                           */
+                          const v = sv.value as { inserted: number; updated: number; failed: Array<{ why: string }> };
+                          if (v.failed.length > 0) {
+                            setStep(`⚠️ ${v.failed.length} 条没入库：${v.failed[0]?.why ?? ''}`);
+                          } else if (v.inserted + v.updated === 0 && records.length > 0) {
+                            setStep(`⚠️ ${records.length} 条推文一条都没入库 —— 看返回值`);
+                          }
                         }
                       }
 

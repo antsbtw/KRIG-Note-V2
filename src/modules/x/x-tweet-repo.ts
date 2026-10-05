@@ -248,5 +248,20 @@ export async function saveTweets(
     }
   }
 
+  /**
+   * ⭐⭐⭐ **落库也要留痕** —— 2026-10-05 的教训。
+   *
+   * ⚠️⚠️ 两跑「面板报入库 44/45 条、库里 0 行」,而我**读不出发生了什么**:
+   * 留痕里只有 `harvest-ok`,没有一条跟写库有关 ——
+   * 「压根没调」和「调了但每条都失败」长得一模一样,只能去真库里猜。
+   * ⭐ `feedback-maintainability-over-feature-completion`:
+   * **成功路径也要留痕**,否则下次验证又要靠人。
+   * ⚠️ 失败原因只记**第一条**(整批同因时 45 条一模一样,记全了是噪音)。
+   */
+  console.log(
+    `[x.tweet-repo] 落库 ${records.length} 条 → 新 ${inserted} / 更新 ${updated}`
+    + (failed.length > 0 ? ` / 失败 ${failed.length}：${failed[0].why}` : ''),
+  );
+
   return { inserted, updated, failed };
 }
