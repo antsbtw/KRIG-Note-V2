@@ -121,8 +121,8 @@ export async function saveTweets(
        * ⭐ 先看在不在 —— 用来分 inserted/updated,
        * 也用来判「正文是不是变短了」(③ 深→浅降级)。
        */
-      const found = await db.query<[Array<{ text?: string }>]>(
-        'SELECT text FROM x_tweet WHERE tweet_id = $id LIMIT 1',
+      const found = await db.query<[Array<{ text?: string; status?: string }>]>(
+        'SELECT text, status FROM x_tweet WHERE tweet_id = $id LIMIT 1',
         { id: r.id },
       );
       const old = (found[0] ?? [])[0];
@@ -135,6 +135,14 @@ export async function saveTweets(
        */
       const oldText = typeof old?.text === 'string' ? old.text : '';
       const keepOldText = exists && oldText.length > r.text.length;
+      /**
+       * ⚠️⚠️ `status` 必填(非 option 无 DEFAULT),但它**是业务字段** ——
+       * 已有行可能已经是 `worth` / `skip` / `replied`,
+       * 重采把它打回 `pending` 会让人工判断和 AI 判断**白做一遍**。
+       * ⭐ 所以:新建给 `pending`,已有行**原样沿用**。
+       */
+      const oldStatus = typeof old?.status === 'string' && old.status !== ''
+        ? old.status : 'pending';
 
       const vars = {
         id: r.id,
@@ -173,6 +181,15 @@ export async function saveTweets(
          * 不是兜底:它与「x.search」一样是个真实的取值,查询时分得出来。
          */
         source: ctx.source || 'unknown',
+        /**
+         * ⚠️⚠️ `status` 是 `TYPE string` **非 option 也没有 DEFAULT** ——
+         * 不给的话每一条都写不进去(`Expected \`string\` but found \`NONE\``)。
+         * ⭐ `'pending'` = 等 AI 判断,是采集进来的入口状态
+         * (`TweetInboxStatus` 的第一个值)。
+         * ⚠️ 只在**新建时**用它 —— 已有行的 status 可能已经是 worth/skip,
+         * 那是业务字段,见下面 `onlyOnCreate`。
+         */
+        status: oldStatus,
         search_recipe: opt(ctx.searchRecipe),
         ws_id: opt(ctx.wsId),
       };
@@ -182,8 +199,21 @@ export async function saveTweets(
        * ⚠️⚠️ **只列采集字段**;`accepted` / `ai_verdict` / `replied` /
        * `translation` 一个都不在这里 —— 它们是人工与 AI 填的,覆盖不可逆。
        */
+      /**
+       * ⭐⭐⭐ **`UPSERT type::record(...)` 而不是 `UPSERT x_tweet ... WHERE`**。
+       *
+       * ⚠️⚠️ 2026-10-05 真机实证:`UPSERT x_tweet SET ... WHERE tweet_id = $id`
+       * 返回 **`[[]]`** —— **不报错、不插入、什么都不写**。
+       * 面板照样显示「新入库 44 条」,而库里 **0 行**。
+       * ⭐ 原因:带 `WHERE` 的 UPSERT 只更新**已匹配的行**,没匹配就什么都不做 ——
+       * 又一个「名字骗人」(`project-x-upsert-insert-ignore` 同族,这次是我自己写的)。
+       *
+       * ⭐ 用 `tweet_id` 当 record id:天然唯一,重采自动落到同一行。
+       * ⚠️ 这也是 `project-surreal-id-field-readonly` 的用法 ——
+       * **不 DEFINE FIELD id**,只在 record id 位置用它。
+       */
       await db.query(
-        `UPSERT x_tweet SET
+        `UPSERT type::record('x_tweet', $id) SET
            tweet_id = $id,
            text = $text, lang = $lang,
            is_long_text = $is_long_text, is_article = $is_article,
@@ -199,10 +229,16 @@ export async function saveTweets(
            media = $media, links = $links,
            hashtags = $hashtags, mentions = $mentions,
            created_at = $created_at,
-           metrics = $metrics, metrics_at = $metrics_at, fetched_at = $fetched_at,
+           metrics = $metrics,
+           -- datetime 字段必须 cast:直接传 ISO 字符串会被库拒收
+           -- (真机 2026-10-05 实证,这一条就足以让每一次写入都失败)
+           metrics_at = type::datetime($metrics_at),
+           fetched_at = type::datetime($fetched_at),
            liked = $liked, retweeted = $retweeted, bookmarked = $bookmarked,
-           source = $source, search_recipe = $search_recipe, ws_id = $ws_id
-         WHERE tweet_id = $id`,
+           source = $source, search_recipe = $search_recipe, ws_id = $ws_id,
+           -- status 只在新建时给 pending;已有行可能已是 worth/skip,
+           -- 那是业务字段,重采不许把它打回去(见 BUSINESS_FIELDS)
+           status = $status`,
         vars,
       );
       if (exists) updated += 1; else inserted += 1;

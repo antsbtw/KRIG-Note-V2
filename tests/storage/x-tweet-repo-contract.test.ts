@@ -37,14 +37,24 @@ describe('⭐⭐⭐ 写库不许用 INSERT IGNORE', () => {
   });
 
   it('⭐⭐ 用的是 UPSERT —— 存在就更新', () => {
-    expect(CODE, '不是 UPSERT —— 重采补不上老数据').toMatch(/UPSERT\s+x_tweet/);
+    /**
+     * ⚠️⚠️ 必须是 `UPSERT type::record(...)`,**不能是** `UPSERT x_tweet ... WHERE`。
+     * 真机 2026-10-05 实证:后者返回 `[[]]` —— **不报错、不插入、什么都不写**,
+     * 面板照样显示「新入库 44 条」而库里 **0 行**。
+     * ⭐ 带 WHERE 的 UPSERT 只更新已匹配的行,没匹配就什么都不做。
+     */
+    expect(CODE, '不是 UPSERT —— 重采补不上老数据').toMatch(/UPSERT\s+type::record/);
+    expect(
+      CODE,
+      '用了 `UPSERT x_tweet ... WHERE` —— 它什么都不写且不报错（真机实证：库里 0 行）',
+    ).not.toMatch(/UPSERT\s+x_tweet\b/);
   });
 });
 
 describe('⭐⭐⭐ 业务字段一个都不许被覆盖', () => {
   /** ⭐ 切出 UPSERT 那条语句 —— 整文件扫会把类型定义也圈进来 */
   const stmt = (): string => {
-    const i = CODE.indexOf('UPSERT x_tweet SET');
+    const i = CODE.indexOf("UPSERT type::record('x_tweet', $id) SET");
     expect(i, 'UPSERT 语句不见了 —— 本条要重写').toBeGreaterThan(-1);
     const end = CODE.indexOf('`', i);
     return CODE.slice(i, end > i ? end : undefined);
@@ -53,13 +63,31 @@ describe('⭐⭐⭐ 业务字段一个都不许被覆盖', () => {
   it('⭐⭐⭐ accepted / ai_verdict / replied / translation **不在更新语句里**', () => {
     const s = stmt();
     expect(s.length, '切片空了 —— 断言会恒真').toBeGreaterThan(200);
+    /**
+     * ⚠️ `status` 是**唯一的例外**:它在 BUSINESS_FIELDS 里,
+     * 但 schema 把它定成 `TYPE string` 非 option 无 DEFAULT ——
+     * 不给的话**每一条都写不进去**。
+     * ⭐ 所以它出现在语句里,但值是 `oldStatus`(已有行原样沿用,
+     * 新建才给 pending)—— 下一条测试钉这个。
+     */
+    const EXEMPT = new Set(['status']);
     for (const f of BUSINESS_FIELDS) {
+      if (EXEMPT.has(f)) continue;
       expect(
         s,
         `更新语句里有业务字段 \`${f}\` —— 它是人工或 AI 填的，`
         + '覆盖不可逆（AI 要重跑、人工采纳直接丢）',
       ).not.toMatch(new RegExp(`\\b${f}\\s*=`));
     }
+  });
+
+  it('⭐⭐⭐ status 必填但**不许重采时打回 pending**', () => {
+    expect(
+      CODE,
+      'status 写死成 pending —— 重采会把已判过的 worth/skip 打回去，'
+      + '人工判断和 AI 判断白做一遍',
+    ).not.toMatch(/status:\s*'pending'/);
+    expect(CODE, '没有「已有行沿用旧 status」这道闸').toMatch(/oldStatus/);
   });
 
   /** ⚠️ 反向也要钉:采集字段漏了就是**静默丢数据** */
@@ -115,5 +143,55 @@ describe('⭐⭐ 存库的字段名要对得上 schema', () => {
       'repo 要写这些字段，但 schema 里没定义 —— SCHEMAFULL 表会整条拒收：\n  '
       + missing.join('\n  '),
     ).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **三条真机实证的写库规矩** —— 2026-10-05
+ *
+ * ⚠️⚠️ 这三条**结构守卫一条都没抓到**:7 条守卫全绿、tsc 0 错、
+ * 面板显示「新入库 44 条」—— 而库里 **0 行**。
+ * 全是我拿真库发语句才查出来的。
+ *
+ * ⭐ 教训:**写库语句的正确性,只有真库答得出** ——
+ * 守卫能钉「用没用对关键字」,钉不了「这条语句到底写没写进去」。
+ */
+describe('⭐⭐⭐ 三条只有真库能验的规矩', () => {
+  it('⭐⭐⭐ ① datetime 字段要 cast —— 直传 ISO 串会被整条拒收', () => {
+    /**
+     * 真机报错:`Couldn't coerce value for field \`fetched_at\`:
+     * Expected \`datetime\` but found '2026-10-05T...'`
+     * ⚠️ 这一条就足以让**每一次写入都失败**。
+     */
+    for (const f of ['fetched_at', 'metrics_at']) {
+      expect(
+        CODE,
+        `\`${f}\` 没 cast 成 datetime —— 传 ISO 字符串会被库整条拒收`,
+      ).toMatch(new RegExp(`${f}\\s*=\\s*type::datetime`));
+    }
+  });
+
+  it('⭐⭐⭐ ② 必填字段一个都不能漏 —— 漏一个整行写不进去', () => {
+    /**
+     * `x_tweet` 里非 option 且无 DEFAULT 的字段:
+     * tweet_id / author_handle / text / fetched_at / metrics / source / status
+     * ⚠️ 真机实证:漏 `status` → `Expected \`string\` but found \`NONE\``。
+     */
+    const REQUIRED = ['tweet_id', 'author_handle', 'text', 'fetched_at', 'metrics', 'source', 'status'];
+    const i = CODE.indexOf("UPSERT type::record('x_tweet', $id) SET");
+    const stmt = CODE.slice(i, CODE.indexOf('`', i));
+    const missing = REQUIRED.filter((f) => !new RegExp(`\\b${f}\\s*=`).test(stmt));
+    expect(
+      missing,
+      '这些**必填**字段没写进语句 —— 整行会被拒收（不是少几个字段，是一条都存不进）：\n  '
+      + missing.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⭐⭐ ③ 用 record id 落行 —— tweet_id 天然唯一,重采落同一行', () => {
+    expect(
+      CODE,
+      '没用 tweet_id 当 record id —— 重采会生成新行而不是更新',
+    ).toMatch(/type::record\('x_tweet',\s*\$id\)/);
   });
 });
