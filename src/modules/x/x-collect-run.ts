@@ -19,7 +19,9 @@ import {
   type TimelineAudit, type TweetAudit,
 } from './x-timeline-audit';
 import { judgeTweet, decideFetch, type FetchDepth, type TweetNeed } from './x-fetch-plan';
-import { carriesTweets, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME } from './x-pages';
+import { carriesTweets, carriesUsers, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME } from './x-pages';
+import { dispatchPayloads, type PayloadKind } from './x-payload-dispatch';
+import type { XUserAudit } from './x-user-audit';
 import { X_SCRIPTS } from './x-dom-scripts';
 
 /** ⭐ 一次采集回来的东西 —— 与底座 `HarvestReport` 同形,只取用得上的 */
@@ -120,6 +122,19 @@ export type RunResult = {
     readonly textLen?: number;
     readonly why?: string;
   }>;
+  /**
+   * ⭐⭐⭐ **同一次采集里顺带解出来的 X 用户** —— 2026-10-05。
+   *
+   * 用户订正:「不管采什么,都是采集页面的内容…**输出要自行判断**。」
+   * ⚠️⚠️ 在这之前,`auditsOf` 用 `carriesTweets` 一筛,
+   * followers/following 的响应就**整个被丢掉、不留痕** ——
+   * 而那些响应明明已经采回来了。于是我加了第二个按钮让人去选,
+   * 等于**把数据里本来就有的信息,变成人要记住的事**。
+   * ⭐ 现在:响应里有什么就产出什么,`kind` 由数据算。
+   */
+  readonly users: readonly XUserAudit[];
+  /** ⭐ 这一跑**到底采到了什么** —— tweets / users / mixed / empty,由数据算 */
+  readonly kind: PayloadKind;
 };
 
 /** ⚠️ 补全有上限 —— 安全网,不是目标(`feedback-pdca-close-the-loop`) */
@@ -216,7 +231,13 @@ async function pageUntilDone(
   audits: readonly TimelineAudit[],
   rep: RunHarvest,
   say: (m: string) => void,
-  addResponses: (n: number) => void,
+  /**
+   * ⭐⭐ 每翻完一页回调一次 —— **给整份 harvest 不只给条数**。
+   * ⚠️ 原先只传 `items.length`(为了累计响应数),于是翻页拿回来的
+   * **用户响应在这一层就蒸发了**:第 2 页之后的人一个都收不到。
+   * ⭐ 传整份出去,「这一页里有什么」由外面那层决定怎么用。
+   */
+  onRound: (rep: RunHarvest) => void,
 ): Promise<{ audits: TimelineAudit[]; paging: NonNullable<RunResult['paging']> }> {
   const all = [...audits];
   /** ⭐ 停止原因**要带出去**,不能只 say() —— say 的东西关掉就没了 */
@@ -225,18 +246,43 @@ async function pageUntilDone(
    * ⭐ 翻页要用**页面自己发过的那条请求** —— queryId 与 features 都在里面,
    * 推不出来也不该写死(随 X 版本变)。
    */
-  const seed = rep.items.find((it) => carriesTweets(it.url) && it.url.includes('variables='));
+  /**
+   * ⚠️⚠️ 2026-10-05 放宽:原先只认**推文**的请求当种子,
+   * 于是 followers 页「有游标、X 说还有」却一页都翻不动 ——
+   * 又是那个「采集只认推文」的旧假设。
+   * ⭐ 用户名单的请求同样带 queryId 与 features,一样能当种子。
+   */
+  const seed = rep.items.find(
+    (it) => (carriesTweets(it.url) || carriesUsers(it.url)) && it.url.includes('variables='),
+  );
   if (seed === undefined) {
     say('没有可用来翻页的请求 —— 跳过主动翻页');
     return { audits: all, paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0 } };
   }
 
+  /**
+   * ⭐⭐ **这一页解出来的用户 handle** —— 判新鲜度用。
+   * ⚠️ 这一层不存用户记录(那是外面那层的事,它要连续的 seq),
+   * 只要「有没有没见过的人」这一个事实。
+   */
+  const usersOfRep = (r: RunHarvest): string[] =>
+    dispatchPayloads(r.items).users.flatMap((a) => a.items.map((u) => u.handle.toLowerCase()))
+      .filter((h) => h !== '');
+
+  /** ⭐ 最近一份用户账给的游标 —— followers 页靠它翻页 */
+  let lastUserCursor: string | undefined = dispatchPayloads(rep.items).users
+    .map((a) => a.cursor).reverse().find((c) => c !== undefined && c !== '');
+
   const seenCursors = new Set<string>();
-  /** ⭐ 已经见过的推文 id —— 判「这一轮有没有收到新东西」靠它 */
-  const seenTweetIds = new Set<string>();
-  for (const a of all) for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
-  /** ⭐ 翻页**开始前**已有多少条 —— 用来算「翻页带来了多少新的」 */
-  const seedCount = seenTweetIds.size;
+  /**
+   * ⭐ 已经见过的**东西** —— 判「这一轮有没有收到新的」靠它。
+   * ⚠️ 推文记 `t:<id>`、用户记 `u:<handle>`,**加前缀避免撞键**。
+   */
+  const seenKeys = new Set<string>();
+  for (const a of all) for (const t of a.items) if (t.id) seenKeys.add(`t:${t.id}`);
+  for (const u of usersOfRep(rep)) seenKeys.add(`u:${u}`);
+  /** ⭐ 翻页**开始前**已有多少 —— 用来算「翻页带来了多少新的」 */
+  const seedCount = seenKeys.size;
   let emptyRounds = 0;
   let round = 0;
   while (round < PAGING_SAFETY_ROUNDS) {
@@ -245,10 +291,20 @@ async function pageUntilDone(
       stopReason = '人点了停止';
       say(`已停止（翻了 ${round} 轮）`); break;
     }
-    /** ⭐ 游标取**最新那一份账**里的,不是第一页的 */
+    /**
+     * ⭐ 游标取**最新那一份账**里的,不是第一页的。
+     * ⚠️ 推文账和用户账**都带游标** —— 只看推文账的话,
+     * followers 页永远拿不到游标、第一轮就停(实测过)。
+     */
     const cursor = [...all].reverse()
       .map((a) => a.cursor)
-      .find((c) => c !== undefined && c !== '');
+      .find((c) => c !== undefined && c !== '')
+      /**
+       * ⭐⭐ 推文账里没有游标时,**问用户账要** ——
+       * followers 页的游标只在用户载荷里(实测:只看推文账则恒为 undefined,
+       * 第一轮就报「X 说到头了」,而 X 一直说还有)。
+       */
+      ?? lastUserCursor;
     if (cursor === undefined) {
       stopReason = '没有下一页游标（X 说到头了）';
       say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
@@ -287,7 +343,7 @@ async function pageUntilDone(
       say(stopReason); break;
     }
 
-    addResponses(one.items.length);
+    onRound(one);
     const got = auditsOf(one);
     /**
      * ⭐⭐⭐ 判据是「**有没有没见过的推**」,不是「这一页有几条推」。
@@ -302,11 +358,22 @@ async function pageUntilDone(
      * ⚠️ `project-x-cursor-paging` 早记过同族:**「几页没新人」不能当到底** ——
      * 反过来「有人」也不能当还有,要看的是**新不新**。
      */
-    const before = seenTweetIds.size;
+    const before = seenKeys.size;
     for (const a of got) {
-      for (const t of a.items) if (t.id) seenTweetIds.add(t.id);
+      for (const t of a.items) if (t.id) seenKeys.add(`t:${t.id}`);
     }
-    const fresh = seenTweetIds.size - before;
+    /**
+     * ⭐⭐ **用户也算「新东西」** —— 否则 followers 页每轮 fresh 恒为 0,
+     * 「这一轮没收到新东西」那道闸会在第一轮就误停。
+     * ⚠️ 判据必须是「这一页有没有没见过的」,不是「这一页有几个」
+     * (`feedback-pdca-close-the-loop` 的「数错元素」)。
+     */
+    for (const u of usersOfRep(one)) seenKeys.add(`u:${u}`);
+    /** ⭐ 游标跟着往前走,否则第二轮还拿第一轮的 */
+    const uc = dispatchPayloads(one.items).users
+      .map((a) => a.cursor).reverse().find((c) => c !== undefined && c !== '');
+    if (uc !== undefined) lastUserCursor = uc;
+    const fresh = seenKeys.size - before;
     emptyRounds = fresh === 0 ? emptyRounds + 1 : 0;
     all.push(...got);
 
@@ -321,7 +388,7 @@ async function pageUntilDone(
      */
     if (deps.stopPaging) {
       const d = deps.stopPaging({
-        round, uniqueTweets: seenTweetIds.size, freshThisRound: fresh, emptyRounds,
+        round, uniqueTweets: seenKeys.size, freshThisRound: fresh, emptyRounds,
       });
       if (!d.go) {
         stopReason = d.why ?? '业务判定够了';
@@ -337,7 +404,7 @@ async function pageUntilDone(
    */
   return {
     audits: all,
-    paging: { rounds: round, stopReason, freshTotal: seenTweetIds.size - seedCount },
+    paging: { rounds: round, stopReason, freshTotal: seenKeys.size - seedCount },
   };
 }
 
@@ -363,10 +430,28 @@ export async function runCollect(
     maxRounds: opts.maxRounds ?? 60,
   });
   if (!rep) {
-    return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, paging: null, fetched: [] };
+    return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, paging: null, fetched: [], users: [], kind: 'empty' };
   }
   /** ⭐ 从第一趟开始累计 —— 后面每补一篇都加上 */
   let totalResponses = rep.items.length;
+  /**
+   * ⭐⭐⭐ **用户也顺带收下** —— 响应里有就产出,不问人要。
+   * ⚠️ `seq` 必须**跨所有 harvest 连续**(增量采集靠它),
+   * 所以计数放在这一层,不在 `dispatchPayloads` 内部。
+   */
+  const userAudits: XUserAudit[] = [];
+  let userSeq = 0;
+  const takeUsers = (one: RunHarvest): void => {
+    const d = dispatchPayloads(one.items);
+    for (const a of d.users) {
+      /** ⭐ 重新编号成全局连续的名次 */
+      userAudits.push(userSeq === 0 ? a : {
+        ...a, items: a.items.map((u, i) => ({ ...u, seq: userSeq + i })),
+      });
+      userSeq += a.items.length;
+    }
+  };
+  takeUsers(rep);
 
   /**
    * ⭐⭐⭐ **采完要回到原来那一页** —— 用户 2026-10-03 原话:
@@ -382,9 +467,19 @@ export async function runCollect(
    * 底座的 `harvest` 读不到当前 URL,为此改底座不值当。
    */
   let audits = auditsOf(rep);
-  if (audits.length === 0) {
-    return { audits, totalResponses, summary: null, harvest: rep, plan: null, paging: null, fetched: [] };
-  }
+  /**
+   * ⚠️⚠️ **没有推文不等于什么都没采到** —— 2026-10-05。
+   * followers / following 页就是这种情形:一条推文都没有,但**人全在**。
+   * ⭐ 原先这里直接 return、把 `users` 丢了,于是我以为必须加第二个按钮。
+   */
+  /**
+   * ⚠️⚠️ **这里不能 return** —— 2026-10-05。
+   * followers 页就是「一条推文都没有」,原先在这里 return
+   * 等于**跳过整个翻页段**:X 一直说还有下一页,而我们只采第一页。
+   * ⭐ 没有推文的页**照样要翻页**,只是翻的是人。
+   * (下面的「研判/补长文」才真的只对推文有意义,那段自己会空转。)
+   */
+  const noTweets = audits.length === 0;
 
   /**
    * ── ①.5 **主动翻页** —— 滚动翻不动的页面靠它 ──
@@ -403,9 +498,29 @@ export async function runCollect(
    */
   let paging: RunResult['paging'] = null;
   if (deps.runScript) {
-    const r = await pageUntilDone(deps, audits, rep, say, (n) => { totalResponses += n; });
+    const r = await pageUntilDone(deps, audits, rep, say, (one) => {
+      totalResponses += one.items.length;
+      /** ⭐ 翻页回来的用户也收下 —— 名次接着往下编 */
+      takeUsers(one);
+    });
     audits = r.audits;
     paging = r.paging;
+  }
+
+  /**
+   * ⭐⭐⭐ 一条推文都没有 → 这一页装的是**人**,到此为止。
+   * ⚠️ 研判/补长文那一段只对推文有意义,硬跑一遍只会产出一堆空账。
+   */
+  if (noTweets && audits.length === 0) {
+    const gotUsers = userAudits.some((a) => a.items.length > 0);
+    say(gotUsers ? `这一页是用户名单：${userSeq} 人` : '这一页什么都没解出来');
+    return {
+      audits, totalResponses, summary: null, harvest: rep,
+      plan: null, paging, fetched: [],
+      users: userAudits,
+      /** ⭐ 由数据算:解出了人就是 users,真的什么都没有才是 empty */
+      kind: gotUsers ? 'users' : 'empty',
+    };
   }
 
   // ── ② 研判(只判不做)──
@@ -544,5 +659,8 @@ export async function runCollect(
     harvest: rep,
     plan: { depth: opts.depth, ...decided },
     fetched,
+    users: userAudits,
+    /** ⭐ 两种都解出来了就是 mixed —— 那是真实情况不是异常 */
+    kind: userAudits.some((a) => a.items.length > 0) ? 'mixed' : 'tweets',
   };
 }

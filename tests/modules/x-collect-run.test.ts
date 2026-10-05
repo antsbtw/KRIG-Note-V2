@@ -996,3 +996,126 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
     expect(r.paging, '没翻页却报了翻页的账').toBeNull();
   });
 });
+
+/**
+ * ⭐⭐⭐ **一个入口采所有** —— 用户 2026-10-05 的订正:
+ * 「不管采什么,都是采集页面的内容,而不应该增加一个采人的名单。
+ * 　跳转到那个页面,就采集那个页面…**输出要自行判断**。」
+ *
+ * ⚠️⚠️ 在这之前 `auditsOf` 用 `carriesTweets` 一筛,
+ * followers/following 的响应就**整个被丢掉不留痕** ——
+ * 而那些响应明明已经采回来了。我却为此加了第二个按钮让人去选。
+ */
+describe('一个入口:响应里有什么就产出什么', () => {
+  const FOLLOWERS = 'https://x.com/i/api/graphql/zz/Followers?variables=%7B%7D';
+
+  const userPage = (ids: number[], cursor?: string): string => {
+    const entries: unknown[] = ids.map((i) => ({
+      entryId: `user-${i}`,
+      content: { itemContent: { user_results: { result: {
+        rest_id: `${900 + i}`,
+        core: { screen_name: `user${i}`, name: `名字${i}` },
+        legacy: { description: `bio ${i}`, followers_count: 10 + i },
+      } } } },
+    }));
+    if (cursor) {
+      entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+    }
+    return JSON.stringify({ data: { user: { result: { timeline: { timeline: {
+      instructions: [{ type: 'TimelineAddEntries', entries }],
+    } } } } } });
+  };
+
+  it('⭐⭐⭐ followers 页:一条推文都没有,但人全在', async () => {
+    /**
+     * ⚠️⚠️ 这正是原先的坑:`audits.length === 0` 直接 return,
+     * 把已经采回来的人**整个丢掉**,于是看起来「必须加个采人按钮」。
+     */
+    const r = await runCollect({
+      async harvest() { return { items: [{ url: FOLLOWERS, text: userPage([1, 2, 3]) }] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.audits).toHaveLength(0);
+    expect(r.kind, '解出了人就该是 users,不是 empty').toBe('users');
+    expect(r.users.flatMap((a) => a.items).map((u) => u.handle))
+      .toEqual(['user1', 'user2', 'user3']);
+  });
+
+  it('⭐⭐⭐ 同一页既有推文又有用户 → mixed,两边都不丢', async () => {
+    const r = await runCollect({
+      async harvest() {
+        return { items: [
+          { url: TIMELINE_URL, text: timelinePayload([foldedTweet('1')]) },
+          { url: FOLLOWERS, text: userPage([7]) },
+        ] };
+      },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.kind).toBe('mixed');
+    expect(r.summary?.items.length).toBeGreaterThan(0);
+    expect(r.users.flatMap((a) => a.items)).toHaveLength(1);
+  });
+
+  it('⭐⭐⭐ 翻页拿回来的人也要收 —— 名次跨页连续', async () => {
+    /**
+     * ⚠️⚠️ `pageUntilDone` 原先只把**条数**传出来(为了累计响应数),
+     * 于是第 2 页之后的用户响应在那一层就蒸发了。
+     * ⭐ `seq` 是增量采集的命根子,必须跨页连续。
+     */
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        const page = n === 0 ? userPage([1, 2], 'c1')
+          : n === 1 ? userPage([3, 4], 'c2') : userPage([5, 6]);
+        return { items: [{ url: FOLLOWERS, text: page }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    const all = r.users.flatMap((a) => a.items);
+    expect(all.map((u) => u.handle)).toEqual(['user1', 'user2', 'user3', 'user4', 'user5', 'user6']);
+    expect(all.map((u) => u.seq), '名次必须跨页连续,不是每页从 0 重来')
+      .toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it('⭐⭐⭐ 人也算「新东西」—— 否则 followers 页 fresh 恒 0 会误停', async () => {
+    /**
+     * ⚠️⚠️ 这条是**注入验证逼出来的**:把「用户算新东西」那行删掉,
+     * 前面几条**全绿** —— 因为我的翻页样本从没走到 `stopPaging`,
+     * 「这一轮收到新东西了没有」这个判据压根没被测到。
+     * ⭐ 又是 `feedback-check-sample-contains-phenomenon`。
+     *
+     * ⭐⭐ 真机后果:followers 页每轮 fresh=0 → 业务那道
+     * 「连续几轮没新的就停」会在第一轮就误停,而 X 一直说还有。
+     */
+    const seen: Array<{ fresh: number; empty: number }> = [];
+    let n = 0;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 每页都是**没见过的人** —— fresh 应当 > 0 */
+        const page = n === 0 ? userPage([1, 2], 'c1')
+          : n === 1 ? userPage([3, 4], 'c2') : userPage([5, 6]);
+        return { items: [{ url: FOLLOWERS, text: page }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+      stopPaging: (st) => {
+        seen.push({ fresh: st.freshThisRound, empty: st.emptyRounds });
+        return { go: true };
+      },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0].fresh, '这一页两个新人,fresh 必须是 2').toBe(2);
+    expect(seen[0].empty, '有新人就不该算空轮').toBe(0);
+  });
+
+  it('⭐⭐ 什么都没解出来才是 empty', async () => {
+    const r = await runCollect({
+      async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+    expect(r.kind).toBe('empty');
+    expect(r.users).toHaveLength(0);
+  });
+});
