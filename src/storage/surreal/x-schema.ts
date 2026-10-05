@@ -1652,6 +1652,66 @@ REMOVE FIELD IF EXISTS media[*] ON x_tweet;
 DEFINE FIELD media[*] ON x_tweet TYPE object FLEXIBLE;
 `;
 
+/**
+ * ⭐⭐⭐ 1.2.16 —— 用户表补 `rest_id` 等采集字段(2026-10-05)
+ *
+ * 用户一句「人,就是x的用户呀」定下来的事:**follower 和推文作者是同一个实体**
+ * ——同一个 X 用户,两条发现路径。所以**不建新表**,落到 `x_author`。
+ * (表名取窄了,但存量数据和引用都在,不改名。)
+ *
+ * ⚠️⚠️ **缺的是 `rest_id`** —— 而这张表自己的注释早就写明了为什么要:
+ * 「数字 id(rest_id)—— 契约的 x_uid 用它匹配最稳,**handle 会改名**」
+ * (那句写在 `x_ws_account` 上,`x_author` 却没有这个字段)。
+ * ⭐ 没有它,一个人改了 handle 就会变成**两行**,而
+ * `idx_author_handle UNIQUE` 只保证「同名不重复」,保证不了「同人不重复」。
+ *
+ * ⚠️ `rest_id` 的索引**不能是 UNIQUE**:存量 1000+ 行全是空的,
+ * UNIQUE 会让第二行空值直接撞上(SurrealDB 的 UNIQUE 把 NONE 也算一个值)。
+ * ⭐ 所以建普通索引 —— 它要的是查得快,不是约束。
+ *
+ * ── ⚠️ 为什么只加这三个字段 ──
+ * `XUserRecord` 的其余字段(bio/location/followers_count/following/
+ * followed_by/is_blue_verified/account_created_at/list_seq/list_source/
+ * list_memberships)**1.2.4 到 1.2.9 已经全部加过了** ——
+ * 我开工前查了 `INFO`(grep schema)才知道,差点又建一张重复的表。
+ */
+const X_SCHEMA_1_2_16 = `
+-- ⭐ 数字 id —— 改名不会变,比 handle 稳(表里原先只有 handle)
+DEFINE FIELD IF NOT EXISTS rest_id   ON x_author TYPE option<string>;
+-- ⚠️ 普通索引不是 UNIQUE:存量行 rest_id 全空,UNIQUE 会被空值撞死
+DEFINE INDEX IF NOT EXISTS idx_author_rest_id ON x_author FIELDS rest_id;
+-- 最近一次从名单里见到他是什么时候(与 list_seen_at 同义,这里补齐采集时刻)
+DEFINE FIELD IF NOT EXISTS fetched_at ON x_author TYPE option<datetime>;
+`;
+
+export async function x_migration_1_2_16(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_16);
+
+  /**
+   * ⭐⭐ **问库要答案,不信自述** —— `project-surreal-flexible-parse-error`
+   * 的教训:整段 DDL 可能**被整体拒收**而「看着跑了」。
+   * ⚠️ SDK 的 `query()` 已经拆掉 HTTP 的 `result` 外壳
+   * (`project-surreal-sdk-vs-http-shape`:我曾照 curl 的形状改代码,
+   * 结果守卫每次启动必抛、app 起不来)。
+   */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['rest_id', 'fetched_at']) {
+    if (!(f in fields)) {
+      throw new Error(
+        `[x-schema 1.2.16] ${f} 没加上 —— 整段 DDL 可能被拒收(parse error 会让后面几条一起消失)`,
+      );
+    }
+  }
+  console.log('[x-schema 1.2.16] x_author.rest_id / fetched_at 已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.16', appliedAt = $now,
+      description = 'x_author 补 rest_id(handle 会改名)—— 用户表就是 x_author,不建新表'`,
+    { rid: new RecordId('schema_version', '1.2.16'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_15(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_15);
   await db.query(
