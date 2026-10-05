@@ -118,8 +118,22 @@ export type TweetRecord = {
   readonly authorBio: string;
   /** ⚠️ 载荷没带就是 undefined,**不兜底成 false** */
   readonly isBlueVerified?: boolean;
-  readonly iFollow?: boolean;
-  readonly followsMe?: boolean;
+  /**
+   * ⭐⭐ **用 X 自己的词** —— 用户 2026-10-04:
+   * 「这个还是按照 x 的分类吧 **following/follower**」。
+   *
+   * ⚠️ 我原先叫 `iFollow` / `followsMe` —— 那是**我自造的说法**。
+   * 载荷里的原名就是 `relationship_perspectives.following` / `.followed_by`,
+   * 照抄平台的词,少一层翻译就少一层漂移
+   * (同 `project-x-persistent-tracking` 那条「措辞一律用追踪不用关注」:
+   * 　**名字要对得上它描述的那件事**)。
+   *
+   * `following`  —— 我关注了他
+   * `followedBy` —— 他关注了我(X 原名 `followed_by`)
+   * ⚠️ 载荷没带就是 undefined,**不兜底成 false**。
+   */
+  readonly following?: boolean;
+  readonly followedBy?: boolean;
 
   // ── 【物】涉及什么 ──
   /** ⭐⭐ 媒体 **带 URL** —— 只存 type 等于没采(现状就是这样) */
@@ -733,8 +747,8 @@ export function auditTimelinePayload(text: string): TimelineAudit {
       authorAvatar: avatarUrl,
       authorBio: authorBio,
       isBlueVerified: blue,
-      iFollow,
-      followsMe,
+      following: iFollow,
+      followedBy: followsMe,
       media,
       links,
       hashtags,

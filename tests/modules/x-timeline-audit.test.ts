@@ -980,13 +980,13 @@ describe('⭐⭐⭐ TweetRecord:五维都要留下来', () => {
     delete (res.legacy as Record<string, unknown>).followed_by;
 
     const r = auditTimelinePayload(payload([t])).items[0].record;
-    expect(r.iFollow, '没带却说成「不关注」—— 那是编的').toBeUndefined();
-    expect(r.followsMe).toBeUndefined();
+    expect(r.following, '没带却说成「不关注」—— 那是编的').toBeUndefined();
+    expect(r.followedBy).toBeUndefined();
   });
 
   it('⭐ 载荷**带了** false 时就是 false —— 别矫枉过正', () => {
     const r = auditTimelinePayload(payload([tweet()])).items[0].record;
-    expect(r.iFollow, '带了 false 却报成 undefined').toBe(false);
+    expect(r.following, '带了 false 却报成 undefined').toBe(false);
   });
 
   it('⭐ 没有【物】的推:四样都是空数组,不是 undefined', () => {
@@ -995,5 +995,31 @@ describe('⭐⭐⭐ TweetRecord:五维都要留下来', () => {
     expect(r.links).toEqual([]);
     expect(r.hashtags).toEqual([]);
     expect(r.mentions).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 落库的字段名**照抄 X 的词** —— 用户 2026-10-04:
+ * 「这个还是按照 x 的分类吧 **following/follower**」。
+ *
+ * ⚠️ 我原先把它们叫 `iFollow` / `followsMe` —— **我自造的说法**。
+ * 载荷原名就是 `relationship_perspectives.following` / `.followed_by`。
+ * ⭐ 少一层翻译就少一层漂移 —— 与 `project-x-persistent-tracking` 那条
+ * 「措辞一律用『追踪』不用『关注』」同一个道理:**名字要对得上它描述的那件事**。
+ */
+describe('⭐⭐⭐ 记录的关系字段用 X 的原词', () => {
+  it('⭐⭐⭐ 叫 following / followedBy,不是我自造的 iFollow / followsMe', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    expect(Object.keys(r), '记录里还在用自造的名字')
+      .toEqual(expect.arrayContaining(['following', 'followedBy']));
+    expect(Object.keys(r), '自造的名字还留在记录里 —— 落库会把它写进表')
+      .not.toEqual(expect.arrayContaining(['iFollow', 'followsMe']));
+  });
+
+  it('⭐ 值仍来自载荷的 relationship_perspectives —— 只改名不改语义', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    /** 默认 fixture:following=false / followed_by=true */
+    expect(r.following, '「我关注他」取错了字段').toBe(false);
+    expect(r.followedBy, '「他关注我」取错了字段').toBe(true);
   });
 });
