@@ -244,7 +244,34 @@ export const X_PAGE_NAME = {
   article: 'x.article',
   /** ⭐ 搜索 —— 配方翻译出查询串后去这一页 */
   search: 'x.search',
+  /**
+   * ── ⭐ 人流名单三页(2026-10-05 补)──
+   * 面板的「采人」按钮要按当前页判是哪个名单,
+   * ⚠️ 判出来的词会原样进 `x_author.list_memberships`(累加不覆盖),
+   * 所以**两边必须是同一个来源** —— 面板抄一份就会漂,
+   * 而漂的后果是在每个人的档案里永久留一条读不懂的记录。
+   */
+  followers: 'x.followers',
+  verifiedFollowers: 'x.verifiedFollowers',
+  following: 'x.following',
 } as const;
+
+/**
+ * ⭐⭐⭐ **语义页名 → `list_source` 的词**。
+ *
+ * ⚠️⚠️ 这张表是「采人」的分流依据,放在**页面表这一侧**:
+ * 面板只认它,不自己写 `'x.followers'` 这种字面量
+ * (守卫「面板里不许出现写死的语义页名」钉的就是这个)。
+ * ⭐ `list_source` 的值必须**稳定** —— 今天 'followers' 明天 '关注者'
+ * 会让同一个名单在 `list_memberships` 里记成两个。
+ * ⚠️ 不在这张表里的页**就不是人流名单** —— 调用方据此拒跑,
+ * 绝不默认成 followers(猜错了写坏的是人的档案)。
+ */
+export const X_USER_LIST_PAGES: Readonly<Record<string, string>> = {
+  [X_PAGE_NAME.followers]: 'followers',
+  [X_PAGE_NAME.verifiedFollowers]: 'verifiedFollowers',
+  [X_PAGE_NAME.following]: 'following',
+};
 
 export const X_PAGE_MATCHERS: readonly string[] = [
   /** ⭐ 正则**由排除表生成** —— 写两份时删掉一份测试照样绿 */

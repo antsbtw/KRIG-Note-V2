@@ -44,12 +44,14 @@ import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
 } from './x-timeline-audit';
 import {
-  X_TIMELINE_ENDPOINTS, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME, isTimelineOp,
+  X_TIMELINE_ENDPOINTS, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME,
+  X_USER_LIST_PAGES, isTimelineOp,
 } from './x-pages';
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect } from './x-collect-run';
+import { runUserCollect } from './x-user-run';
 import { recipeToQuery } from './x-recipe-query';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
@@ -299,6 +301,23 @@ export function XConsole(
    * 它闭包捕获的 state **永远是开跑那一刻的值**,改了也看不见。
    */
   const cancelRef = useRef(false);
+  /**
+   * ⭐⭐ **人流采集的结果** —— 与推文那套分开存。
+   * ⚠️ 不复用 `audit`/`saved`:两者字段不同(人流有 `terminated`、
+   * 有 `skippedNoHandle`),挤进一个 state 就要到处 `as`,
+   * 而那种地方**改错了不报错**。
+   */
+  const [userRun, setUserRun] = useState<{
+    listSource: string;
+    users: number;
+    totalResponses: number;
+    rounds: number;
+    stopReason: string;
+    freshTotal: number;
+    terminated: boolean;
+    problems: readonly string[];
+    saved: { inserted: number; updated: number; skippedNoHandle: number; failed: unknown[] } | null;
+  } | null>(null);
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
   const [plan, setPlan] = useState<{
     depth: FetchDepth;
@@ -999,6 +1018,198 @@ export function XConsole(
                   停止
                 </button>
               </div>
+
+              {/*
+                ⭐⭐⭐ **采人** —— followers / following / verifiedFollowers。
+                ⚠️⚠️ **单独一行、单独一个按钮**,不塞进「采这一页」——
+                「采这一页」的参数(补到哪一层、长文)对人流一个都不适用,
+                而共用一个按钮就要在里面按当前页分流 ——
+                `project-x-collect-panel-scraped-homepage` 正是那种分流
+                静默走错了岔路(把人选好的 x.profile 改成 x.home,
+                爬了 30 分钟首页)。⭐ 两件事就摆两个按钮,最不容易错。
+              */}
+              <div style={{ ...S.row, marginTop: 4 }}>
+                <button
+                  type="button"
+                  disabled={wcId == null || running}
+                  onClick={async () => {
+                    setRunning(true);
+                    cancelRef.current = false;
+                    setUserRun(null);
+                    try {
+                      /**
+                       * ⭐⭐⭐ **名单的词从当前页读** —— 不让人再填一遍。
+                       * ⚠️⚠️ 但**认不出来就不跑**,绝不默认成 'followers':
+                       * `listSource` 会进 `list_memberships`(累加不覆盖),
+                       * 猜错了会在**每个人的档案**里永久留下一条错记录,
+                       * 而「他在不在我的关注者里」从此答错且看不出来。
+                       * ⭐ 这正是 `feedback-fail-loud-no-fallback` ——
+                       * 兜底在这里的代价是**写坏人的档案**,不是少跑一次。
+                       */
+                      const page = identified?.name ?? '';
+                      /**
+                       * ⚠️⚠️ 查**页面表的那张映射**,面板不抄一份清单 ——
+                       * 守卫「面板里不许出现写死的语义页名」钉的就是这个,
+                       * 而抄一份的后果是「面板上有这个名字、点下去说没登记」。
+                       * ⭐ 顺带:新增第四个名单页只改页面表,这里自动跟上。
+                       */
+                      const listSource = X_USER_LIST_PAGES[page] ?? '';
+                      if (listSource === '') {
+                        setStep(`⚠️ 当前页不是人流名单（识别为 ${page || '认不出'}）——`
+                          + ' 先去 followers / following / 蓝V关注者 页再点');
+                        return;
+                      }
+
+                      const r = await runUserCollect({
+                        harvest: async (plan) => {
+                          const rr = await window.electronAPI!.webDomInvoke({
+                            op: 'harvest', pageRef: { wcId: wcId! }, plan,
+                          });
+                          setLog((l) => [{
+                            at: new Date().toLocaleTimeString(),
+                            label: `采人（${listSource}）`, result: rr,
+                          }, ...l].slice(0, 50));
+                          if (rr.status !== 'ok' && rr.status !== 'degraded') return null;
+                          return (rr as WebDomResult & { value: HarvestReport }).value;
+                        },
+                        runScript: async (scriptId, params) => {
+                          const rr = await window.electronAPI!.webDomInvoke({
+                            op: 'run',
+                            pageRef: { wcId: wcId! },
+                            scriptId,
+                            params: params as Record<string, string>,
+                          });
+                          if (rr.status !== 'ok' && rr.status !== 'degraded') {
+                            throw new Error(`翻页脚本失败：${(rr as { reason?: string }).reason ?? ''}`);
+                          }
+                          return (rr as { value?: unknown }).value;
+                        },
+                        /**
+                         * ⭐⭐⭐ **够了没有,业务说了算**(用户 2026-10-04)。
+                         * ⚠️⚠️ 这里**故意不设空轮刹车** ——
+                         * `project-x-cursor-paging` 实测:3 页刹车把 2604 账号
+                         * 卡死在 2244、三跑同数,而 X 一直说还有。
+                         * 滚动已采过的人让翻页头几页**天然零新增**。
+                         * ⭐ 人填的页数是**唯一**的业务闸,其余交给数据判据
+                         * (没游标 / 游标不变 / X 说到头)。
+                         */
+                        stopPaging: (st) => {
+                          const want = Number(pagesWanted) || 10;
+                          if (st.uniqueUsers > 0 && st.round >= want) {
+                            return { go: false, why: `已翻够 ${want} 页` };
+                          }
+                          return { go: true };
+                        },
+                        cancelled: () => cancelRef.current,
+                        onProgress: setStep,
+                      }, { listSource, wantPages: Number(pagesWanted) || 10 });
+
+                      /**
+                       * ⭐⭐ 先把**采到的账**显示出来,再去存 ——
+                       * 存失败时「采到多少」这个数**还在**,
+                       * 两件事分得开(采集成功 / 落库失败)。
+                       */
+                      setUserRun({
+                        listSource, users: r.users.length,
+                        totalResponses: r.totalResponses,
+                        rounds: r.paging.rounds, stopReason: r.paging.stopReason,
+                        freshTotal: r.paging.freshTotal, terminated: r.paging.terminated,
+                        problems: r.problems, saved: null,
+                      });
+
+                      if (r.users.length === 0) {
+                        /**
+                         * ⚠️ 「采到 0 人」两种成因别混:链路坏 vs 这页真没人
+                         * (`project-x-collect-needs-scroll`)。
+                         * ⭐ `problems` 里有话就原样印出来 —— 它分得开。
+                         */
+                        setStep(r.problems[0] ?? '⚠️ 采到 0 人 —— 看「载荷」数:0 就是两条腿都没收到');
+                        return;
+                      }
+
+                      const sv = await window.electronAPI!.xDataInvoke({
+                        op: 'saveUsers', records: r.users, ctx: { listSource },
+                      });
+                      setLog((l) => [{
+                        at: new Date().toLocaleTimeString(), label: '落库（人）', result: sv,
+                      }, ...l].slice(0, 50));
+                      /**
+                       * ⭐⭐⭐ **一个都没存进去 = 失败**,别让它看着像成功。
+                       * ⚠️ 2026-10-05 连栽两跑:面板报「新入库 44 条」而库里 0 行。
+                       */
+                      if (sv.status !== 'ok') {
+                        setStep(`落库失败：${(sv as { reason?: string }).reason ?? ''}`);
+                        return;
+                      }
+                      const v = sv.value as {
+                        inserted: number; updated: number;
+                        skippedNoHandle: number; failed: Array<{ why: string }>;
+                      };
+                      setUserRun((u) => (u === null ? u : { ...u, saved: v }));
+                      if (v.failed.length > 0) {
+                        setStep(`⚠️ ${v.failed.length} 人没入库：${v.failed[0]?.why ?? ''}`);
+                      } else if (v.inserted + v.updated === 0) {
+                        setStep(`⚠️ ${r.users.length} 人一条都没入库 —— 看返回值`);
+                      }
+                    } finally {
+                      setRunning(false);
+                    }
+                  }}
+                  style={S.btn}
+                  title="采 followers / following / 蓝V关注者 —— 滚动 + 主动翻页，采完落 x_author"
+                >
+                  {running ? '采集中…' : '采人（名单）'}
+                </button>
+                <span style={{ fontSize: 10, opacity: 0.5 }}>
+                  当前页：{identified?.name ?? '认不出'}
+                </span>
+              </div>
+
+              {/*
+                ⭐⭐⭐ **人流的账** —— 用户「这就是我们要检阅的结果」。
+                ⚠️ 必须答得出三件事:采到多少人、翻了几轮、**哪道闸停的**。
+                上一跑翻了 47 轮而我读不出是哪道判据停的,就是因为只进进度条。
+              */}
+              {userRun !== null && (
+                <div style={S.diagnose}>
+                  <strong>人流（{userRun.listSource}）</strong>
+                  <div style={{ marginTop: 3 }}>
+                    采到 <strong>{userRun.users}</strong> 人
+                    　·　载荷 <strong>{userRun.totalResponses}</strong>
+                    　·　翻页 <strong>{userRun.rounds}</strong> 轮
+                    （翻页新增 <strong>{userRun.freshTotal}</strong>）
+                  </div>
+                  <div style={{ marginTop: 3, opacity: 0.85 }}>
+                    停因：{userRun.stopReason}
+                    {userRun.terminated && '（X 说名单到头了）'}
+                  </div>
+                  {/*
+                    ⭐⭐ 存了多少**单独一行** —— 「采到了」和「存进去了」
+                    是两件事,合成一个数就是「面板报 44、库里 0」的起点。
+                  */}
+                  {userRun.saved !== null && (
+                    <div style={{ marginTop: 3 }}>
+                      入库：新 <strong>{userRun.saved.inserted}</strong>
+                      　·　更新 <strong>{userRun.saved.updated}</strong>
+                      {userRun.saved.skippedNoHandle > 0 && (
+                        <>　·　<span style={{ opacity: 0.8 }}>
+                          无 handle 挡下 {userRun.saved.skippedNoHandle}
+                        </span></>
+                      )}
+                      {userRun.saved.failed.length > 0 && (
+                        <>　·　<span style={{ color: '#f66' }}>
+                          ⚠️ 失败 {userRun.saved.failed.length}
+                        </span></>
+                      )}
+                    </div>
+                  )}
+                  {userRun.problems.length > 0 && (
+                    <div style={{ marginTop: 3, opacity: 0.8 }}>
+                      ⚠️ 解析问题 {userRun.problems.length} 条：{userRun.problems[0]}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/*
                 ⭐⭐⭐ **研判与执行的账** —— 三类分开,不许混(2026-10-03)。

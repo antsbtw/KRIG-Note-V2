@@ -1,5 +1,5 @@
 /**
- * ⭐⭐ X 的**数据** IPC(配方 CRUD + 推文落库)—— **X 自带,与 X 同生共死**
+ * ⭐⭐ X 的**数据** IPC(配方 CRUD + 推文落库 + 用户落库)—— **X 自带,与 X 同生共死**
  *
  * ⚠️ `search-recipe-repo` 本来就在(表、CRUD 都齐),
  * 缺的只是「renderer 怎么调到它」这一环。
@@ -14,6 +14,7 @@ import {
 } from '@platform/main/db/search-recipe-repo';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
+import { saveUsers } from './x-user-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 
@@ -84,6 +85,52 @@ export function registerXDataIpc(): void {
               /** ⚠️ 只记第一条原因 —— 整批同因时 N 条一模一样 */
               firstFailure: r.failed[0]?.why ?? '(none)',
               source: p.ctx?.source ?? '(empty)',
+            },
+          });
+          return { status: 'ok', value: r };
+        }
+
+        /**
+         * ⭐⭐⭐ **采到的 X 用户落库** —— 2026-10-05。
+         * ⚠️ 返回 `inserted / updated / skippedNoHandle / failed` **原样回去**:
+         * 「全是老人」和「全是新人」合成一个数就分不出来,
+         * 而增量采集(以后要做的)全靠这个分别。
+         */
+        case 'saveUsers': {
+          if (!Array.isArray(p.records) || p.records.length === 0) {
+            return failed('[x.data] saveUsers 没给记录');
+          }
+          /**
+           * ⚠️⚠️ `listSource` **要拒收空** —— 与 `source` 的处理**故意不同**。
+           * `source` 只是「这批从哪来」的元数据,空了记 `unknown` 就行;
+           * 而 `listSource` 会进 `list_memberships`(累加不覆盖),
+           * 空值会在每个人的名单里**永久留下一个空字符串**,
+           * 之后「他在不在我的关注者里」这个问题就带着一条读不懂的记录。
+           * ⭐ 这是写进**人的档案**里的,不是这一跑的标签。
+           */
+          if (typeof p.ctx?.listSource !== 'string' || p.ctx.listSource.trim() === '') {
+            return failed('[x.data] saveUsers 必须给 listSource（它会进 list_memberships，空值会永久留在每个人档案里）');
+          }
+          const r = await saveUsers(p.records, p.ctx);
+          /**
+           * ⭐⭐⭐ **落库结果落盘** —— 同 `saveTweets` 那条教训:
+           * `console.log` 只在启动 app 的终端里,留痕文件里一个字都没有,
+           * 于是「面板报入库 N 条、库里 0 行」只能去真库里猜(我猜错过三次)。
+           */
+          traceRecorder.lifecycle({
+            layer: 'web.net',
+            event: r.failed.length > 0 || r.inserted + r.updated === 0
+              ? 'x-save-users-incomplete' : 'x-save-users-ok',
+            pageId: 'x-data',
+            detail: {
+              given: p.records.length,
+              inserted: r.inserted,
+              updated: r.updated,
+              /** ⭐ 无 handle 被挡下的单独记 —— 它不是写库失败,混一起会指错层 */
+              skippedNoHandle: r.skippedNoHandle,
+              failed: r.failed.length,
+              firstFailure: r.failed[0]?.why ?? '(none)',
+              listSource: p.ctx.listSource,
             },
           });
           return { status: 'ok', value: r };

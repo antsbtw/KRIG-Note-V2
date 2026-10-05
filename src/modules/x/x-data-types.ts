@@ -22,6 +22,7 @@
 
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { TweetRecord } from './x-timeline-audit';
+import type { XUserRecord } from './x-user-audit';
 
 /**
  * ⚠️ 通道名**不在这里** —— 在 `@shared/ipc/channel-names` 的 `X_DATA_INVOKE`。
@@ -51,6 +52,25 @@ export type XDataInvoke =
       readonly op: 'saveTweets';
       readonly records: readonly TweetRecord[];
       readonly ctx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string };
+    }
+  /**
+   * ⭐⭐⭐ **采到的 X 用户落库** —— 2026-10-05。
+   *
+   * ⚠️ 与 `saveTweets` 并列、**不合并成一个 `save`** ——
+   * 两者的「不许覆盖」清单完全不同:
+   * 推文护的是 `accepted`/`ai_verdict`(AI 与人工填的),
+   * 用户护的是 `blocked`/`watched`/`note`(屏蔽名单与追踪名单)。
+   * ⭐ 合成一个泛型 op 就要在里面分流,而分流写错**不报错**、
+   * 表现成「屏蔽点了没反应」。
+   *
+   * ⚠️ `listSource` 会原样进 `x_author.list_memberships`(累加不覆盖),
+   * 所以必须是**稳定的词**(followers / following / verifiedFollowers)——
+   * 今天写 'followers' 明天写 '关注者' 会让同一个名单记成两个。
+   */
+  | {
+      readonly op: 'saveUsers';
+      readonly records: readonly XUserRecord[];
+      readonly ctx: { readonly listSource: string; readonly wsId?: string };
     };
 
 /**
