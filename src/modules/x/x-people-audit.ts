@@ -1,0 +1,221 @@
+/**
+ * ⭐⭐⭐ **人流载荷的解析** —— followers / following / verifiedFollowers
+ *
+ * ── 为什么要单独一个 ──
+ * 这三页的条目是**人不是推**。此前它们被 `carriesTweets` 认成时间线,
+ * 喂给推文解析器 → **0 条 + 报「一条推文都没解出来,可能结构变了」**。
+ * ⚠️ 误导性告警**比报错还坏**:它把人指向「X 改版了」这个错方向。
+ *
+ * ── 交接文档(`docs/handoff/x-followers-collection.md`)记的实测事实 ──
+ * ⚠️ 采人页回读要数 **`UserCell`**,数 `article[data-testid=tweet]` **恒为 0**
+ * ⚠️ X 翻到底会发 `TimelineTerminateTimeline`,**但仍附带游标**(值还在倒退)
+ * ⚠️ **空 handle 会让整批写入 0 条**(`FOR` 里一条 ASSERT 失败全灭)
+ * ⚠️ `Followers` 端点**必须 POST**(GET 恒 404 + 空 body)—— 那是翻页的事
+ *
+ * ⭐ 与 `x-timeline-audit` 并列、不复用它的类型:
+ * 「人」和「推」是两个实体,硬套一套字段会把两边都拧歪
+ * (`project-data-model-charter` 原则一:实体优先)。
+ */
+
+/** ⭐ 一个人的完整记录 —— 落库用,与 `TweetRecord` 并列 */
+export type PersonRecord = {
+  /** ⭐ handle 是业务主键 —— ⚠️ 空的要在**入库前**挡掉,见 `problems` */
+  readonly handle: string;
+  /** ⭐ X 的数字 id —— 改名不会变,比 handle 稳 */
+  readonly restId: string;
+  readonly name: string;
+  readonly bio: string;
+  readonly avatar: string;
+  /** ⚠️ 载荷没带就是 undefined,**不兜底成 0** —— 「不知道」不是「零粉丝」 */
+  readonly followersCount?: number;
+  /** 他关注了多少人(X 原名 `friends_count`) */
+  readonly followingCount?: number;
+  readonly statusesCount?: number;
+  readonly location: string;
+  readonly isBlueVerified?: boolean;
+  /** ⭐ 用 X 的原词 —— 与 `TweetRecord` 一致 */
+  readonly following?: boolean;
+  readonly followedBy?: boolean;
+  readonly createdAt?: string;
+  /**
+   * ⭐⭐ **在名单里的名次**(0 起)—— 增量采集的命根子。
+   *
+   * 交接文档实测:**X 的 followers 列表严格按关注时间倒序**,
+   * 2770 人里新人全落在 seq 0-10、相对顺序零颠倒。
+   * ⚠️ 判「是不是新人」别用「位移要小」—— 正确期望是
+   * **位移 ≈ 净增人数**(整体平移)。那条判词写错过一次。
+   */
+  readonly seq: number;
+};
+
+export type PeopleAudit = {
+  readonly people: number;
+  readonly items: readonly PersonRecord[];
+  /** ⭐ 翻页游标 —— 它回答「还能不能继续翻」 */
+  readonly hasCursor: boolean;
+  readonly cursor?: string;
+  /**
+   * ⚠️ X 翻到底会发 `TimelineTerminateTimeline`,**但仍附带游标** ——
+   * 所以「有游标」不等于「还有人」,要同时看这个。
+   */
+  readonly terminated: boolean;
+  readonly coverage: Readonly<Record<string, number>>;
+  readonly problems: readonly string[];
+};
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+const num = (v: unknown): number | undefined =>
+  (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+
+/** ⚠️ 防环:X 的载荷里有互相引用 */
+function collectBy(
+  node: unknown,
+  pred: (o: Record<string, unknown>) => boolean,
+): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  const seen = new Set<unknown>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== 'object') return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) walk(x); return; }
+    const o = n as Record<string, unknown>;
+    if (pred(o)) out.push(o);
+    for (const v of Object.values(o)) walk(v);
+  };
+  walk(node);
+  return out;
+}
+
+/**
+ * ⭐⭐⭐ 核对一个人流载荷。
+ *
+ * ⚠️ 解不出来**不抛** —— 回 `problems` 非空的结果:
+ * 「这个载荷读不懂」与「这个载荷是空的」是两件事,混起来就查不动
+ * (推文那边正是这么踩过)。
+ */
+export function auditPeoplePayload(text: string, seqFrom = 0): PeopleAudit {
+  const empty = (problems: string[]): PeopleAudit => ({
+    people: 0, items: [], hasCursor: false, terminated: false, coverage: {}, problems,
+  });
+
+  /** ⚠️ 空响应体单独说 —— 不是解析失败,是根本没拿到内容 */
+  if (text.trim() === '') {
+    return empty(['**响应体是空的** —— 不是解析失败，是这条响应根本没拿到内容'
+      + '（多半是 CDP 读 body 失败，看 legs 里的 noBody）']);
+  }
+
+  let root: unknown;
+  try {
+    root = JSON.parse(text);
+  } catch (e) {
+    return empty([`不是合法 JSON(${e instanceof Error ? e.message : '未知'})—— `
+      + '可能被截断了,或这根本不是人流载荷']);
+  }
+
+  /**
+   * ⭐ 人的特征:`legacy.screen_name` 或 `core.screen_name`。
+   * ⚠️ 两个位置都要看 —— X 正在把字段从 `legacy` 挪到 `core`,
+   * 只认一个会在改版时**静默少一半**(推文那边的 `authorName` 就是这样)。
+   */
+  const nodes = collectBy(root, (o) => {
+    /**
+     * ⚠️⚠️ 判据是「**有没有 screen_name 这个键**」,不是「它有没有值」。
+     *
+     * 第一版写成「值非空」,后果:**空 handle 的人根本解不出来** ——
+     * 而交接文档实测它会让**整批写入 0 条**(FOR 里一条 ASSERT 失败全灭)。
+     * ⭐ 看不见就警告不了:解析器必须先把人收进来,才谈得上报「这人没 handle」。
+     */
+    const legacy = isObj(o.legacy) ? o.legacy : undefined;
+    const core = isObj(o.core) ? o.core : undefined;
+    const hasKey = (x: Record<string, unknown> | undefined): boolean =>
+      x !== undefined && 'screen_name' in x;
+    return hasKey(legacy) || hasKey(core);
+  });
+
+  const problems: string[] = [];
+  const items: PersonRecord[] = nodes.map((node, i) => {
+    const legacy = isObj(node.legacy) ? node.legacy : {};
+    const core = isObj(node.core) ? node.core : {};
+    const persp = isObj(node.relationship_perspectives) ? node.relationship_perspectives : undefined;
+    const avatarObj = isObj(node.avatar) ? node.avatar : undefined;
+    const bioObj = isObj(node.profile_bio) ? node.profile_bio : undefined;
+
+    return {
+      handle: str(core.screen_name) || str(legacy.screen_name),
+      restId: str(node.rest_id),
+      name: str(core.name) || str(legacy.name),
+      bio: str(bioObj?.description) || str(legacy.description),
+      avatar: str(avatarObj?.image_url) || str(legacy.profile_image_url_https),
+      /** ⚠️ 没带就 undefined —— 记忆记着旧实现 36 行里**粉丝数全空** */
+      followersCount: num(legacy.followers_count),
+      followingCount: num(legacy.friends_count),
+      statusesCount: num(legacy.statuses_count),
+      location: str(legacy.location),
+      isBlueVerified: typeof node.is_blue_verified === 'boolean'
+        ? node.is_blue_verified : undefined,
+      following: typeof persp?.following === 'boolean'
+        ? persp.following
+        : (typeof legacy.following === 'boolean' ? legacy.following : undefined),
+      followedBy: typeof persp?.followed_by === 'boolean'
+        ? persp.followed_by
+        : (typeof legacy.followed_by === 'boolean' ? legacy.followed_by : undefined),
+      createdAt: typeof legacy.created_at === 'string' ? legacy.created_at : undefined,
+      /** ⭐ 名次接着上一页数 —— 跨页连续才能做差集 */
+      seq: seqFrom + i,
+    };
+  });
+
+  /** ⭐ 游标:`cursorType` 为 bottom 的那个 */
+  const cursors = collectBy(root, (o) =>
+    str(o.cursorType).toLowerCase() === 'bottom' && str(o.value) !== '');
+  const cursor = cursors.length > 0 ? str(cursors[0].value) : '';
+
+  /**
+   * ⚠️⚠️ X 翻到底会发 `TimelineTerminateTimeline`,**但仍附带游标**
+   * (值还在倒退)—— 光看游标会以为还能翻。
+   */
+  const terminated = collectBy(root, (o) =>
+    str(o.type) === 'TimelineTerminateTimeline'
+    || str(o.entryType) === 'TimelineTerminateTimeline').length > 0;
+
+  if (items.length === 0) {
+    problems.push('这个载荷里**一个人都没解出来** —— 可能不是人流载荷,或结构变了');
+  }
+  /**
+   * ⚠️⚠️ **空 handle 必须在这里喊** —— 交接文档实测:
+   * 它会让**整批写入 0 条**(`FOR` 里一条 ASSERT 失败全灭)。
+   * ⭐ 在解析这层报出来,比到写库时整批失败好查得多。
+   */
+  const noHandle = items.filter((p) => p.handle === '').length;
+  if (noHandle > 0) {
+    problems.push(`有 ${noHandle} 个人没有 handle —— **入库前必须挡掉**,`
+      + '否则整批写入 0 条（一条 ASSERT 失败全灭）');
+  }
+
+  const pct = (f: (p: PersonRecord) => boolean): number =>
+    (items.length === 0 ? 0 : Math.round((items.filter(f).length / items.length) * 100));
+
+  return {
+    people: items.length,
+    items,
+    hasCursor: cursor !== '',
+    cursor: cursor === '' ? undefined : cursor,
+    terminated,
+    coverage: {
+      handle: pct((p) => p.handle !== ''),
+      用户id: pct((p) => p.restId !== ''),
+      显示名: pct((p) => p.name !== ''),
+      头像: pct((p) => p.avatar !== ''),
+      简介: pct((p) => p.bio !== ''),
+      /** ⭐ 这几项**本就不该 100%** —— 量它们是为了知道「X 到底给不给」 */
+      粉丝数: pct((p) => p.followersCount !== undefined),
+      关注数: pct((p) => p.followingCount !== undefined),
+      位置: pct((p) => p.location !== ''),
+      关系: pct((p) => p.following !== undefined || p.followedBy !== undefined),
+    },
+    problems,
+  };
+}

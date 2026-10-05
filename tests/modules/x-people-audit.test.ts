@@ -1,0 +1,174 @@
+/**
+ * ⭐⭐⭐ 人流载荷的解析 —— followers / following / verifiedFollowers
+ *
+ * ⚠️ 此前这三页被 `carriesTweets` 认成时间线、喂给**推文**解析器 →
+ * **0 条 + 报「一条推文都没解出来,可能结构变了」**。
+ * ⭐ 误导性告警**比报错还坏**:它把人指向「X 改版了」这个错方向。
+ *
+ * 四条判据来自 `docs/handoff/x-followers-collection.md` 的实测,
+ * 不是我新发明的。
+ */
+import { describe, it, expect } from 'vitest';
+import { auditPeoplePayload } from '@modules/x/x-people-audit';
+import { carriesTweets, carriesPeople } from '@modules/x/x-pages';
+
+/** ⭐ 照真机形状造一个人 */
+const person = (i: number, over: Record<string, unknown> = {}): unknown => ({
+  entryId: `user-${i}`,
+  content: { itemContent: { user_results: { result: {
+    rest_id: `${900 + i}`,
+    core: { screen_name: `user${i}`, name: `名字${i}` },
+    legacy: {
+      description: `bio ${i}`,
+      followers_count: 1234 + i, friends_count: 56, statuses_count: 789,
+      profile_image_url_https: `https://pbs/av${i}.jpg`,
+    },
+    relationship_perspectives: { following: false, followed_by: true },
+    ...over,
+  } } } },
+});
+
+const payload = (entries: unknown[], extra: unknown[] = []): string => JSON.stringify({
+  data: { user: { result: { timeline: { timeline: {
+    instructions: [{ type: 'TimelineAddEntries', entries }, ...extra],
+  } } } } },
+});
+
+const cursor = (v: string): unknown =>
+  ({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: v } });
+
+describe('⭐⭐⭐ 人流与推文流必须分开', () => {
+  it('⭐⭐⭐ 三个人流端点**不**算带推文', () => {
+    for (const ep of ['Followers', 'Following', 'BlueVerifiedFollowers']) {
+      const u = `https://x.com/i/api/graphql/abc/${ep}`;
+      expect(
+        carriesTweets(u),
+        `${ep} 被当成推文流 —— 人的载荷喂给推文解析器会报「一条推文都没解出来」`,
+      ).toBe(false);
+      expect(carriesPeople(u), `${ep} 没被认成人流`).toBe(true);
+    }
+  });
+
+  it('⭐⭐ 推文端点**不**算带人 —— 两者互斥', () => {
+    for (const ep of ['SearchTimeline', 'HomeTimeline', 'TweetResultByRestId']) {
+      const u = `https://x.com/i/api/graphql/abc/${ep}`;
+      expect(carriesPeople(u), `${ep} 被认成人流了`).toBe(false);
+      expect(carriesTweets(u)).toBe(true);
+    }
+  });
+});
+
+describe('⭐⭐ 解析一页人', () => {
+  it('⭐⭐ 身份四样都取到:handle / id / 名字 / 头像', () => {
+    const a = auditPeoplePayload(payload([person(0)]));
+    const p = a.items[0];
+    expect(p.handle).toBe('user0');
+    expect(p.restId).toBe('900');
+    expect(p.name).toBe('名字0');
+    expect(p.avatar).toContain('av0.jpg');
+  });
+
+  /**
+   * ⚠️ `screen_name` 在 `core` 和 `legacy` **两个位置**都可能 ——
+   * X 正在往 `core` 挪。只认一个会在改版时**静默少一半**。
+   */
+  it('⭐⭐ handle 在 legacy 里也认得出(X 正在挪字段)', () => {
+    const old = { content: { itemContent: { user_results: { result: {
+      rest_id: '1', legacy: { screen_name: 'oldstyle', name: '老形状' },
+    } } } } };
+    const a = auditPeoplePayload(payload([old]));
+    expect(a.items[0]?.handle, '只认 core 的话,老形状的载荷会一个人都解不出').toBe('oldstyle');
+  });
+
+  it('⭐ 关系用 X 的原词 following / followedBy', () => {
+    const p = auditPeoplePayload(payload([person(0)])).items[0];
+    expect(p.following).toBe(false);
+    expect(p.followedBy).toBe(true);
+  });
+
+  /** ⚠️ 没带就 undefined —— 记忆记着旧实现 36 行里**粉丝数全空** */
+  it('⚠️ 载荷没带粉丝数 → undefined,**不兜底成 0**', () => {
+    const noFc = { content: { itemContent: { user_results: { result: {
+      rest_id: '1', core: { screen_name: 'a', name: 'A' }, legacy: {},
+    } } } } };
+    const p = auditPeoplePayload(payload([noFc])).items[0];
+    expect(p.followersCount, '没带却说成 0 粉丝 —— 「不知道」不是「零」').toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐ `seq` 是增量采集的命根子:交接文档实测
+   * **X 的 followers 严格按关注时间倒序**,新人全落在最前面。
+   */
+  it('⭐⭐ seq 跨页连续 —— 差集靠它', () => {
+    const a = auditPeoplePayload(payload([person(0), person(1)]), 100);
+    expect(a.items.map((p) => p.seq), '名次没接着上一页数,跨页就对不上').toEqual([100, 101]);
+  });
+});
+
+describe('⭐⭐⭐ 到底的判据', () => {
+  /**
+   * ⚠️⚠️ 交接文档实测:X 翻到底会发 `TimelineTerminateTimeline`,
+   * **但仍附带游标**(值还在倒退)—— 光看游标会以为还能翻。
+   */
+  it('⭐⭐⭐ 到底那页:**有游标但 terminated** —— 两个都要报', () => {
+    const a = auditPeoplePayload(payload(
+      [person(0), cursor('STILL-HERE')],
+      [{ type: 'TimelineTerminateTimeline', direction: 'Bottom' }],
+    ));
+    expect(a.hasCursor, '游标确实还在 —— 这正是坑所在').toBe(true);
+    expect(a.terminated, '没认出 TimelineTerminateTimeline —— 会一直翻下去').toBe(true);
+  });
+
+  it('⭐ 没到底时 terminated 为 false', () => {
+    const a = auditPeoplePayload(payload([person(0), cursor('C1')]));
+    expect(a.terminated).toBe(false);
+    expect(a.cursor).toBe('C1');
+  });
+});
+
+describe('⚠️⚠️ 空 handle 要在解析层就喊', () => {
+  /**
+   * ⚠️⚠️ 交接文档实测:空 handle 会让**整批写入 0 条**
+   * (`FOR` 里一条 ASSERT 失败全灭)。
+   * ⭐ 在解析这层报出来,比到写库时整批失败好查得多。
+   */
+  it('⭐⭐⭐ 有人没 handle → problems 里明说「入库前必须挡掉」', () => {
+    const bad = { content: { itemContent: { user_results: { result: {
+      rest_id: '1', core: { screen_name: '', name: '无名' },
+      legacy: { screen_name: '', description: 'x' },
+    } } } } };
+    /** ⚠️ 先确认样本真造出了该现象 —— 没 handle 的人要能被解出来 */
+    const a = auditPeoplePayload(payload([person(0), bad]));
+    expect(a.people, '样本里那个空 handle 的人没被解出来 —— 测不到该现象').toBe(2);
+    expect(
+      a.problems.join(''),
+      '空 handle 不报 —— 到写库时会整批 0 条，那时才查就晚了',
+    ).toContain('入库前必须挡掉');
+  });
+});
+
+describe('⚠️ 读不懂与是空的,分开说', () => {
+  it('⚠️ 空响应体 → 说「响应体是空的」,不说解析失败', () => {
+    expect(auditPeoplePayload('').problems.join('')).toContain('响应体是空的');
+  });
+
+  it('⚠️ 半截 JSON → 说「不是合法 JSON」', () => {
+    expect(auditPeoplePayload('{"data":{"us').problems.join('')).toContain('不是合法 JSON');
+  });
+
+  it('⚠️ 合法但一个人都没有 → 明说,不交空报告', () => {
+    const a = auditPeoplePayload('{"data":{}}');
+    expect(a.people).toBe(0);
+    expect(a.problems.join('')).toContain('一个人都没解出来');
+  });
+});
+
+describe('⭐ 覆盖率只报事实', () => {
+  it('⭐ 不是人人都有位置 → 不该报 100%', () => {
+    const a = auditPeoplePayload(payload([
+      person(0, { legacy: { screen_name: 'a', location: '北京' } }),
+      person(1),
+    ]));
+    expect(a.coverage.位置, '位置报成 100% —— 「不量的字段永远 100%」的反面').toBeLessThan(100);
+  });
+});

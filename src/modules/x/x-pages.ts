@@ -310,7 +310,41 @@ export function isSingleTweetOp(url: string): boolean {
  * 所以解析侧统一问这一个函数。
  */
 export function carriesTweets(url: string): boolean {
+  /**
+   * ⚠️⚠️ **人流不带推文** —— 2026-10-05。
+   * `Followers` / `Following` / `BlueVerifiedFollowers` 以 `Timeline` 判据看
+   * 都算「时间线」,但它们的条目是**人不是推**。
+   * 喂给推文解析器的后果:0 条 + 报「一条推文都没解出来,可能结构变了」——
+   * **误导性告警比报错还坏**(它把人指向「X 改版了」这个错方向)。
+   */
+  if (isPeopleOp(url)) return false;
   return isTimelineOp(url) || isSingleTweetOp(url);
+}
+
+/**
+ * ⭐⭐⭐ **这个响应里装的是「人」** —— 2026-10-05。
+ *
+ * ⚠️ 判据用**精确名**不用后缀:`Followers` 结尾的还有
+ * `BlueVerifiedFollowers`,而 `FollowersYouKnow` 之类将来可能出现,
+ * 宁可漏不可错认(错认会让人流被当推文流,或反过来)。
+ *
+ * ⚠️ 交接文档记着:`Followers` 端点**必须走 POST**(GET 恒 404 + 空 body),
+ * 那是**翻页**时的事,与「这是不是人流」无关 —— 两件事别混。
+ */
+const X_PEOPLE_ENDPOINTS: readonly string[] = [
+  'Followers',
+  'Following',
+  'BlueVerifiedFollowers',
+];
+
+export function isPeopleOp(url: string): boolean {
+  const op = url.split('?')[0].split('/').filter(Boolean).pop() ?? '';
+  return X_PEOPLE_ENDPOINTS.includes(op);
+}
+
+/** ⭐ 带人的响应 —— 与 `carriesTweets` 并列,两者**互斥** */
+export function carriesPeople(url: string): boolean {
+  return isPeopleOp(url);
 }
 
 
