@@ -31,6 +31,19 @@ export const X_SCRIPTS = {
    */
   navProbe: 'x.navBackProbe' as ScriptId,
   /**
+   * ⭐⭐⭐ **滚不动时跳到最后一张卡片** —— 虚拟列表的抢救动作。
+   *
+   * ── 用户 2026-09-19 原话 ──
+   * > 「如果校验发现没有滚动就往下一个位置去采集数据。
+   * >   这样才对吧,而不是盲目采集直到出问题都不懂」
+   *
+   * ⚠️⚠️ X 的名单是虚拟列表:滚过去的 DOM 会被删掉,
+   * 「滚不动」常常**不是到底了,而是新内容还没渲染**。
+   * ⭐ `scrollIntoView` 到最后一张卡片会**强制渲染它后面的内容**,
+   * 比盲目 `scrollBy` 可靠(历史代码实测:250 → 2781)。
+   */
+  jumpToLastCard: 'x.jumpToLastCard' as ScriptId,
+  /**
    * ⭐⭐⭐ **拿游标主动翻下一页** —— 搜索页滚动不翻页,只能自己发。
    * ⚠️ 这是**本仓第一个带参数的脚本**(URL 与游标是运行时值),
    * 参数走 `JSON.stringify`,绝不拼进脚本文本。
@@ -280,6 +293,42 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
     purpose: 'X:读当前页现场(URL/滚动位置/history深度/首张卡id)—— 验「进去再返回」的前提',
     /** ⚠️ 同样**无参数**,只读不写 */
     build: () => NAV_PROBE_SCRIPT,
+  },
+  {
+    id: X_SCRIPTS.jumpToLastCard,
+    purpose: 'X:滚不动时跳到最后一张卡片,逼虚拟列表渲染后面的内容',
+    /**
+     * ⚠️ **无参数** —— 选择器是 X 的业务知识,写死在脚本里即可,
+     * 没有运行时值就没有拼串的机会(`inject-template-escape` 那道闸)。
+     *
+     * ⭐⭐ 选择器按**从具体到通用**依次试:
+     * `UserCell` 是人流名单的卡片(历史代码实测有效),
+     * `article` 是推文流的;都没有才退回「滚到文档底」。
+     * ⚠️ 返回值要说清**跳成功没有** —— 底座据此决定要不要再给一轮,
+     * 恒回 true 会让「真到底」永远停不下来。
+     */
+    build: () => [
+      '(function () {',
+      '  try {',
+      // ⚠️ CSS 属性值用**单引号**:外层 TS 字符串也是单引号时,
+      // 反斜杠转义会原样发到浏览器(守卫当场逮到过)。用反引号包住最省事。
+      `    var sels = ['[data-testid="UserCell"]', 'article[data-testid="tweet"]'];`,
+      '    for (var i = 0; i < sels.length; i++) {',
+      '      var cells = document.querySelectorAll(sels[i]);',
+      '      var last = cells[cells.length - 1];',
+      '      if (last && last.scrollIntoView) {',
+      `        last.scrollIntoView({ block: 'end' });`,
+      '        return { jumped: true, by: sels[i], count: cells.length };',
+      '      }',
+      '    }',
+      /** ⚠️ 一张卡片都找不到:**如实回 false**,别假装抢救过 */
+      '    var el = document.scrollingElement || document.documentElement;',
+      '    var before = el.scrollTop;',
+      '    el.scrollTop = el.scrollHeight;',
+      `    return { jumped: el.scrollTop !== before, by: 'scrollHeight', count: 0 };`,
+      '  } catch (e) { return { jumped: false, why: String(e) }; }',
+      '})();',
+    ].join('\n'),
   },
   {
     id: X_SCRIPTS.fetchNextPage,

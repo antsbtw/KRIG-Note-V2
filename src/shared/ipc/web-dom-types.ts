@@ -232,6 +232,12 @@ export type WebDomInvoke =
         readonly maxRounds?: number;
         /** ⭐ 每轮滚完跑的脚本 id —— 只收**预注册的 id** */
         readonly afterRoundScriptId?: string;
+        /**
+         * ⭐⭐⭐ **滚不动时跑这个脚本换个位置** —— 虚拟列表的抢救动作。
+         * ⚠️ 脚本要回 `{ jumped: boolean }`:true = 换过位置了,再给一轮;
+         * 恒 true 会让「真到底」永远停不下来。
+         */
+        readonly onStuckScriptId?: string;
         /** ⚠️ 不要的 URL 子串 —— 业务给,底座一条不内置 */
         readonly noisyUrlSubstrings?: readonly string[];
         readonly maxMs?: number;

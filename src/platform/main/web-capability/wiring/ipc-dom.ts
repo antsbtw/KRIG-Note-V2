@@ -417,6 +417,8 @@ function makeHarvestDeps(wc: WebContents, pid: PageId): HarvestDeps {
       scrollCancelled.delete(pageId);
       const r = await controlEngine.scrollUntil(pageId, { kind: 'atBottom' }, {
         maxRounds: opts.maxRounds,
+        /** ⭐ 滚不动时换位置 —— 由业务提供动作,底座只管什么时候问 */
+        onStuck: opts.onStuck,
         afterRound: opts.afterRound,
         // ⭐ 两个停止源:人点「停翻页」 或 编排说够了
         shouldStop: () => scrollCancelled.has(pageId) || Boolean(opts.shouldStop?.()),

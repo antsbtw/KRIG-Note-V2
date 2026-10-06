@@ -34,6 +34,10 @@ function deps(plan: {
   /** ⭐ 造「导航没去成」那条路 */
   gotoFails?: boolean;
   scriptThrows?: boolean;
+  /** ⭐ 从第几轮起「滚不动」—— 用来测 onStuck 抢救 */
+  stuckAtRound?: number;
+  /** ⭐ 抢救脚本回不回 `jumped:true`(false = 一张卡片都没找到) */
+  scriptReturnsJumped?: boolean;
 } = {}) {
   const pool: AcquiredItem[] = [...(plan.initial ?? [])];
   const order: string[] = [];
@@ -81,13 +85,31 @@ function deps(plan: {
         pool.push(...(plan.perRound?.[round] ?? []));
         round += 1;
         await opts.afterRound?.(i);
+        /**
+         * ⭐ 造「滚不动」—— 底座真实行为是:卡住时先问 `onStuck`,
+         * 换过位置(回 true)就再给一轮,否则判到底。
+         * ⚠️ 假底座不模拟这一步的话,`onStuck` 这条线**测不到**
+         * (`feedback-source-scan-cant-see-execution`:声明了不等于会调)。
+         */
+        if (plan.stuckAtRound !== undefined && i >= plan.stuckAtRound) {
+          const rescued = await opts.onStuck?.(3);
+          if (rescued !== true) {
+            return {
+              rounds, scrolledPx: rounds * 500, reachedBottom: true,
+              stopReason: `滚到底(连续 3 轮未变)`,
+            };
+          }
+        }
       }
       return { rounds, scrolledPx: rounds * 500, reachedBottom: false, stopReason: `滚了 ${rounds} 轮` };
     },
     async runScript() {
       order.push('runScript');
       if (plan.scriptThrows) throw new Error('脚本炸了');
-      return { expanded: 1, tweets: [{ id: 't1', text: '展开后的全文' }] };
+      if (plan.scriptReturnsJumped !== undefined) {
+        return { jumped: plan.scriptReturnsJumped };
+      }
+      return { expanded: 1, tweets: [{ id: 't1', text: '展开后的全文' }], jumped: true };
     },
     wait: async (ms) => { t += ms; },
     now: () => { t += 1; return t; },
@@ -348,5 +370,51 @@ describe('⭐⭐⭐ 早停要说清是谁停的', () => {
     expect(rep.stopReason).toContain('滚了');
     expect(rep.stopReason).not.toContain('时间上限');
     expect(rep.stopReason).not.toContain('已采够');
+  });
+});
+
+/**
+ * ⭐⭐⭐ **滚不动就换个位置** —— 2026-10-06 从历史代码捡回来的。
+ *
+ * ── 用户 2026-09-19 原话 ──
+ * > 「如果校验发现没有滚动就往下一个位置去采集数据。
+ * >   这样才对吧,而不是盲目采集直到出问题都不懂」
+ *
+ * ⚠️⚠️ X 的名单是**虚拟列表**:滚过去的 DOM 会被删掉,
+ * 「滚不动」常常**不是到底了,而是新内容还没渲染**。
+ * 历史代码靠这一步把 250 采成 2781;重建时丢了,
+ * 真机重现:关注 5319 人只采到 169,而停因言之凿凿写着「滚到底」。
+ */
+describe('⭐⭐⭐ 滚不动要先抢救,别急着判到底', () => {
+  it('⭐⭐⭐ 卡住时跑 onStuck 脚本,换过位置就继续滚', async () => {
+    const { d, order } = deps({ stuckAtRound: 2 });
+    const rep = await harvestPage(d, 'p1' as never, {
+      onStuckScriptId: 'x.jumpToLastCard', maxRounds: 5,
+    });
+    /** ⭐ 脚本真的被调用了 —— 不是只在类型里声明 */
+    expect(order.filter((o) => o === 'runScript').length).toBeGreaterThan(0);
+    expect(rep.rounds).toBeGreaterThan(0);
+  });
+
+  it('⭐⭐⭐ 脚本说没跳成(jumped:false)就该判到底 —— 不许恒真', async () => {
+    /**
+     * ⚠️⚠️ 恒回 true 的后果**比不抢救更坏**:真到底时永远停不下来,
+     * 一路空转到轮次/时间上限。
+     * ⭐ 这条是注入验证逼出来的 —— 我把 `?.jumped === true` 改成 `return true`,
+     * 前面那条测试**照样绿**(它只验「调了没有」,不验「怎么用返回值」)。
+     */
+    const { d } = deps({ stuckAtRound: 2, scriptReturnsJumped: false });
+    const rep = await harvestPage(d, 'p1' as never, {
+      onStuckScriptId: 'x.jumpToLastCard', maxRounds: 50,
+    });
+    expect(rep.reachedBottom, '脚本说没跳成,就该认到底').toBe(true);
+    expect(rep.rounds, '不该一路空转到上限').toBeLessThan(10);
+  });
+
+  it('⭐⭐⭐ 不给 onStuckScriptId 就不该调脚本', async () => {
+    /** ⚠️ 不误伤:别的调用方(网页剪藏)没有这个动作,不该被硬塞 */
+    const { d, order } = deps({ stuckAtRound: 1 });
+    await harvestPage(d, 'p1' as never, { maxRounds: 2 });
+    expect(order.filter((o) => o === 'runScript')).toHaveLength(0);
   });
 });

@@ -332,6 +332,8 @@ export class ControlEngine {
     let lastY = start.value.y;
     const startY = start.value.y;
     let stuck = 0;
+    /** ⭐ 换位置抢救了几次 —— 要写进停因,否则这个判据只活在这一次运行里 */
+    let rescued = 0;
     let rounds = 0;
     let reachedBottom = false;
     let stopReason = `达到轮次上限 ${maxRounds}`;
@@ -428,9 +430,37 @@ export class ControlEngine {
           break;
         }
       }
+      /**
+       * ⭐⭐⭐ **滚不动先别急着判到底 —— 换个位置再试**(2026-10-06)。
+       *
+       * ⚠️⚠️ 虚拟列表滚过去的 DOM 会被删掉,「位置不动」常常是
+       * **新内容还没渲染**,不是真到底。历史代码里有这一步,
+       * 重建时丢了 —— 真机后果:关注 5319 人只采到 169,
+       * 而停因言之凿凿写着「滚到底」。
+       *
+       * ⭐ 在判到底**之前**试:回调说「我换过位置了」就再给一轮机会。
+       * ⚠️ `rescued` 要计数并**写进停因** —— 不然「抢救过几次」这个
+       * 判断依据又只活在这一次运行里。
+       */
+      if (stuck >= stuckRounds && options.onStuck) {
+        let moved = false;
+        try {
+          moved = await options.onStuck(stuck);
+        } catch (err) {
+          /** ⚠️ 抢救本身炸了不该让整趟滚动失败 —— 但也**绝不静默** */
+          console.warn(`[web.page] onStuck(第 ${i} 轮)抛异常,按到底处理:`, err);
+        }
+        if (moved) {
+          rescued += 1;
+          /** ⭐ 清零重新数 —— 换过位置之后它应该能再滚一段 */
+          stuck = 0;
+          continue;
+        }
+      }
       if (stuck >= stuckRounds) {
         reachedBottom = true;
-        stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${pos.y} 未变)`;
+        stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${pos.y} 未变`
+          + (rescued > 0 ? `,中途换位置抢救 ${rescued} 次` : '') + ')';
         break;
       }
     }

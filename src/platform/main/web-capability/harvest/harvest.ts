@@ -128,6 +128,23 @@ export async function harvestPage(
   const scroll = await deps.scroll(pageId, {
     maxRounds,
     /**
+     * ⭐⭐⭐ **滚不动就换个位置** —— 2026-10-06 从历史代码捡回来的。
+     * ⚠️ 虚拟列表「滚不动」常常不是到底,是新内容没渲染;
+     * 不给机会就是「采到 250 就停」那个形态。
+     * ⭐ 脚本回 `{ jumped: true }` 才算换过位置 —— 恒 true 会让真到底停不下来。
+     */
+    onStuck: plan.onStuckScriptId
+      ? async () => {
+        try {
+          const r = await deps.runScript(pageId, plan.onStuckScriptId as string);
+          return (r as { jumped?: boolean } | null)?.jumped === true;
+        } catch {
+          /** ⚠️ 抢救失败就按到底处理 —— 但不让它毁掉整趟采集 */
+          return false;
+        }
+      }
+      : undefined,
+    /**
      * ⭐ 每轮滚完:先跑业务的脚本(展开折叠),再看够不够。
      * ⚠️ 脚本失败**不中断** —— 展开失败只是少几条全文,不该让整轮作废。
      */

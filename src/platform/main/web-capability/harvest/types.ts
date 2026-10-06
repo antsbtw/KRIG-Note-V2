@@ -50,6 +50,8 @@ export type HarvestPlan = {
    * (`project-x-inject-template-escape` 换来的那道闸)。
    */
   readonly afterRoundScriptId?: string;
+  /** ⭐ 滚不动时换位置的脚本 —— 见 `ScrollOptions.onStuck` */
+  readonly onStuckScriptId?: string;
   /**
    * ⚠️ 不要的 URL 子串 —— **业务给**,底座一条都不内置。
    * (本仓栽过:`s-cdn.anthropic.com/images/` 硬编码进了底层)
@@ -129,6 +131,8 @@ export interface HarvestDeps {
     maxRounds?: number;
     afterRound?: (round: number) => Promise<void> | void;
     shouldStop?: () => boolean;
+    /** ⭐ 滚不动时换位置 —— 回 true 表示换过了,再给一轮 */
+    onStuck?: (stuck: number) => Promise<boolean> | boolean;
   }): Promise<{
     rounds: number; scrolledPx: number; reachedBottom: boolean; stopReason: string;
   }>;

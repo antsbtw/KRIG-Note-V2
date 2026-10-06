@@ -44,6 +44,8 @@ export type RunDeps = {
     pageUrlIncludes?: readonly string[];
     noisyUrlSubstrings?: readonly string[];
     afterRoundScriptId?: string;
+    /** ⭐ 滚不动时换位置的脚本 —— 虚拟列表的抢救动作 */
+    onStuckScriptId?: string;
     maxRounds?: number;
     /** ⭐ 时间安全网 —— 不给的话底座默认 180s(名单多的号不够用) */
     maxMs?: number;
@@ -506,6 +508,18 @@ export async function runCollect(
     pageUrlIncludes: X_PAGE_MATCHERS,
     noisyUrlSubstrings: X_NOISY_URLS,
     afterRoundScriptId: X_SCRIPTS.expandAll,
+    /**
+     * ⭐⭐⭐ **滚不动时跳到最后一张卡片** —— 2026-10-06 从历史代码捡回来。
+     *
+     * 用户 2026-09-19 原话:「如果校验发现没有滚动就往下一个位置去采集数据。
+     * 这样才对吧,而不是盲目采集直到出问题都不懂」
+     *
+     * ⚠️⚠️ X 的名单是**虚拟列表**,滚过去的 DOM 会被删掉 ——
+     * 「滚不动」常常不是到底,是新内容还没渲染。历史代码靠这一步
+     * 把 250 采成 2781;重建时丢了,真机重现:5319 人只采到 169,
+     * 而停因言之凿凿写着「滚到底」。
+     */
+    onStuckScriptId: X_SCRIPTS.jumpToLastCard,
     /**
      * ⚠️⚠️ **安全网不是目标** —— 2026-10-05 真机:`?? 60` 把 following
      * 卡在 **150 人**(滚 60 轮 42687px 到上限,X 还有一大截没滚到)。
