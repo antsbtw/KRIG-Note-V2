@@ -129,7 +129,9 @@ describe('一跑的账要落得下来', () => {
     });
     expect(t).toContain('cur-A');
     expect(t).toContain('cur-B');
-    expect(t).toMatch(/轮次\s+新增\s+响应\s+游标/);
+    /** ⚠️ 2026-10-06 多了「取」一列(主路 body / 兜底 harvest) */
+    expect(t).toMatch(/轮次\s+新增\s+响应\s+取\s+游标/);
+    expect(t, '主路/兜底的轮数要有个总计').toMatch(/取数:主路/);
   });
 
   it('⭐⭐ 覆盖率要连样本量一起写 —— 「1 个人里 1 个有」也是 100%', () => {

@@ -151,10 +151,21 @@ export function buildRunReport(input: RunReportInput): string {
         : '⚠️ 有**重复的游标** → 是我们这边的 bug（取错了游标 / 没往前走）');
     }
     L.push('');
-    L.push('轮次  新增  响应  游标');
+    /**
+     * ⭐⭐ `取` 这一列:`body` = 脚本当场回的正文(主路),
+     * `收` = 走 harvest 兜底收的。
+     * ⚠️ 两条路混在一起的话,「主路坏了、兜底顶着」会被悄悄盖住 ——
+     * 而那正是本仓反复出现的形态(载荷断了 DOM 顶着)。
+     */
+    const viaBodyN = p.rounds_detail.filter((d) => d.viaBody === true).length;
+    L.push(`取数:主路(脚本回 body)${viaBodyN} 轮 / 兜底(harvest)`
+      + `${p.rounds_detail.length - viaBodyN} 轮`);
+    L.push('');
+    L.push('轮次  新增  响应  取    游标');
     for (const d of p.rounds_detail) {
       L.push(`${String(d.round).padStart(4)}  ${String(d.fresh).padStart(4)}`
-        + `  ${String(d.responses).padStart(4)}  ${d.cursor}`);
+        + `  ${String(d.responses).padStart(4)}  ${d.viaBody === true ? 'body' : '收  '}`
+        + `  ${d.cursor}`);
     }
   }
   L.push('');

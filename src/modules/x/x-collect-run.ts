@@ -154,6 +154,8 @@ export type RunResult = {
       readonly fresh: number;
       /** 这一轮收到几条响应 */
       readonly responses: number;
+      /** ⭐ true = 脚本直接回了 body(主路);false = 走 harvest 兜底 */
+      readonly viaBody?: boolean;
     }>;
   } | null;
   /** ⭐ 逐篇补正文的结果 —— 成/败都记 */
@@ -197,6 +199,11 @@ const MAX_ARTICLE_FETCH = 50;
  * 这个数只防「每篇都带出新的」那种病态情况把一轮跑无限拖下去。
  */
 const MAX_PASSES = 5;
+/**
+ * ⭐⭐ **第一趟滚动只要这么多页** —— 它只为抄一条请求模板。
+ * ⚠️ 旧版实测:滚动拿 7.7%,游标翻页快几十倍。滚多了纯属浪费。
+ */
+const SEED_PAGES = 2;
 
 /**
  * ⭐⭐⭐ **这一趟是不是被限流了** —— 2026-10-06。
@@ -375,7 +382,9 @@ async function pageUntilDone(
   })();
 
   /** ⭐ 每轮的账 —— 见 `rounds_detail` 的注释 */
-  const roundsDetail: Array<{ round: number; cursor: string; fresh: number; responses: number }> = [];
+  const roundsDetail: Array<{
+    round: number; cursor: string; fresh: number; responses: number; viaBody?: boolean;
+  }> = [];
 
   /**
    * ⭐⭐⭐ **X 说「到头了」** —— `TimelineTerminateTimeline`。
@@ -449,19 +458,41 @@ async function pageUntilDone(
     const cursorBrief = cursor.length > 28
       ? `${cursor.slice(0, 12)}…${cursor.slice(-12)}` : cursor;
 
+    /**
+     * ⭐⭐⭐ **发一页 → 当场拿到这一页** —— 2026-10-06,照旧版的形状改。
+     *
+     * ⚠️⚠️ 原先是 `runScript` 发请求、再跑**一次 harvest** 去等响应 ——
+     * 两步之间隔着异步,harvest 会把**滚动顺带触发的别的响应**也收进来,
+     * 于是「这一页给了什么」说不清,只能拿累计表去猜。
+     * ⭐ 旧版 `buildRefetchScript` 直接把 body 回传,一页一判一进;
+     * 实测 **30 次请求拿 2000+ 人,比滚动快几十倍**。
+     *
+     * ⚠️ 仍保留 harvest 兜底:脚本回不出 body 时(老构建/被拦),
+     * 走老路至少不空转 —— 但**如实记下走的是哪条**,别让两种情况长得一样。
+     */
     let one: RunHarvest | null;
+    let viaBody = false;
     try {
-      /**
-       * ⭐ 一次零滚动的 harvest:它会装腿 → 跑脚本发请求 → 把响应收回来。
-       * ⚠️ `maxRounds: 0` —— 这一步**不滚动**,只等响应。
-       */
-      await deps.runScript!(X_SCRIPTS.fetchNextPage, { url: seed.url, cursor });
-      one = await deps.harvest({
-        wantPages: 1,
-        pageUrlIncludes: X_PAGE_MATCHERS,
-        noisyUrlSubstrings: X_NOISY_URLS,
-        maxRounds: 0,
-      });
+      const r = await deps.runScript!(X_SCRIPTS.fetchNextPage, { url: seed.url, cursor }) as {
+        ok?: boolean; status?: number; body?: string; why?: string; shape?: string;
+      } | null;
+      if (r?.ok === false) {
+        stopReason = `第 ${round} 轮请求失败：${r.why ?? `HTTP ${r.status ?? '?'}`}`;
+        say(stopReason); break;
+      }
+      if (typeof r?.body === 'string' && r.body.length > 0) {
+        /** ⭐ 这一页的正文当场到手 —— 不再多跑一次 harvest */
+        viaBody = true;
+        one = { items: [{ url: seed.url, text: r.body, status: r.status ?? 200 }] };
+      } else {
+        /** ⚠️ 兜底:老路。`viaBody=false` 会进留痕,两条路分得开 */
+        one = await deps.harvest({
+          wantPages: 1,
+          pageUrlIncludes: X_PAGE_MATCHERS,
+          noisyUrlSubstrings: X_NOISY_URLS,
+          maxRounds: 0,
+        });
+      }
     } catch (e) {
       /** ⚠️ 翻页失败**不毁整轮** —— 已经采到的还在 */
       stopReason = `第 ${round} 轮失败：${e instanceof Error ? e.message : String(e)}`;
@@ -524,7 +555,11 @@ async function pageUntilDone(
     if (dispatchPayloads(one.items).users.some((a) => a.terminated)) terminated = true;
     const fresh = seenKeys.size - before;
     /** ⭐⭐ 每轮落一笔账 —— 下一跑不用再问人、也不用猜 */
-    roundsDetail.push({ round, cursor: cursorBrief, fresh, responses: one.items.length });
+    roundsDetail.push({
+      round, cursor: cursorBrief, fresh, responses: one.items.length,
+      /** ⭐ 这一页是**当场拿到**的还是走兜底 harvest 收的 —— 两条路要分得开 */
+      viaBody,
+    });
     emptyRounds = fresh === 0 ? emptyRounds + 1 : 0;
     all.push(...got);
 
@@ -573,13 +608,31 @@ async function pageUntilDone(
  */
 export async function runCollect(
   deps: RunDeps,
-  opts: { wantPages: number; depth: FetchDepth; maxRounds?: number; maxMs?: number },
+  opts: {
+    wantPages: number; depth: FetchDepth; maxRounds?: number; maxMs?: number;
+    /** ⭐ 第一趟滚动采几页就够 —— 只为抄请求模板,默认 `SEED_PAGES` */
+    seedPages?: number;
+  },
 ): Promise<RunResult> {
   const say = (m: string): void => deps.onProgress?.(m);
 
   // ── ① 采 ──
   const rep = await deps.harvest({
-    wantPages: opts.wantPages,
+    /**
+     * ⭐⭐⭐ **第一趟滚动只为拿「请求模板」** —— 2026-10-06 照旧版改。
+     *
+     * ⚠️⚠️ 旧代码注释里的实测:滚动 30 轮 / 76 秒只拿到 **201/2604 = 7.7%**,
+     * 只触发 4 个载荷 —— 时间全花在滚动动画和虚拟列表渲染上;
+     * 而游标翻页 **30 次请求就能拿 2000+ 人,快几十倍**。
+     * 我却对着滚动改了七八轮(轮次/时间闸/空轮刹车/换位置抢救),
+     * 真机 631 轮 448453px 只换来 **23 人**。
+     *
+     * ⭐ 现在滚动只需滚到**拿得到一条带 `variables` 的请求**为止:
+     * 后面全靠游标翻页。`SEED_PAGES` 取 2 —— 1 页就够抄模板,
+     * 给 2 页是因为头一条可能是别的端点(ViewerBadgeCounts 之类)。
+     * ⚠️ 人填的页数**不再传给滚动**,它是**翻页**的目标(见面板 stopPaging)。
+     */
+    wantPages: opts.seedPages ?? SEED_PAGES,
     pageUrlIncludes: X_PAGE_MATCHERS,
     noisyUrlSubstrings: X_NOISY_URLS,
     afterRoundScriptId: X_SCRIPTS.expandAll,

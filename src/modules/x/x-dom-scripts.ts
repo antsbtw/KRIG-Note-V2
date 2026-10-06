@@ -255,13 +255,22 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
      */
     '          var looksBlocked = r.status === 404 && t.trim().charAt(0) !== "{";',
     '          if (!looksBlocked) {',
-    '            return { ok: r.ok, status: r.status, bytes: t.length, shape: "GET" };',
+    /**
+     * ⭐⭐⭐ **把 body 原样带回来** —— 2026-10-06,照旧版 `buildRefetchScript` 改。
+     *
+     * ⚠️⚠️ 原先只回 `bytes`,正文全靠两条捕获腿兜着 ——
+     * 于是「发了请求」和「拿到这一页」之间隔着一层异步,
+     * 编排层只能**再跑一次 harvest** 去等响应,
+     * 做不到旧版那种「一页 → 判断 → 下一页」的闭环。
+     * ⭐ 旧版实测:30 次请求拿 2000+ 人,比滚动快几十倍。
+     */
+    '            return { ok: r.ok, status: r.status, bytes: t.length, shape: "GET", body: t };',
     '          }',
     '          return asPost().then(function (r2) {',
     '            return r2.text().then(function (t2) {',
     /** ⭐⭐ `shapeSwitched` 要留痕 —— 「X 的 GET 已不认」是外部事实,不留就随这跑消失 */
     '              return {',
-    '                ok: r2.ok, status: r2.status, bytes: t2.length,',
+    '                ok: r2.ok, status: r2.status, bytes: t2.length, body: t2,',
     '                shape: "POST", shapeSwitched: true,',
     '                why: "GET 被 X 挡下（404+非 JSON），改用 POST 形状重试",',
     '              };',

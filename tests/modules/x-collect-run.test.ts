@@ -1638,6 +1638,125 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(last!.users).toBeGreaterThan(0);
   });
 
+  it('⭐⭐⭐ 一页一判一进:脚本回 body 就当场解析,不再多跑一次 harvest', async () => {
+    /**
+     * ⚠️⚠️ 旧代码注释里的实测(2026-09-18):
+     * 滚动 30 轮 / 76 秒只拿到 **201/2604 = 7.7%**,只触发 4 个载荷;
+     * 而游标翻页 **30 次请求拿 2000+ 人,快几十倍**。
+     * ⭐ 关键在「发一页 → **当场拿到这一页** → 判断 → 下一页」,
+     * 而不是「发请求 → 再跑一次 harvest 去等响应」——
+     * 后者两步之间隔着异步,会把滚动顺带触发的别的响应混进来。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+
+    let harvests = 0;
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        harvests += 1;
+        return { items: [{ url: FOLLOWERS, text: page([1, 2], 'c0') }] };
+      },
+      /** ⭐ 脚本直接把这一页的 body 交回来 */
+      async runScript() {
+        n += 1;
+        return n <= 3
+          ? { ok: true, status: 200, body: page([n * 10, n * 10 + 1], `c${n}`) }
+          : { ok: true, status: 200, body: page([1], `c${n}`) };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    /** ⭐⭐ 只采了**一趟** harvest(种子),其余全靠脚本回的 body */
+    expect(harvests, '拿到 body 就不该再跑 harvest 等响应').toBe(1);
+    expect(r.users.flatMap((a) => a.items).length).toBeGreaterThan(4);
+    /** ⭐ 留痕要记下走的是主路 */
+    expect(r.paging?.rounds_detail.some((d) => d.viaBody === true)).toBe(true);
+  });
+
+  it('⭐⭐⭐ 脚本回不出 body 时走 harvest 兜底,并如实记下', async () => {
+    /** ⚠️ 两条路要分得开 —— 否则「主路坏了」会被兜底悄悄盖住 */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [{ url: FOLLOWERS, text: page([n], `c${n}`) }] };
+      },
+      /** ⚠️ 老构建的形状:只回 bytes,没有 body */
+      async runScript() { return { ok: true, status: 200, bytes: 100 }; },
+    }, { wantPages: 3, depth: 'as-is' });
+
+    expect(r.paging?.rounds_detail.length).toBeGreaterThan(0);
+    expect(r.paging?.rounds_detail.every((d) => d.viaBody !== true), '该标成兜底')
+      .toBe(true);
+  });
+
+  it('⭐⭐⭐ 请求失败要当场停并说清楚 —— 不许当成「没有更多了」', async () => {
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: JSON.stringify({
+          data: { user: { result: { timeline: { timeline: { instructions: [{
+            type: 'TimelineAddEntries',
+            entries: [
+              { entryId: 'user-1', content: { itemContent: { user_results: { result: {
+                rest_id: '901', core: { screen_name: 'a', name: 'A' }, legacy: {},
+              } } } } },
+              { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: 'c1' } },
+            ],
+          }] } } } } },
+        }) }] };
+      },
+      async runScript() { return { ok: false, status: 404, why: 'HTTP 404' }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason).toContain('请求失败');
+    expect(r.paging?.stopReason, '别把失败说成「到头了」').not.toContain('到头');
+  });
+
+  it('⭐⭐⭐ 第一趟滚动只采「种子页」—— 不拿人填的页数去滚', async () => {
+    /**
+     * ⚠️⚠️ 真机:631 轮 448453px 只换来 23 人。
+     * ⭐ 滚动只为抄一条带 variables 的请求,后面全靠游标翻页。
+     */
+    let seedWant: number | undefined;
+    await runCollect({
+      async harvest(plan) { seedWant = plan.wantPages; return { items: [] }; },
+    }, { wantPages: 100, depth: 'as-is' });
+    expect(seedWant, '人填 100 页不该让滚动去滚 100 页').toBeLessThanOrEqual(3);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
