@@ -178,29 +178,27 @@ describe('一个入口:采到人就存', () => {
       .not.toMatch(/if \([^)]*emptyRounds[^)]*\)\s*\{/);
   });
 
-  it('⭐⭐⭐ 「页」要按**采到的人数**收手,不是按翻页轮次', () => {
+  it('⭐⭐⭐ 「页」= 翻页轮次,且只是人给的上限 —— 不是采集的判据', () => {
     /**
-     * ⚠️⚠️⚠️ **把采集卡死在 169 人的最后一道闸**(2026-10-06):
-     * 原先 `st.round >= want` —— 人填 10,翻到第 10 轮就停。
-     * 而真机一轮能带回 **100 人**,5319 人要翻 50+ 轮。
-     * 用户:「修复了7/8次,都是搞不定名单的采集,在干活吗?」—— 这就是最后一道。
-     *
-     * ⭐ 人填「10 页」的本意是「采 10 页那么多数据」,
-     * X 一页给 20-50 人 → 判据改成 `uniqueUsers >= want × 每页人数`。
+     * ⚠️⚠️ 这条**改过两次**,两次都是真机逼的,记下来免得再绕:
+     * ① 最早 `st.round >= want`,而翻页**根本没跑起来**(403)——
+     * 　 于是 169 人就停,我误判成「这个框卡死了采集」。
+     * ② 我改成按人数换算(`want × 20`)。链路通了之后反而错位:
+     * 　 实测**每页 50 人**,按 20 算 → 填 10 页只采 200 人就收手,
+     * 　 而 X 还在给。
+     * ⭐ 现在回到轮次,与人的直觉一致(填 10 就翻 10 轮)。
+     * ⚠️ 关键是:**它只是人给的上限**,真正该停的是数据判据
+     * (X 说到头 / 游标不变)——那些在采集层,不在这儿。
      */
     const i = CONSOLE.indexOf('stopPaging:');
     expect(i).toBeGreaterThan(-1);
     const body = CONSOLE.slice(i, CONSOLE.indexOf('cancelled:', i));
     expect(body.length).toBeGreaterThan(100);
-    expect(body, '必须按人数收手').toMatch(/st\.uniqueUsers >= want \* PER_PAGE/);
-    /**
-     * ⚠️ 只看 `if (...)` 里的判据,**不看注释** ——
-     * 注释里提一句「原先按轮次」会误伤(第一版就栽在这)。
-     * ⭐ `feedback-guard-scope-to-the-branch`:切到分支再断言。
-     */
-    const ifs = [...body.matchAll(/if \(([^)]*)\)/g)].map((m) => m[1]).join(' ; ');
-    expect(ifs.length).toBeGreaterThan(5);
-    expect(ifs, '判据里不许再出现「按轮次收手」').not.toMatch(/round >= want/);
+    expect(body, '按轮次收手').toMatch(/st\.round >= want/);
+    /** ⭐ 停因里要带上**采到多少人** —— 光说「翻够 10 页」看不出收获 */
+    expect(body).toMatch(/st\.uniqueUsers/);
+    /** ⚠️ 不许再出现按每页人数换算的魔法数 */
+    expect(body, '别再把页数换算成人数 —— 每页多少人是 X 说了算').not.toMatch(/PER_PAGE/);
   });
 
   it('⭐⭐⭐ 翻够页数的判据不许带「有没有推文」', () => {
