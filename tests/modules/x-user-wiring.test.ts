@@ -157,6 +157,57 @@ describe('一个入口:采到人就存', () => {
     expect(breaks, '编排层拿 emptyRounds 刹车了').toHaveLength(0);
   });
 
+  it('⭐⭐⭐ 面板侧不许用「连续几轮没新的」当停止理由', () => {
+    /**
+     * ⚠️⚠️ **这条刹车我已经加回去过两次**,两次都出事:
+     * ① `project-x-cursor-paging`:3 页刹车把 2604 账号**卡死在 2244**、
+     * 　 三跑同数,而 X 一直说 hasMore=true。
+     * ② 2026-10-05 真机:`emptyRounds >= 15` 把 verified_followers
+     * 　 停在 **60 人**,停因还写着「没有新**推文**」——
+     * 　 一个连推文都没有的页面。
+     *
+     * ⭐ 滚动已采过的人让翻页头几页**天然零新增**,这个数设多少都是猜。
+     * 真正该停的是数据判据(没游标/游标不变/X 说到头),采集层已经在管。
+     */
+    const i = CONSOLE.indexOf('stopPaging:');
+    expect(i, '面板不给 stopPaging 了?那是另一回事,但这条守卫就失去意义')
+      .toBeGreaterThan(-1);
+    const body = CONSOLE.slice(i, CONSOLE.indexOf('cancelled:', i));
+    expect(body.length).toBeGreaterThan(100);
+    expect(body, 'emptyRounds 不许当停止理由 —— 它已经害过两次')
+      .not.toMatch(/if \([^)]*emptyRounds[^)]*\)\s*\{/);
+  });
+
+  it('⭐⭐⭐ 翻够页数的判据不许带「有没有推文」', () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-05:判据写的是 `st.uniqueTweets > 0 && st.round >= want`,
+     * 而 followers 页**一条推文都没有** → 这个条件恒假 →
+     * **人填的页数被整个忽略**,一路翻到别的闸停为止。
+     * ⭐ 「翻够没有」跟「这页上是什么」无关。
+     */
+    const i = CONSOLE.indexOf('stopPaging:');
+    const body = CONSOLE.slice(i, CONSOLE.indexOf('cancelled:', i));
+    expect(body).toMatch(/st\.round >= want/);
+    expect(body, '翻够页数不该跟推文条数挂钩')
+      .not.toMatch(/uniqueTweets[^)]*&&[^)]*st\.round >= want/);
+  });
+
+  it('⭐⭐⭐ 每轮的游标要落账 —— 否则「X 回同一批」没法定位', () => {
+    /**
+     * ⚠️⚠️ 真机翻 16 轮只多 20 人,而我**读不出每轮发的游标是什么**:
+     * 「游标没变」(我的 bug)和「游标变了 X 还回同一批」(请求形状的问题)
+     * 是完全不同的两个毛病,光看总数分不出来,只能猜。
+     * ⭐ `feedback-maintainability-over-feature-completion`:
+     * 下次验证要能不靠人、只靠留下的东西说清楚。
+     */
+    expect(RUN).toMatch(/roundsDetail\.push\(/);
+    const push = RUN.slice(RUN.indexOf('roundsDetail.push('));
+    const line = push.slice(0, push.indexOf(');'));
+    for (const k of ['round', 'cursor', 'fresh', 'responses']) {
+      expect(line, `每轮的账里缺 ${k}`).toContain(k);
+    }
+  });
+
   it('⭐⭐ 翻页种子认推文也认用户请求', () => {
     /**
      * ⚠️ 原先只认推文请求当种子,于是 followers 页「有游标、X 说还有」

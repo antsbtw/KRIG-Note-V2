@@ -50,7 +50,7 @@ import {
 import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
-import { runCollect } from './x-collect-run';
+import { runCollect, type RunResult } from './x-collect-run';
 import { recipeToQuery } from './x-recipe-query';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
@@ -287,9 +287,13 @@ export function XConsole(
    * ⚠️ 上一跑翻了 47 轮(填 50),**没到上限**却读不出是哪道闸停的 ——
    * 三句停止原因只走进度条,关掉就没。
    */
-  const [paging, setPaging] = useState<{
-    rounds: number; stopReason: string; freshTotal: number;
-  } | null>(null);
+  /**
+   * ⭐⭐ 形状**从 `RunResult` 推**,不在这里重抄一遍。
+   * ⚠️ 2026-10-05 栽过:采集层加了 `rounds_detail`,这里的手抄类型没跟上,
+   * 于是面板**读不到已经产出来的数据**(tsc 当场报了,但这就是
+   * `project-x-field-four-place-registration` 的同一种病:同一个事实写两处)。
+   */
+  const [paging, setPaging] = useState<RunResult['paging']>(null);
   const [saved, setSaved] = useState<{
     inserted: number; updated: number; failed: unknown[];
   } | null>(null);
@@ -848,18 +852,31 @@ export function XConsole(
                          */
                         stopPaging: (st) => {
                           const want = Number(pagesWanted) || 10;
-                          if (st.uniqueTweets > 0 && st.round >= want) {
+                          /**
+                           * ⚠️⚠️ **判据不许带 `uniqueTweets > 0`** —— 2026-10-05 真机:
+                           * followers 页一条推文都没有,这个条件恒假 →
+                           * **人填的页数被整个忽略**,一路翻到别的闸停为止。
+                           * ⭐ `uniqueTweets` 现在数的是「采到的东西」(推文+人),
+                           * 名字是历史遗留;这里只问「翻够没有」。
+                           */
+                          if (st.round >= want) {
                             return { go: false, why: `已翻够 ${want} 页` };
                           }
                           /**
-                           * ⚠️ 连续空轮**不是**停止理由(X 翻页会从头翻,
-                           * 头几页全是见过的很正常)—— 但连着太多轮一条新的都没有,
-                           * 多半是 X 在原地打转,这时才收手。
-                           * ⭐ 这个数在**业务这边**定,改它不用动采集层。
+                           * ⚠️⚠️ **连续空轮不是停止理由** —— 这条刹车害过两次:
+                           * ① `project-x-cursor-paging` 实测:3 页刹车把 2604 账号
+                           * 　 **卡死在 2244**、三跑同数,而 X 一直说 hasMore=true。
+                           * ② 2026-10-05 真机:`emptyRounds >= 15` 把
+                           * 　 verified_followers 停在 **60 人**,还报「没有新**推文**」——
+                           * 　 一个连推文都没有的页面。
+                           *
+                           * ⭐ 滚动已经采过的人让翻页头几页**天然零新增**,
+                           * 这个数在业务侧设多少都是猜。真正该停的是数据判据
+                           * (没游标 / 游标不变 / X 说到头),采集层已经在管。
+                           * ⚠️ 要防「X 原地打转」的话,判据该是**游标不变**(采集层有),
+                           * 不是「几轮没新的」—— 后者把「X 还有但头几页重复」
+                           * 和「X 真的没了」混成一件事。
                            */
-                          if (st.emptyRounds >= 15) {
-                            return { go: false, why: `连续 ${st.emptyRounds} 轮没有新推文` };
-                          }
                           return { go: true };
                         },
                         cancelled: () => cancelRef.current,
@@ -1257,6 +1274,29 @@ export function XConsole(
                       翻页 {paging.rounds} 轮 · 新采到 {paging.freshTotal} 条
                       <br />
                       停因：{paging.stopReason}
+                      {/*
+                        ⭐⭐⭐ **每轮发的游标摊开** —— 2026-10-05 补。
+                        ⚠️⚠️ 真机翻 16 轮只多 20 人,而「游标没变」(我的 bug)和
+                        「游标变了 X 还回同一批」(请求形状的问题)是**两个毛病**,
+                        光看总数分不出来 —— 我只能猜,而判据就在这几行里。
+                        ⭐ 只在**零新增**的轮次标出来,正常轮次不占屏幕。
+                      */}
+                      {paging.rounds_detail.length > 0 && (
+                        <details style={{ marginTop: 3 }}>
+                          <summary style={{ cursor: 'pointer', opacity: 0.75 }}>
+                            每轮的游标（{paging.rounds_detail.filter((d) => d.fresh === 0).length} 轮零新增）
+                          </summary>
+                          <div style={{ marginTop: 3, fontFamily: 'monospace', fontSize: 10 }}>
+                            {paging.rounds_detail.map((d) => (
+                              <div key={d.round} style={{ opacity: d.fresh === 0 ? 0.6 : 1 }}>
+                                {String(d.round).padStart(3)} · 新 {String(d.fresh).padStart(3)}
+                                {' · 响应 '}{String(d.responses).padStart(2)}
+                                {' · '}{d.cursor}
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      )}
                     </div>
                   )}
                   <div style={S.todo}>

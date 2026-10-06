@@ -113,6 +113,24 @@ export type RunResult = {
     readonly stopReason: string;
     /** ⚠️ 47 轮只换 40 条新推 = 每页高度重复,这个数要能读出来 */
     readonly freshTotal: number;
+    /**
+     * ⭐⭐⭐ **每一轮发出去的游标和换回来的东西** —— 2026-10-05 补。
+     *
+     * ⚠️⚠️ 真机:翻 16 轮只多 20 个人,而我**读不出每轮发的游标是什么** ——
+     * 「游标没变所以 X 回同一批」和「游标变了但 X 还是回同一批」
+     * 是**完全不同的两个毛病**(前者是我的 bug,后者要去查请求形状),
+     * 光看总数分不出来,只能猜。⭐ 把它记下来,下一跑自己说得清。
+     * ⚠️ 游标很长,只留前后各 12 个字符 —— 够判「变没变」,不占地方。
+     */
+    readonly rounds_detail: ReadonlyArray<{
+      readonly round: number;
+      /** 发出去的游标(掐头去尾) */
+      readonly cursor: string;
+      /** 这一轮**新**收到几个(推文+用户) */
+      readonly fresh: number;
+      /** 这一轮收到几条响应 */
+      readonly responses: number;
+    }>;
   } | null;
   /** ⭐ 逐篇补正文的结果 —— 成/败都记 */
   readonly fetched: ReadonlyArray<{
@@ -257,7 +275,7 @@ async function pageUntilDone(
   );
   if (seed === undefined) {
     say('没有可用来翻页的请求 —— 跳过主动翻页');
-    return { audits: all, paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0 } };
+    return { audits: all, paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0, rounds_detail: [] } };
   }
 
   /**
@@ -272,6 +290,9 @@ async function pageUntilDone(
   /** ⭐ 最近一份用户账给的游标 —— followers 页靠它翻页 */
   let lastUserCursor: string | undefined = dispatchPayloads(rep.items).users
     .map((a) => a.cursor).reverse().find((c) => c !== undefined && c !== '');
+
+  /** ⭐ 每轮的账 —— 见 `rounds_detail` 的注释 */
+  const roundsDetail: Array<{ round: number; cursor: string; fresh: number; responses: number }> = [];
 
   const seenCursors = new Set<string>();
   /**
@@ -318,6 +339,9 @@ async function pageUntilDone(
 
     round += 1;
     say(`主动翻页 第 ${round} 页…`);
+    /** ⭐ 掐头去尾 —— 够判「变没变」,不占地方 */
+    const cursorBrief = cursor.length > 28
+      ? `${cursor.slice(0, 12)}…${cursor.slice(-12)}` : cursor;
 
     let one: RunHarvest | null;
     try {
@@ -374,6 +398,8 @@ async function pageUntilDone(
       .map((a) => a.cursor).reverse().find((c) => c !== undefined && c !== '');
     if (uc !== undefined) lastUserCursor = uc;
     const fresh = seenKeys.size - before;
+    /** ⭐⭐ 每轮落一笔账 —— 下一跑不用再问人、也不用猜 */
+    roundsDetail.push({ round, cursor: cursorBrief, fresh, responses: one.items.length });
     emptyRounds = fresh === 0 ? emptyRounds + 1 : 0;
     all.push(...got);
 
@@ -404,7 +430,7 @@ async function pageUntilDone(
    */
   return {
     audits: all,
-    paging: { rounds: round, stopReason, freshTotal: seenKeys.size - seedCount },
+    paging: { rounds: round, stopReason, freshTotal: seenKeys.size - seedCount, rounds_detail: roundsDetail },
   };
 }
 
