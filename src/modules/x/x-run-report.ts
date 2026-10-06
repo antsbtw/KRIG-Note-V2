@@ -135,6 +135,19 @@ export function buildRunReport(input: RunReportInput): string {
      * 说不知道,比说一个错方向有用。
      */
     const MIN_ROUNDS_TO_JUDGE = 5;
+    /**
+     * ⭐⭐⭐ **零新增要占多数才值得怀疑** —— 2026-10-06 真机(成功那一跑)。
+     *
+     * ⚠️⚠️ 原先判据是「**有没有**零新增轮次」(`length > 0`):
+     * 翻 100 轮采到 5050 人、99 轮都有新增,报告照样印着
+     * 「多半是请求形状/端点的问题,去社区查」—— **一切正常时的误报**。
+     * ⭐ 而第 1 轮零新增恰恰是**正常现象**:种子已经把头一页收了。
+     * ⚠️ 误报比不报更坏:它在没问题时把人指向错方向,
+     * 我今天已经为这类假线索浪费过好几轮(那条 429 也是)。
+     *
+     * ⭐ 取一半:真「翻不动」时是**连片**的零新增,不是零星一两轮。
+     */
+    const ZERO_RATIO_TO_WARN = 0.5;
     const lastRound = p.rounds_detail[p.rounds_detail.length - 1]?.round;
     const zeroBeforeEnd = zero.filter((d) => d.round !== lastRound);
     if (p.rounds_detail.length < MIN_ROUNDS_TO_JUDGE) {
@@ -143,7 +156,7 @@ export function buildRunReport(input: RunReportInput): string {
       if (zero.length > 0 && zeroBeforeEnd.length === 0) {
         L.push('　· 零新增只出现在**最后一轮**，那多半就是翻到底了，正常');
       }
-    } else if (zeroBeforeEnd.length > 0) {
+    } else if (zeroBeforeEnd.length > p.rounds_detail.length * ZERO_RATIO_TO_WARN) {
       const allDistinct = cursors.size === p.rounds_detail.length;
       L.push(allDistinct
         ? '⚠️ 游标**每轮都在变**,人却不新增 → 不是游标 bug，'
