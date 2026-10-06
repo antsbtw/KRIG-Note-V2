@@ -97,7 +97,29 @@ export function buildRunReport(input: RunReportInput): string {
      * 跟『Followers 必须 POST』同族)是**完全不同的两个毛病**,
      * 光看总数分不出来 —— 所以这里直接把结论写死。
      */
-    if (zero.length > 0) {
+    /**
+     * ⭐⭐⭐ **样本太薄就别下结论** —— 2026-10-06 自己栽的。
+     *
+     * ⚠️⚠️ 第一版只要有一轮零新增就开口断言「多半是请求形状问题，去社区查」。
+     * 真机第一跑:**总共 2 轮、1 轮零新增**,它就把人指向了社区 ——
+     * 而「最后一轮零新增」恰恰是**翻到底的正常现象**(X 没有更多了)。
+     * ⭐ 正是 `feedback-check-sample-contains-phenomenon` 的同一种病:
+     * 拿一个撑不住结论的样本下结论,**制造假线索引人改没坏的代码**。
+     *
+     * ⚠️ 判据:至少 `MIN_ROUNDS_TO_JUDGE` 轮、且零新增**不止最后一轮**,
+     * 才谈得上「翻不动」。够不着就如实说「样本太薄」——
+     * 说不知道,比说一个错方向有用。
+     */
+    const MIN_ROUNDS_TO_JUDGE = 5;
+    const lastRound = p.rounds_detail[p.rounds_detail.length - 1]?.round;
+    const zeroBeforeEnd = zero.filter((d) => d.round !== lastRound);
+    if (p.rounds_detail.length < MIN_ROUNDS_TO_JUDGE) {
+      L.push(`（只翻了 ${p.rounds_detail.length} 轮，`
+        + `不足 ${MIN_ROUNDS_TO_JUDGE} 轮——样本太薄，不下结论）`);
+      if (zero.length > 0 && zeroBeforeEnd.length === 0) {
+        L.push('　· 零新增只出现在**最后一轮**，那多半就是翻到底了，正常');
+      }
+    } else if (zeroBeforeEnd.length > 0) {
       const allDistinct = cursors.size === p.rounds_detail.length;
       L.push(allDistinct
         ? '⚠️ 游标**每轮都在变**,人却不新增 → 不是游标 bug，'
