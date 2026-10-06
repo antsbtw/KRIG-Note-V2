@@ -27,11 +27,20 @@ import { X_SCRIPTS } from './x-dom-scripts';
 /** ⭐ 一次采集回来的东西 —— 与底座 `HarvestReport` 同形,只取用得上的 */
 export type RunHarvest = {
   /**
-   * ⚠️⚠️ **`status` 必须带着** —— 2026-10-06 的教训。
-   * 原先这里只有 `{url, text}`,**状态码在类型边界上被我丢掉了**:
-   * 底座有、面板甚至红字显示着 `429 Rate limit exceeded`,
-   * 偏偏采集层拿不到 → 被限流时照样报「滚到底了」,
-   * 害我对着滚动/翻页/游标折腾了七八轮,全不是真因。
+   * ⚠️ **`status` 要带着** —— 原先这里只声明 `{url, text}`,
+   * 底座的 `AcquiredItem` 一直有 `status`,到了这一层就没了。
+   * ⭐ 带上它,采集层才能自己判「这条是不是被挡了」。
+   *
+   * ── ⚠️⚠️ 怎么读面板上那一行(2026-10-06 我读错过)──
+   * 面板一行长这样:`429  ViewerBadgeCounts` + `不是 JSON（20 字符，开头：Rate limit exceeded…）`
+   * 　· `429` 是**真实 HTTP 状态码**(`XConsole` 画的,非 200 标红)
+   * 　· `Rate limit exceeded` 是**那条响应 body 的前几个字符**,
+   * 　　由我们自己的 `describePayload` 截出来 —— **不是 X 发来的通知**
+   * ⭐ 我把这两样读成一件事,断言「X 在限流、前面七八轮白干」,还建议停手等几小时。
+   * 用户一句话证否:「我们肉眼能够在 view 中看到名单滚动,你告诉我限流啦?」
+   * ⚠️ 那条 429 是 `ViewerBadgeCounts`(通知角标计数),**不在 `X_PAGE_MATCHERS` 里**;
+   * 同一屏 `BlueVerifiedFollowers` 是 **200 / 38.6KB / 20 个用户**,主链路好得很。
+   * ⭐ 判据:说「被挡了」之前先问**被挡的是不是我们要的端点**(见 `detectRateLimit`)。
    */
   readonly items: ReadonlyArray<{
     readonly url: string;
@@ -285,6 +294,12 @@ export type PagingState = {
   readonly round: number;
   /** 到目前为止一共多少条**不重复**推文 */
   readonly uniqueTweets: number;
+  /**
+   * ⭐⭐ **到目前为止解出多少不重复的人** —— 2026-10-06 加。
+   * ⚠️ `uniqueTweets` 这个名字是历史遗留,它数的其实是「推文 + 人」的总和,
+   * 拿它当「人数」用会偏大。业务要按人数收手,就得有个**名副其实**的数。
+   */
+  readonly uniqueUsers: number;
   /** 这一轮**新增**了几条(0 = 这一页全是见过的) */
   readonly freshThisRound: number;
   /** ⚠️ 连续多少轮没有新的 —— 业务要用它定自己的刹车 */
@@ -524,7 +539,12 @@ async function pageUntilDone(
      */
     if (deps.stopPaging) {
       const d = deps.stopPaging({
-        round, uniqueTweets: seenKeys.size, freshThisRound: fresh, emptyRounds,
+        round,
+        uniqueTweets: seenKeys.size,
+        /** ⭐ 只数人:`u:` 前缀的那些(推文记的是 `t:`) */
+        uniqueUsers: [...seenKeys].filter((k) => k.startsWith('u:')).length,
+        freshThisRound: fresh,
+        emptyRounds,
       });
       if (!d.go) {
         stopReason = d.why ?? '业务判定够了';
@@ -716,8 +736,23 @@ export async function runCollect(
    */
   const scrolledToBottom = rep.reachedBottom === true;
   const gotSomething = audits.length > 0 || userAudits.some((a) => a.items.length > 0);
+  /**
+   * ⭐⭐⭐ **人流名单:滚到底也要继续翻页** —— 2026-10-06 实测定的。
+   *
+   * ⚠️⚠️ 我上一轮加的「滚到底就跳过翻页」对**人流名单是错的**。
+   * x.following 那跑的账拆开看:
+   * 　· 滚动 765 轮 / 557085px → 只入账 **69 人**
+   * 　· 翻页**第 1 轮**(15 条响应)→ 直接 **+100 人**
+   * ⭐ 翻页的产出率比滚动高一个数量级,而「滚到底」只说明
+   * **DOM 不再长高**,不等于 X 没有下一页(X 的游标还在给)。
+   *
+   * ⚠️ 推文页仍按原样:那里滚动本来就会自动翻页,滚到底就是真到底。
+   * ⭐ 判据用「这一页产出的是**人**」—— 不是页面名(面板不许写死页名),
+   * 也不是我猜的「哪些页特殊」。
+   */
+  const isUserList = userAudits.some((a) => a.items.length > 0);
   let paging: RunResult['paging'] = null;
-  if (scrolledToBottom && gotSomething) {
+  if (scrolledToBottom && gotSomething && !isUserList) {
     say('滚到底了 —— 这一页已经采完,跳过翻页');
     paging = {
       rounds: 0,

@@ -178,6 +178,31 @@ describe('一个入口:采到人就存', () => {
       .not.toMatch(/if \([^)]*emptyRounds[^)]*\)\s*\{/);
   });
 
+  it('⭐⭐⭐ 「页」要按**采到的人数**收手,不是按翻页轮次', () => {
+    /**
+     * ⚠️⚠️⚠️ **把采集卡死在 169 人的最后一道闸**(2026-10-06):
+     * 原先 `st.round >= want` —— 人填 10,翻到第 10 轮就停。
+     * 而真机一轮能带回 **100 人**,5319 人要翻 50+ 轮。
+     * 用户:「修复了7/8次,都是搞不定名单的采集,在干活吗?」—— 这就是最后一道。
+     *
+     * ⭐ 人填「10 页」的本意是「采 10 页那么多数据」,
+     * X 一页给 20-50 人 → 判据改成 `uniqueUsers >= want × 每页人数`。
+     */
+    const i = CONSOLE.indexOf('stopPaging:');
+    expect(i).toBeGreaterThan(-1);
+    const body = CONSOLE.slice(i, CONSOLE.indexOf('cancelled:', i));
+    expect(body.length).toBeGreaterThan(100);
+    expect(body, '必须按人数收手').toMatch(/st\.uniqueUsers >= want \* PER_PAGE/);
+    /**
+     * ⚠️ 只看 `if (...)` 里的判据,**不看注释** ——
+     * 注释里提一句「原先按轮次」会误伤(第一版就栽在这)。
+     * ⭐ `feedback-guard-scope-to-the-branch`:切到分支再断言。
+     */
+    const ifs = [...body.matchAll(/if \(([^)]*)\)/g)].map((m) => m[1]).join(' ; ');
+    expect(ifs.length).toBeGreaterThan(5);
+    expect(ifs, '判据里不许再出现「按轮次收手」').not.toMatch(/round >= want/);
+  });
+
   it('⭐⭐⭐ 翻够页数的判据不许带「有没有推文」', () => {
     /**
      * ⚠️⚠️ 真机 2026-10-05:判据写的是 `st.uniqueTweets > 0 && st.round >= want`,
@@ -187,9 +212,8 @@ describe('一个入口:采到人就存', () => {
      */
     const i = CONSOLE.indexOf('stopPaging:');
     const body = CONSOLE.slice(i, CONSOLE.indexOf('cancelled:', i));
-    expect(body).toMatch(/st\.round >= want/);
-    expect(body, '翻够页数不该跟推文条数挂钩')
-      .not.toMatch(/uniqueTweets[^)]*&&[^)]*st\.round >= want/);
+    /** ⚠️ 2026-10-06 改成按人数收手后,这里钉的是「判据里不许出现推文条数」 */
+    expect(body, '收手判据不该跟推文条数挂钩').not.toMatch(/uniqueTweets/);
   });
 
   it('⭐⭐⭐ 每轮的游标要落账 —— 否则「X 回同一批」没法定位', () => {

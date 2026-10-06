@@ -1316,7 +1316,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.paging?.rounds).toBeLessThanOrEqual(3);
   });
 
-  it('⭐⭐⭐ 滚到底了就别再翻页 —— 用户:「提取完毕怎么还在翻页呢?」', async () => {
+  it('⭐⭐⭐ 人流名单滚到底后**仍要翻页** —— 翻页产出率高一个数量级', async () => {
     /**
      * ⚠️⚠️ 用户 2026-10-06 原话:「提取完毕怎么还在翻页呢?没有逻辑吗?」
      *
@@ -1368,9 +1368,22 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async runScript() { return { ok: true }; },
     }, { wantPages: 100, depth: 'as-is' });
 
-    expect(r.paging?.rounds, '滚到底了还翻页 = 空转').toBe(0);
-    expect(r.paging?.stopReason).toContain('滚到底');
-    expect(pagingHarvests, '只该采一趟').toBe(1);
+    /**
+     * ⚠️⚠️ **2026-10-06 订正**:这条原先断言「人流名单滚到底就一轮都不翻」,
+     * 但真机数据推翻了它 —— x.following 那跑:
+     * 　滚动 765 轮 / 557085px → 只入账 **69 人**
+     * 　翻页**第 1 轮**(15 条响应)→ 直接 **+100 人**
+     * ⭐ 翻页产出率高一个数量级,「滚到底」只说明 DOM 不再长高,
+     * **不等于 X 没有下一页**(游标还在给)。
+     *
+     * ⭐ 用户当初抱怨的是「**提取完毕还在翻页**」= 翻了 9 轮零新增的空转,
+     * 不是「翻页本身不该有」。空转由数据判据治(X 说到头 / 游标不变 /
+     * 业务说够了),不是一刀切禁掉。
+     * ⚠️ 这条测试现在钉的是:**人流名单滚到底后仍然要翻页**。
+     */
+    expect(r.paging?.rounds, '人流名单滚到底后仍要翻页 —— 它的产出率更高')
+      .toBeGreaterThan(0);
+    expect(pagingHarvests).toBeGreaterThan(1);
   });
 
   it('⭐⭐⭐ 没滚到底的页面照常翻页 —— 搜索页滚动不翻页,别误伤', async () => {
@@ -1528,6 +1541,101 @@ describe('一个入口:响应里有什么就产出什么', () => {
       },
     }, { wantPages: 10, depth: 'as-is' });
     expect(r.rateLimit).toBeUndefined();
+  });
+
+  it('⭐⭐⭐ uniqueUsers 只数人 —— 业务按人数收手,不能被推文数掺假', async () => {
+    /**
+     * ⚠️⚠️ 2026-10-06:面板的「页」数原先是 `st.round >= want`,
+     * 人填 10 就在第 10 轮停 —— 而一轮能带回 100 人,5319 人要 50+ 轮,
+     * **这个框把整次采集卡死在 169 人**。
+     * ⭐ 改成按人数收手,就必须有个**名副其实**的人数:
+     * `uniqueTweets` 是历史遗留名,数的是「推文 + 人」的总和。
+     */
+    const seen: Array<{ users: number; all: number }> = [];
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [{ url: FOLLOWERS, text: page([n * 2, n * 2 + 1], `c${n}`) }] };
+      },
+      async runScript() { return { ok: true }; },
+      stopPaging: (st) => {
+        seen.push({ users: st.uniqueUsers, all: st.uniqueTweets });
+        return { go: st.uniqueUsers < 6 };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[seen.length - 1].users).toBeGreaterThanOrEqual(6);
+    /**
+     * ⭐⭐ **样本里必须同时有推文和人**,否则 `uniqueUsers === uniqueTweets`,
+     * 把实现改成 `seenKeys.size` 这条测试照样绿 ——
+     * 注入验证当场逮到(`feedback-check-sample-contains-phenomenon`:
+     * 样本里没有那个现象,就论证不了它)。
+     * ⚠️ 下面那条用**混合样本**补上这个缺口。
+     */
+    expect(seen.every((x) => x.users <= x.all), 'uniqueUsers 不该超过总数').toBe(true);
+  });
+
+  it('⭐⭐⭐ 混着推文时,uniqueUsers 必须**小于**总数', async () => {
+    /**
+     * ⚠️⚠️ 这条是注入验证逼出来的:上面那条样本**全是人**,
+     * 于是 `uniqueUsers` 写成 `seenKeys.size`(连推文一起数)也全绿。
+     * ⭐ 业务按人数收手,混进推文数会让它**提前停**——
+     * 正是「把人卡在半路」那一类。
+     */
+    let last: { users: number; all: number } | null = null;
+    let n = 0;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [
+          /** ⭐ 一条人流载荷 */
+          { url: FOLLOWERS, text: JSON.stringify({
+            data: { user: { result: { timeline: { timeline: { instructions: [{
+              type: 'TimelineAddEntries',
+              entries: [{
+                entryId: `user-${n}`,
+                content: { itemContent: { user_results: { result: {
+                  rest_id: `${900 + n}`,
+                  core: { screen_name: `user${n}`, name: `名字${n}` },
+                  legacy: {},
+                } } } },
+              }, { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: `c${n}` } }],
+            }] } } } } },
+          }) },
+          /** ⭐ 外加一条**推文**载荷 —— 它不该被算进人数 */
+          { url: TIMELINE_URL, text: timelinePayload([foldedTweet(`t${n}`)]) },
+        ] };
+      },
+      async runScript() { return { ok: true }; },
+      stopPaging: (st) => {
+        last = { users: st.uniqueUsers, all: st.uniqueTweets };
+        return { go: st.round < 3 };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(last).not.toBeNull();
+    expect(last!.users, '人数不该把推文算进来').toBeLessThan(last!.all);
+    expect(last!.users).toBeGreaterThan(0);
   });
 
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
