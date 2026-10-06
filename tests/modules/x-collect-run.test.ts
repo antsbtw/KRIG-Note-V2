@@ -1208,6 +1208,60 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(got).toBe(5);
   });
 
+  it('⭐⭐⭐ 一轮回多条响应时,游标要取**最靠后**那条 —— 否则第二轮就撞重复', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:关注 5319 人,只采到 236(4.4%),
+     * 翻页**第 2 轮就停**,停因「游标不再变化」。
+     *
+     * ⭐ 真因:一次翻页 harvest 会回**十几条**响应(滚动还在继续产出),
+     * 而取游标用的是 `.reverse().find(...)` = **数组里最后那条**。
+     * 响应到达顺序**不等于**分页顺序,拿到一条靠前的游标发出去,
+     * X 就把**已经走过的那一页**再给一遍 → 游标撞进 `seenCursors` → 停。
+     *
+     * ⭐ 判据:同一轮里出现多个游标时,要用**没见过的那个**继续翻,
+     * 而不是闭着眼取最后一条。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        if (n === 1) return { items: [{ url: FOLLOWERS, text: page([1, 2], 'c1') }] };
+        /**
+         * ⭐ 第 2 轮起**一次回两条**:一条是旧游标(c1,已经用过),
+         * 一条是新的。闭眼取最后一条就会撞上 c1 → 停。
+         */
+        const fresh = `c${n}`;
+        return { items: [
+          { url: FOLLOWERS, text: page([n * 10], fresh) },
+          { url: FOLLOWERS, text: page([n * 10 + 1], 'c1') },
+        ] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.paging?.stopReason, '不该在第 2 轮就报「游标不再变化」')
+      .not.toContain('游标不再变化');
+    expect(r.paging?.rounds, '应该能一直翻下去').toBeGreaterThan(3);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },

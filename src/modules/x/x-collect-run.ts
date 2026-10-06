@@ -290,8 +290,17 @@ async function pageUntilDone(
       .filter((h) => h !== '');
 
   /** ⭐ 最近一份用户账给的游标 —— followers 页靠它翻页 */
-  let lastUserCursor: string | undefined = dispatchPayloads(rep.items).users
-    .map((a) => a.cursor).reverse().find((c) => c !== undefined && c !== '');
+  /**
+   * ⭐ 首轮的游标 —— 滚动会采回几十条响应,这里同样**不能闭眼取最后一条**。
+   * ⚠️ 取最靠后的那个非空游标即可(首轮 `seenCursors` 还是空的,
+   * 没有「见过没见过」可挑);真正的挑选逻辑在循环里。
+   */
+  let lastUserCursor: string | undefined = (() => {
+    const cs = dispatchPayloads(rep.items).users
+      .map((a) => a.cursor)
+      .filter((c): c is string => c !== undefined && c !== '');
+    return cs.length > 0 ? cs[cs.length - 1] : undefined;
+  })();
 
   /** ⭐ 每轮的账 —— 见 `rounds_detail` 的注释 */
   const roundsDetail: Array<{ round: number; cursor: string; fresh: number; responses: number }> = [];
@@ -396,8 +405,25 @@ async function pageUntilDone(
      */
     for (const u of usersOfRep(one)) seenKeys.add(`u:${u}`);
     /** ⭐ 游标跟着往前走,否则第二轮还拿第一轮的 */
-    const uc = dispatchPayloads(one.items).users
-      .map((a) => a.cursor).reverse().find((c) => c !== undefined && c !== '');
+    /**
+     * ⭐⭐⭐ **取「没见过的」游标,不是「最后一条」** —— 2026-10-06 真机。
+     *
+     * ⚠️⚠️ 关注 5319 人只采到 236(4.4%),翻页**第 2 轮就停**,
+     * 停因「游标不再变化」。真因:一次翻页 harvest 会回**十几条**响应
+     * (滚动还在继续产出),而原先取游标用 `.reverse().find(...)`
+     * = 数组里最后那条 —— 而**响应到达顺序 ≠ 分页顺序**。
+     * 拿到一条靠前的游标发出去,X 就把走过的那一页再给一遍,
+     * 游标撞进 `seenCursors` → 判成「翻不动了」→ 停。
+     *
+     * ⭐ 一页只有 20-50 人,5319 人要翻上百轮;在第 2 轮停下,
+     * 面板却报「真的翻不动了」—— 又一个「看着成功实际没有」。
+     */
+    const ucs = dispatchPayloads(one.items).users
+      .map((a) => a.cursor)
+      .filter((c): c is string => c !== undefined && c !== '');
+    /** ⭐ 优先挑**没用过的**;都用过了才退回最后一条(让「真不动了」仍能判出来) */
+    const unseen = ucs.filter((c) => !seenCursors.has(c));
+    const uc = unseen.length > 0 ? unseen[unseen.length - 1] : ucs[ucs.length - 1];
     if (uc !== undefined) lastUserCursor = uc;
     const fresh = seenKeys.size - before;
     /** ⭐⭐ 每轮落一笔账 —— 下一跑不用再问人、也不用猜 */
