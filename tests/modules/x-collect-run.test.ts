@@ -1488,6 +1488,35 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.rateLimit, '要有专门的字段,别混在一堆 problems 里').toBeTruthy();
   });
 
+  it('⭐⭐⭐ 无关端点的 429 **不算**限流 —— 我拿它误判过一整轮', async () => {
+    /**
+     * ⚠️⚠️⚠️ 2026-10-06 我的误判:看到面板里一行
+     * `429 ViewerBadgeCounts  Rate limit exceeded`,
+     * 就断言「X 在限流、前面七八轮全白干」。
+     * 用户点破:「我们肉眼能够在 view 中看到名单滚动,你告诉我限流啦?」
+     *
+     * ⭐ 事实:`ViewerBadgeCounts` 是 X 的**通知角标计数**,根本不在
+     * `X_PAGE_MATCHERS` 里;同一屏 `BlueVerifiedFollowers` 是
+     * **200 / 38.6KB / 20 个用户**,主链路好得很。
+     * ⚠️ 拿无关端点的失败去论证主链路被挡 = 制造假线索,
+     * 而且这次把人指向了「等几小时再说」这种最浪费的方向。
+     */
+    const r = await runCollect({
+      async harvest() {
+        return {
+          items: [
+            /** ⭐ 名单本身是好的 */
+            { url: 'https://x.com/i/api/graphql/aa/BlueVerifiedFollowers', text: '{}', status: 200 },
+            /** ⚠️ 无关端点被挡 —— 不该据此说「被限流」 */
+            { url: 'https://x.com/i/api/graphql/bb/ViewerBadgeCounts', text: '', status: 429 },
+          ],
+          reachedBottom: true,
+        };
+      },
+    }, { wantPages: 10, depth: 'as-is' });
+    expect(r.rateLimit, '无关端点的 429 不该报成限流').toBeUndefined();
+  });
+
   it('⭐⭐ 没有 429 时不许瞎报限流', async () => {
     /** ⚠️ 判据太宽会被无视,那是另一种假绿 */
     const r = await runCollect({

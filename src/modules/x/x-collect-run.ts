@@ -198,7 +198,20 @@ const MAX_PASSES = 5;
  * 调用方会用 `if (rateLimit)` 判,空串与 undefined 行为一样但语义含糊。
  */
 function detectRateLimit(rep: RunHarvest): string | undefined {
-  const blocked = rep.items.filter((it) => it.status === 429);
+  /**
+   * ⚠️⚠️ **只看我们要的那些端点** —— 2026-10-06 订正。
+   *
+   * 我第一版把**任何** 429 都当成「X 在限流」,据此断言「前面七八轮白干」。
+   * 用户一句话点破:「我们肉眼能够在 view 中看到名单滚动,你告诉我限流啦?」
+   * ——**他是对的**。那条 429 是 `ViewerBadgeCounts`(通知角标计数),
+   * 根本不在 `X_PAGE_MATCHERS` 里;同一屏 `BlueVerifiedFollowers`
+   * 是 **200 / 38.6KB / 20 个用户**,主链路好得很。
+   * ⭐ 教训:判据要缩到**我们真正依赖的东西**,拿无关端点的失败
+   * 论证主链路被挡 = 制造假线索,还把人指向「等几小时」这种最浪费的方向。
+   */
+  const blocked = rep.items.filter(
+    (it) => it.status === 429 && (carriesTweets(it.url) || carriesUsers(it.url)),
+  );
   if (blocked.length === 0) return undefined;
   /** ⭐ 端点名去重 —— 同一个端点被挡 20 次,说一次就够 */
   const ops = [...new Set(blocked.map(
