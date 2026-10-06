@@ -47,6 +47,12 @@ export type CapturedPayload = {
   /** 原样响应体(已按 UTF-8 解码)。⚠️ 不解析、不挑字段 */
   readonly text: string;
   readonly byteLength: number;
+  /**
+   * ⭐⭐ **X 发这条请求时用的请求头** —— 游标翻页要原样重发它。
+   * ⚠️ 只带 cookie 不够:X 的 GraphQL 还要 authorization / x-csrf-token,
+   * 少了就是 **HTTP 403**(2026-10-06 真机实证)。
+   */
+  readonly requestHeaders?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -241,6 +247,8 @@ export class CaptureSession {
       at: event.at,
       text: new TextDecoder().decode(body.value),
       byteLength: body.value.byteLength,
+      /** ⭐ `onSendHeaders` 早就记进 bus 了,这里只是往上送 */
+      requestHeaders: record?.requestHeaders,
     });
     /**
      * ⭐ 首次捕到就报一次 —— 让「链路活了」这个事实**离开内存**。

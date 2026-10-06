@@ -198,10 +198,38 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
    */
   const url = JSON.stringify(String(params.url ?? ''));
   const cursor = JSON.stringify(String(params.cursor ?? ''));
+  /**
+   * ⭐⭐⭐ **原样重发 X 自己的请求头** —— 2026-10-06 真机:只带 cookie
+   * 时游标翻页第 1 轮就 **HTTP 403**。X 的 GraphQL 还要
+   * `authorization` 与 `x-csrf-token`。
+   * ⚠️ 自己拼鉴权那条路本仓早否决过(token 会过期、随版本变),
+   * 正确做法是**复用 X 刚发过的那条请求**。
+   * ⚠️⚠️ 参数仍走 `JSON.stringify` 绑定,绝不拼进脚本文本
+   * (`project-x-inject-template-escape` 那道闸)。
+   */
+  const headers = JSON.stringify(
+    (params.headers ?? {}) as Record<string, string>,
+  );
   return [
     '(function () {',
     '  var u = ' + url + ';',
     '  var c = ' + cursor + ';',
+    '  var rawHeaders = ' + headers + ';',
+    /**
+     * ⚠️⚠️ **浏览器禁止脚本设置的头要剔掉** —— 否则整个 fetch 直接抛
+     * (`Refused to set unsafe header`),表现成「翻页一轮都没跑」。
+     * ⭐ cookie 由 `credentials:"include"` 自动带,不能也不需要手设。
+     */
+    '  var FORBIDDEN = ["host","cookie","content-length","connection",',
+    '    "origin","referer","user-agent","accept-encoding","sec-fetch-mode",',
+    '    "sec-fetch-site","sec-fetch-dest","sec-ch-ua","sec-ch-ua-mobile",',
+    '    "sec-ch-ua-platform"];',
+    '  var safeHeaders = {};',
+    '  for (var hk in rawHeaders) {',
+    '    if (FORBIDDEN.indexOf(String(hk).toLowerCase()) === -1) {',
+    '      safeHeaders[hk] = rawHeaders[hk];',
+    '    }',
+    '  }',
     '  if (!u || !c) return { ok: false, why: "缺 url 或 cursor" };',
     '  try {',
     '    var parsed = new URL(u);',
@@ -235,7 +263,7 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
     '      return fetch(parsed.origin + parsed.pathname, {',
     '        method: "POST",',
     '        credentials: "include",',
-    '        headers: { "content-type": "application/json" },',
+    '        headers: Object.assign({}, safeHeaders, { "content-type": "application/json" }),',
     '        body: JSON.stringify(body),',
     '      });',
     '    }',
@@ -245,7 +273,7 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
      * ⚠️ `credentials: "include"` 必须有 —— 少了它 X 当成未登录,
      * 回 401 而**不报错**,表现成「翻了但没数据」。
      */
-    '    return fetch(parsed.toString(), { credentials: "include" })',
+    '    return fetch(parsed.toString(), { credentials: "include", headers: safeHeaders })',
     '      .then(function (r) {',
     '        return r.text().then(function (t) {',
     /**

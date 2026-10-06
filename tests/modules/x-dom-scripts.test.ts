@@ -336,3 +336,77 @@ describe('⭐⭐ 回读正文', () => {
     expect(r.tweets.length, '一条坏就整页作废了').toBeGreaterThanOrEqual(2);
   });
 });
+
+/**
+ * ⭐⭐⭐ **游标翻页要原样重发 X 的请求头** —— 2026-10-06 真机。
+ *
+ * ⚠️⚠️ 只带 cookie(`credentials:"include"`)时,翻页第 1 轮就 **HTTP 403**:
+ * X 的 GraphQL 还要 `authorization` 与 `x-csrf-token`。
+ * ⭐ 自己拼鉴权那条路本仓早否决过(token 会过期、随版本变),
+ * 正确做法是**复用 X 刚发过的那条请求**。
+ */
+describe('⭐⭐⭐ 翻页脚本:请求头原样重发', () => {
+  const build = (params: Record<string, unknown>): string => {
+    const reg = X_DOM_SCRIPTS.find((x) => x.id === X_SCRIPTS.fetchNextPage);
+    expect(reg, '找不到 fetchNextPage —— 脚本没注册?').toBeTruthy();
+    return reg!.build!(params);
+  };
+
+  it('⭐⭐⭐ 传进来的请求头会出现在脚本里', () => {
+    const src = build({
+      url: 'https://x.com/i/api/graphql/q/Followers?variables=%7B%7D',
+      cursor: 'c1',
+      headers: { authorization: 'Bearer AAAA', 'x-csrf-token': 'abc123' },
+    });
+    expect(src).toContain('Bearer AAAA');
+    expect(src).toContain('abc123');
+    /** ⭐ 两个分支都要用上 —— GET 与 POST */
+    expect(src).toMatch(/headers: safeHeaders/);
+    expect(src).toMatch(/Object\.assign\(\{\}, safeHeaders/);
+  });
+
+  it('⭐⭐⭐ 浏览器禁设的头要剔掉 —— 否则整个 fetch 直接抛', () => {
+    /**
+     * ⚠️ `Refused to set unsafe header` 会让 fetch 抛,
+     * 表现成「翻页一轮都没跑」—— 与 403 长得不一样,但一样采不到。
+     * ⭐ cookie 由 credentials:"include" 自动带,不能也不需要手设。
+     */
+    const src = build({
+      url: 'https://x.com/i/api/graphql/q/Followers?variables=%7B%7D',
+      cursor: 'c1',
+      headers: { cookie: 'auth_token=xxx', host: 'x.com', authorization: 'Bearer B' },
+    });
+    /**
+     * ⚠️⚠️ **跑一遍,看真实产出** —— 只断言「清单在源码里」的话,
+     * 把 `if (FORBIDDEN.indexOf(...) === -1)` 改成 `if (true)` 照样绿
+     * (注入验证当场逮到)。`feedback-source-scan-cant-see-execution`:
+     * 文本在 ≠ 行为在。
+     * ⭐ 把脚本里算 safeHeaders 那段抠出来真跑,比对结果。
+     */
+    /**
+     * ⚠️ 切到 `safeHeaders` 循环结束为止 ——
+     * 切过头会带进半个 `try`(SyntaxError: Missing catch),第一版就栽在这。
+     */
+    const from = src.indexOf('var rawHeaders');
+    const end = src.indexOf('if (!u || !c)', from);
+    expect(from).toBeGreaterThan(-1);
+    expect(end, '切不出 safeHeaders 那段就什么也证明不了').toBeGreaterThan(from);
+    const body = src.slice(from, end);
+    expect(body.length).toBeGreaterThan(100);
+    const run = new Function(`${body}; return safeHeaders;`) as () => Record<string, string>;
+    const safe = run();
+    expect(safe.cookie, 'cookie 必须剔掉 —— 浏览器禁设').toBeUndefined();
+    expect(safe.host, 'host 必须剔掉').toBeUndefined();
+    /** ⭐ 该留的还得留 */
+    expect(safe.authorization).toBe('Bearer B');
+  });
+
+  it('⭐⭐ 不给 headers 时不炸 —— 老调用方行为不变', () => {
+    const src = build({
+      url: 'https://x.com/i/api/graphql/q/Followers?variables=%7B%7D',
+      cursor: 'c1',
+    });
+    expect(() => new Function(`return ${src}`)).not.toThrow();
+    expect(src).toContain('var rawHeaders = {}');
+  });
+});

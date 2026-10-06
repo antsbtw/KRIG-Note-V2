@@ -1855,6 +1855,53 @@ describe('一个入口:响应里有什么就产出什么', () => {
       .toBeGreaterThan(1);
   });
 
+  it('⭐⭐⭐ 翻页要把种子那条的请求头原样带上 —— 少了就是 403', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:翻页第 1 轮 **HTTP 403**。
+     * 我们只带了 cookie(`credentials:"include"`),而 X 的 GraphQL
+     * 还要 `authorization` 与 `x-csrf-token`。
+     * ⭐ 旧版的做法是**复用 X 刚发过的那条请求**原样重发;
+     * 自己拼鉴权那条路本仓早否决过(token 会过期、随版本变)。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let sent: Record<string, unknown> | null = null;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{
+          url: FOLLOWERS,
+          text: page([1], 'c1'),
+          /** ⭐ 种子那条带着 X 的真实请求头 */
+          requestHeaders: { authorization: 'Bearer SEED', 'x-csrf-token': 'tok1' },
+        }] };
+      },
+      async runScript(_id, params) {
+        sent = params;
+        return { ok: true, status: 200, body: page([2], 'c2') };
+      },
+    }, { wantPages: 2, depth: 'as-is' });
+
+    expect(sent, '翻页脚本压根没被调').not.toBeNull();
+    const h = (sent as unknown as { headers?: Record<string, string> }).headers;
+    expect(h?.authorization, '没把种子的 authorization 带上 → 403').toBe('Bearer SEED');
+    expect(h?.['x-csrf-token']).toBe('tok1');
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },

@@ -195,6 +195,11 @@ type MergedItem = {
   readonly at: string;
   /** 'cdp' | 'hook' | 'both' —— ⭐ 证据,不是选项 */
   readonly from: 'cdp' | 'hook' | 'both';
+  /**
+   * ⭐⭐ X 发这条请求时用的请求头 —— 游标翻页要原样重发。
+   * ⚠️ 只有 CDP 腿拿得到(钩子腿在页面里,看不见真实请求头)。
+   */
+  readonly requestHeaders?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -238,6 +243,8 @@ function mergedItems(pageId: PageId, limit: number): MergedItem[] {
     byKey.set(k, {
       url: x.url, method: x.method ?? 'GET', status: x.status ?? 0,
       text: x.text, byteLength: x.byteLength, at: x.at, from: 'cdp',
+      /** ⭐ 请求头往上送 —— 游标翻页要原样重发(少了就是 403) */
+      requestHeaders: x.requestHeaders,
     });
   }
 

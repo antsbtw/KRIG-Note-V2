@@ -46,6 +46,15 @@ export type RunHarvest = {
     readonly url: string;
     readonly text: string;
     readonly status?: number;
+    /**
+     * ⭐⭐⭐ **X 发这条请求时用的请求头** —— 2026-10-06 真机逼出来的。
+     * ⚠️⚠️ 游标翻页第 1 轮 **HTTP 403**:我们只带了 cookie
+     * (`credentials: "include"`),而 X 的 GraphQL 还要
+     * `authorization` 与 `x-csrf-token`。
+     * ⭐ 旧版的做法是**复用 X 刚发过的那条请求**原样重发 ——
+     * 自己拼鉴权那条路本仓早就否决过(token 会过期、随版本变)。
+     */
+    readonly requestHeaders?: Readonly<Record<string, string>>;
   }>;
   readonly afterRound?: readonly unknown[];
   readonly rounds?: number;
@@ -487,7 +496,16 @@ async function pageUntilDone(
     let one: RunHarvest | null;
     let viaBody = false;
     try {
-      const r = await deps.runScript!(X_SCRIPTS.fetchNextPage, { url: seed.url, cursor }) as {
+      const r = await deps.runScript!(X_SCRIPTS.fetchNextPage, {
+        url: seed.url,
+        cursor,
+        /**
+         * ⭐⭐ **原样带上 X 自己的请求头** —— 少了 authorization /
+         * x-csrf-token 就是 403(真机实证)。
+         * ⚠️ 用 seed 那条的头:它就是 X 刚刚成功发过的那一条。
+         */
+        headers: seed.requestHeaders ?? {},
+      }) as {
         ok?: boolean; status?: number; body?: string; why?: string; shape?: string;
       } | null;
       if (r?.ok === false) {

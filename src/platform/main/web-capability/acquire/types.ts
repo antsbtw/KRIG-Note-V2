@@ -59,6 +59,19 @@ export type AcquiredItem = {
   readonly byteLength: number;
   readonly at: string;
   /**
+   * ⭐⭐⭐ **X 发这条请求时用的请求头** —— 2026-10-06 补。
+   *
+   * ⚠️⚠️ 为什么非要它:游标翻页要**复用 X 刚发过的那条请求**原样重发。
+   * 只带 cookie(`credentials: "include"`)不够 —— X 的 GraphQL 还要
+   * `authorization` 与 `x-csrf-token`,少了就是 **HTTP 403**(真机实证)。
+   * ⭐ 自己拼鉴权那条路**已被否决**(见 `webrequest-side.ts` 的注释):
+   * token 会过期、会随版本变,复刻必然追着改。
+   *
+   * ⚠️ `webrequest-side` 的 `onSendHeaders` 早就把它记进 bus 了,
+   * 只是一直没往上送 —— 又一例「字段有、生产端写了、消费端拿不到」。
+   */
+  readonly requestHeaders?: Readonly<Record<string, string>>;
+  /**
    * ⚠️ 从哪条腿来的 —— **这是证据不是选项**。
    * 保留它是为了出问题时查得动(`both` 说明两条腿互证通过);
    * 调用方正常情况下**不该关心**这个字段。
