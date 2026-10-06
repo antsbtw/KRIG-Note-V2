@@ -453,7 +453,20 @@ export async function runCollect(
     pageUrlIncludes: X_PAGE_MATCHERS,
     noisyUrlSubstrings: X_NOISY_URLS,
     afterRoundScriptId: X_SCRIPTS.expandAll,
-    maxRounds: opts.maxRounds ?? 60,
+    /**
+     * ⚠️⚠️ **安全网不是目标** —— 2026-10-05 真机:`?? 60` 把 following
+     * 卡在 **150 人**(滚 60 轮 42687px 到上限,X 还有一大截没滚到)。
+     * ⭐⭐ 这是 `project-x-followers-2500-ceiling` 的**同一个错误**:
+     * 所谓「X 天花板 2500」真因就是滚动轮数不够,而那个轮数是人填的 ——
+     * 我把**自己设的闸门**当成了平台的限制。那条记忆开头就写着「已作废」,
+     * 而我又踩了一次。
+     *
+     * ⭐ 滚动本来就有**数据判据**(`reachedBottom`:滚不动了就停),
+     * 轮数只在它失灵时兜底。2645 人实测约需 130+ 轮,给到 3000
+     * 是为了「人多的号也别被我拦住」——
+     * 真正该停的是「滚到底了」,不是「我数到 60 了」。
+     */
+    maxRounds: opts.maxRounds ?? 3000,
   });
   if (!rep) {
     return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, paging: null, fetched: [], users: [], kind: 'empty' };

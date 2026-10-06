@@ -1299,9 +1299,23 @@ export function XConsole(
                       )}
                     </div>
                   )}
+                  {/*
+                    ⭐⭐⭐ **滚动的停因**(与上面「翻页的停因」是两件事)。
+                    ⚠️⚠️ 2026-10-05:这两个停因并排摆着,我却**只读了翻页那个**,
+                    于是「滚动到了轮次上限」整整漏了两跑 ——
+                    following 卡在 150 人,而屏幕上一直写着「达到轮次上限 60」。
+                    ⭐ 加上标签,并在**撞上限**时标红:
+                    「滚到底了」和「我数到上限了」是完全不同的结论。
+                  */}
                   <div style={S.todo}>
-                    {report.stopReason}
+                    滚动：{report.stopReason}
                     {report.elapsedMs > 0 && `　·　${(report.elapsedMs / 1000).toFixed(1)}s`}
+                    {report.stopReason?.includes('轮次上限') && (
+                      <div style={{ color: '#f90', marginTop: 2 }}>
+                        ⚠️ 是**撞到轮次上限**停的,不是滚到底 ——
+                        名单多半还有,这个数不是全部
+                      </div>
+                    )}
                   </div>
 
                   {/*

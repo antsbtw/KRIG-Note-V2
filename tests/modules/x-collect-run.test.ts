@@ -1163,6 +1163,33 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.users.every((a) => a.items.length > 0)).toBe(true);
   });
 
+  it('⭐⭐⭐ 滚动轮数是安全网不是目标 —— 别再把自己的闸门当平台限制', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-05:`maxRounds ?? 60` 把 following 卡在 **150 人**
+     * (滚 60 轮 42687px 到上限,X 还有一大截)。
+     * ⭐⭐ 与 `project-x-followers-2500-ceiling` **同一个错误**:
+     * 所谓「X 天花板 2500」真因就是滚动轮数不够、而那轮数是人填的 ——
+     * 那条记忆开头就写着「已作废」,我又踩了一次。
+     *
+     * ⭐ 判据:调用方不给 maxRounds 时,传给底座的必须**远大于**
+     * 一个真实名单要滚的轮数(2645 人实测约 130+ 轮)。
+     */
+    let got: number | undefined;
+    await runCollect({
+      async harvest(plan) { got = plan.maxRounds; return { items: [] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+    expect(got, '默认轮数太小 = 给人多的号设了个看不见的天花板')
+      .toBeGreaterThanOrEqual(1000);
+  });
+
+  it('⭐⭐ 调用方显式给了就听它的 —— 安全网可以调小,但要是显式的', async () => {
+    let got: number | undefined;
+    await runCollect({
+      async harvest(plan) { got = plan.maxRounds; return { items: [] }; },
+    }, { wantPages: 1, depth: 'as-is', maxRounds: 5 });
+    expect(got).toBe(5);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
