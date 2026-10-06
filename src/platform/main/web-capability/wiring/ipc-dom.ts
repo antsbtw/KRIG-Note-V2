@@ -24,6 +24,7 @@
  */
 
 import { app, ipcMain, webContents, type WebContents } from 'electron';
+import { mainBuildStamp } from './build-stamp';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
@@ -902,7 +903,22 @@ export function registerWebDomIpc(): void {
               // ⚠️ 文件名带时间戳 —— **不覆盖历史**,两次采集要能对照
               const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
               const file = join(dir, `${p.name ?? 'audit'}-${stamp}.txt`);
-              writeFileSync(file, p.text, 'utf-8');
+              /**
+               * ⭐⭐⭐ **main 进程的构建时刻写在最前面** —— 2026-10-06。
+               *
+               * 用户问:「为什么存在跑的不是你修改的代码这一个说法呢?」
+               * ⚠️⚠️ 因为 `electron-forge start` **只在启动时构建**:
+               * 改完 main 的代码不重启 app,跑的就还是上一份。而在此之前
+               * 「跑着的 app 里有没有刚才那个修改」**无从得知** —— 只能靠人说
+               * 「应该有了」,那是猜不是判据。真机代价:改完让用户再采一次,
+               * 数据纹丝不动,两个人对着同一份输出纳闷了两轮。
+               *
+               * ⭐ 写在**这一层**(main)而不是 renderer:
+               * 滚动/翻页/采集都在 main,它的构建戳才是「那个修复在不在」的答案;
+               * 而且 renderer 在 dev 下不落盘,命令行根本查不到。
+               */
+              const head = `main 构建：${mainBuildStamp()}\n`;
+              writeFileSync(file, head + p.text, 'utf-8');
               traceRecorder.lifecycle({
                 layer: 'web.net', event: 'audit-written', pageId: String(pageId),
                 detail: { file, bytes: p.text.length },
