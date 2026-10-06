@@ -2056,6 +2056,97 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.paging?.stopReason).toContain('429');
   });
 
+  it('⭐⭐⭐ 每轮之间要有**随机**停顿 —— 匀速请求是风控最容易识别的特征', async () => {
+    /**
+     * ⚠️⚠️ 用户 2026-10-06:「是的,不能太快,这样会引发限流。」
+     * 旧代码注释原话:「随机停顿:**匀速请求是风控最容易识别的特征**」(1800~3300ms)。
+     * 而我重建的翻页是**连珠炮**:48 轮零间隔 → X 把**整个会话**挡掉,
+     * 连它自己的页面都报 `Something went wrong`。
+     * ⭐ 判据两条:**有停顿** 且 **不是定值**(定值本身也是指纹)。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const waits: number[] = [];
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`) };
+      },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 12, depth: 'as-is' });
+
+    expect(waits.length, '一个停顿都没有 —— 连珠炮会被风控识别').toBeGreaterThan(5);
+    /**
+     * ⭐⭐ **只看轮间抖动那些**(短的),不能把批间长停顿算进来 ——
+     * ⚠️ 注入验证逼出来的:第一版拿全部 waits 判「有几种不同值」,
+     * 批间那个 20s 自带一种值,于是**把抖动改成定值照样绿**。
+     * `feedback-guard-scope-to-the-branch`:要缩到真正被测的那一类。
+     */
+    const jitters = waits.filter((w) => w < 10_000);
+    expect(jitters.length, '切不出轮间抖动就什么也证明不了').toBeGreaterThan(3);
+    expect(new Set(jitters).size, '停顿是定值,等于另一种指纹').toBeGreaterThan(1);
+    /** ⭐ 量级要够:亚秒级的「停顿」挡不住风控 */
+    expect(Math.min(...jitters)).toBeGreaterThanOrEqual(1000);
+  });
+
+  it('⭐⭐⭐ 每翻一批要主动歇一次 —— 别等被挡了再退避', async () => {
+    /**
+     * ⚠️ 实测 `Followers` 两跑都卡在 **48/49 轮**,
+     * 所以批次要明显小于它,中途主动歇比被挡了再退避划算。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const waits: number[] = [];
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`) };
+      },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 40, depth: 'as-is' });
+
+    /** ⭐ 批间停顿明显长于轮间抖动 —— 翻 40 轮至少歇过一次 */
+    expect(Math.max(...waits), '没有批间长停顿').toBeGreaterThanOrEqual(10_000);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },

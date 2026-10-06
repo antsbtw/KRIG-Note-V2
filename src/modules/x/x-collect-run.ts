@@ -226,6 +226,20 @@ const SEED_PAGES = 2;
 const MAX_429_RETRY = 4;
 /** ⭐ 退避基数 —— 翻倍:30s / 60s / 120s / 240s */
 const RATE_LIMIT_BASE_MS = 30_000;
+/**
+ * ⭐⭐⭐ **每轮之间的随机停顿** —— 旧代码实测值 1800~3300ms。
+ * ⚠️ 旧注释原话:「**匀速请求是风控最容易识别的特征**」——
+ * 所以是**随机**区间不是定值,定值本身也是指纹。
+ */
+const PAGE_GAP_MIN_MS = 1_800;
+const PAGE_GAP_JITTER_MS = 1_500;
+/**
+ * ⭐⭐ 每翻这么多页主动歇一次 —— 实测 `Followers` 两跑都卡在 48/49 轮,
+ * 所以批次要明显小于它。
+ */
+const BATCH_ROUNDS = 30;
+/** ⭐ 批间停顿 —— 记忆里旧实现是「2000 人歇 20s」,这里每 30 轮(≈1500 人)歇 20s */
+const BATCH_PAUSE_MS = 20_000;
 
 /**
  * ⭐⭐⭐ **这一趟是不是被限流了** —— 2026-10-06。
@@ -502,6 +516,42 @@ async function pageUntilDone(
     seenCursors.add(cursor);
 
     round += 1;
+    /**
+     * ⭐⭐⭐ **请求之间要有随机停顿** —— 2026-10-06 真机,用户:
+     * 「是的,不能太快,这样会引发限流。」
+     *
+     * ⚠️⚠️ 旧代码注释里一句话点破:
+     * > 「随机停顿:**匀速请求是风控最容易识别的特征**」
+     * 而我重建的翻页是**连珠炮**:48 轮一轮接一轮、中间零间隔,
+     * 真机后果是 X 把**整个会话**挡掉 —— 连它自己的页面都报
+     * `Something went wrong. Try reloading.`(用户截图实证)。
+     *
+     * ⭐ 停顿要**随机**不要定值:定值本身也是指纹。
+     * ⚠️ 第一轮不等(刚从种子过来,本来就有间隔),从第二轮起才等。
+     * ⚠️ 等待期间要能叫停 —— `deps.wait` 的实现里每秒看一次停止键。
+     */
+    if (round > 1 && deps.wait) {
+      const jitter = PAGE_GAP_MIN_MS + Math.random() * PAGE_GAP_JITTER_MS;
+      await deps.wait(Math.round(jitter));
+      if (deps.cancelled?.()) {
+        stopReason = '人点了停止';
+        say(`已停止（翻了 ${round - 1} 轮）`); break;
+      }
+    }
+    /**
+     * ⭐⭐ **每采一批歇一会儿** —— 记忆 project-x-cursor-paging 记着
+     * 「自动分批(2000 人歇 20s)」。
+     * ⚠️ 连续几十轮之后 X 的容忍度明显下降(followers 两跑都卡在 48/49 轮),
+     * 中途主动歇一次,比被挡了再退避划算。
+     */
+    if (round > 1 && round % BATCH_ROUNDS === 0 && deps.wait) {
+      say(`已翻 ${round} 页 —— 歇 ${Math.round(BATCH_PAUSE_MS / 1000)}s 再继续（避开限流）`);
+      await deps.wait(BATCH_PAUSE_MS);
+      if (deps.cancelled?.()) {
+        stopReason = '人点了停止';
+        say(`已停止（翻了 ${round - 1} 轮）`); break;
+      }
+    }
     say(`主动翻页 第 ${round} 页…`);
     /** ⭐ 掐头去尾 —— 够判「变没变」,不占地方 */
     const cursorBrief = cursor.length > 28
