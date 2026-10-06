@@ -308,3 +308,45 @@ describe('⭐⭐⭐ gotoPage:先去那一页再采', () => {
     expect(r.pages, '失败却报采到了页数').toBe(0);
   });
 });
+
+/**
+ * ⭐⭐⭐ **时间闸要留名** —— 2026-10-06 真机逼出来的。
+ *
+ * ⚠️⚠️ following 实跑滚了 221 轮 162571px,**正好撞上默认 180s**,
+ * 停在 150 人。可停因写的是「**人工取消(第 222 轮前)**」——
+ * 而人根本没点(我回头问了,用户答「我没有任何点击」)。
+ * ⭐⭐ 停因说错了主语,下一步就查错方向:
+ * 我差点去查「谁发了 scrollStop」,而真相是时间安全网自己到期了。
+ */
+describe('⭐⭐⭐ 早停要说清是谁停的', () => {
+  it('⭐⭐⭐ 撞时间上限 → 停因必须说「不是人点的」', async () => {
+    const { d } = deps({ initial: [], perRound: [] });
+    /** ⭐ 把时钟推过上限 —— 第一轮开头就触发 */
+    const rep = await harvestPage(
+      { ...d, now: (() => { let t = 0; return () => { t += 100_000; return t; }; })() },
+      'p1' as never,
+      { maxMs: 1000, wantPages: 99 },
+    );
+    expect(rep.stopReason, '不许再甩锅给「人工取消」').not.toContain('人工取消');
+    expect(rep.stopReason).toContain('时间上限');
+    expect(rep.stopReason, '要明说不是人点的').toContain('不是人点的');
+  });
+
+  it('⭐⭐ 采够页数停的,停因仍说「已采够」—— 别被时间闸的改动带偏', async () => {
+    const item = { url: 'https://x.com/i/api/graphql/a/UserTimeline', text: '{}' } as never;
+    const { d } = deps({ initial: [item] });
+    const rep = await harvestPage(d, 'p1' as never, {
+      wantPages: 1, pageUrlIncludes: ['UserTimeline'],
+    });
+    expect(rep.stopReason).toContain('已采够');
+    expect(rep.stopReason).not.toContain('时间上限');
+  });
+
+  it('⭐⭐ 没撞任何闸时,停因照常是滚动自己给的', async () => {
+    const { d } = deps({ initial: [] });
+    const rep = await harvestPage(d, 'p1' as never, { maxRounds: 2 });
+    expect(rep.stopReason).toContain('滚了');
+    expect(rep.stopReason).not.toContain('时间上限');
+    expect(rep.stopReason).not.toContain('已采够');
+  });
+});

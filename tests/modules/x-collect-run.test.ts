@@ -1182,6 +1182,24 @@ describe('一个入口:响应里有什么就产出什么', () => {
       .toBeGreaterThanOrEqual(1000);
   });
 
+  it('⭐⭐⭐ 时间安全网也要够大 —— 180s 把 following 卡在 150 人', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:滚 221 轮 162571px,**正好撞上底座默认的 180s**,
+     * 停在 150 人,而停因写成「人工取消」——人根本没点。
+     * ⭐⭐ **同一个错误的第三次**:
+     * ①「X 天花板 2500」(真因滚动轮数不够)
+     * ② `maxRounds ?? 60`(卡在 150 人)
+     * ③ `maxMs` 180s
+     * 每次都是**我设的闸门被当成了平台的限制**。
+     */
+    let got: number | undefined;
+    await runCollect({
+      async harvest(plan) { got = plan.maxMs; return { items: [] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+    expect(got, '2000+ 人的名单按实测速度要十几分钟')
+      .toBeGreaterThanOrEqual(10 * 60 * 1000);
+  });
+
   it('⭐⭐ 调用方显式给了就听它的 —— 安全网可以调小,但要是显式的', async () => {
     let got: number | undefined;
     await runCollect({

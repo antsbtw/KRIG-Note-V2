@@ -45,6 +45,8 @@ export type RunDeps = {
     noisyUrlSubstrings?: readonly string[];
     afterRoundScriptId?: string;
     maxRounds?: number;
+    /** ⭐ 时间安全网 —— 不给的话底座默认 180s(名单多的号不够用) */
+    maxMs?: number;
     gotoPage?: { name: string; params?: Record<string, string> };
   }): Promise<RunHarvest | null>;
   /**
@@ -443,7 +445,7 @@ async function pageUntilDone(
  */
 export async function runCollect(
   deps: RunDeps,
-  opts: { wantPages: number; depth: FetchDepth; maxRounds?: number },
+  opts: { wantPages: number; depth: FetchDepth; maxRounds?: number; maxMs?: number },
 ): Promise<RunResult> {
   const say = (m: string): void => deps.onProgress?.(m);
 
@@ -467,6 +469,21 @@ export async function runCollect(
      * 真正该停的是「滚到底了」,不是「我数到 60 了」。
      */
     maxRounds: opts.maxRounds ?? 3000,
+    /**
+     * ⭐⭐⭐ **时间安全网也是网,不是目标** —— 2026-10-06 真机。
+     *
+     * ⚠️⚠️ 底座默认 180s,而 following 实跑 221 轮 162571px 正好撞上它,
+     * 停在 150 人。⭐ 这是**同一个错误的第三次**:
+     * 先是「X 天花板 2500」(真因滚动轮数不够)、
+     * 再是 `maxRounds ?? 60`(卡在 150 人)、
+     * 现在是 `maxMs` 180s —— 每次都是**我设的闸门被当成了平台的限制**。
+     *
+     * ⭐ 滚动本来就有数据判据(`reachedBottom`),时间只在它失灵时兜底。
+     * 2000+ 人的名单按实测速度要十几分钟,给到 20 分钟。
+     * ⚠️ 改的是**X 自己传的值**,不动底座默认 ——
+     * 别的调用方(网页剪藏之类)不该为 X 的长名单买单。
+     */
+    maxMs: opts.maxMs ?? 20 * 60 * 1000,
   });
   if (!rep) {
     return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, paging: null, fetched: [], users: [], kind: 'empty' };

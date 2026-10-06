@@ -123,6 +123,8 @@ export async function harvestPage(
 
   // ── ③④ 滚动 + 每轮展开,采够页数就停 ──
   let stoppedByPages = false;
+  /** ⭐ 时间安全网触发过没有 —— 不记的话停因会甩锅给「人工取消」 */
+  let stoppedByTime = false;
   const scroll = await deps.scroll(pageId, {
     maxRounds,
     /**
@@ -142,7 +144,18 @@ export async function harvestPage(
      * ⚠️ 也看时间安全网 —— 防「页面一直给、永远停不下来」。
      */
     shouldStop: () => {
-      if (deps.now() - t0 > maxMs) return true;
+      /**
+       * ⭐⭐⭐ **时间闸要留名** —— 2026-10-06 真机。
+       *
+       * ⚠️⚠️ 原先这里 `return true` 但**不留任何标记**,
+       * 于是滚动循环按「外面叫停了」处理,停因写成
+       * **「人工取消(第 222 轮前)」** —— 而人根本没点。
+       * 我因此回头问用户「是你点的吗」,用户答「我没有任何点击」。
+       * ⭐⭐ `feedback-dont-record-own-choices-as-user-requirements` 的同族:
+       * **把自己做的决定记成别人做的**。停因是用来定位的,
+       * 它说错了主语,下一步就查错了方向。
+       */
+      if (deps.now() - t0 > maxMs) { stoppedByTime = true; return true; }
       if (plan.wantPages === undefined) return false;
       const got = countPages(deps.peekAcquire(pageId), pageWant);
       if (got >= plan.wantPages) { stoppedByPages = true; return true; }
@@ -169,7 +182,10 @@ export async function harvestPage(
     problems.push(
       `只采到 ${pages} 页,不足 ${plan.wantPages} 页`
       + `(滚了 ${scroll.rounds} 轮 ${Math.round(scroll.scrolledPx)}px,${scroll.stopReason})`
-      + ' —— 可能这一页就这么多,或滚动轮次上限太小',
+      + (stoppedByTime
+        ? ` —— **是撞上 ${Math.round(maxMs / 1000)}s 时间上限停的**,名单多半还有,`
+          + '调大 maxMs 或分批采'
+        : ' —— 可能这一页就这么多,或滚动轮次上限太小'),
     );
   }
 
@@ -182,9 +198,15 @@ export async function harvestPage(
     rounds: scroll.rounds,
     scrolledPx: scroll.scrolledPx,
     reachedBottom: scroll.reachedBottom,
+    /**
+     * ⚠️ 三种「早停」要分得开 —— 它们的下一步完全不同:
+     * 采够了=正常收工 / 到时间=**调大 maxMs 或分批** / 人工取消=人点的。
+     */
     stopReason: stoppedByPages
       ? `已采够 ${pages} 页(目标 ${plan.wantPages})`
-      : scroll.stopReason,
+      : stoppedByTime
+        ? `到时间上限 ${Math.round(maxMs / 1000)}s 停的（不是人点的）`
+        : scroll.stopReason,
     elapsedMs: deps.now() - t0,
     legs: acq.legs,
   };
