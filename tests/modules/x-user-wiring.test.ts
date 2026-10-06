@@ -230,6 +230,18 @@ describe('一个入口:采到人就存', () => {
     }
   });
 
+  it('⭐⭐⭐ 面板要给 wait —— 不给的话 429 退避是死代码', () => {
+    /**
+     * ⚠️ `feedback-source-scan-cant-see-execution` 的同族:
+     * 采集层写了退避,面板不传 `wait` 就永远走不到那条分支。
+     * ⭐ 而且等待期间要能被停止键打断(退避可能几分钟)。
+     */
+    const i = CONSOLE.indexOf('stopPaging:');
+    const body = CONSOLE.slice(i, CONSOLE.indexOf('}, {', i));
+    expect(body, '没给 wait —— 429 退避永远跑不到').toMatch(/wait: async \(ms\)/);
+    expect(body, '等待期间要看停止键').toMatch(/cancelRef\.current/);
+  });
+
   it('⭐⭐⭐ 每一跑都要落账 —— 不许只在有推文时写', () => {
     /**
      * ⚠️⚠️ 用户 2026-10-06:「这两个你没有办法自行读取吗?」

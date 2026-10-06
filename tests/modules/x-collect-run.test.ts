@@ -1950,6 +1950,112 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(h?.authorization, '挑到了没有头的那条种子 → 必然 403').toBe('Bearer CDP');
   });
 
+  it('⭐⭐⭐ 被限流(429)要退避重试,不许把剩下的全丢了', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:followers 翻到**第 49 轮** 429,
+     * 诊断写着 `authorization=有，x-csrf-token=有` —— 不是鉴权问题,是真限流。
+     * 原先直接 break:2469 人到手,**剩下 3000 多人整批丢掉**,
+     * 而 X 只是让我们慢一点,不是不给。
+     * ⭐ 照本仓已有的那套(限速 + 指数退避 + 熔断)。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const waits: number[] = [];
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        /** ⭐ 第 2 次被限流,之后恢复 */
+        if (n === 2) return { ok: false, status: 429, why: 'HTTP 429' };
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`) };
+      },
+      /** ⭐ 注入的等待:测试里不真等 */
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 5, depth: 'as-is' });
+
+    expect(waits.length, '被限流了却没退避').toBeGreaterThan(0);
+    expect(r.paging?.stopReason, '退避成功后不该停在限流上').not.toContain('限流');
+    /** ⭐ 限流那一轮之后还继续采到了人 */
+    expect(r.users.flatMap((a) => a.items).length).toBeGreaterThan(2);
+  });
+
+  it('⭐⭐⭐ 退避到上限仍被挡 → 如实说「不是采完了」', async () => {
+    /** ⚠️ 这时最怕的是把「被挡住」说成「采完了」—— 人会以为没有更多 */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    const waits: number[] = [];
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      /** ⚠️ 一直 429 */
+      async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason).toContain('限流');
+    expect(r.paging?.stopReason, '别把被挡说成采完了').toContain('不是采完了');
+    /** ⭐ 退避要**翻倍**,不是每次等一样久 */
+    expect(waits.length).toBeGreaterThan(1);
+    expect(waits[1]).toBeGreaterThan(waits[0]);
+  });
+
+  it('⭐⭐ 不给 wait 时行为不变 —— 老调用方不受影响', async () => {
+    const page = (c: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          { entryId: 'user-1', content: { itemContent: { user_results: { result: {
+            rest_id: '901', core: { screen_name: 'a', name: 'A' }, legacy: {},
+          } } } } },
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: c } },
+        ],
+      }] } } } } },
+    });
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page('c0') }] };
+      },
+      async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
+    }, { wantPages: 5, depth: 'as-is' });
+    /** ⚠️ 没有 wait 就退不了避,照旧当失败停 —— 但停因要说得出是 429 */
+    expect(r.paging?.stopReason).toContain('429');
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },

@@ -111,6 +111,12 @@ export type RunDeps = {
   goBack?(): Promise<boolean>;
   /** ⭐ 每做完一步报一次 —— 长流程必须让人看见进度 */
   onProgress?(msg: string): void;
+  /**
+   * ⭐⭐ **等一会儿** —— 被限流(429)时退避重试用。
+   * ⚠️ 注入进来是为了**测试跑得动**:真用 `setTimeout` 的话,
+   * 一条退避测试就要等好几秒,没人会愿意跑。
+   */
+  wait?(ms: number): Promise<void>;
 };
 
 export type RunResult = {
@@ -213,6 +219,13 @@ const MAX_PASSES = 5;
  * ⚠️ 旧版实测:滚动拿 7.7%,游标翻页快几十倍。滚多了纯属浪费。
  */
 const SEED_PAGES = 2;
+/**
+ * ⭐⭐ **被限流后最多退避重试几次**。
+ * ⚠️ 不是越多越好:真被封时干等十几分钟不如如实报出来让人决定。
+ */
+const MAX_429_RETRY = 4;
+/** ⭐ 退避基数 —— 翻倍:30s / 60s / 120s / 240s */
+const RATE_LIMIT_BASE_MS = 30_000;
 
 /**
  * ⭐⭐⭐ **这一趟是不是被限流了** —— 2026-10-06。
@@ -447,6 +460,8 @@ async function pageUntilDone(
   const seedCount = seenKeys.size;
   let emptyRounds = 0;
   let round = 0;
+  /** ⭐ 429 退避试了几次 —— 超过上限才真停 */
+  let rateLimitRetries = 0;
   while (round < PAGING_SAFETY_ROUNDS) {
     /** ⭐ 每轮开头先看人有没有喊停 —— 停在轮次之间,已采到的都留着 */
     if (deps.cancelled?.()) {
@@ -519,6 +534,35 @@ async function pageUntilDone(
       }) as {
         ok?: boolean; status?: number; body?: string; why?: string; shape?: string;
       } | null;
+      /**
+       * ⭐⭐⭐ **被限流就等一会儿再试,别把剩下的全丢了** —— 2026-10-06 真机。
+       *
+       * ⚠️⚠️ followers 那跑翻到**第 49 轮** 429,而诊断写着
+       * `authorization=有，x-csrf-token=有` —— 不是鉴权问题,是真限流。
+       * 原先直接 break:2469 人到手,剩下 3000 多人**整批丢掉**,
+       * 而 X 只是让我们**慢一点**,不是不给。
+       *
+       * ⭐ 照本仓已有的那套(`project-x-translate-rate-limited`:
+       * 限速 + 指数退避 + 熔断)。这里退避翻倍,最多试 `MAX_429_RETRY` 次;
+       * 还不行才停,并**如实说是限流停的**(不是「采完了」)。
+       * ⚠️ 退避期间也要能被人叫停 —— 长等待里不响应停止键是最招人烦的。
+       */
+      if (r?.ok === false && r.status === 429 && deps.wait) {
+        if (rateLimitRetries < MAX_429_RETRY) {
+          rateLimitRetries += 1;
+          const backoff = RATE_LIMIT_BASE_MS * (2 ** (rateLimitRetries - 1));
+          say(`⚠️ 被 X 限流(429)—— 等 ${Math.round(backoff / 1000)}s 再试`
+            + `（第 ${rateLimitRetries}/${MAX_429_RETRY} 次重试，已采 ${seenKeys.size} 条）`);
+          await deps.wait(backoff);
+          /** ⭐ 这一轮不算数:游标还没用掉,退回去重来 */
+          seenCursors.delete(cursor);
+          round -= 1;
+          continue;
+        }
+        stopReason = `被 X 限流(429)，退避 ${MAX_429_RETRY} 次仍被挡`
+          + `——**不是采完了**，歇一会儿再跑能接着采`;
+        say(stopReason); break;
+      }
       if (r?.ok === false) {
         /**
          * ⭐⭐⭐ **失败时把判据一起交出来** —— 2026-10-06,403 查了两轮。

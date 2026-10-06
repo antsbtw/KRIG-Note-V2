@@ -894,6 +894,18 @@ export function XConsole(
                         },
                         cancelled: () => cancelRef.current,
                         onProgress: setStep,
+                        /**
+                         * ⭐⭐ **被限流时的等待** —— 2026-10-06。
+                         * ⚠️ 等待期间**每秒看一次有没有人点停止** ——
+                         * 退避可能几分钟,干等着不响应停止键最招人烦。
+                         */
+                        wait: async (ms) => {
+                          const until = Date.now() + ms;
+                          while (Date.now() < until) {
+                            if (cancelRef.current) return;
+                            await new Promise((r) => setTimeout(r, 1000));
+                          }
+                        },
                       }, {
                         // ⭐ 用户 2026-10-03:「每次采集 10 页」
                         wantPages: Number(pagesWanted) || 10,
