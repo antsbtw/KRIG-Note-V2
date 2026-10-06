@@ -21,6 +21,7 @@
  */
 
 import type { RunResult } from './x-collect-run';
+import { buildStamp, buildAgeMinutes } from './x-build-stamp';
 
 /** ⭐ 一跑里**人能据以判断**的事实 —— 全部来自 `RunResult`,不另算 */
 export type RunReportInput = {
@@ -53,6 +54,18 @@ export function buildRunReport(input: RunReportInput): string {
   const h = run.harvest;
 
   L.push(`X 采集留痕　${at}`);
+  /**
+   * ⭐⭐⭐ **这份代码什么时候构建的** —— 2026-10-06 真机逼出来的。
+   * ⚠️⚠️ 改完代码让用户再采一次,数据纹丝不动、停因里连「抢救」都没有,
+   * 两个人对着同一份输出纳闷 —— 真因是 **app 还跑着旧构建**。
+   * ⭐ 印出来,「是不是旧构建」就从猜变成看一眼。
+   */
+  const age = buildAgeMinutes();
+  L.push(`构建：${buildStamp()}`
+    + (age === undefined ? '' : `（${age} 分钟前）`)
+    + (age !== undefined && age > 30
+      ? '　⚠️ 构建已超过 30 分钟 —— 如果刚改过代码,**这一跑可能跑的是旧版**,先重启 app'
+      : ''));
   L.push(`页面：${page || '(认不出)'}　·　人填页数：${wantPages}`);
   L.push(`采到：${run.kind}　·　推文 ${run.summary?.items.length ?? 0}`
     + `　·　人 ${run.users.reduce((n, a) => n + a.items.length, 0)}`

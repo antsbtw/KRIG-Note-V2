@@ -38,6 +38,19 @@ export const READY_POLL_MS = 200;
 
 /** ⭐ 连续几轮不变才算到底。**默认 3** —— 一轮就停是血泪③ 的复发形态 */
 export const DEFAULT_STUCK_ROUNDS = 3;
+/**
+ * ⭐⭐ **抢救上限** —— 换位置最多试这么多次。
+ * ⚠️ 没有上限的话,「每次都说跳成了、但位置就是不动」会变成**死循环**
+ * (脚本回 true 不代表内容真的长出来了)。
+ * ⭐ 历史代码的形态是「stuck>=2 试、stuck>=8 放弃」= 大约 3 次机会;
+ * 这里给 50:名单长的号中途会反复卡,次数太小等于没抢救。
+ */
+export const MAX_RESCUES = 50;
+/**
+ * ⭐ 跳完等多久再滚 —— 历史代码实测 1.5s。
+ * ⚠️ 不等的话虚拟列表还没渲染,下一轮回读到的还是同一个位置。
+ */
+export const RESCUE_SETTLE_MS = 1500;
 export const DEFAULT_MAX_ROUNDS = 50;
 export const DEFAULT_SETTLE_MS = 800;
 /** 每轮滚屏高的几成:0.55~0.85 抖动(匀速是风控最容易识别的特征) */
@@ -442,7 +455,7 @@ export class ControlEngine {
        * ⚠️ `rescued` 要计数并**写进停因** —— 不然「抢救过几次」这个
        * 判断依据又只活在这一次运行里。
        */
-      if (stuck >= stuckRounds && options.onStuck) {
+      if (stuck >= stuckRounds && options.onStuck && rescued < MAX_RESCUES) {
         let moved = false;
         try {
           moved = await options.onStuck(stuck);
@@ -452,9 +465,25 @@ export class ControlEngine {
         }
         if (moved) {
           rescued += 1;
+          /**
+           * ⭐⭐ **跳完要等一等** —— 历史代码等 1.5s,照抄。
+           * ⚠️ 不等的话:`scrollIntoView` 刚触发、虚拟列表还没渲染出新内容,
+           * 下一轮回读到的还是同一个位置 → 又判卡住 → 空转。
+           * ⭐ 「做了动作」和「动作生效了」是两件事,中间要给时间。
+           *
+           * ⚠️⚠️ **这一行没有测试盖住**(2026-10-06 注入验过:删掉它仍全绿)——
+           * 假页面是同步渲染的,「等不等」对它没区别。
+           * ⭐ 真机才验得出来,**别因为测试绿就以为它可有可无**
+           * (`project-x-collect-two-legs`:CDP 这类时序行为只有真机验得出)。
+           */
+          await this.sleep(RESCUE_SETTLE_MS);
           /** ⭐ 清零重新数 —— 换过位置之后它应该能再滚一段 */
           stuck = 0;
-          continue;
+          /**
+           * ⚠️ **不 `continue`** —— 那会跳过本轮的滚动,
+           * 而我们正需要它滚一下来验证「换位置到底有没有用」。
+           * 落到循环末尾自然进下一轮即可。
+           */
         }
       }
       if (stuck >= stuckRounds) {
