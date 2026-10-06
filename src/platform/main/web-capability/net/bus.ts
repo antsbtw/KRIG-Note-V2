@@ -139,11 +139,30 @@ export class NetworkEventBus {
 
   recordResponseComplete(record: NetworkRecord, body?: Uint8Array): void {
     const list = this.requests.get(record.pageId) ?? [];
-    let stored: NetworkRecord = record;
+    /**
+     * ⭐⭐⭐ **保住先前记下的请求头** —— 2026-10-06,403 查了三轮的真因。
+     *
+     * ⚠️⚠️ 这里原本直接拿新 `record` **整条替换**旧的。
+     * 而链路顺序是:
+     * 　`onBeforeRequest`(无头)→ `onSendHeaders`(**有头**)
+     * 　→ `onCompleted`(**又没头**,它的 details 里本来就没有)
+     * 最后这一步把 `onSendHeaders` 辛苦记下的头**整条抹掉** ——
+     * 于是 CaptureSession 回查时永远拿到「0 个请求头」,
+     * 游标翻页重发必然 **403**(真机实证:种子带了 0 个请求头)。
+     *
+     * ⭐ 改成**合并**:新字段覆盖旧的,但旧的有、新的没有的**保留**。
+     * ⚠️ 这是「后一步不该抹掉前一步的成果」—— 与 upsert 那一族同形
+     * (`project-x-upsert-overwrites-richer-text`:深→浅降级)。
+     */
+    const prev = list.find((r) => r.requestId === record.requestId);
+    const merged: NetworkRecord = prev
+      ? { ...prev, ...record, requestHeaders: record.requestHeaders ?? prev.requestHeaders }
+      : record;
+    let stored: NetworkRecord = merged;
     if (body) {
       const bodyRef = record.bodyRef ?? this.mintBodyRef();
       this.storeBody(bodyRef, body);
-      stored = { ...record, bodyRef, bodyBytes: body.byteLength };
+      stored = { ...merged, bodyRef, bodyBytes: body.byteLength };
     }
     this.requests.set(
       record.pageId,

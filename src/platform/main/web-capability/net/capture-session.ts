@@ -98,6 +98,8 @@ export class CaptureSession {
    * ⭐ 捕到第一条就记一次,之后不再重复(免得刷屏)。
    */
   private firstCaptureReported = false;
+  /** ⭐ GraphQL 请求头回查只报一次 —— 刷屏没意义 */
+  private headersReported = false;
 
   /**
    * ⭐⭐ 已经算过 `noBody` 的 requestId。
@@ -250,6 +252,26 @@ export class CaptureSession {
       /** ⭐ `onSendHeaders` 早就记进 bus 了,这里只是往上送 */
       requestHeaders: record?.requestHeaders,
     });
+    /**
+     * ⭐⭐⭐ **请求头到底有没有跟过来** —— 2026-10-06,403 查了三轮。
+     *
+     * ⚠️⚠️ 游标翻页要原样重发 X 的请求头,少了就是 403。
+     * 而链路是:`onSendHeaders` → bus 记录 → 这里按 requestId 回查 → 往上送。
+     * 中间任何一环断了,**表现都是「种子带了 0 个请求头」** ——
+     * 而我已经为此查了三轮、改了两处都没中。
+     * ⭐ 在**取到的这一刻**报一次:有就是有,没有就说明回查没命中,
+     * 两种情况当场分得开,不用再猜。
+     * ⚠️ 只报**键数**不报值 —— 凭据不进日志。
+     */
+    if (!this.headersReported && /\/i\/api\/graphql\//.test(record?.url ?? '')) {
+      this.headersReported = true;
+      const n = Object.keys(record?.requestHeaders ?? {}).length;
+      console.log(
+        `[web.net] GraphQL 请求头回查:${n > 0 ? `✓ ${n} 个` : '✗ 一个都没有'}`
+        + `（requestId=${event.requestId}，记录${record ? '找到了' : '**没找到**'}）`,
+      );
+    }
+
     /**
      * ⭐ 首次捕到就报一次 —— 让「链路活了」这个事实**离开内存**。
      * ⚠️ 放在 push 之后:报的是真存下来的那一条。
