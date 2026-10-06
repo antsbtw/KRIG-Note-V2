@@ -305,6 +305,21 @@ async function pageUntilDone(
   /** ⭐ 每轮的账 —— 见 `rounds_detail` 的注释 */
   const roundsDetail: Array<{ round: number; cursor: string; fresh: number; responses: number }> = [];
 
+  /**
+   * ⭐⭐⭐ **X 说「到头了」** —— `TimelineTerminateTimeline`。
+   *
+   * ⚠️⚠️ 真机 2026-10-06:第 3 轮 X 回了它、外加游标 `0|...`(A 段为 0 = 边界),
+   * **明说没有了**;可翻页又空转了 7 轮,游标 A 段冻住、只有 B 段(时间戳)
+   * 匀速递增 —— 拿着同一个位置反复问「下一页呢」。
+   * ⭐ 解析器**早就解出了 `terminated`**,而这里从来没读过它:
+   * 那条检查原本在 `x-user-run` 里,合并成单入口时**丢了**。
+   * ⚠️ `feedback-grep-shared-edge-before-delete` 的反面:删文件前我 grep 的是
+   * 「谁 import 它」,而不是「**它做了什么别处没有的事**」。
+   *
+   * ⚠️ 注意:X 翻到底**仍然附带游标**,所以光看游标永远判不出来。
+   */
+  let terminated = dispatchPayloads(rep.items).users.some((a) => a.terminated);
+
   const seenCursors = new Set<string>();
   /**
    * ⭐ 已经见过的**东西** —— 判「这一轮有没有收到新的」靠它。
@@ -322,6 +337,14 @@ async function pageUntilDone(
     if (deps.cancelled?.()) {
       stopReason = '人点了停止';
       say(`已停止（翻了 ${round} 轮）`); break;
+    }
+    /**
+     * ⭐⭐⭐ X 明说到头了就停 —— 别再拿同一个位置空转。
+     * ⚠️ 放在游标检查**之前**:它比游标可信(游标到底了还给)。
+     */
+    if (terminated) {
+      stopReason = 'X 说名单到头了（TimelineTerminateTimeline）';
+      say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
     }
     /**
      * ⭐ 游标取**最新那一份账**里的,不是第一页的。
@@ -425,6 +448,8 @@ async function pageUntilDone(
     const unseen = ucs.filter((c) => !seenCursors.has(c));
     const uc = unseen.length > 0 ? unseen[unseen.length - 1] : ucs[ucs.length - 1];
     if (uc !== undefined) lastUserCursor = uc;
+    /** ⭐ X 这一轮说到头了 → 下一轮开头就停 */
+    if (dispatchPayloads(one.items).users.some((a) => a.terminated)) terminated = true;
     const fresh = seenKeys.size - before;
     /** ⭐⭐ 每轮落一笔账 —— 下一跑不用再问人、也不用猜 */
     roundsDetail.push({ round, cursor: cursorBrief, fresh, responses: one.items.length });

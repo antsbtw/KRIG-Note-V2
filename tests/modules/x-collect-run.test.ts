@@ -1262,6 +1262,60 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.paging?.rounds, '应该能一直翻下去').toBeGreaterThan(3);
   });
 
+  it('⭐⭐⭐ X 说「到头了」就停 —— TimelineTerminateTimeline', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:第 3 轮 X 回了 `TimelineTerminateTimeline: Bottom`
+     * 外加游标 `0|...`(A 段为 0 = 边界),**明说没有了**;
+     * 可翻页又空转了 7 轮(4-10 轮全部零新增),
+     * 游标 A 段冻住、只有 B 段(时间戳)在匀速递增 ——
+     * 等于拿着同一个位置反复问「下一页呢」。
+     *
+     * ⭐⭐ 解析器**早就解出了 `terminated`**,而 `x-collect-run` 从来没读过它
+     * ——那条检查原本在 x-user-run 里,合并成单入口时**丢了**。
+     * ⚠️ 这正是 `feedback-grep-shared-edge-before-delete` 的反面教训:
+     * 删文件前我 grep 的是「谁 import 它」,而不是「它做了什么别处没有的事」。
+     */
+    const page = (ids: number[], cursor: string, terminated = false): string => {
+      const instructions: unknown[] = [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }];
+      if (terminated) {
+        instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      }
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        /** ⭐ 第 3 次 harvest 起 X 就说到头了,但**仍然附带游标** */
+        const done = n >= 3;
+        return { items: [{ url: FOLLOWERS, text: page([n], `c${n}`, done) }] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason, 'X 明说到头了就该停,别再空转')
+      .toContain('到头');
+    /** ⭐ 停在它说的那一轮附近,不是一路空转到上限 */
+    expect(r.paging?.rounds).toBeLessThanOrEqual(3);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
