@@ -208,6 +208,31 @@ describe('一个入口:采到人就存', () => {
     }
   });
 
+  it('⭐⭐⭐ 每一跑都要落账 —— 不许只在有推文时写', () => {
+    /**
+     * ⚠️⚠️ 用户 2026-10-06:「这两个你没有办法自行读取吗?」
+     * 不能,因为滚动停因/每轮游标只渲染在面板上。
+     * ⭐ 原先的 `exportAuditText` 裹在 `if (run.audits.length > 0)` 里 ——
+     * **人流页一条推文都没有,于是什么都不写**,我只能回头要截图。
+     * ⚠️ 判据:写账这段**不许**被「有没有推文」包住。
+     */
+    const i = CONSOLE.indexOf("name: 'x-run'");
+    expect(i, '面板没有写 run 账的调用').toBeGreaterThan(-1);
+    const before = CONSOLE.slice(Math.max(0, i - 1200), i);
+    expect(before, '落账不许裹在「有推文」的条件里')
+      .not.toMatch(/if \(run\.audits\.length > 0\)[\s\S]*$/);
+    expect(before, '要用 buildRunReport 产出内容').toContain('buildRunReport');
+  });
+
+  it('⭐⭐⭐ 落账的内容必须含「滚动停因」和「每轮游标」两样', () => {
+    /** ⭐ 这两样正是用户问的那两个问题 —— 少一样就还得问人 */
+    const REPORT = read('src/modules/x/x-run-report.ts');
+    expect(REPORT).toMatch(/停因：\$\{h\.stopReason/);
+    expect(REPORT, '每轮游标要逐行列出').toMatch(/rounds_detail\) \{/);
+    expect(REPORT, '「撞上限」要单独下结论').toContain('不是滚到底');
+    expect(REPORT, '零新增时要区分两种病因').toContain('请求形状');
+  });
+
   it('⭐⭐ 翻页种子认推文也认用户请求', () => {
     /**
      * ⚠️ 原先只认推文请求当种子,于是 followers 页「有游标、X 说还有」

@@ -51,6 +51,7 @@ import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect, type RunResult } from './x-collect-run';
+import { buildRunReport } from './x-run-report';
 import { recipeToQuery } from './x-recipe-query';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
@@ -1022,6 +1023,34 @@ export function XConsole(
                        *
                        * ⚠️ 只落**第一条**用户载荷:够看结构了,不占地方。
                        */
+                      /**
+                       * ⭐⭐⭐ **每一跑都落一份账** —— 2026-10-06,用户:
+                       * 「这两个你没有办法自行读取吗?」
+                       *
+                       * ⚠️⚠️ 不能:滚动停因与每轮游标**只渲染在面板上**,关掉就没,
+                       * 于是每次核对我都得回头要截图。这正是
+                       * `feedback-maintainability-over-feature-completion` 的原病
+                       * ——用户当时点破的是「**你不记录如何做验证**」。
+                       * ⚠️ 我上一轮只落了原始载荷(解决「字段在哪」),
+                       * 却没落**结论性的那几行**(解决「为什么停在 200 人」)。
+                       *
+                       * ⭐ 无条件写:**成功路径也要留痕**,不只失败时写。
+                       */
+                      {
+                        const text = buildRunReport({
+                          run,
+                          page: origin?.name ?? identified?.name ?? '',
+                          wantPages: Number(pagesWanted) || 10,
+                          at: new Date().toISOString(),
+                        });
+                        const rr = await window.electronAPI!.webDomInvoke({
+                          op: 'writeAudit', pageRef: { wcId: wcId! }, text, name: 'x-run',
+                        });
+                        if (rr.status === 'ok') {
+                          setAuditFile((rr.value as { file: string }).file);
+                        }
+                      }
+
                       if (run.users.length > 0 && run.harvest) {
                         const raw = run.harvest.items.find((it) => /Followers|Following/.test(it.url));
                         if (raw) {
