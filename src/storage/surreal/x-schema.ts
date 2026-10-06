@@ -1684,6 +1684,52 @@ DEFINE INDEX IF NOT EXISTS idx_author_rest_id ON x_author FIELDS rest_id;
 DEFINE FIELD IF NOT EXISTS fetched_at ON x_author TYPE option<datetime>;
 `;
 
+/**
+ * ⭐⭐⭐ 1.2.17 —— 人的字段补齐(2026-10-05,**拿真载荷定的**)
+ *
+ * 用户:「人有哪些数据?**要先观察清楚**,不要数据都采不齐呢。」
+ *
+ * ⚠️⚠️ 真机 `Following` 载荷实测(50 个用户的样本):
+ * X 已经把字段全搬进带类型的子对象,**`legacy` 这个键根本不存在了**。
+ * 而解析器原先只读 `legacy.*` → 粉丝数/关注数/地点/注册时间
+ * **整列空采了三跑**(0/221),覆盖率一直算着却没人报警。
+ *
+ * ⭐ 这次补的是**真载荷里确实有、而库里没地方放**的三样:
+ * 　`website.url` → website          (实测 5/50 有 —— 稀疏是正常的)
+ * 　`verification.verified` → is_verified(⚠️ 与蓝V**不是一回事**)
+ * 　`privacy.protected` → is_protected (受保护的号采不到他的推)
+ * ⚠️ `tweet_count` / `media_count` **1.2.9 就有了**,只是没人往里写 ——
+ * 开工前查了 schema 才没白建一遍。
+ */
+const X_SCHEMA_1_2_17 = `
+-- 个人网站(实测 5/50 有值,稀疏正常)
+DEFINE FIELD IF NOT EXISTS website      ON x_author TYPE option<string>;
+-- ⚠️ 老的认证标,与 is_blue_verified(买的蓝V)不是一回事
+DEFINE FIELD IF NOT EXISTS is_verified  ON x_author TYPE option<bool>;
+-- 受保护的号:采不到他的推,业务要分得出来
+DEFINE FIELD IF NOT EXISTS is_protected ON x_author TYPE option<bool>;
+`;
+
+export async function x_migration_1_2_17(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_17);
+
+  /** ⭐⭐ 问库要答案 —— 整段 DDL 可能被拒收而「看着跑了」 */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['website', 'is_verified', 'is_protected']) {
+    if (!(f in fields)) {
+      throw new Error(`[x-schema 1.2.17] ${f} 没加上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.17] x_author website / is_verified / is_protected 已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.17', appliedAt = $now,
+      description = '人的字段补齐(真载荷实测):website / is_verified / is_protected'`,
+    { rid: new RecordId('schema_version', '1.2.17'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_16(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_16);
 

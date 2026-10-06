@@ -48,8 +48,18 @@ export type XUserRecord = {
   /** 他关注了多少人(X 原名 `friends_count`) */
   readonly followingCount?: number;
   readonly statusesCount?: number;
+  /** ⭐ 发过多少条带媒体的推(`tweet_counts.media_tweets`,新结构才有) */
+  readonly mediaCount?: number;
+  /** ⚠️ 实测 16/50 有值 —— **零星缺失是正常的**,很多人不填 */
   readonly location: string;
+  /** ⚠️ 实测 5/50 有值 —— 同上 */
+  readonly website?: string;
+  /** ⭐ 蓝V(买的) */
   readonly isBlueVerified?: boolean;
+  /** ⚠️ 与蓝V**不是一回事**:`verification.verified` 是老的认证标 */
+  readonly isVerified?: boolean;
+  /** ⭐ 受保护的号采不到他的推 —— 业务要分得出来 */
+  readonly isProtected?: boolean;
   /** ⭐ 用 X 的原词 —— 与 `TweetRecord` 一致 */
   readonly following?: boolean;
   readonly followedBy?: boolean;
@@ -160,6 +170,13 @@ export function auditUserPayload(text: string, seqFrom = 0): XUserAudit {
     const persp = isObj(node.relationship_perspectives) ? node.relationship_perspectives : undefined;
     const avatarObj = isObj(node.avatar) ? node.avatar : undefined;
     const bioObj = isObj(node.profile_bio) ? node.profile_bio : undefined;
+    /** ⭐ 2026-10-05 真载荷里的新位置 —— 路径都是实测抄下来的,不是猜的 */
+    const relCounts = isObj(node.relationship_counts) ? node.relationship_counts : undefined;
+    const tweetCounts = isObj(node.tweet_counts) ? node.tweet_counts : undefined;
+    const locObj = isObj(node.location) ? node.location : undefined;
+    const siteObj = isObj(node.website) ? node.website : undefined;
+    const verifyObj = isObj(node.verification) ? node.verification : undefined;
+    const privacyObj = isObj(node.privacy) ? node.privacy : undefined;
 
     return {
       handle: str(core.screen_name) || str(legacy.screen_name),
@@ -167,20 +184,41 @@ export function auditUserPayload(text: string, seqFrom = 0): XUserAudit {
       name: str(core.name) || str(legacy.name),
       bio: str(bioObj?.description) || str(legacy.description),
       avatar: str(avatarObj?.image_url) || str(legacy.profile_image_url_https),
-      /** ⚠️ 没带就 undefined —— 记忆记着旧实现 36 行里**粉丝数全空** */
-      followersCount: num(legacy.followers_count),
-      followingCount: num(legacy.friends_count),
-      statusesCount: num(legacy.statuses_count),
-      location: str(legacy.location),
+      /**
+       * ⭐⭐⭐ **新结构优先,`legacy` 兜底** —— 2026-10-05 拿真载荷定的。
+       *
+       * ⚠️⚠️ 真机 `Following` 载荷里**根本没有 `legacy` 这个键**:
+       * X 已经把字段全搬进带类型的子对象。而这四个字段原先**只读 legacy**,
+       * 于是整列空(粉丝数/关注数/地点/注册时间 0/221,采了三跑)。
+       * ⭐ handle/name/bio/avatar 之所以一直有,正是因为它们**早就两条路都读**。
+       *
+       * ⚠️ `legacy` 仍保留作兜底:别的端点(推文里的作者)可能还是旧形状,
+       * 删掉它等于拿「这一个端点的观察」去断言全站 ——
+       * 而 `feedback-check-sample-contains-phenomenon` 说的就是这个。
+       */
+      followersCount: num(relCounts?.followers) ?? num(legacy.followers_count),
+      followingCount: num(relCounts?.following) ?? num(legacy.friends_count),
+      statusesCount: num(tweetCounts?.tweets) ?? num(legacy.statuses_count),
+      /** ⭐ 实测 16/50 有 —— **零星缺失是正常的**(很多人不填地点) */
+      location: str(locObj?.location) || str(legacy.location),
+      /** ⭐ 实测 5/50 有 —— 同上,不是 bug */
+      website: str(siteObj?.url),
+      /** ⭐ 媒体推文数 —— 新结构才有,旧的没有对应字段 */
+      mediaCount: num(tweetCounts?.media_tweets),
+      /** ⚠️ `is_blue_verified`(蓝V,买的)与 `verification.verified`(认证)**不是一回事** */
       isBlueVerified: typeof node.is_blue_verified === 'boolean'
         ? node.is_blue_verified : undefined,
+      isVerified: typeof verifyObj?.verified === 'boolean' ? verifyObj.verified : undefined,
+      /** ⭐ 受保护的号:采不到他的推,业务要分得出来 */
+      isProtected: typeof privacyObj?.protected === 'boolean' ? privacyObj.protected : undefined,
       following: typeof persp?.following === 'boolean'
         ? persp.following
         : (typeof legacy.following === 'boolean' ? legacy.following : undefined),
       followedBy: typeof persp?.followed_by === 'boolean'
         ? persp.followed_by
         : (typeof legacy.followed_by === 'boolean' ? legacy.followed_by : undefined),
-      createdAt: typeof legacy.created_at === 'string' ? legacy.created_at : undefined,
+      createdAt: str(core.created_at) || (typeof legacy.created_at === 'string'
+        ? legacy.created_at : undefined) || undefined,
       /** ⭐ 名次接着上一页数 —— 跨页连续才能做差集 */
       seq: seqFrom + i,
     };
@@ -254,7 +292,11 @@ export function auditUserPayload(text: string, seqFrom = 0): XUserAudit {
       /** ⭐ 这几项**本就不该 100%** —— 量它们是为了知道「X 到底给不给」 */
       粉丝数: pct((p) => p.followersCount !== undefined),
       关注数: pct((p) => p.followingCount !== undefined),
+      推文数: pct((p) => p.statusesCount !== undefined),
+      注册时间: pct((p) => p.createdAt !== undefined),
+      /** ⚠️ 这两项**实测本就稀疏**(16/50、5/50)—— 低不代表坏 */
       位置: pct((p) => p.location !== ''),
+      网站: pct((p) => p.website !== undefined && p.website !== ''),
       关系: pct((p) => p.following !== undefined || p.followedBy !== undefined),
     },
     problems,

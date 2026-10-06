@@ -284,3 +284,67 @@ describe('采不齐要喊,不要默默算个覆盖率', () => {
     expect(r.problems.filter((p) => p.includes('整列空'))).toHaveLength(0);
   });
 });
+
+/**
+ * ⭐⭐⭐ **拿真载荷钉** —— 2026-10-05 从真机 `Following` 响应取下来的样本
+ * (`tests/fixtures/x-user-following-real.json`,只换了 handle/名字/头像,
+ * **结构一个键都没动**)。
+ *
+ * ⚠️⚠️ 为什么非要真样本:我手写的假样本一直在造 `legacy.followers_count`,
+ * 而真载荷里**根本没有 `legacy` 这个键** —— X 已经把字段全搬进带类型的
+ * 子对象。于是粉丝数/关注数/地点/注册时间**整列空采了三跑**,
+ * 测试却一路全绿:**我的样本里有那个字段,真实数据里没有**。
+ * ⭐ 正是 `feedback-check-sample-contains-phenomenon` 的反向版:
+ * 别拿**含有某现象的**假样本,去论证真实数据里也有。
+ */
+describe('真载荷:X 现在到底给哪些字段', () => {
+  const real = readFileSync(
+    join(process.cwd(), 'tests/fixtures/x-user-following-real.json'), 'utf8',
+  );
+
+  it('⭐⭐⭐ legacy 已经不存在了 —— 样本自己作证', () => {
+    /** ⚠️ 这条钉的是**事实本身**:哪天 X 把 legacy 加回来,它会红,那是好事 */
+    const d = JSON.parse(real) as Record<string, unknown>;
+    const s = JSON.stringify(d);
+    expect(s).not.toContain('"legacy"');
+    expect(s, '新结构的标志').toContain('relationship_counts');
+  });
+
+  it('⭐⭐⭐ 四个「曾经整列空」的字段,现在都解得出来', () => {
+    const r = auditUserPayload(real);
+    expect(r.users).toBe(2);
+    const u = r.items[0];
+    expect(u.followersCount, '粉丝数 ← relationship_counts.followers').toBe(1874);
+    expect(u.followingCount, '关注数 ← relationship_counts.following').toBe(2096);
+    expect(u.statusesCount, '推文数 ← tweet_counts.tweets').toBeGreaterThan(0);
+    expect(u.createdAt, '注册时间 ← core.created_at').toBeTruthy();
+  });
+
+  it('⭐⭐ 新发现的字段也收下 —— 媒体数/网站/认证/受保护', () => {
+    const r = auditUserPayload(real);
+    const u = r.items[0];
+    expect(u.mediaCount, '媒体推文数 ← tweet_counts.media_tweets').toBeGreaterThanOrEqual(0);
+    expect(typeof u.isVerified, '认证 ← verification.verified(与蓝V不是一回事)')
+      .toBe('boolean');
+    expect(typeof u.isProtected, '受保护 ← privacy.protected').toBe('boolean');
+  });
+
+  it('⭐⭐⭐ 真载荷下不许再报「整列空」', () => {
+    /**
+     * ⭐ 这条把上面那套报警和真实数据接在一起:
+     * 报警该在**字段路径错**时响,不该在正常数据上响。
+     */
+    const r = auditUserPayload(real);
+    const joined = r.problems.join(' ');
+    expect(joined).not.toContain('粉丝数');
+    expect(joined).not.toContain('关注数');
+    expect(joined).not.toContain('注册时间');
+  });
+
+  it('⭐⭐ 关系方向两边都解得出', () => {
+    const r = auditUserPayload(real);
+    const u = r.items[0];
+    expect(typeof u.following, '我关注他').toBe('boolean');
+    expect(typeof u.followedBy, '他关注我').toBe('boolean');
+  });
+});

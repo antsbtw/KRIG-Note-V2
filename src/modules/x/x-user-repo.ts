@@ -49,8 +49,9 @@ import type { XUserRecord } from './x-user-audit';
  */
 export const USER_COLLECTED_FIELDS = [
   'handle', 'rest_id', 'display_name', 'avatar', 'bio', 'location',
-  'followers_count', 'following_count', 'tweet_count',
-  'is_blue_verified', 'i_follow', 'follows_me',
+  'followers_count', 'following_count', 'tweet_count', 'media_count',
+  'website', 'is_blue_verified', 'is_verified', 'is_protected',
+  'i_follow', 'follows_me',
   'account_created_at', 'list_source', 'list_seq', 'list_seen_at',
   'list_memberships', 'fetched_at',
 ] as const;
@@ -175,7 +176,12 @@ export async function saveUsers(
         followers_count: r.followersCount,
         following_count: r.followingCount,
         tweet_count: r.statusesCount,
+        media_count: r.mediaCount,
+        website: opt(r.website),
         is_blue_verified: r.isBlueVerified,
+        /** ⚠️ 与蓝V**不是一回事** —— 两个都存,别合并 */
+        is_verified: r.isVerified,
+        is_protected: r.isProtected,
         /**
          * ⭐ X 的原词映射到表里的旧名:
          * `following`(我关注他)→ `i_follow`
@@ -214,8 +220,10 @@ export async function saveUsers(
            avatar = $avatar, bio = $bio, location = $location,
            followers_count = $followers_count,
            following_count = $following_count,
-           tweet_count = $tweet_count,
+           tweet_count = $tweet_count, media_count = $media_count,
+           website = $website,
            is_blue_verified = $is_blue_verified,
+           is_verified = $is_verified, is_protected = $is_protected,
            i_follow = $i_follow, follows_me = $follows_me,
            -- datetime 字段必须 cast:直传 ISO 字符串会被库拒收
            -- (option 的要先判 NONE,否则 type::datetime(NONE) 自己就抛)
