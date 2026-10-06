@@ -1007,6 +1007,36 @@ export function XConsole(
                         }
                       }
 
+                      /**
+                       * ⭐⭐⭐ **采到人时,把原始载荷落一份** —— 2026-10-05。
+                       *
+                       * 用户:「人有哪些数据?**要先观察清楚**,不要数据都采不齐呢。」
+                       * ⚠️⚠️ 库里实测:bio 159/171 有,而**粉丝数/关注数/地点/注册时间
+                       * 全是 0/171** —— 四个字段整列空。解析器读的是 `legacy.*`,
+                       * 而 handle/name/bio/avatar 之所以有,是因为它们**另有一条
+                       * 新结构的路**(core./profile_bio./avatar.)。
+                       * ⭐ 所以多半是 X 把这些字段挪走了,**但我不该猜** ——
+                       * 落一份原始载荷下来,照着真结构改。
+                       * (`feedback-dont-guess-look-at-real-data`:
+                       * 　别靠读代码脑补,拿真实数据定根因。)
+                       *
+                       * ⚠️ 只落**第一条**用户载荷:够看结构了,不占地方。
+                       */
+                      if (run.users.length > 0 && run.harvest) {
+                        const raw = run.harvest.items.find((it) => /Followers|Following/.test(it.url));
+                        if (raw) {
+                          const rw = await window.electronAPI!.webDomInvoke({
+                            op: 'writeAudit',
+                            pageRef: { wcId: wcId! },
+                            text: `URL: ${raw.url}\n\n${raw.text}`,
+                            name: 'x-user-payload',
+                          });
+                          if (rw.status === 'ok') {
+                            setStep(`原始载荷已落盘：${(rw.value as { file: string }).file}`);
+                          }
+                        }
+                      }
+
                       if (run.audits.length > 0) {
                         const text = exportAuditText(run.audits, {
                           pages: run.audits.length,

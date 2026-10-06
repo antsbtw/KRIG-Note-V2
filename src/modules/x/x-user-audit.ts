@@ -216,6 +216,29 @@ export function auditUserPayload(text: string, seqFrom = 0): XUserAudit {
   const pct = (f: (p: XUserRecord) => boolean): number =>
     (items.length === 0 ? 0 : Math.round((items.filter(f).length / items.length) * 100));
 
+  /**
+   * ⭐⭐⭐ **整列为 0 要喊出来** —— 2026-10-05,用户:
+   * 「人有哪些数据?**要先观察清楚**,不要数据都采不齐呢。」
+   *
+   * ⚠️⚠️ 真机实测:`bio` 159/171 有,而**粉丝数/关注数/地点/注册时间
+   * 全是 0/171**。覆盖率一直算着、也显示着,可**没有一句话说「这不正常」** ——
+   * 于是四个字段整列空采了两跑没人发现。
+   * ⭐ 「某些人没有」是正常的(有人就是不填地点);
+   * **「一个人都没有」几乎一定是取错了路径**,这两件事必须分开报。
+   * ⚠️ 这正是 `project-x-article-body-lost` 那条的反面:
+   * 「不量的字段永远 100%」—— 而量了却不报警,一样等于没量。
+   */
+  const allMissing = (label: string, f: (p: XUserRecord) => boolean): void => {
+    if (items.length > 0 && items.every((p) => !f(p))) {
+      problems.push(`**${label} 一个都没解出来**(0/${items.length})—— `
+        + '「有人没填」会是零星缺失,**整列空几乎一定是字段路径变了**');
+    }
+  };
+  allMissing('粉丝数', (p) => p.followersCount !== undefined);
+  allMissing('关注数', (p) => p.followingCount !== undefined);
+  allMissing('地点', (p) => p.location !== '');
+  allMissing('注册时间', (p) => p.createdAt !== undefined);
+
   return {
     users: items.length,
     items,

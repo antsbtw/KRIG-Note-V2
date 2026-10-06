@@ -217,3 +217,70 @@ describe('⭐⭐⭐ 用 X 的词,不自造', () => {
     ).toContain('x_author');
   });
 });
+
+/**
+ * ⭐⭐⭐ **整列为 0 要喊出来** —— 用户 2026-10-05:
+ * 「人有哪些数据?**要先观察清楚**,不要数据都采不齐呢。」
+ */
+describe('采不齐要喊,不要默默算个覆盖率', () => {
+  /** ⭐ 只有 core/profile_bio 的新结构 —— 真机现在就是这样 */
+  const newShape = (i: number): unknown => ({
+    entryId: `user-${i}`,
+    content: { itemContent: { user_results: { result: {
+      rest_id: `${900 + i}`,
+      core: { screen_name: `user${i}`, name: `名字${i}` },
+      profile_bio: { description: `bio ${i}` },
+      avatar: { image_url: `https://pbs/av${i}.jpg` },
+      /** ⚠️ legacy 在,但**不带**计数/地点/注册时间 */
+      legacy: {},
+    } } } },
+  });
+  const pack = (entries: unknown[]): string => JSON.stringify({
+    data: { user: { result: { timeline: { timeline: {
+      instructions: [{ type: 'TimelineAddEntries', entries }],
+    } } } } },
+  });
+
+  it('⭐⭐⭐ 粉丝数整列空 → problems 里必须有话', () => {
+    const r = auditUserPayload(pack([newShape(1), newShape(2), newShape(3)]));
+    expect(r.users).toBe(3);
+    /** ⭐ 人是解出来了的 —— 不是「解析失败」,是「字段缺了」 */
+    expect(r.items[0].handle).toBe('user1');
+    const joined = r.problems.join(' ');
+    expect(joined, '粉丝数 0/3 却一句话都不说 = 量了等于没量').toContain('粉丝数');
+    expect(joined).toContain('地点');
+    expect(joined).toContain('注册时间');
+  });
+
+  it('⭐⭐⭐ 零星缺失**不许**报警 —— 「有人没填」是正常的', () => {
+    /**
+     * ⚠️ 判据太宽会被无视,那是另一种假绿
+     * (`feedback-guard-caught-what-tsc-cannot`:不误伤样本也要钉)。
+     */
+    const withCounts = (i: number): unknown => ({
+      entryId: `user-${i}`,
+      content: { itemContent: { user_results: { result: {
+        rest_id: `${900 + i}`,
+        core: { screen_name: `user${i}`, name: `名字${i}` },
+        legacy: {
+          followers_count: 10 + i, friends_count: 5, statuses_count: 7,
+          created_at: 'Fri Oct 03 10:00:00 +0000 2026',
+          /** ⭐ 只有第 1 个人填了地点 —— 这是**正常**的零星缺失 */
+          location: i === 1 ? '北京' : '',
+        },
+      } } } },
+    });
+    const r = auditUserPayload(pack([withCounts(1), withCounts(2), withCounts(3)]));
+    const joined = r.problems.join(' ');
+    expect(joined, '有一个人填了地点就不该报「整列空」').not.toContain('地点');
+    expect(joined).not.toContain('粉丝数');
+  });
+
+  it('⭐⭐ 一个人都没解出来时不该再刷一堆「整列空」', () => {
+    /** ⚠️ 那只会把真正的问题(载荷不对)淹掉 */
+    const r = auditUserPayload(pack([]));
+    expect(r.users).toBe(0);
+    expect(r.problems.join(' ')).toContain('一个人都没解出来');
+    expect(r.problems.filter((p) => p.includes('整列空'))).toHaveLength(0);
+  });
+});
