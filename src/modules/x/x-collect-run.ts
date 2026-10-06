@@ -399,7 +399,21 @@ async function pageUntilDone(
    *
    * ⚠️ 注意:X 翻到底**仍然附带游标**,所以光看游标永远判不出来。
    */
-  let terminated = dispatchPayloads(rep.items).users.some((a) => a.terminated);
+  /**
+   * ⭐⭐⭐ **「到头了」要按「我们要用的那一页」判** —— 2026-10-06 真机。
+   *
+   * ⚠️⚠️ 原先用 `.some()` 扫**种子里所有**用户载荷:种子一趟会收到好几条
+   * (真机截图里两条 `BlueVerifiedFollowers`),其中**最后一页**带 terminate
+   * 是正常的,而第一页的游标还活着 —— 一条「到头了」就把整轮**毒死在第 0 轮**,
+   * 停因还理直气壮写着「X 说名单到头了」。
+   *
+   * ⭐ 正确判据:**带着我们要用的那个游标的那一页**说没说到头。
+   * 种子里**有游标**就说明还能翻;没有任何游标才是真到头。
+   * ⚠️ 翻页开始后每一轮只看**那一轮回来的那一页**(见循环末尾)。
+   */
+  const seedUsers = dispatchPayloads(rep.items).users;
+  let terminated = seedUsers.length > 0
+    && seedUsers.every((a) => a.terminated || a.cursor === undefined || a.cursor === '');
 
   const seenCursors = new Set<string>();
   /**
@@ -551,8 +565,17 @@ async function pageUntilDone(
     const unseen = ucs.filter((c) => !seenCursors.has(c));
     const uc = unseen.length > 0 ? unseen[unseen.length - 1] : ucs[ucs.length - 1];
     if (uc !== undefined) lastUserCursor = uc;
-    /** ⭐ X 这一轮说到头了 → 下一轮开头就停 */
-    if (dispatchPayloads(one.items).users.some((a) => a.terminated)) terminated = true;
+    /**
+     * ⭐ X 这一轮说到头了 → 下一轮开头就停。
+     * ⚠️ 判据与种子那里一致:**这一轮回来的页里再没有活游标**才算到头。
+     * 走兜底(harvest)时一轮可能收到好几条,其中一条带 terminate 很正常
+     * (那是列表末页),不能因此就把整轮判死 —— 真机已经栽过一次。
+     */
+    const roundUsers = dispatchPayloads(one.items).users;
+    if (roundUsers.length > 0
+      && roundUsers.every((a) => a.terminated || a.cursor === undefined || a.cursor === '')) {
+      terminated = true;
+    }
     const fresh = seenKeys.size - before;
     /** ⭐⭐ 每轮落一笔账 —— 下一跑不用再问人、也不用猜 */
     roundsDetail.push({

@@ -1757,6 +1757,104 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(seedWant, '人填 100 页不该让滚动去滚 100 页').toBeLessThanOrEqual(3);
   });
 
+  it('⭐⭐⭐ 种子里**有一页**说到头,不该让翻页一轮都不跑', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:种子滚动只花 2.7s(好事),但翻页 **0 轮**,
+     * 停因「X 说名单到头了」—— 而列表明明还长得很。
+     *
+     * 真因:`terminated` 用 `.some()` 扫**种子里所有**用户载荷。
+     * 种子一趟会收到好几条(截图里两条 BlueVerifiedFollowers),
+     * 其中**最后一页**带 terminate 是正常的,而第一页的游标还活着 ——
+     * 一条「到头了」就把整轮毒死在第 0 轮。
+     *
+     * ⭐ 判据该是「**我们接下来要用的那个游标**所在的那一页到头了没有」,
+     * 不是「种子里有没有任何一页到头」。
+     */
+    const page = (ids: number[], cursor: string | null, terminated: boolean): string => {
+      const entries: unknown[] = ids.map((i) => ({
+        entryId: `user-${i}`,
+        content: { itemContent: { user_results: { result: {
+          rest_id: `${900 + i}`,
+          core: { screen_name: `user${i}`, name: `名字${i}` },
+          legacy: {},
+        } } } },
+      }));
+      if (cursor) {
+        entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+      }
+      const instructions: unknown[] = [{ type: 'TimelineAddEntries', entries }];
+      if (terminated) instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 种子一趟收到两条:一条还有游标,一条是别的端点给的「到头了」 */
+        return { items: [
+          { url: FOLLOWERS, text: page([1, 2], 'c-alive', false) },
+          { url: FOLLOWERS, text: page([3], null, true) },
+        ] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10, n * 10 + 1], `c${n}`, false) };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '种子里有一页到头,不该让翻页一轮都不跑')
+      .toBeGreaterThan(0);
+    expect(r.users.flatMap((a) => a.items).length).toBeGreaterThan(3);
+  });
+
+  it('⭐⭐⭐ 翻页某一轮收到多页时,也要「全都到头」才停', async () => {
+    /**
+     * ⚠️ 与种子那条同源:走兜底(harvest)时一轮可能收到好几条,
+     * 其中一条带 terminate 很正常(列表末页),
+     * 不能因此把整轮判死 —— 否则第 1 轮就停。
+     * ⭐ 注入验证逼出来的:只改种子那一处,这条路**没有测试盖住**。
+     */
+    const page = (ids: number[], cursor: string | null, terminated: boolean): string => {
+      const entries: unknown[] = ids.map((i) => ({
+        entryId: `user-${i}`,
+        content: { itemContent: { user_results: { result: {
+          rest_id: `${900 + i}`,
+          core: { screen_name: `user${i}`, name: `名字${i}` },
+          legacy: {},
+        } } } },
+      }));
+      if (cursor) {
+        entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+      }
+      const instructions: unknown[] = [{ type: 'TimelineAddEntries', entries }];
+      if (terminated) instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        if (n === 1) return { items: [{ url: FOLLOWERS, text: page([1], 'c-alive', false) }] };
+        /** ⭐ 翻页回来的这一轮:一条还有游标,一条说到头 */
+        return { items: [
+          { url: FOLLOWERS, text: page([n * 10], `c${n}`, false) },
+          { url: FOLLOWERS, text: page([n * 10 + 1], null, true) },
+        ] };
+      },
+      /** ⚠️ 不回 body —— 逼它走兜底那条路 */
+      async runScript() { return { ok: true, status: 200, bytes: 10 }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '一轮里有一页到头,不该第 1 轮就停')
+      .toBeGreaterThan(1);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
