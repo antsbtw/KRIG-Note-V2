@@ -1111,6 +1111,58 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(seen[0].empty, '有新人就不该算空轮').toBe(0);
   });
 
+  it('⭐⭐⭐ 翻页回来的是同一批人 → 不许重复计数、不许重编名次', async () => {
+    /**
+     * ⚠️⚠️ **真机 2026-10-05 的数据损坏**(verified_followers,面板报
+     * 「解出 420 人·入库 新 40·更新 380」而库里**只有 40 行**):
+     * 翻页 10 轮每轮都回同一批 20 人(面板自己写着「新采到 0 条」),
+     * 而 `takeUsers` **照单全收**、每轮重新编号 ——
+     * 于是同一个人被编了 10 个不同的 seq,
+     * 最后一轮的号覆盖掉前面所有,库里 `list_seq` 只剩 380…419。
+     *
+     * ⭐ 「420 人」里有 380 个是**同一批人的影子**。
+     * ⚠️ 这正是 `project-x-upsert-insert-ignore` 那一族:
+     * 数字好看、库里不对,而两者**都不报错**。
+     *
+     * ⭐ 判据:去重后人数 = 真实人数,且 seq 从 0 连续。
+     */
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 每一轮都回**同一批人**,但游标一直在变(真机就是这样) */
+        return { items: [{ url: FOLLOWERS, text: userPage([1, 2], `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    const all = r.users.flatMap((a) => a.items);
+    expect(all.map((u) => u.handle).sort(), '同一批人翻 N 轮,不该变成 N 倍')
+      .toEqual(['user1', 'user2']);
+    expect(all.map((u) => u.seq), '名次必须是 0 起的真实名次,不是最后一轮的号')
+      .toEqual([0, 1]);
+  });
+
+  it('⭐⭐ 全是老人的那一页不记账 —— 别拿条目数充数', async () => {
+    /**
+     * ⚠️ 去重之后,「这一页一个新人都没有」会留下一个 items 为空的壳。
+     * 堆在 `users` 里的话,「采到几页人」这个数还是会被虚高的条目数骗 ——
+     * 跟刚修掉的「420 人」是同一种假象,只是换了个计量单位。
+     */
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: userPage([1, 2], `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.users.length, '翻了很多轮但只有第一轮有新人 → 只该有 1 份账')
+      .toBe(1);
+    expect(r.users.every((a) => a.items.length > 0)).toBe(true);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },

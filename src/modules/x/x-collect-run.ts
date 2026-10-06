@@ -440,15 +440,36 @@ export async function runCollect(
    * 所以计数放在这一层,不在 `dispatchPayloads` 内部。
    */
   const userAudits: XUserAudit[] = [];
-  let userSeq = 0;
+  /**
+   * ⭐⭐⭐ **按 handle 去重** —— 同一个人只留一份,名次按**第一次见到**算。
+   *
+   * ⚠️⚠️ 真机 2026-10-05 的数据损坏就是缺这一步:
+   * verified_followers 翻 10 轮、每轮回**同一批 20 人**
+   * (面板自己写着「新采到 0 条」),而这里照单全收、每轮重新编号 →
+   * 面板报「解出 420 人·入库 新 40·更新 380」,库里**只有 40 行**,
+   * `list_seq` 只剩 380…419 —— **前 380 个号全是同一批人的影子**。
+   * ⭐ 「更新 380」听着像补全了 380 个人,其实是同 40 行被覆盖了 380 次。
+   *
+   * ⚠️ 名次必须是**第一次见到时**的号:`seq` 是增量采集的命根子
+   * (「新人全落在 seq 0-10」那条实测判据),按最后一次编号就全乱了。
+   */
+  const seenHandles = new Set<string>();
   const takeUsers = (one: RunHarvest): void => {
-    const d = dispatchPayloads(one.items);
-    for (const a of d.users) {
-      /** ⭐ 重新编号成全局连续的名次 */
-      userAudits.push(userSeq === 0 ? a : {
-        ...a, items: a.items.map((u, i) => ({ ...u, seq: userSeq + i })),
-      });
-      userSeq += a.items.length;
+    for (const a of dispatchPayloads(one.items).users) {
+      const fresh: typeof a.items[number][] = [];
+      for (const u of a.items) {
+        const k = u.handle.toLowerCase();
+        /** ⚠️ 空 handle 不进去凑数 —— 解析器已经在 problems 里报过它 */
+        if (k === '' || seenHandles.has(k)) continue;
+        seenHandles.add(k);
+        /** ⭐ 名次 = 已经收了多少人(第一次见到时定,之后不再变) */
+        fresh.push({ ...u, seq: seenHandles.size - 1 });
+      }
+      /**
+       * ⚠️ 这一页**一个新人都没有**就不记账 ——
+       * 否则 `users` 里会堆一串空壳,「解出几人」还是会被虚高的条目数骗。
+       */
+      if (fresh.length > 0) userAudits.push({ ...a, items: fresh });
     }
   };
   takeUsers(rep);
@@ -513,7 +534,7 @@ export async function runCollect(
    */
   if (noTweets && audits.length === 0) {
     const gotUsers = userAudits.some((a) => a.items.length > 0);
-    say(gotUsers ? `这一页是用户名单：${userSeq} 人` : '这一页什么都没解出来');
+    say(gotUsers ? `这一页是用户名单：${seenHandles.size} 人` : '这一页什么都没解出来');
     return {
       audits, totalResponses, summary: null, harvest: rep,
       plan: null, paging, fetched: [],
