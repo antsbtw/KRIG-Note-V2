@@ -360,9 +360,20 @@ async function pageUntilDone(
    * 又是那个「采集只认推文」的旧假设。
    * ⭐ 用户名单的请求同样带 queryId 与 features,一样能当种子。
    */
-  const seed = rep.items.find(
+  const seedCandidates = rep.items.filter(
     (it) => (carriesTweets(it.url) || carriesUsers(it.url)) && it.url.includes('variables='),
   );
+  /**
+   * ⭐⭐⭐ **优先挑带着请求头的那一条** —— 2026-10-06,403 的第二刀。
+   *
+   * ⚠️⚠️ 请求头**只有 CDP 腿拿得到**(钩子腿跑在页面里,看不见真实请求头)。
+   * 同一条响应两条腿都会收到,而原先 `find` 取的是**第一条** ——
+   * 撞上钩子腿那份就拿到个**没有鉴权头的种子**,重发必然 403。
+   * ⭐ 先挑有头的;一条都没有才退而求其次(至少 URL 模板是对的)。
+   */
+  const seed = seedCandidates.find(
+    (it) => Object.keys(it.requestHeaders ?? {}).length > 0,
+  ) ?? seedCandidates[0];
   if (seed === undefined) {
     say('没有可用来翻页的请求 —— 跳过主动翻页');
     return { audits: all, paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0, rounds_detail: [] } };
@@ -509,7 +520,23 @@ async function pageUntilDone(
         ok?: boolean; status?: number; body?: string; why?: string; shape?: string;
       } | null;
       if (r?.ok === false) {
-        stopReason = `第 ${round} 轮请求失败：${r.why ?? `HTTP ${r.status ?? '?'}`}`;
+        /**
+         * ⭐⭐⭐ **失败时把判据一起交出来** —— 2026-10-06,403 查了两轮。
+         *
+         * ⚠️⚠️ 只说「HTTP 403」时,三种成因**长得一模一样**:
+         * 　· 根本没带鉴权头(种子那条压根没记到 requestHeaders)
+         * 　· 带了但被浏览器剔掉了(禁设名单误伤)
+         * 　· 带全了而 X 仍拒(那才轮到查别的)
+         * ⭐ 把**实际发出去的头名**列出来,三种当场分得开。
+         * ⚠️ 只记**键名**不记值 —— authorization/csrf 是凭据,不进留痕。
+         */
+        const sentKeys = Object.keys(seed.requestHeaders ?? {});
+        const sawAuth = sentKeys.some((k) => k.toLowerCase() === 'authorization');
+        const sawCsrf = sentKeys.some((k) => k.toLowerCase() === 'x-csrf-token');
+        stopReason = `第 ${round} 轮请求失败：${r.why ?? `HTTP ${r.status ?? '?'}`}`
+          + `（种子带了 ${sentKeys.length} 个请求头`
+          + `，authorization=${sawAuth ? '有' : '**无**'}`
+          + `，x-csrf-token=${sawCsrf ? '有' : '**无**'}）`;
         say(stopReason); break;
       }
       if (typeof r?.body === 'string' && r.body.length > 0) {

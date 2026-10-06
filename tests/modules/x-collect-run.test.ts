@@ -1902,6 +1902,54 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(h?.['x-csrf-token']).toBe('tok1');
   });
 
+  it('⭐⭐⭐ 种子要挑**带请求头**的那一条 —— 两条腿都会收到同一条响应', async () => {
+    /**
+     * ⚠️⚠️ 403 的第二刀(2026-10-06):请求头**只有 CDP 腿拿得到**
+     * (钩子腿跑在页面里,看不见真实请求头)。
+     * 同一条响应两条腿都会收到,而原先 `find` 取**第一条** ——
+     * 撞上钩子腿那份就拿到个**没有鉴权头的种子**,重发必然 403。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let sent: Record<string, unknown> | null = null;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [
+          /** ⚠️ 钩子腿那份排在前面,**没有请求头** */
+          { url: FOLLOWERS, text: page([1], 'c1') },
+          /** ⭐ CDP 腿那份带着头 */
+          {
+            url: FOLLOWERS,
+            text: page([2], 'c1'),
+            requestHeaders: { authorization: 'Bearer CDP', 'x-csrf-token': 'tok' },
+          },
+        ] };
+      },
+      async runScript(_id, params) {
+        sent = params;
+        return { ok: true, status: 200, body: page([3], 'c2') };
+      },
+    }, { wantPages: 2, depth: 'as-is' });
+
+    const h = (sent as unknown as { headers?: Record<string, string> } | null)?.headers;
+    expect(h?.authorization, '挑到了没有头的那条种子 → 必然 403').toBe('Bearer CDP');
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
