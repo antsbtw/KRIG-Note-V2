@@ -26,7 +26,18 @@ import { X_SCRIPTS } from './x-dom-scripts';
 
 /** ⭐ 一次采集回来的东西 —— 与底座 `HarvestReport` 同形,只取用得上的 */
 export type RunHarvest = {
-  readonly items: ReadonlyArray<{ readonly url: string; readonly text: string }>;
+  /**
+   * ⚠️⚠️ **`status` 必须带着** —— 2026-10-06 的教训。
+   * 原先这里只有 `{url, text}`,**状态码在类型边界上被我丢掉了**:
+   * 底座有、面板甚至红字显示着 `429 Rate limit exceeded`,
+   * 偏偏采集层拿不到 → 被限流时照样报「滚到底了」,
+   * 害我对着滚动/翻页/游标折腾了七八轮,全不是真因。
+   */
+  readonly items: ReadonlyArray<{
+    readonly url: string;
+    readonly text: string;
+    readonly status?: number;
+  }>;
   readonly afterRound?: readonly unknown[];
   readonly rounds?: number;
   readonly scrolledPx?: number;
@@ -157,6 +168,16 @@ export type RunResult = {
   readonly users: readonly XUserAudit[];
   /** ⭐ 这一跑**到底采到了什么** —— tweets / users / mixed / empty,由数据算 */
   readonly kind: PayloadKind;
+  /**
+   * ⭐⭐⭐ **被 X 限流了** —— 有话说,没限流就是 undefined。
+   *
+   * ⚠️⚠️ 限流下的「滚到底」是**假的**:内容没加载出来,不是没有内容。
+   * 不把这件事单独喊出来,人(和我)就会去查滚动逻辑 ——
+   * 真机已经栽过:响应数 132→9→6→4 一路掉,我却改了七八轮滚动/翻页/游标。
+   * ⭐ 单独一个字段,不混进 `problems` 那一堆里 —— 它决定的是
+   * 「**现在该停手等一等**」,不是「哪个字段没解出来」。
+   */
+  readonly rateLimit?: string;
 };
 
 /** ⚠️ 补全有上限 —— 安全网,不是目标(`feedback-pdca-close-the-loop`) */
@@ -167,6 +188,27 @@ const MAX_ARTICLE_FETCH = 50;
  * 这个数只防「每篇都带出新的」那种病态情况把一轮跑无限拖下去。
  */
 const MAX_PASSES = 5;
+
+/**
+ * ⭐⭐⭐ **这一趟是不是被限流了** —— 2026-10-06。
+ *
+ * ⚠️ 判据就是 HTTP 状态码,**不猜**:429 = Too Many Requests。
+ * ⭐ 连同「哪些端点被挡」一起报出来 —— 只说「被限流了」人还得去翻日志。
+ * ⚠️ 返回 `undefined` 表示没限流,**不要返回空字符串**:
+ * 调用方会用 `if (rateLimit)` 判,空串与 undefined 行为一样但语义含糊。
+ */
+function detectRateLimit(rep: RunHarvest): string | undefined {
+  const blocked = rep.items.filter((it) => it.status === 429);
+  if (blocked.length === 0) return undefined;
+  /** ⭐ 端点名去重 —— 同一个端点被挡 20 次,说一次就够 */
+  const ops = [...new Set(blocked.map(
+    (it) => it.url.split('?')[0].split('/').filter(Boolean).pop() ?? it.url,
+  ))];
+  return `⚠️ X 正在限流(HTTP 429):${blocked.length} 条响应被挡`
+    + `（${ops.slice(0, 5).join(' / ')}）`
+    + ' —— 这时候的「滚到底」是假的:内容没加载出来,不是没有内容。'
+    + ' ⭐ 该做的是**歇一会儿再采**,不是改采集逻辑。';
+}
 
 /** ⭐ 从一次 harvest 的响应里解析出核对结果 */
 function auditsOf(rep: RunHarvest): TimelineAudit[] {
@@ -553,6 +595,13 @@ export async function runCollect(
   if (!rep) {
     return { audits: [], totalResponses: 0, summary: null, harvest: null, plan: null, paging: null, fetched: [], users: [], kind: 'empty' };
   }
+  /**
+   * ⭐⭐⭐ **先看是不是被限流** —— 在一切判断之前。
+   * ⚠️ 限流下后面所有的「到底了/没有更多了」全是假的。
+   */
+  const rateLimit = detectRateLimit(rep);
+  if (rateLimit !== undefined) say(rateLimit);
+
   /** ⭐ 从第一趟开始累计 —— 后面每补一篇都加上 */
   let totalResponses = rep.items.length;
   /**
@@ -686,6 +735,7 @@ export async function runCollect(
       users: userAudits,
       /** ⭐ 由数据算:解出了人就是 users,真的什么都没有才是 empty */
       kind: gotUsers ? 'users' : 'empty',
+      rateLimit,
     };
   }
 
@@ -828,5 +878,6 @@ export async function runCollect(
     users: userAudits,
     /** ⭐ 两种都解出来了就是 mixed —— 那是真实情况不是异常 */
     kind: userAudits.some((a) => a.items.length > 0) ? 'mixed' : 'tweets',
+    rateLimit,
   };
 }

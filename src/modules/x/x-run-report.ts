@@ -72,6 +72,17 @@ export function buildRunReport(input: RunReportInput): string {
     + `　·　响应 ${run.totalResponses}`);
   L.push('');
 
+  /**
+   * ⭐⭐⭐ **限流放在最前面** —— 2026-10-06 真机教训。
+   * ⚠️⚠️ 被限流时下面所有的「滚到底/没有更多了」**全是假的**,
+   * 先看到这一行,才不会去查滚动逻辑(我已经白查了七八轮)。
+   */
+  if (run.rateLimit !== undefined) {
+    L.push('── ⚠️ 被限流 ──');
+    L.push(run.rateLimit);
+    L.push('');
+  }
+
   // ── ① 滚动 ──
   L.push('── 滚动 ──');
   if (h) {

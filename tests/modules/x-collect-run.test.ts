@@ -1450,6 +1450,57 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(harvests).toBe(1);
   });
 
+  it('⭐⭐⭐ 被限流(429)要喊出来 —— 不许报成「滚到底了」', async () => {
+    /**
+     * ⚠️⚠️⚠️ **这是折腾七八轮的真因**(2026-10-06,用户:
+     * 「修复了7/8次,都是搞不定名单的采集,在干活吗?」)。
+     *
+     * 真机留痕按时间排:
+     *   10:30  响应 132 → 169 人
+     *   13:13  响应   9 →  30 人
+     *   15:53  响应   6 →  29 人
+     *   16:10  响应   4 →  20 人   ← 面板里 `429 Rate limit exceeded`
+     *
+     * **响应数一路掉**,而每一跑都理直气壮报「滚到底了」。
+     * 我这几轮改的滚动/翻页/游标全都**不是**真因 ——
+     * X 在限流我们,而采集层**看不见 HTTP 状态码**:
+     * `RunHarvest.items` 的类型里只有 `{url, text}`,
+     * 状态码在底座有、面板甚至红字显示着 429,**偏偏采集层拿不到**。
+     *
+     * ⭐ 这是「看着成功实际没有」最贵的一次:判据被我自己在类型边界上丢了。
+     * ⚠️ 限流下的「滚到底」是**假的** —— 内容没加载出来,不是没有内容。
+     */
+    const r = await runCollect({
+      async harvest() {
+        return {
+          items: [
+            { url: 'https://x.com/i/api/graphql/aa/BlueVerifiedFollowers', text: '{}', status: 429 },
+            { url: 'https://x.com/i/api/graphql/aa/ViewerBadgeCounts', text: 'Rate limit exceeded', status: 429 },
+          ],
+          reachedBottom: true,
+          stopReason: '滚到底(连续 3 轮未变)',
+        };
+      },
+    }, { wantPages: 10, depth: 'as-is' });
+
+    const problems = r.users.flatMap((a) => a.problems).concat(r.rateLimit ? [r.rateLimit] : []);
+    expect(problems.join(' '), '被限流了却一个字都不说').toContain('429');
+    expect(r.rateLimit, '要有专门的字段,别混在一堆 problems 里').toBeTruthy();
+  });
+
+  it('⭐⭐ 没有 429 时不许瞎报限流', async () => {
+    /** ⚠️ 判据太宽会被无视,那是另一种假绿 */
+    const r = await runCollect({
+      async harvest() {
+        return {
+          items: [{ url: FOLLOWERS, text: '{}', status: 200 }],
+          reachedBottom: true,
+        };
+      },
+    }, { wantPages: 10, depth: 'as-is' });
+    expect(r.rateLimit).toBeUndefined();
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },

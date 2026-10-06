@@ -233,6 +233,32 @@ describe('一个入口:采到人就存', () => {
     expect(REPORT, '零新增时要区分两种病因').toContain('请求形状');
   });
 
+  it('⭐⭐⭐ 状态码必须一路带到采集层 —— 429 看不见就会报成「滚到底」', () => {
+    /**
+     * ⚠️⚠️⚠️ **折腾七八轮的真因**(2026-10-06):
+     * `RunHarvest.items` 原先只声明 `{url, text}`,
+     * **状态码在类型边界上被丢掉了** —— 底座的 `AcquiredItem` 有 `status`、
+     * 面板甚至红字显示着 `429 Rate limit exceeded`,偏偏采集层拿不到。
+     * 于是被限流时照样报「滚到底了」,我对着滚动/翻页/游标改了七八轮,全不是真因。
+     *
+     * ⭐ 这条钉三件事:类型带着它、有人真的读它、读出来要喊。
+     */
+    expect(RUN, 'RunHarvest.items 必须带 status').toMatch(/readonly status\?: number;/);
+    expect(RUN, '要有人真的判 429').toMatch(/it\.status === 429/);
+    expect(RUN, '判出来要给调用方一个字段').toMatch(/readonly rateLimit\?: string;/);
+    /** ⭐ 底座那一侧本来就有 —— 钉住它别被「精简」掉 */
+    const ACQ = read('src/platform/main/web-capability/acquire/types.ts');
+    expect(ACQ, 'AcquiredItem 的 status 是源头,丢了全链路都瞎').toMatch(/readonly status: number;/);
+  });
+
+  it('⭐⭐⭐ 面板要把限流显示出来 —— 不显示等于没查', () => {
+    /**
+     * ⚠️ `feedback-log-where-the-human-looks`:
+     * 「我加了判断」≠「人能看到判断结果」。
+     */
+    expect(CONSOLE).toMatch(/rateLimit/);
+  });
+
   it('⭐⭐ 翻页种子认推文也认用户请求', () => {
     /**
      * ⚠️ 原先只认推文请求当种子,于是 followers 页「有游标、X 说还有」

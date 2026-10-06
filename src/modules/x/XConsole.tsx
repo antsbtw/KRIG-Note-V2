@@ -889,6 +889,13 @@ export function XConsole(
                         depth,
                       });
 
+                      /**
+                       * ⭐⭐⭐ **被限流要第一时间喊** —— 2026-10-06。
+                       * ⚠️⚠️ 限流下的「滚到底」是假的,而我对着滚动逻辑改了七八轮。
+                       * ⭐ 放在最前面、用红字:它决定的是「现在该停手等一等」,
+                       * 不是「哪个字段没解出来」。
+                       */
+                      if (run.rateLimit) setStep(run.rateLimit);
                       if (run.harvest) setReport(run.harvest as HarvestReport);
                       setTotalResponses(run.totalResponses);
                       setPaging(run.paging);
