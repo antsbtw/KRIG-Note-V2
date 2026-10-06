@@ -638,8 +638,32 @@ export async function runCollect(
    * ⚠️ 停止由**数据判据**定(没有新游标 / 没采到新东西就停),
    * 轮数上限只是安全网(`feedback-pdca-close-the-loop`)。
    */
+  /**
+   * ⭐⭐⭐ **滚到底了就别再翻页** —— 2026-10-06,用户:
+   * 「提取完毕怎么还在翻页呢?没有逻辑吗?」
+   *
+   * ⚠️⚠️ 原先翻页段的入口只有 `if (deps.runScript)` ——**无条件跑**,
+   * 从不看滚动阶段是不是已经把活干完了。
+   * 人流名单滚到底(`reachedBottom`)本身就是「这一页没有更多了」的数据判据,
+   * 再从头翻一遍纯属空转:既耗时,又让面板显示「还在翻页」像卡住了。
+   *
+   * ⚠️ **不能无脑跳过**:搜索页滚动**不翻页**(X 的页面差异,实测滚 4 万 px
+   * 只出 1 条载荷),那里必须靠主动翻页。
+   * ⭐ 所以判据是「**滚到底了 + 这一趟确实解出过东西**」——
+   * 什么都没解出来时(页面不对/链路坏)该让翻页去试,不能当成「采完了」。
+   */
+  const scrolledToBottom = rep.reachedBottom === true;
+  const gotSomething = audits.length > 0 || userAudits.some((a) => a.items.length > 0);
   let paging: RunResult['paging'] = null;
-  if (deps.runScript) {
+  if (scrolledToBottom && gotSomething) {
+    say('滚到底了 —— 这一页已经采完,跳过翻页');
+    paging = {
+      rounds: 0,
+      stopReason: '滚到底了,无需翻页（这一页已经采完）',
+      freshTotal: 0,
+      rounds_detail: [],
+    };
+  } else if (deps.runScript) {
     const r = await pageUntilDone(deps, audits, rep, say, (one) => {
       totalResponses += one.items.length;
       /** ⭐ 翻页回来的用户也收下 —— 名次接着往下编 */

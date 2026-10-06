@@ -11,7 +11,9 @@
  * 每条断言先问一句:**「如果被测逻辑是错的,这条断言还会成立吗?」**
  */
 import { describe, it, expect } from 'vitest';
-import { ControlEngine, DEFAULT_STUCK_ROUNDS, MAX_RESCUES } from '@platform/main/web-capability/page/control';
+import {
+  ControlEngine, DEFAULT_STUCK_ROUNDS, MAX_RESCUES, RESCUE_NO_GAIN_LIMIT,
+} from '@platform/main/web-capability/page/control';
 import { isDegraded, isFailed, isOk } from '@platform/main/web-capability';
 import { FakeScrollPage, MapAnchors, MapScripts, PAGE } from './helpers/fake-scroll-page';
 import type { ScrollReport } from '@platform/main/web-capability/page/control-types';
@@ -579,6 +581,47 @@ describe('⭐⭐⭐ 血泪⑤ —— 滚不动要先换位置再判到底', () =
     const rep = reportOf(r);
     expect(asked, '抢救次数必须有上限').toBeLessThanOrEqual(MAX_RESCUES);
     expect(rep.rounds, '必须停得下来').toBeLessThan(500);
+  });
+
+  it('⭐⭐⭐ 抢救不管用就早停 —— 别把额度耗光(真机 838 轮采 30 人)', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:verifiedFollowers 只有 30 个人,
+     * 却滚了 **838 轮**、把 50 次抢救额度**全部耗光**才停。
+     * 真因:判「抢救成功」用的是「脚本说跳成了」,而脚本只要找得到
+     * 最后一张卡片就回 true,**跟有没有新内容无关**。
+     * ⭐ `feedback-pdca-close-the-loop`:判据要回读**真实产出量**
+     * (位置有没有真变),不是「动作做了没有」。
+     */
+    const page = new FakeScrollPage({ docHeight: 1200, innerHeight: 800 });
+    let asked = 0;
+    const r = await engineFor(page).scrollUntil(PAGE, { kind: 'atBottom' }, {
+      maxRounds: 500,
+      /** ⭐ 永远说「跳成了」,但页面不长 —— 真机就是这个形态 */
+      onStuck: () => { asked += 1; return true; },
+    });
+    const rep = reportOf(r);
+    expect(asked, '几次没用就该收手,不是耗到上限').toBeLessThan(MAX_RESCUES);
+    expect(asked).toBeLessThanOrEqual(RESCUE_NO_GAIN_LIMIT + 1);
+    expect(rep.reachedBottom).toBe(true);
+    expect(rep.stopReason, '停因要说明是抢救后位置仍没变').toContain('抢救');
+  });
+
+  it('⭐⭐⭐ 抢救**真的**换来新内容时不许早停', async () => {
+    /** ⚠️ 判据太宽会把能救回来的也掐掉 —— 那比不抢救更坏 */
+    const page = new FakeScrollPage({ docHeight: 1200, innerHeight: 800 });
+    let asked = 0;
+    const r = await engineFor(page).scrollUntil(PAGE, { kind: 'atBottom' }, {
+      maxRounds: 200,
+      onStuck: () => {
+        asked += 1;
+        /** ⭐ 每次抢救都真的长出新内容 —— 该一直救下去 */
+        if (asked <= 10) { page.docHeight += 5000; return true; }
+        return false;
+      },
+    });
+    const rep = reportOf(r);
+    expect(asked, '每次都有效就该救满 10 次').toBeGreaterThan(RESCUE_NO_GAIN_LIMIT + 1);
+    expect(rep.scrolledPx, '救回来的内容要真的滚过去').toBeGreaterThan(5000);
   });
 
   it('⭐⭐ 不给 onStuck 时行为不变 —— 别的调用方不该被牵连', async () => {

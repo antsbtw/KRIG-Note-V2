@@ -51,6 +51,13 @@ export const MAX_RESCUES = 50;
  * ⚠️ 不等的话虚拟列表还没渲染,下一轮回读到的还是同一个位置。
  */
 export const RESCUE_SETTLE_MS = 1500;
+/**
+ * ⭐⭐ 连续几次抢救没换来**位置变化**就认到底。
+ * ⚠️ 真机:30 人的名单滚 838 轮、耗光 50 次额度 ——
+ * 判据是「脚本说跳成了」而不是「跳完有没有用」,那是没闭环。
+ * ⭐ 取 3:给虚拟列表两次慢渲染的机会,又不至于空转几百轮。
+ */
+export const RESCUE_NO_GAIN_LIMIT = 3;
 export const DEFAULT_MAX_ROUNDS = 50;
 export const DEFAULT_SETTLE_MS = 800;
 /** 每轮滚屏高的几成:0.55~0.85 抖动(匀速是风控最容易识别的特征) */
@@ -347,6 +354,10 @@ export class ControlEngine {
     let stuck = 0;
     /** ⭐ 换位置抢救了几次 —— 要写进停因,否则这个判据只活在这一次运行里 */
     let rescued = 0;
+    /** ⭐ 上次抢救时的位置 —— 用来判「抢救到底有没有换来新内容」 */
+    let lastRescueY = -1;
+    /** ⭐ 连续几次抢救没换来位置变化 */
+    let rescueNoGain = 0;
     let rounds = 0;
     let reachedBottom = false;
     let stopReason = `达到轮次上限 ${maxRounds}`;
@@ -479,6 +490,30 @@ export class ControlEngine {
           await this.sleep(RESCUE_SETTLE_MS);
           /** ⭐ 清零重新数 —— 换过位置之后它应该能再滚一段 */
           stuck = 0;
+          /**
+           * ⭐⭐⭐ **抢救要回读有没有用** —— 2026-10-06 真机逼出来的。
+           *
+           * ⚠️⚠️ verifiedFollowers 实测:30 个人的名单滚了 **838 轮**、
+           * 把 50 次抢救额度**全部耗光**才停 —— 因为判「抢救成功」用的是
+           * 「脚本说跳成了」,而脚本只要找得到最后一张卡片就回 true,
+           * **跟有没有新内容无关**。于是真到底之后还在反复抢救。
+           *
+           * ⭐ `feedback-pdca-close-the-loop`:判据要回读**真实产出量**,
+           * 不是「动作做了没有」。这里的产出量就是**位置有没有真的变**。
+           * ⚠️ 连续 `RESCUE_NO_GAIN_LIMIT` 次抢救后位置纹丝不动 → 真到底了,
+           * 别再耗额度。
+           */
+          if (pos.y === lastRescueY) {
+            rescueNoGain += 1;
+            if (rescueNoGain >= RESCUE_NO_GAIN_LIMIT) {
+              reachedBottom = true;
+              stopReason = `滚到底(抢救 ${rescued} 次后位置仍是 ${pos.y},真的没有更多了)`;
+              break;
+            }
+          } else {
+            rescueNoGain = 0;
+          }
+          lastRescueY = pos.y;
           /**
            * ⚠️ **不 `continue`** —— 那会跳过本轮的滚动,
            * 而我们正需要它滚一下来验证「换位置到底有没有用」。

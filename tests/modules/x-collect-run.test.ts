@@ -1316,6 +1316,140 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.paging?.rounds).toBeLessThanOrEqual(3);
   });
 
+  it('⭐⭐⭐ 滚到底了就别再翻页 —— 用户:「提取完毕怎么还在翻页呢?」', async () => {
+    /**
+     * ⚠️⚠️ 用户 2026-10-06 原话:「提取完毕怎么还在翻页呢?没有逻辑吗?」
+     *
+     * 真因:翻页段的入口条件只有 `if (deps.runScript)` ——
+     * **无条件跑**,从不看滚动阶段是不是已经把活干完了。
+     * 人流名单滚到底(`reachedBottom=true`)本身就是「这一页没有更多了」的
+     * 数据判据,再从头翻一遍纯属空转:
+     * 既浪费时间,又让面板显示「还在翻页」,看起来像卡住了。
+     *
+     * ⭐ 判据:滚动已经到底 → 翻页一轮都不该跑。
+     * ⚠️ 注意**不是**所有页都这样:搜索页滚动不翻页(X 的页面差异),
+     * 那里到底了也得靠主动翻页 —— 所以判据要看「**到底了并且解出过人**」,
+     * 不是无脑跳过。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+
+    let pagingHarvests = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 第一趟:滚到底了,并且解出了人 */
+        if (pagingHarvests === 0) {
+          pagingHarvests += 1;
+          return {
+            items: [{ url: FOLLOWERS, text: page([1, 2, 3], 'c1') }],
+            reachedBottom: true,
+            stopReason: '滚到底(连续 3 轮 scrollY 未变)',
+          };
+        }
+        /** ⚠️ 走到这里就说明又去翻页了 —— 不该发生 */
+        pagingHarvests += 1;
+        return { items: [{ url: FOLLOWERS, text: page([99], 'c2') }] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '滚到底了还翻页 = 空转').toBe(0);
+    expect(r.paging?.stopReason).toContain('滚到底');
+    expect(pagingHarvests, '只该采一趟').toBe(1);
+  });
+
+  it('⭐⭐⭐ 没滚到底的页面照常翻页 —— 搜索页滚动不翻页,别误伤', async () => {
+    /**
+     * ⚠️ 判据太宽会被无视,那是另一种假绿。
+     * 实测:搜索页滚 4 万 px 只出 1 条载荷,**必须靠主动翻页**。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        /** ⭐ `reachedBottom: false` —— 滚动没到底 */
+        return {
+          items: [{ url: FOLLOWERS, text: page([n], `c${n}`) }],
+          reachedBottom: false,
+        };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 3, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '没到底就该翻页').toBeGreaterThan(0);
+  });
+
+  it('⭐⭐⭐ 滚到底但**什么都没采到** → 还是要翻页试试,不能当「采完了」', async () => {
+    /**
+     * ⚠️⚠️ 这条是注入验证逼出来的:把 `gotSomething` 改成恒 true,
+     * 前面两条**照样绿** —— 因为我的样本里「滚到底」和「采到了人」
+     * 永远同时成立,那个区别压根没被测到
+     * (`feedback-check-sample-contains-phenomenon`)。
+     *
+     * ⭐ 真实场景:页面不对 / 链路坏 / 载荷一条没收到 —— 这时「滚到底」
+     * 证明不了「这一页没有更多」,只证明「滚不动了」。
+     * 当成采完了就是**把失败伪装成成功**,正是要治的病。
+     */
+    let harvests = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        harvests += 1;
+        /** ⭐ 滚到底了,但一条可解析的响应都没有 */
+        return { items: [], reachedBottom: true, stopReason: '滚到底' };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 3, depth: 'as-is' });
+
+    expect(r.kind).toBe('empty');
+    /**
+     * ⭐ 关键只有一条:**不许说「已经采完」**。
+     * ⚠️ 至于接下来能不能翻页,是另一回事 —— 一条响应都没有时
+     * 连翻页的种子 URL 都没有(queryId/features 都在那条请求里),
+     * 所以它会如实报「没有可用来翻页的请求」。
+     * ⭐ 那也是**诚实的失败**,与「采完了」有本质区别:
+     * 前者指向「这一页链路坏了」,后者指向「这一页就这么多」。
+     * ⚠️ 我第一版断言「该多采一趟」—— 那是**我想当然**,
+     * 代码其实是对的(没种子就翻不动),错的是我的期望。
+     */
+    expect(r.paging?.stopReason, '什么都没采到时不该说「已经采完」')
+      .not.toContain('无需翻页');
+    expect(r.paging?.stopReason).toContain('没有可用来翻页的请求');
+    expect(harvests).toBe(1);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
