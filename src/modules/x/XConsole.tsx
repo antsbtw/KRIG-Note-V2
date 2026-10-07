@@ -183,6 +183,31 @@ export function XConsole(
   /** 展开看原样 JSON 的那一条 */
   const [openPayload, setOpenPayload] = useState<string | null>(null);
   /**
+   * ⭐⭐⭐ **页面一变就读断点** —— 开采前就让人看见「这次是续采还是从头」。
+   * ⚠️ 不读的话人只能点下去才知道,而那时配额已经花出去了。
+   */
+  useEffect(() => {
+    const kind = X_USER_LIST_PAGES[identified?.name ?? ''] ?? '';
+    const h = identified?.params.handle ?? '';
+    if (kind === '' || h === '') { setCursorInfo(null); return; }
+    const sc = `${h.trim().replace(/^@+/, '').toLowerCase()}:${kind}`;
+    void (async () => {
+      const r = await window.electronAPI?.xDataInvoke?.({ op: 'readCursor', scope: sc });
+      const v = r?.status === 'ok'
+        ? (r.value as {
+          bottomCursor?: string; exhausted?: boolean; lastRound?: number; totalSeen?: number;
+        } | null)
+        : null;
+      setCursorInfo(v === null ? null : {
+        lastRound: v.lastRound,
+        totalSeen: v.totalSeen,
+        exhausted: v.exhausted === true,
+        /** ⭐ 「有断点可续」要同时满足:有游标 且 没到头 */
+        has: v.exhausted !== true && typeof v.bottomCursor === 'string' && v.bottomCursor !== '',
+      });
+    })();
+  }, [identified]);
+  /**
    * ⭐ 采集中 / 最近一次报告 —— **只有这两个 state**。
    * ⚠️ 原来有 stats / hook / payloads 三份(按腿分),那是实现细节漏到了界面上。
    */
@@ -305,6 +330,14 @@ export function XConsole(
    * 它闭包捕获的 state **永远是开跑那一刻的值**,改了也看不见。
    */
   const cancelRef = useRef(false);
+  /**
+   * ⭐⭐ **断点** —— 上次停在哪(2026-10-07)。
+   * ⚠️ 开采前要让人看见「这次是续采还是从头采」——
+   * 否则「为什么只采到 2400」和「为什么又重采一遍」都说不清。
+   */
+  const [cursorInfo, setCursorInfo] = useState<{
+    lastRound?: number; totalSeen?: number; exhausted: boolean; has: boolean;
+  } | null>(null);
   /**
    * ⭐⭐ **人流采集的结果** —— 与推文那套分开存。
    * ⚠️ 不复用 `audit`/`saved`:两者字段不同(人流有 `terminated`、
@@ -787,6 +820,43 @@ export function XConsole(
                         ? null
                         : { name: identified.name, params: identified.params };
 
+                      /**
+                       * ⭐⭐⭐ **开跑前读断点** —— 2026-10-07。
+                       *
+                       * ⚠️⚠️ `Followers` 端点约 50 次/窗口就 429,而 X 每次都从
+                       * **第 1 页**给游标。不续采的话:翻 1-48 轮全是已入库的人
+                       * → 第 49 轮又 429 → **一个新人都拿不到**。
+                       * ⭐ scope 按 `<账号>:<名单>` 分 —— 混用会让 A 名单的游标
+                       * 被 B 续采,而那种错在数据里看不出来。
+                       * ⚠️ 读不到就从头采 —— 游标是可重算的派生状态,这不是降级。
+                       */
+                      const listKind = X_USER_LIST_PAGES[origin?.name ?? ''] ?? '';
+                      const handle = origin?.params.handle ?? '';
+                      const scope = listKind !== '' && handle !== ''
+                        ? `${handle.trim().replace(/^@+/, '').toLowerCase()}:${listKind}`
+                        : '';
+                      let resumeCursor: string | undefined;
+                      if (scope !== '') {
+                        const cr = await window.electronAPI!.xDataInvoke({
+                          op: 'readCursor', scope,
+                        });
+                        const prev = cr.status === 'ok'
+                          ? (cr.value as {
+                            bottomCursor?: string; exhausted?: boolean;
+                            lastRound?: number; totalSeen?: number;
+                          } | null)
+                          : null;
+                        /**
+                         * ⚠️ **到头了就不续** —— 带着一个已经到底的游标去续,
+                         * 只会立刻又到底、白跑一趟。到头后该从头采拿新增。
+                         */
+                        if (prev && prev.exhausted !== true && prev.bottomCursor) {
+                          resumeCursor = prev.bottomCursor;
+                          setStep(`从断点续采：上次停在第 ${prev.lastRound ?? '?'} 页`
+                            + `（累计 ${prev.totalSeen ?? '?'} 人）`);
+                        }
+                      }
+
                       const run = await runCollect({
                         harvest: async (plan) => {
                           const rr = await window.electronAPI!.webDomInvoke({
@@ -911,6 +981,8 @@ export function XConsole(
                         wantPages: Number(pagesWanted) || 10,
                         /** ⭐⭐ 补到哪一层 —— **采集要求说了算**,不是代码定 */
                         depth,
+                        /** ⭐ 有断点就从断点翻 —— 配额才花在新数据上 */
+                        resumeCursor,
                       });
 
                       /**
@@ -1055,6 +1127,31 @@ export function XConsole(
                        * ⚠️ 只落**第一条**用户载荷:够看结构了,不占地方。
                        */
                       /**
+                       * ⭐⭐⭐ **跑完存断点** —— 2026-10-07。
+                       *
+                       * ⚠️⚠️ **无论怎么停的都要存**:被 429 挡下那次正是最需要它的
+                       * (不存的话下次从第 1 页开始,50 次配额全浪费在重采上)。
+                       * ⭐ X 说到头了也要存(`exhausted=true`)——
+                       * 下次就知道该从头采拿新增,而不是拿个到底的游标去续。
+                       */
+                      if (scope !== '') {
+                        const cu = await window.electronAPI!.xDataInvoke({
+                          op: 'saveCursor',
+                          cursor: {
+                            scope,
+                            bottomCursor: run.nextCursor,
+                            exhausted: run.exhausted === true,
+                            lastRound: run.paging?.rounds,
+                            lastReason: run.paging?.stopReason,
+                            totalSeen: run.users.reduce((n, a) => n + a.items.length, 0),
+                          },
+                        });
+                        setLog((l) => [{
+                          at: new Date().toLocaleTimeString(), label: '存断点', result: cu,
+                        }, ...l].slice(0, 50));
+                      }
+
+                      /**
                        * ⭐⭐⭐ **每一跑都落一份账** —— 2026-10-06,用户:
                        * 「这两个你没有办法自行读取吗?」
                        *
@@ -1148,6 +1245,52 @@ export function XConsole(
                   >
                     名单：{X_USER_LIST_PAGES[identified?.name ?? '']}
                   </span>
+                )}
+                {/*
+                  ⭐⭐⭐ **断点状态** —— 2026-10-07。
+                  ⚠️ `Followers` 端点约 50 次/窗口就 429,5729 人要分 2-3 跑。
+                  不显示的话,「为什么只采到 2400」和「这次会不会又重采一遍」
+                  人都看不出来。⭐ 放按钮旁 —— 点之前就该知道。
+                */}
+                {cursorInfo !== null && (
+                  <>
+                    <span
+                      style={{
+                        fontSize: 11, padding: '2px 6px', borderRadius: 3,
+                        background: cursorInfo.has ? '#2a3348' : '#333',
+                        color: cursorInfo.has ? '#9bf' : '#999',
+                        whiteSpace: 'nowrap',
+                      }}
+                      title={cursorInfo.exhausted
+                        ? '上次 X 说名单到头了 —— 这次会从头采（拿新增）'
+                        : '上次没采完，这次从断点接着翻（配额才花在新数据上）'}
+                    >
+                      {cursorInfo.exhausted
+                        ? `✓ 上次采到底（${cursorInfo.totalSeen ?? '?'} 人）`
+                        : cursorInfo.has
+                          ? `续采：上次第 ${cursorInfo.lastRound ?? '?'} 页（${cursorInfo.totalSeen ?? '?'} 人）`
+                          : '从头采'}
+                    </span>
+                    {cursorInfo.has && (
+                      <button
+                        type="button"
+                        disabled={running}
+                        onClick={async () => {
+                          const kind = X_USER_LIST_PAGES[identified?.name ?? ''] ?? '';
+                          const h = identified?.params.handle ?? '';
+                          if (kind === '' || h === '') return;
+                          const sc = `${h.trim().replace(/^@+/, '').toLowerCase()}:${kind}`;
+                          await window.electronAPI!.xDataInvoke({ op: 'clearCursor', scope: sc });
+                          setCursorInfo(null);
+                          setStep('断点已清 —— 下次从头采');
+                        }}
+                        style={{ ...S.btn, fontSize: 10, padding: '2px 6px' }}
+                        title="丢掉断点，下次从第 1 页开始。⚠️ 删的是派生状态，已采到的人一个不少"
+                      >
+                        从头采
+                      </button>
+                    )}
+                  </>
                 )}
                 <input
                   value={pagesWanted}

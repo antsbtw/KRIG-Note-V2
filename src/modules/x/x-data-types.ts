@@ -71,7 +71,31 @@ export type XDataInvoke =
       readonly op: 'saveUsers';
       readonly records: readonly XUserRecord[];
       readonly ctx: { readonly listSource: string; readonly wsId?: string };
-    };
+    }
+  /**
+   * ⭐⭐⭐ **断点续采:读上次停在哪** —— 2026-10-07。
+   *
+   * ⚠️ `Followers` 端点约 50 次/窗口就 429,而 X 每次都从**第 1 页**给游标。
+   * 不续采的话整个配额浪费在重采已入库的人上。
+   */
+  | { readonly op: 'readCursor'; readonly scope: string }
+  /**
+   * ⭐⭐ **存断点** —— 每跑结束都存,不管是采完了还是被挡了。
+   * ⚠️ 「被挡下」那次正是最需要存的。
+   */
+  | {
+      readonly op: 'saveCursor';
+      readonly cursor: {
+        readonly scope: string;
+        readonly bottomCursor?: string;
+        readonly exhausted: boolean;
+        readonly lastRound?: number;
+        readonly lastReason?: string;
+        readonly totalSeen?: number;
+      };
+    }
+  /** ⭐ 清断点 —— 面板「从头采」用。⚠️ 删的是派生状态,人一个不少 */
+  | { readonly op: 'clearCursor'; readonly scope: string };
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:

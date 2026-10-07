@@ -276,6 +276,51 @@ describe('一个入口:采到人就存', () => {
     expect(cond, '渲染条件要真的查当前页').toMatch(/X_USER_LIST_PAGES\[identified/);
   });
 
+  it('⭐⭐⭐ 断点续采:开采前读、跑完存、两处都接上了', () => {
+    /**
+     * ⚠️⚠️ `Followers` 端点约 50 次/窗口就 429,而 X 每次都从**第 1 页**给游标。
+     * 不续采的话:翻 1-48 轮全是已入库的人 → 第 49 轮又 429
+     * → **整个配额浪费在重采上,一个新人都拿不到**。
+     * ⭐ 三处缺一不可:读断点、传进 runCollect、跑完存回去。
+     */
+    expect(CONSOLE, '开采前没读断点').toMatch(/op: 'readCursor'/);
+    expect(CONSOLE, '读了却没传进 runCollect').toMatch(/^\s*resumeCursor,$/m);
+    expect(CONSOLE, '跑完没存断点 —— 被挡那次正是最需要存的').toMatch(/op: 'saveCursor'/);
+    /** ⭐ 存的时候要带上 nextCursor 和 exhausted,否则下次续不了/白续 */
+    const save = CONSOLE.slice(CONSOLE.indexOf("op: 'saveCursor'"));
+    const block = save.slice(0, save.indexOf('});'));
+    expect(block).toMatch(/bottomCursor: run\.nextCursor/);
+    expect(block, '不带 exhausted 的话到头了还会去续,白跑一趟')
+      .toMatch(/exhausted: run\.exhausted/);
+  });
+
+  it('⭐⭐⭐ IPC 三个游标 op 都要有 handler —— 契约有、handler 没有 = 静默失败', () => {
+    for (const op of ['readCursor', 'saveCursor', 'clearCursor']) {
+      expect(TYPES, `契约里缺 ${op}`).toMatch(new RegExp(`op: '${op}'`));
+      expect(IPC, `handler 里缺 ${op} —— 点了会回「不认识的 op」`)
+        .toMatch(new RegExp(`case '${op}':`));
+    }
+    expect(IPC).toContain("import { readCursor, saveCursor, clearCursor } from './x-cursor-repo'");
+  });
+
+  it('⭐⭐⭐ 到头了不许续 —— 带着到底的游标去续只会白跑一趟', () => {
+    /**
+     * ⚠️ `exhausted` 的意思是「X 说名单到头了」。
+     * 这时该**从头采拿新增**,而不是拿一个已经到底的游标接着翻。
+     */
+    /**
+     * ⚠️ `readCursor` 出现**两处**:面板展示那一处(useEffect)在前,
+     * 采集流程那一处在后。要钉的是**采集流程**那一处 ——
+     * 第一版抓到了前者,断言当场变红(`feedback-guard-scope-to-the-branch`:
+     * 锚点抓错就什么也证明不了)。
+     */
+    const i = CONSOLE.indexOf("op: 'readCursor', scope,");
+    expect(i, '采集流程里没读断点').toBeGreaterThan(-1);
+    const after = CONSOLE.slice(i, i + 1400);
+    expect(after, '没判 exhausted —— 到头了还会去续')
+      .toMatch(/prev\.exhausted !== true/);
+  });
+
   it('⭐⭐⭐ 每一跑都要落账 —— 不许只在有推文时写', () => {
     /**
      * ⚠️⚠️ 用户 2026-10-06:「这两个你没有办法自行读取吗?」

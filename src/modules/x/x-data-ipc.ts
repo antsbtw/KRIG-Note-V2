@@ -15,6 +15,7 @@ import {
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
 import { saveUsers } from './x-user-repo';
+import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 
@@ -134,6 +135,35 @@ export function registerXDataIpc(): void {
             },
           });
           return { status: 'ok', value: r };
+        }
+
+        /**
+         * ⭐⭐⭐ **断点续采** —— 2026-10-07。
+         * ⚠️ scope 为空要拒收:那会让所有名单共用一个断点,
+         * A 名单的游标被 B 续采,而那种错在数据里看不出来。
+         */
+        case 'readCursor': {
+          if (typeof p.scope !== 'string' || p.scope.trim() === '') {
+            return failed('[x.data] readCursor 缺 scope');
+          }
+          /** ⭐ 读不到回 null —— 调用方据此从头采,这是正确行为不是降级 */
+          return { status: 'ok', value: await readCursor(p.scope) };
+        }
+
+        case 'saveCursor': {
+          if (typeof p.cursor?.scope !== 'string' || p.cursor.scope.trim() === '') {
+            return failed('[x.data] saveCursor 缺 scope');
+          }
+          await saveCursor(p.cursor);
+          return { status: 'ok', value: { saved: p.cursor.scope } };
+        }
+
+        case 'clearCursor': {
+          if (typeof p.scope !== 'string' || p.scope.trim() === '') {
+            return failed('[x.data] clearCursor 缺 scope');
+          }
+          await clearCursor(p.scope);
+          return { status: 'ok', value: { cleared: p.scope } };
         }
 
         case 'delete':
