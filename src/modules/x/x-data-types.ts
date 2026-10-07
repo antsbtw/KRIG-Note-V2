@@ -101,6 +101,27 @@ export type XDataInvoke =
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:
  * `ok` 由有没有问题算出来,不是独立字段(两者各说各话就是撒谎的入口)。
  */
+/**
+ * ⭐⭐⭐ **X 侧的类型化入口** —— 2026-10-07。
+ *
+ * ⚠️⚠️ 共享层的 `xDataInvoke` 现在收发 `unknown`(不透明载荷),
+ * 因为写上 X 的类型名会让「删 X」真的编译不过 ——
+ * 守卫扫不到 `import(...)` 的类型位置用法,**可卸载性是假的**。
+ *
+ * ⭐ 类型安全没丢,只是**收窄的地方挪到了 X 自己这边**:
+ * 调用方用这个函数,参数与返回照样有完整检查。
+ * ⚠️ 这是唯一允许做 `as` 的地方 —— 别在各个调用点散着写。
+ */
+export async function xDataCall(payload: XDataInvoke): Promise<XDataResult> {
+  const api = (globalThis as { electronAPI?: { xDataInvoke?(p: unknown): Promise<unknown> } })
+    .electronAPI;
+  if (api?.xDataInvoke === undefined) {
+    /** ⚠️ fail loud:通道没挂上就说清楚,别回个空壳让人以为「存了」 */
+    return { status: 'failed', reason: '[x.data] electronAPI.xDataInvoke 不存在 —— 通道没接上' };
+  }
+  return await api.xDataInvoke(payload) as XDataResult;
+}
+
 export type XDataResult =
   | { readonly status: 'ok'; readonly value: unknown }
   | { readonly status: 'failed'; readonly reason: string };

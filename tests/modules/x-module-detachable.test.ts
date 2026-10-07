@@ -309,6 +309,55 @@ describe('⭐ 装卸不只是代码:四类残留必须跟着模块走', () => {
     ).toEqual([]);
   });
 
+  it('⑥ **类型位置也不许引用 X** —— `import(...)` 绕不过这条', () => {
+    /**
+     * ⚠️⚠️ **2026-10-07 真机验证逼出来的**:我真把 `src/modules/x` 删掉跑 tsc,
+     * **当场 3 处报错**,全在 preload —— 而守卫当时**全绿**。
+     *
+     * 原因:守卫扫的是 `import ... from '@modules/x'` 这种**语句形状**,
+     * 而那三处写的是 `payload: import('@modules/x/...').XDataInvoke` ——
+     * **类型位置的动态 import**,形状不同,规则没覆盖到。
+     * ⚠️ 更难看的是代码注释写着「用 import(...) 而不是顶部 import ——
+     * 顶部 import 会让守卫必红」:那是**写代码去迎合守卫**,
+     * 守卫绿着而可卸载性是假的,**比没有守卫更坏**。
+     *
+     * ⭐ 修法:边界上用**不透明载荷**(`payload: unknown`),
+     * 类型收窄挪进 X 自己那边(`xDataCall`)。
+     * ⭐ 判据改成「**任何形式**提到 `@modules/x`」,不管是哪种 import。
+     */
+    /** ⭐ `outsideX` 是现成的扫描面(X 目录之外的源码,注释已剥) */
+    const offenders = outsideX
+      /** ⭐ 自注册那两行是**允许**的 —— 删 X 时跟着删 */
+      .filter(({ path }) => !/^src\/platform\/(renderer\/index\.tsx|main\/index\.ts)$/.test(path))
+      .filter(({ code }) => code.includes('@modules/x'))
+      .map(({ path }) => path);
+    expect(outsideX.length, '扫描面是空的 —— 断言会恒真').toBeGreaterThan(100);
+    expect(
+      offenders,
+      '这些文件在**代码里**提到 @modules/x —— 删 X 时会编译失败:\n  '
+      + offenders.join('\n  '),
+    ).toEqual([]);
+  });
+
+  it('⑦ X 的测试必须全在 `tests/modules/x-*` —— 否则「删一个目录」删不干净', () => {
+    /**
+     * ⚠️ 同一次真机验证发现的第二个洞:
+     * `tests/storage/x-tweet-repo-contract.test.ts` 引用 `@modules/x`,
+     * 删掉模块后它编译失败 —— 而「删一个目录 + 一行」的承诺里没算上它。
+     * ⭐ 已搬到 `tests/modules/`;这条钉住别再散出去。
+     */
+    const testFiles = listSources(join(ROOT, 'tests'));
+    expect(testFiles.length, '扫不到测试文件 —— 断言会恒真').toBeGreaterThan(50);
+    const strays = testFiles
+      .map((p) => relative(ROOT, p))
+      .filter((rel) => !rel.startsWith('tests/modules/x-'))
+      .filter((rel) => strip(readFileSync(join(ROOT, rel), 'utf-8')).includes('@modules/x'));
+    expect(
+      strays,
+      'X 的测试散在别处 —— 删 X 时删不干净,会编译失败:\n  ' + strays.join('\n  '),
+    ).toEqual([]);
+  });
+
   it('⑤ 共用层不许认识 X 这个平台', () => {
     /**
      * 实测残留:`web-shared/should-handle.ts` 引用 X。

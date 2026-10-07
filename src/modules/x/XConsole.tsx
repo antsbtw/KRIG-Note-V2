@@ -39,6 +39,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import type { WebDomInvoke, WebDomResult } from '@shared/ipc/web-dom-types';
+import { xDataCall } from './x-data-types';
 import type { XDataResult } from './x-data-types';
 import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText, type TimelineAudit,
@@ -192,7 +193,7 @@ export function XConsole(
     if (kind === '' || h === '') { setCursorInfo(null); return; }
     const sc = `${h.trim().replace(/^@+/, '').toLowerCase()}:${kind}`;
     void (async () => {
-      const r = await window.electronAPI?.xDataInvoke?.({ op: 'readCursor', scope: sc });
+      const r = await xDataCall({ op: 'readCursor', scope: sc });
       const v = r?.status === 'ok'
         ? (r.value as {
           bottomCursor?: string; exhausted?: boolean; lastRound?: number; totalSeen?: number;
@@ -251,7 +252,7 @@ export function XConsole(
     setRecipeBusy(true);
     setRecipeErr(null);
     try {
-      const r = await window.electronAPI!.xDataInvoke({ op: 'list' });
+      const r = await xDataCall({ op: 'list' });
       if (r.status === 'ok') setRecipes(r.value as SearchRecipe[]);
       else setRecipeErr(r.reason);
     } catch (e) {
@@ -264,7 +265,7 @@ export function XConsole(
   /** ⚠️ 存完**重新读一遍** —— 不拿本地那份充数(库里可能改了别的字段) */
   const saveRecipe = useCallback(async (r: SearchRecipe) => {
     setRecipeErr(null);
-    const res = await window.electronAPI!.xDataInvoke({ op: 'upsert', recipe: r });
+    const res = await xDataCall({ op: 'upsert', recipe: r });
     if (res.status !== 'ok') { setRecipeErr(res.reason); return; }
     setEditing(null);
     await loadRecipes();
@@ -272,7 +273,7 @@ export function XConsole(
 
   const removeRecipe = useCallback(async (r: SearchRecipe) => {
     setRecipeErr(null);
-    const res = await window.electronAPI!.xDataInvoke({ op: 'delete', recipeId: r.id });
+    const res = await xDataCall({ op: 'delete', recipeId: r.id });
     if (res.status !== 'ok') { setRecipeErr(res.reason); return; }
     await loadRecipes();
   }, [loadRecipes]);
@@ -837,7 +838,7 @@ export function XConsole(
                         : '';
                       let resumeCursor: string | undefined;
                       if (scope !== '') {
-                        const cr = await window.electronAPI!.xDataInvoke({
+                        const cr = await xDataCall({
                           op: 'readCursor', scope,
                         });
                         const prev = cr.status === 'ok'
@@ -1012,7 +1013,7 @@ export function XConsole(
                         .map((t) => t.record)
                         .filter((r) => r.id !== '');
                       if (records.length > 0) {
-                        const sv = await window.electronAPI!.xDataInvoke({
+                        const sv = await xDataCall({
                           op: 'saveTweets',
                           records,
                           ctx: {
@@ -1079,7 +1080,7 @@ export function XConsole(
                          * 且看不出来。这是少数「宁可不存也不兜底」的地方。
                          */
                         const listSource = X_USER_LIST_PAGES[origin?.name ?? identified?.name ?? ''] ?? '';
-                        const su = await window.electronAPI!.xDataInvoke({
+                        const su = await xDataCall({
                           op: 'saveUsers', records: users, ctx: { listSource },
                         });
                         setLog((l) => [{
@@ -1135,7 +1136,7 @@ export function XConsole(
                        * 下次就知道该从头采拿新增,而不是拿个到底的游标去续。
                        */
                       if (scope !== '') {
-                        const cu = await window.electronAPI!.xDataInvoke({
+                        const cu = await xDataCall({
                           op: 'saveCursor',
                           cursor: {
                             scope,
@@ -1280,7 +1281,7 @@ export function XConsole(
                           const h = identified?.params.handle ?? '';
                           if (kind === '' || h === '') return;
                           const sc = `${h.trim().replace(/^@+/, '').toLowerCase()}:${kind}`;
-                          await window.electronAPI!.xDataInvoke({ op: 'clearCursor', scope: sc });
+                          await xDataCall({ op: 'clearCursor', scope: sc });
                           setCursorInfo(null);
                           setStep('断点已清 —— 下次从头采');
                         }}

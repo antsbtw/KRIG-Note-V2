@@ -916,12 +916,22 @@ declare global {
         payload: import('./web-dom-types').WebDomInvoke,
       ): Promise<import('./web-dom-types').WebDomResult>;
       /**
-       * ⭐ X 配方 CRUD（list / upsert / delete）。
-       * ⚠️ 通道名在 X 模块自己的契约里 —— 删 X 时这一行跟着删,不留孤儿常量。
+       * ⭐ X 的数据通道（配方 CRUD / 落库 / 断点）。
+       *
+       * ⚠️⚠️ **参数与返回都不写 X 的类型名** —— 2026-10-07 真机验证逼出来的。
+       * 原先写的是 `import('@modules/x/x-data-types').XDataInvoke` ——
+       * 看着「不是顶部 import、守卫不红」,可**真把 X 目录删掉,tsc 当场 3 处报错**。
+       * ⭐ 那是「写代码去迎合守卫」,不是真满足规则:
+       * 守卫扫的是 `import` 语句的文本形状,而 `import(...)` 的类型位置用法
+       * 形状不同 —— 规则没覆盖到,**可卸载性是假的**。
+       *
+       * ⭐⭐ 正确做法:边界上用**不透明载荷**。
+       * 共享层只知道「有这么个通道、收发 unknown」,
+       * 具体契约由 X 自己在两端收窄(`XDataInvoke` / `XDataResult` 仍在 X 模块里)。
+       * ⚠️ 代价是这里失去类型检查 —— 但**换来真正能删**,
+       * 而且 X 侧调用处仍有完整类型(它自己 import 自己的契约)。
        */
-      xDataInvoke(
-        payload: import('@modules/x/x-data-types').XDataInvoke,
-      ): Promise<import('@modules/x/x-data-types').XDataResult>;
+      xDataInvoke(payload: unknown): Promise<unknown>;
       /** ⭐ 列已注册的语义页面名(Console 下拉用,从真表读) */
       webPageListNames(): Promise<Array<{
         owner: string;

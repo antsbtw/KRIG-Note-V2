@@ -964,15 +964,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   /**
-   * ⭐ X 的数据通道(配方 CRUD + 推文落库)。
-   * ⚠️ 用 `import(...)` 写类型**而不是顶部 import** —— preload 是单一文件、
-   * 无法自注册,顶部 import `@modules/x` 会让「X 可卸载」守卫必红。
+   * ⭐ X 的数据通道(配方 CRUD / 落库 / 断点)。
+   *
+   * ⚠️⚠️ **不写 X 的类型名** —— 2026-10-07 真机验证逼出来的。
+   * 原先写 `import('@modules/x/x-data-types').XDataInvoke`,理由是
+   * 「不是顶部 import,守卫不红」—— 可**真把 X 目录删掉,tsc 当场报错**。
+   * ⭐ 那是**写代码去迎合守卫**:守卫扫 `import` 语句的文本形状,
+   * 而 `import(...)` 的类型位置用法形状不同,规则没覆盖到。
+   * 守卫绿着,可卸载性却是假的 —— 这比没有守卫更坏。
+   *
+   * ⭐⭐ 改成**不透明载荷**:preload 只管转发,不认识 X 的契约。
+   * ⚠️ 类型安全没丢 —— X 侧调用处自己 import 自己的契约,照样有完整检查。
    * ⭐ 通道名在 `IPC_CHANNELS`,删 X 时留一行孤儿常量(比守卫永远红便宜)。
    */
-  xDataInvoke(
-    payload: import('@modules/x/x-data-types').XDataInvoke,
-  ): Promise<import('@modules/x/x-data-types').XDataResult> {
-    return ipcRenderer.invoke(IPC_CHANNELS.X_DATA_INVOKE, payload) as Promise<import('@modules/x/x-data-types').XDataResult>;
+  xDataInvoke(payload: unknown): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.X_DATA_INVOKE, payload);
   },
 
   /** ⭐ 列已注册的语义页面名(Console 下拉用,**从真表读**) */
