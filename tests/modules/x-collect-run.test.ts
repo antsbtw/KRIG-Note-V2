@@ -2268,6 +2268,49 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.nextCursor, '到头了还带游标 —— 下次会白跑一趟').toBeUndefined();
   });
 
+  it('⭐⭐⭐ 退避要一次等够 —— 7.5 分钟那套实测注定失败', async () => {
+    /**
+     * ⚠️⚠️ 原先 4 次翻倍(30s/60s/120s/240s ≈ 7.5 分钟),
+     * **三跑全部退避到底仍被挡** —— X 的窗口恢复要更久。
+     * ⭐ 退避的意义是「等到恢复」,等不到就是纯浪费 7.5 分钟然后照样停。
+     * 用户 2026-10-07 定:**一次等够**(实测人工等十几分钟再点就能接着采)。
+     * ⚠️ 次数反而要少:断点续采已经兜住了,等太久不如把控制权交回给人。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    const waits: number[] = [];
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    /** ⭐ 退避那几次(长的)—— 轮间抖动是秒级,切出来才不混 */
+    const backoffs = waits.filter((w) => w >= 60_000);
+    expect(backoffs.length, '一次退避都没有').toBeGreaterThan(0);
+    expect(Math.min(...backoffs), '退避不足 10 分钟 —— 实测等不到恢复')
+      .toBeGreaterThanOrEqual(10 * 60_000);
+    /** ⚠️ 次数别太多:断点兜住了,等太久该把控制权交回给人 */
+    expect(backoffs.length, '退避次数太多 —— 人会以为卡死了').toBeLessThanOrEqual(3);
+  });
+
   it('⭐⭐ 什么都没解出来才是 empty', async () => {
     const r = await runCollect({
       async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
