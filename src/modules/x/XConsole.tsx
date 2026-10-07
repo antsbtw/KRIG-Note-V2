@@ -1122,6 +1122,33 @@ export function XConsole(
                 >
                   {running ? '采集中…' : '采这一页'}
                 </button>
+                {/*
+                  ⭐⭐⭐ **开采前先说清楚「这是哪个名单」** —— 2026-10-07。
+                  ⚠️⚠️ 用户连着三次采到了同一个名单(following),
+                  而他要的是 followers。他说「粗心大意了」——
+                  ⭐ 但三次都点错说明**界面没把这件事说清楚**,不是人该更小心:
+                  · X 的三个标签页(Verified Followers / Followers / Following)
+                    文字相近、挨在一起
+                  · **采完后 X 会自己跳回 Following** —— 最容易再点错的时刻
+                  · 面板原来只在结果区事后显示名单名,开采前看不到
+                  ⚠️ 代价很实:每次白跑 6-7 分钟,还白耗一次限流额度。
+                  ⭐ 所以放在**按钮右边**(点之前视线必经之处),不是结果区。
+                */}
+                {X_USER_LIST_PAGES[identified?.name ?? ''] !== undefined && (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      padding: '2px 6px',
+                      borderRadius: 3,
+                      background: '#2a3a2a',
+                      color: '#9c9',
+                      whiteSpace: 'nowrap',
+                    }}
+                    title="当前页面是哪个名单 —— X 的三个标签页很像，采之前扫一眼"
+                  >
+                    名单：{X_USER_LIST_PAGES[identified?.name ?? '']}
+                  </span>
+                )}
                 <input
                   value={pagesWanted}
                   onChange={(e) => setPagesWanted(e.target.value.replace(/\D/g, ''))}

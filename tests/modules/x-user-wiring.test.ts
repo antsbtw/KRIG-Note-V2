@@ -242,6 +242,40 @@ describe('一个入口:采到人就存', () => {
     expect(body, '等待期间要看停止键').toMatch(/cancelRef\.current/);
   });
 
+  it('⭐⭐⭐ 开采前要显示「这是哪个名单」—— 不是事后在结果区', () => {
+    /**
+     * ⚠️⚠️ 2026-10-07 真机:用户连着**三次**采到 following,而他要的是 followers。
+     * 他说「粗心大意了」—— 但三次都错说明**界面没说清楚**:
+     * · X 三个标签页文字相近、挨在一起
+     * · **采完后 X 会自己跳回 Following** —— 最容易再点错的时刻
+     * · 面板原来只在**结果区事后**显示名单名,开采前看不到
+     * ⚠️ 代价很实:每次白跑 6-7 分钟 + 白耗一次限流额度。
+     *
+     * ⭐ 判据:提示必须在**按钮附近**(点之前视线必经),不是结果区。
+     */
+    /**
+     * ⚠️ 锚点要钉**真正的按钮 JSX**,不是注释里提到的同名字符串 ——
+     * 第一版用 `indexOf` 抓到了 1600 行开外的一句注释,算出「相距 17513 字符」
+     * (`feedback-guard-scope-to-the-branch`:锚点抓错就什么也证明不了)。
+     */
+    const i = CONSOLE.indexOf("{running ? '采集中…' : '采这一页'}");
+    expect(i, '采集按钮的 JSX 没了?').toBeGreaterThan(-1);
+    /** ⭐ 只看按钮之后那一小段 —— 结果区在很后面,切窄才证明得了「在按钮旁」 */
+    const near = CONSOLE.slice(i, i + 1600);
+    expect(near, '按钮旁没有名单提示 —— 用户会再点错')
+      .toMatch(/名单：\{X_USER_LIST_PAGES\[/);
+    /**
+     * ⭐⭐ **渲染条件必须真的能成立** —— 注入验证逼出来的:
+     * 把 `{X_USER_LIST_PAGES[...] !== undefined && (` 改成 `{false && (`,
+     * 上面那条**照样绿**(文字还在源码里,只是永远渲染不出来)。
+     * ⚠️ `feedback-source-scan-cant-see-execution`:文本在 ≠ 画得出来。
+     */
+    const cond = near.slice(0, near.indexOf('名单：'));
+    expect(cond, '渲染条件被写死成 false —— 提示永远不显示')
+      .not.toMatch(/\{\s*false\s*&&/);
+    expect(cond, '渲染条件要真的查当前页').toMatch(/X_USER_LIST_PAGES\[identified/);
+  });
+
   it('⭐⭐⭐ 每一跑都要落账 —— 不许只在有推文时写', () => {
     /**
      * ⚠️⚠️ 用户 2026-10-06:「这两个你没有办法自行读取吗?」
