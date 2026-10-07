@@ -138,6 +138,23 @@ export type CapturePolicy = {
   readonly resourceTypes?: readonly string[];
   /** 调用方给的噪音 URL 子串名单 —— 底座自己一条都不带 */
   readonly noisyUrlSubstrings?: readonly string[];
-  /** 单条 body 上限,超过不存(防大文件吃爆内存) */
+  /**
+   * 单条 body 的**截断**阈值(防大文件吃爆内存)。
+   *
+   * ⚠️⚠️ **超限是截断并标注,不是整条丢掉** —— 2026-10-02 改。
+   *
+   * ── 用户 2026-10-02:「这个最不应该,自废武功。」──
+   *
+   * 原行为是超限就 `return`,整条载荷消失,而调用方看到的是「没捕到」——
+   * ⭐ 一条 16081 字的长文正文被自己设的阈值丢掉,现象与「这页没载荷」
+   * 完全一样(`project-x-article-body-lost` 正是长文正文整片丢失那次)。
+   *
+   * ⭐ 同仓的 `raw-store` 早就做对了(§8 验收:「不许静默截断」):
+   * **截断并标注 `truncated`,`bytes` 记原始大小**。
+   * 两处对同一件事两种做法 —— 本次统一到 raw-store 那种。
+   *
+   * ⚠️ 不给 = 不截断(默认行为),**不是给个内置默认值**:
+   * 底座不替调用方决定「多大算大」。
+   */
   readonly maxBodyBytes?: number;
 };

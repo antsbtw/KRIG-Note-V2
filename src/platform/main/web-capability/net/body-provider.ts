@@ -93,12 +93,50 @@ type PendingRequest = {
  * 注意它**没有 detach / release / dispose** —— 这是有意的。
  * 通道只在**页面销毁**时随宿主一起消失(`onDestroyed`)。
  */
+/**
+ * ⭐⭐ 「这条载荷为什么没到手」的回报口 —— 2026-10-02 加。
+ *
+ * ── 为什么非加不可(真机实测逼出来的)──
+ *
+ * 真机点「开始捕获」后:接线 ✅、attach ✅、**一条载荷都没有**。
+ * 而本文件里有**三处静默 return**(getResponseBody 失败 / body 解不出 /
+ * 关联失败),全都只 `console.warn` —— 于是「捕 0 条」这个结果
+ * **没有任何可读的成因**,只能靠人盯终端。
+ *
+ * ⚠️ 本文件原注释自己写着「将来接 web.trace 时改成 degradation 记录」——
+ * 现在就是那个将来。
+ *
+ * ⭐ 用回调不直接 import `trace/`:`net/` 层的边界守卫禁跨层依赖,
+ * 而 `NetMonitor` 早有同款范式(收一个可选 `recorder`)。
+ * ⚠️ 不给回调就只是不留痕,**不报错也不降级功能**。
+ */
+export type BodyMissReporter = (miss: {
+  readonly pageId: PageId;
+  readonly url: string;
+  /**
+   * ⚠️⚠️ `oversize-kept` 是**提醒,不是失败**:载荷已原样完整交出。
+   * 它在这里是为了「内存涨了」时能回头看是哪些页面带来的 ——
+   * **不表示任何数据被动过**。
+   * ⚠️ 没有 `too-large` / `truncated`:本层既不丢弃也不截断
+   * (用户 2026-10-02:「自废武功」/「要保持信息的完整性,而不是片段」)。
+   */
+  readonly reason:
+    | 'get-body-failed' | 'body-undecodable' | 'correlate-failed' | 'oversize-kept'
+    /** ⚠️ 临时诊断,定位后删 */
+    ;
+  readonly detail?: string;
+}) => void;
+
 export class CdpBodyProvider {
   readonly providerId = 'cdp';
   /** 已经装过的宿主 —— 每个宿主只装一次(V1 字面) */
   private readonly attachedHosts = new Set<number>();
 
-  constructor(private readonly bus: NetworkEventBus) {}
+  constructor(
+    private readonly bus: NetworkEventBus,
+    /** ⚠️ 可选 —— 不给只是不留痕,功能不变(同 `NetMonitor` 的 recorder) */
+    private readonly reportMiss?: BodyMissReporter,
+  ) {}
 
   isAttached(hostId: number): boolean {
     return this.attachedHosts.has(hostId);
@@ -232,16 +270,63 @@ export class CdpBodyProvider {
       })) as { body?: string; base64Encoded?: boolean };
     } catch (error) {
       // 单条取不到 body 不是通道故障(通道还活着),所以不发 channel-lost;
-      // 但也**不静默** —— 留痕,将来接 web.trace 时改成 degradation 记录。
+      // 但也**不静默** —— ⭐ 2026-10-02 真正接上了留痕(原来只有 console.warn,
+      //   于是「捕 0 条」没有任何可读的成因)。
+      const detail = error instanceof Error ? error.message : String(error);
       console.warn('[web.net] getResponseBody 失败', {
         pageId, providerRequestId, url: pending.url, error,
       });
+      this.reportMiss?.({ pageId, url: pending.url, reason: 'get-body-failed', detail });
       return;
     }
 
     const body = decodeBody(raw);
-    if (!body) return;
-    if (policy.maxBodyBytes !== undefined && body.byteLength > policy.maxBodyBytes) return;
+    if (!body) {
+      // ⚠️ 原来这里**完全静默** —— body 解不出与「这条没内容」长得一样
+      this.reportMiss?.({ pageId, url: pending.url, reason: 'body-undecodable' });
+      return;
+    }
+    /**
+     * ⭐⭐⭐ **本层不截断、不丢弃 —— 载荷一律原样整条交出** (2026-10-02)。
+     *
+     * ── 用户两句话,第二句推翻了我的第一次修法 ──
+     *
+     * ① 「被我们自己设的上限挡了…这个最不应该,**自废武功**。」
+     *    → 我把「超限丢弃」改成了「截断并标注」。
+     * ② 「什么叫截断并标注?我们要保持获取到的信息的**完整性**,
+     *    而不是片段哦。」
+     *    → ⭐ 对的,我停在了半道上:
+     *
+     * **截断只是比丢弃好,它仍然交出一条残缺的载荷。**
+     * 对 X 的 GraphQL 来说半条 JSON 等于没有 —— 下游 `JSON.parse` 必炸,
+     * 那条推文/那个人照样丢。标注只是让丢失**有记录**,不是让信息完整。
+     * (`project-x-article-body-lost`:16081 字的长文正文整片丢失那次,
+     *  正是这种「看着有、实际残」的形态。)
+     *
+     * ── ⚠️ 那内存怎么办(查证过,不是拍脑袋)──
+     *
+     * 总线按**条数**封顶(`MAX_RESPONSE_BODIES = 256`),不是按单条大小。
+     * 所以单条大并不会让内存无限涨 —— 容量是**总量**问题,
+     * 该由条数/总字节的配额管,**不该靠毁掉单条数据来解决**。
+     * 真要压内存,正确的做法是降低保留条数或改落盘(`raw-store` 那条路),
+     * 而不是把每条都切一刀。
+     *
+     * ⭐ `policy.maxBodyBytes` 仍保留在契约里,但本层**只用它报一声**
+     * (见下),绝不据此改动数据 —— 它从「会毁数据的闸门」降级为
+     * 「超大载荷的提醒」。
+     */
+    if (policy.maxBodyBytes !== undefined && body.byteLength > policy.maxBodyBytes) {
+      /**
+       * ⚠️ 这不是失败,是**提醒**:载荷原样交出去了,只是比预期大。
+       * 留痕是为了「内存涨了」时能回头看是哪些页面带来的,
+       * 而**不是**为了说明某条数据被动过。
+       */
+      this.reportMiss?.({
+        pageId, url: pending.url, reason: 'oversize-kept',
+        detail: `${body.byteLength}B 超过提醒阈值 ${policy.maxBodyBytes}B —— `
+          + '⭐ 已**原样完整**交出,未截断',
+      });
+    }
 
     const result = this.bus.attachProviderBody(pageId, providerRequestId, {
       url: pending.url,
@@ -249,11 +334,20 @@ export class CdpBodyProvider {
       resourceType: pending.resourceType,
       mimeType: pending.mimeType,
       responseHeaders: pending.responseHeaders,
+      // ⭐ **原样整条** —— 本层不动数据
       body,
     });
     if (result.status === 'failed') {
-      // ⚠️ 关联失败**不静默丢**(prompt §7)。这条留痕将来进 web.trace 的 degradation。
+      /**
+       * ⚠️⚠️ 关联失败是**最要紧**的一种:它意味着 CDP 拿到了 body,
+       * 但配不上任何 webRequest 记录 → 事件压根不发 → 订阅者看到的是「0 条」。
+       * ⭐ `project` 里那条「webRequest 侧零接线」的症状就是它刷屏。
+       * 2026-10-02:终于从 console.warn 接进了留痕。
+       */
       console.warn('[web.net] body 关联失败', { pageId, providerRequestId, reason: result.reason });
+      this.reportMiss?.({
+        pageId, url: pending.url, reason: 'correlate-failed', detail: result.reason,
+      });
     }
   }
 }

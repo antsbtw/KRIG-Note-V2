@@ -21,6 +21,15 @@ export interface WebviewElement extends HTMLElement {
   getTitle(): string;
   /** SyncDriver / TranslateDriver 用 */
   isLoading(): boolean;
+  /**
+   * ⭐ guest 的 webContents id —— 走 `web.dom` IPC 面时用它**指认页面**。
+   *
+   * ⚠️ 这是「main 侧绝不猜是哪个页面」的前提:
+   * 不用 activeWs、不用「最后 navigate 的那个」
+   * (`page-registry.ts:15` 记过那条血泪)。
+   * ⚠️ webview 未 attached 时它会**抛** —— 调用方要 try(同 executeJavaScript)。
+   */
+  getWebContentsId(): number;
   /** SyncDriver / TranslateDriver 注入用 */
   executeJavaScript(code: string): Promise<unknown>;
   /** 页内查找(P0)— 返回 requestId,结果走 'found-in-page' 事件 */
@@ -79,6 +88,14 @@ export interface HostHandle {
   stop(): void;
   /** 当前 webview 是否 loading 中 */
   isLoading(): boolean;
+  /**
+   * ⭐ guest 的 webContents id —— 走 `web.dom` IPC 面时用它**指认页面**。
+   *
+   * ⚠️ webview 未 attached 时返回 **null**(底层 `getWebContentsId()` 会抛)——
+   * 调用方据此知道「还没就绪」,而不是拿到一个假 id 去调用后静默失败。
+   * ⭐ 与 `MailHostHandle.getWebContentsId()` 同口径。
+   */
+  getWebContentsId(): number | null;
   /** 页内查找(P0)— 结果走 HostProps.onFoundInPage 回调 */
   findInPage(text: string, options?: WebFindInPageOptions): void;
   /** 停止页内查找(P0)*/

@@ -1,0 +1,1025 @@
+/**
+ * X 时间线载荷的完整性核对 —— ⭐ 它回答「**采到的数据完整没有**」
+ *
+ * 用户 2026-10-02:「关键是核对爬取的数据完整没有。」
+ *
+ * ⚠️⚠️ 本文件钉的是**本仓真实发生过的丢失形态**,不是臆想:
+ * · `project-x-article-body-lost`  长文正文整片丢失,报告仍说「✓ 全文已取回」
+ * · `project-x-field-four-place-registration` 「**不量的字段永远 100%**」
+ * · 2026-10-02 实测 captured=72 而**一条推文都没有**
+ */
+
+import { describe, it, expect } from 'vitest';
+import { auditTimelinePayload, summarizeAudits } from '@modules/x/x-timeline-audit';
+
+/**
+ * 造一条**形状贴近真实**的推文节点。
+ *
+ * ⚠️⚠️ 2026-10-02 重写:原来只有 8 个字段,那是**我挑的**。
+ * 查旧实现 `x-timeline-harvester.ts`(1871 行)与 `x_tweet` 表 schema 后,
+ * 真实载荷有 22 项 —— 样本必须贴近真实,否则
+ * 「字段缺了量不量得出来」这类测试**根本测不到**
+ * (`feedback-check-sample-contains-phenomenon`)。
+ *
+ * ⭐ 尤其是这几个**两个位置**的:显示名 / 头像 / 蓝V / 关系 / bio ——
+ * 旧实现踩过「只读一个位置会漏」,样本里两边都给才试得出来。
+ */
+function tweet(over: Record<string, unknown> = {}, legacyOver: Record<string, unknown> = {}) {
+  return {
+    __typename: 'Tweet',
+    rest_id: '1234567890',
+    views: { count: '1234', state: 'EnabledWithCount' },
+    core: {
+      user_results: {
+        result: {
+          rest_id: '111',
+          // ⭐ 新形态:core.screen_name / core.name / avatar.image_url
+          core: { screen_name: 'someone', name: 'Some One' },
+          avatar: { image_url: 'https://pbs.twimg.com/a_normal.jpg' },
+          is_blue_verified: true,
+          relationship_perspectives: { following: false, followed_by: true },
+          profile_bio: { description: '一段 bio' },
+          // 旧形态同时给(真实载荷里两种都可能出现)
+          legacy: { screen_name: 'someone', name: 'Some One' },
+        },
+      },
+    },
+    legacy: {
+      id_str: '1234567890',
+      full_text: 'hello world',
+      created_at: 'Wed Oct 01 12:00:00 +0000 2026',
+      conversation_id_str: '1234567890',
+      lang: 'zh',
+      favorite_count: 3,
+      retweet_count: 1,
+      reply_count: 0,
+      quote_count: 2,
+      bookmark_count: 5,
+      favorited: false,
+      retweeted: false,
+      bookmarked: true,
+      ...legacyOver,
+    },
+    ...over,
+  };
+}
+
+/** 包成 X 真实的那种外层(instructions → entries) */
+function payload(tweets: unknown[], cursor = 'DAABCgABxxxx'): string {
+  return JSON.stringify({
+    data: {
+      home: {
+        home_timeline_urt: {
+          instructions: [{
+            type: 'TimelineAddEntries',
+            entries: [
+              ...tweets.map((t, i) => ({
+                entryId: `tweet-${i}`,
+                content: { itemContent: { tweet_results: { result: t } } },
+              })),
+              ...(cursor ? [{
+                entryId: 'cursor-bottom-0',
+                content: { value: cursor, cursorType: 'Bottom' },
+              }] : []),
+            ],
+          }],
+        },
+      },
+    },
+  });
+}
+
+describe('⭐⭐ 解得出推文', () => {
+  it('⭐ 真实嵌套结构里能找到推文 —— **不写死路径**', () => {
+    /**
+     * ⚠️ 旧实现的教训:「X 的响应外层结构变过好几次,
+     * 写死路径会在改版后**静默取不到**(返回 undefined 而不报错)」。
+     */
+    const a = auditTimelinePayload(payload([tweet(), tweet()]));
+    expect(a.tweets, '解不出推文').toBe(2);
+    expect(a.problems, '正常载荷不该有问题').toEqual([]);
+  });
+
+  it('⭐⭐ 换一层嵌套照样解得出(防「改版就哑」)', () => {
+    const weird = JSON.stringify({
+      data: { user: { result: { timeline: { xx: { yy: [{ zz: tweet() }] } } } } },
+    });
+    expect(auditTimelinePayload(weird).tweets, '换个嵌套就解不出 —— 写死路径了?').toBe(1);
+  });
+
+  it('⚠️ 载荷里有环也不死循环', () => {
+    /** ⭐ X 的载荷里确实有互相引用 */
+    const t: Record<string, unknown> = tweet();
+    (t as { self?: unknown }).self = t;
+    let text = '';
+    try { text = JSON.stringify(t); } catch { text = payload([tweet()]); }
+    expect(() => auditTimelinePayload(text)).not.toThrow();
+  });
+});
+
+describe('⭐⭐⭐ 逐字段量 —— 不量的字段永远 100%', () => {
+  it('⭐ 全字段齐 → 覆盖率都是 100%', () => {
+    const a = auditTimelinePayload(payload([tweet(), tweet()]));
+    for (const k of ['正文', '作者', '作者id', '显示名', '头像', '发布时间',
+      '语言', '互动数', '会话id', '推文链接', '蓝V', '关系', '作者bio']) {
+      expect(a.coverage[k], `${k} 没量到 100%`).toBe(100);
+    }
+  });
+
+  it('⭐⭐ 正文丢了 → 覆盖率掉下来(最要紧的一条)', () => {
+    /** `project-x-article-body-lost`:正文整片丢失而报告说「✓ 全文已取回」 */
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: '' }), tweet()]));
+    expect(a.coverage['正文'], '正文丢了却报 100% —— 又一次「不量就 100%」').toBe(50);
+  });
+
+  it('⭐ 作者丢了 → 量得出来', () => {
+    const noAuthor = tweet();
+    delete (noAuthor as Record<string, unknown>).core;
+    const a = auditTimelinePayload(payload([noAuthor, tweet()]));
+    expect(a.coverage['作者']).toBe(50);
+  });
+
+  it('⭐ conversation_id 丢了 → 量得出来', () => {
+    /** ⚠️ 本仓实测这个字段曾卡在 9% —— 正是没人量它 */
+    const a = auditTimelinePayload(payload([tweet({}, { conversation_id_str: undefined }), tweet()]));
+    expect(a.coverage['会话id']).toBe(50);
+  });
+
+  it('⭐⭐ 互动数**六项都要齐** —— 缺一项就看得见', () => {
+    /**
+     * ⭐ 旧实现取六项:likes/retweets/replies/quotes/bookmarks/views。
+     * ⚠️ 只量「有没有互动数」的话,缺了 quotes/bookmarks/views 照样报 100% ——
+     * 又一次「不量的字段永远 100%」。
+     */
+    const t = tweet({ views: undefined }, { quote_count: undefined, bookmark_count: undefined });
+    const a = auditTimelinePayload(payload([t, tweet()]));
+    expect(a.coverage['互动数'], '缺了三项却报满').toBe(50);
+    expect(a.items[0].metricsCount, '没数清缺了几项').toBe(3);
+  });
+
+  it('⭐⭐ `views.count` 是**字符串** —— 要转成数字', () => {
+    /** ⚠️ 旧实现专门记着这条:「views.count 是字符串,state=Enabled 时没有数字」 */
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].metrics.views, 'views 没解出来').toBe(1234);
+  });
+
+  it('⭐⭐ 作者的**两个位置**都要看(新/旧形态)', () => {
+    /**
+     * ⚠️ 旧实现踩过:只读一个位置 → tweet_url 77% 空、author_avatar 80% 空。
+     */
+    const onlyLegacy = tweet();
+    const u = ((onlyLegacy.core as Record<string, unknown>).user_results as Record<string, unknown>)
+      .result as Record<string, unknown>;
+    delete u.core; delete u.avatar;
+    (u.legacy as Record<string, unknown>).profile_image_url_https = 'https://x/a.jpg';
+    const a = auditTimelinePayload(payload([onlyLegacy]));
+    expect(a.items[0].handle, '旧形态的 handle 没读到').toBe('someone');
+    expect(a.items[0].authorName, '旧形态的显示名没读到').toBe('Some One');
+    expect(a.items[0].hasAvatar, '旧形态的头像没读到').toBe(true);
+  });
+
+  it('⭐⭐ 蓝V/关系/bio 的**第二个位置**也要读', () => {
+    /**
+     * ⚠️⚠️ 注入验证抓到:我的样本**两个位置都给了蓝V**,
+     * 所以「只读一个位置」的实现**照样全绿** ——
+     * 样本里根本没有「只有第二个位置有」这个现象
+     * (`feedback-check-sample-contains-phenomenon`,今天第三次栽)。
+     *
+     * ⭐ 旧实现原话:「只读一个会漏 —— 那正是 x_author 里蓝V只有 2% 的成因之一」。
+     * ⭐ 真能区分的样本:**只给第二个位置**(verification.is_blue_verified)。
+     */
+    const onlySecond = tweet();
+    const u = ((onlySecond.core as Record<string, unknown>).user_results as Record<string, unknown>)
+      .result as Record<string, unknown>;
+    delete u.is_blue_verified;                       // 第一个位置拿掉
+    u.verification = { is_blue_verified: true };     // 只剩第二个
+    delete u.relationship_perspectives;              // 关系也只留旧形态
+    (u.legacy as Record<string, unknown>).following = true;
+    delete u.profile_bio;                            // bio 也只留旧形态
+    (u.legacy as Record<string, unknown>).description = '旧形态 bio';
+
+    const a = auditTimelinePayload(payload([onlySecond]));
+    expect(a.items[0].isBlueVerified, '只读第一个位置 —— 蓝V 会漏掉').toBe(true);
+    expect(a.items[0].iFollow, '关系只读新形态 —— 旧形态会漏').toBe(true);
+    expect(a.items[0].authorBio, 'bio 只读新形态 —— 旧形态会漏').toBe('旧形态 bio');
+  });
+
+  it('⭐ 带了就有值,**没带是 undefined 不是 false**', () => {
+    /** ⚠️ 「没关注」与「不知道关注没」是两件事,混起来会让追踪名单判错人 */
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].isBlueVerified).toBe(true);
+    expect(a.items[0].iFollow).toBe(false);
+    expect(a.items[0].followsMe).toBe(true);
+    expect(a.items[0].authorBio).toBe('一段 bio');
+
+    const bare = tweet();
+    const u2 = ((bare.core as Record<string, unknown>).user_results as Record<string, unknown>)
+      .result as Record<string, unknown>;
+    delete u2.is_blue_verified; delete u2.relationship_perspectives; delete u2.profile_bio;
+    delete (u2.legacy as Record<string, unknown>).following;
+    const b = auditTimelinePayload(payload([bare]));
+    expect(b.items[0].iFollow, '没带关系却兜底成了 false').toBeUndefined();
+  });
+
+  it('⭐⭐ 长推取**长的那个正文** —— 不是截断版', () => {
+    /**
+     * ⚠️ `project-x-article-body-lost`:取错了会「23 字 vs 16081 字」。
+     * legacy.full_text 是截断版,note_tweet 里才是全文。
+     */
+    const long = 'x'.repeat(5000);
+    const t = tweet({
+      note_tweet: { note_tweet_results: { result: { text: long } } },
+    }, { full_text: 'x'.repeat(200) });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].textLen, '取了截断版 —— 长推正文会丢 96%').toBe(5000);
+    expect(a.items[0].isLongText, '没识别出这是长推').toBe(true);
+    expect(a.coverage['长推']).toBe(100);
+  });
+
+  it('⚠️⚠️ 长推与长文**分开量** —— 它们是两回事', () => {
+    /**
+     * `project-x-article-body-lost`:「长推(note_tweet)与长文(article)是两回事」。
+     *
+     * ⚠️ 注入验证逼出来的改写:我第一版只测「纯长文」,
+     * 而把长推也标成长文的那种实现**照样全绿** ——
+     * 样本里根本没有「只是长推」的那一条
+     * (`feedback-check-sample-contains-phenomenon`)。
+     * ⭐ 真能区分的样本:**纯长推**(有 note_tweet、无 article)
+     * 和**纯长文**(有 article、无 note_tweet)各一条。
+     */
+    const pureNote = tweet({
+      note_tweet: { note_tweet_results: { result: { text: 'y'.repeat(3000) } } },
+    });
+    const pureArticle = tweet(
+      { rest_id: '2', article: { article_results: { result: { content_state: { x: 1 } } } } },
+      { id_str: '2' },
+    );
+    const a = auditTimelinePayload(payload([pureNote, pureArticle]));
+
+    expect(a.tweets).toBe(2);
+    // ⭐ 各一条 → 各 50%;混为一谈的实现会让「长文」变成 100%
+    expect(a.coverage['长推'], '长推没量对').toBe(50);
+    expect(a.coverage['长文'], '长推被算成了长文 —— 两种丢失形态会混在一起').toBe(50);
+    // ⭐ 逐条也要对
+    expect(a.items[0].isLongText).toBe(true);
+    expect(a.items[0].isArticle, '纯长推被标成了长文').toBe(false);
+    expect(a.items[1].isArticle).toBe(true);
+    expect(a.items[1].isLongText, '纯长文被标成了长推').toBe(false);
+  });
+});
+
+describe('⭐⭐ 翻页游标 —— 它是「还能不能翻」的硬证据', () => {
+  it('⭐ 有游标 → 认得出来', () => {
+    const a = auditTimelinePayload(payload([tweet()], 'DAABCgABabc'));
+    expect(a.hasCursor, '游标解不出来 —— 翻页会以为到底了').toBe(true);
+    expect(a.cursor).toContain('DAAB');
+  });
+
+  it('⭐⭐ 没游标 → **报问题**,不静默', () => {
+    /**
+     * ⚠️ `project-x-cursor-paging`:「几页没新人」不能当到底,
+     * 而 X 一直说 hasMore=true —— 游标在不在才是硬证据。
+     */
+    const a = auditTimelinePayload(payload([tweet()], ''));
+    expect(a.hasCursor).toBe(false);
+    expect(a.problems.join(''), '没游标却不吭声 —— 「翻不动」会被当成「到底了」')
+      .toContain('没有翻页游标');
+  });
+});
+
+describe('⭐⭐ 解不出来时如实说', () => {
+  it('⭐⭐ 不是 JSON → 报问题,**不抛**', () => {
+    /** ⚠️ 「读不懂」与「是空的」是两件事,混起来就查不动 */
+    const a = auditTimelinePayload('这不是 JSON{{{');
+    expect(a.tweets).toBe(0);
+    expect(a.problems.join(''), '没说清是解析失败').toContain('不是合法 JSON');
+    expect(a.problems.join(''), '没提示可能被截断').toContain('截断');
+  });
+
+  it('⭐⭐ 合法 JSON 但没推文 → 报问题(2026-10-02 实测的那种)', () => {
+    /** ⚠️ 实测:captured=72 全是视频分片、心跳、头像 */
+    const a = auditTimelinePayload(JSON.stringify({ data: { viewer: { ok: true } } }));
+    expect(a.tweets).toBe(0);
+    expect(a.problems.join(''), '采到一堆无关的却不吭声').toContain('一条推文都没解出来');
+  });
+
+  it('⚠️ 空字符串也不崩', () => {
+    expect(() => auditTimelinePayload('')).not.toThrow();
+    expect(auditTimelinePayload('').problems.length).toBeGreaterThan(0);
+  });
+});
+
+describe('⭐⭐ 多页汇总', () => {
+  it('⭐⭐ 按 id **去重** —— 两页之间会重叠', () => {
+    /** ⚠️ 不去重会把条数报虚高,而「采到多少」正是要核对的 */
+    const p1 = auditTimelinePayload(payload([tweet(), tweet({ rest_id: '2' }, { id_str: '2' })]));
+    const p2 = auditTimelinePayload(payload([tweet({ rest_id: '2' }, { id_str: '2' }),
+      tweet({ rest_id: '3' }, { id_str: '3' })]));
+    const sum = summarizeAudits([p1, p2]);
+    expect(sum.pages).toBe(2);
+    expect(sum.tweets, '原始条数').toBe(4);
+    expect(sum.uniqueTweets, '去重后该是 3 条 —— 不去重就报虚高了').toBe(3);
+  });
+
+  it('⭐ 汇总的覆盖率跨页算', () => {
+    const p1 = auditTimelinePayload(payload([tweet()]));
+    const p2 = auditTimelinePayload(payload([tweet({}, { full_text: '' })]));
+    const sum = summarizeAudits([p1, p2]);
+    expect(sum.coverage['正文'], '跨页覆盖率算错了').toBe(50);
+  });
+
+  it('⭐ 各页的问题都汇总上来', () => {
+    const p1 = auditTimelinePayload(payload([tweet()], ''));
+    const p2 = auditTimelinePayload('坏的');
+    const sum = summarizeAudits([p1, p2]);
+    expect(sum.problems.length, '问题被吞了').toBeGreaterThanOrEqual(2);
+  });
+
+  it('⚠️ 零页时不崩、不报 NaN', () => {
+    const sum = summarizeAudits([]);
+    expect(sum.pages).toBe(0);
+    expect(Number.isFinite(sum.coverage['正文']), '空集算出了 NaN').toBe(true);
+    expect(sum.coverage['正文']).toBe(0);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **逐条明细** —— 用户 2026-10-02:
+ * 「对于推文中的**数据是否完整**没有显示哦。」
+ *
+ * ⚠️ 只给覆盖率百分比的话,人不知道**哪几条**不完整、缺的是什么,
+ * 也不知道采到的到底是什么内容。
+ */
+describe('⭐⭐⭐ 「数据是否完整」要逐条说清', () => {
+  it('⭐⭐ 每条带**正文开头** —— 一眼看出采到的是什么', () => {
+    const t = tweet({}, { full_text: '这是一条很长的推文内容'.repeat(20) });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].preview.length, '没有正文摘要 —— 人看不出采到了什么')
+      .toBeGreaterThan(0);
+    expect(a.items[0].preview.length, '摘要太长会把面板撑爆').toBeLessThanOrEqual(80);
+  });
+
+  it('⚠️ 摘要里的换行要去掉 —— 否则面板布局撑开', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: 'a\nb\n\nc' })]));
+    expect(a.items[0].preview, '换行没去掉').toBe('a b c');
+  });
+
+  it('⭐⭐⭐ `incomplete` 逐条列出**缺了什么**', () => {
+    const bad = tweet({}, { full_text: '', conversation_id_str: undefined });
+    const good = tweet({ rest_id: '2' }, { id_str: '2' });
+    const sum = summarizeAudits([auditTimelinePayload(payload([bad, good]))]);
+
+    expect(sum.incomplete.length, '没列出有缺失的那条').toBe(1);
+    expect(sum.incomplete[0].missing.join(), '缺的字段没说清').toContain('正文');
+    expect(sum.incomplete[0].missing.join()).toContain('会话id');
+    // ⭐ 完好的那条不该进来
+    expect(sum.incomplete.some((x) => x.audit.id === '2'), '完好的被当成了有缺失').toBe(false);
+  });
+
+  it('⚠️ 长推/长文**不算缺失** —— 它们是种类不是必备字段', () => {
+    /** ⭐ 否则普通推文会被全部报成「缺长推、缺长文」—— 噪音淹掉真问题 */
+    const sum = summarizeAudits([auditTimelinePayload(payload([tweet()]))]);
+    expect(sum.incomplete, '普通推文被报成有缺失').toEqual([]);
+  });
+
+  it('⭐⭐ `items` 带回**去重后**的全部明细', () => {
+    const p1 = auditTimelinePayload(payload([tweet(), tweet({ rest_id: '2' }, { id_str: '2' })]));
+    const p2 = auditTimelinePayload(payload([tweet({ rest_id: '2' }, { id_str: '2' }),
+      tweet({ rest_id: '3' }, { id_str: '3' })]));
+    const sum = summarizeAudits([p1, p2]);
+    expect(sum.items.length, '明细没去重 —— 两页之间会重叠').toBe(3);
+    expect(sum.items.map((x) => x.id).sort()).toEqual(['1234567890', '2', '3']);
+  });
+
+  it('⭐ 明细里带 handle 与字数 —— 判断「这条对不对」用得上', () => {
+    const sum = summarizeAudits([auditTimelinePayload(payload([tweet()]))]);
+    expect(sum.items[0].handle, '没带作者').toBe('someone');
+    expect(sum.items[0].textLen, '没带字数').toBeGreaterThan(0);
+  });
+
+  it('⚠️ 零条时 incomplete 与 items 都是空数组,不是 undefined', () => {
+    const sum = summarizeAudits([]);
+    expect(sum.items).toEqual([]);
+    expect(sum.incomplete).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 截断判据 —— **真机误报 16/36 条**之后重写
+ *
+ * ── 2026-10-02 实测 ──
+ * 36 条推文里 **16 条被标「正文被截断」**,而它们根本没截断:
+ *
+ *   「一觉醒来，粉丝超过 1k 了，谢谢各位原始股东！🎉 https://t.co/MOWj8yNqAC」
+ *
+ * ⭐ 那个 t.co 是 **X 给自己的图片/视频生成的链接** —— 几乎每条带图的推都有。
+ * 我的判据「以 t.co 结尾就算截断」把它们全误判了。
+ *
+ * ⚠️⚠️ `project-x-readback-lies`:
+ * **工具谎报比采集出错更坏 —— 它让人去改没坏的代码**。
+ * 而且 16 条全误报时,**真有问题的那条也被淹了**。
+ */
+describe('⭐⭐⭐ 截断判据:宁可漏报不要误报', () => {
+  it('⭐⭐⭐ 带图的推以 t.co 结尾 → **不算截断**(真机误报 16 条的那种)', () => {
+    const t = tweet({}, {
+      full_text: '一觉醒来，粉丝超过 1k 了，谢谢各位原始股东！🎉 https://t.co/MOWj8yNqAC',
+      extended_entities: { media: [{ type: 'photo', media_url_https: 'https://pbs/x.jpg' }] },
+    });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].hasMedia, '样本没造出「有媒体」—— 测不到该现象').toBe(true);
+    expect(
+      a.items[0].incomplete,
+      '带图的推被误判成截断 —— 真机 36 条里误报了 16 条',
+    ).toBeUndefined();
+  });
+
+  it('⭐⭐ 省略号结尾 → **算**截断(真信号)', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: '这条很长很长…' })]));
+    expect(a.items[0].incomplete, '省略号是 X 真截断的标记,没认出来').toBe('text-truncated');
+  });
+
+  /**
+   * ⭐⭐⭐ 2026-10-03 真机**第二次误报** —— 这次是**链接卡片**
+   *
+   *   「新人必备 跟上峰哥的节奏 https://t.co/4QMNIjlI8f」(36 字,媒体=无)
+   *
+   * 旧判据「没媒体 + t.co 结尾 = 截断」把它判成截断。它根本没截断:
+   * 那是一条**分享链接**的推,卡片既不算媒体(媒体只认
+   * `extended_entities.media`)也不算引用。
+   *
+   * ⭐ 改用 X 自己给的证据:t.co **在 `entities.urls` 里**就是卡片。
+   */
+  it('⭐⭐⭐ 末尾 t.co 在 entities.urls 里 → **不算截断**(真机误报的链接卡片)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '新人必备 跟上峰哥的节奏 https://t.co/4QMNIjlI8f',
+        entities: {
+          urls: [{
+            url: 'https://t.co/4QMNIjlI8f',
+            expanded_url: 'https://example.com/landing',
+          }],
+        },
+      }),
+    ]));
+    /** ⚠️ 先确认样本**真的造出了该现象** —— 否则测的是别的东西 */
+    expect(a.items[0].hasMedia, '样本不该有媒体,否则走的是另一条分支').toBe(false);
+    expect(
+      a.items[0].truncationEvidence?.trailingUrlIsEntity,
+      '样本没造出「t.co 在 entities.urls 里」—— 测不到该现象',
+    ).toBe(true);
+    expect(
+      a.items[0].incomplete,
+      '链接卡片被误判成截断 —— 真机 2026-10-03 第 7 条就这么报错的',
+    ).toBeUndefined();
+    /**
+     * ⭐⭐ 连**理由**一起钉 —— 「没报截断」有好几条路能到达,
+     * 只钉结论的话,把卡片分支掐掉照样全绿(注入验证实测过)。
+     */
+    expect(
+      a.items[0].truncationEvidence?.verdict,
+      '结论对了但理由不是「卡片」—— 判对是碰巧的',
+    ).toContain('链接卡片');
+    expect(a.items[0].truncationEvidence?.trailingExpandedUrl).toBe('https://example.com/landing');
+  });
+
+  it('⭐⭐ 末尾 t.co **不在** entities.urls 里且无媒体 → 算截断(可疑)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '看这个 https://t.co/abc123',
+        /** ⭐ urls 给了但**没有**末尾那条 —— 才敢说「不在里面」 */
+        entities: { urls: [{ url: 'https://t.co/other', expanded_url: 'https://e.com' }] },
+      }),
+    ]));
+    expect(a.items[0].truncationEvidence?.trailingUrlIsEntity, '样本前提不成立').toBe(false);
+    expect(a.items[0].incomplete).toBe('text-truncated');
+  });
+
+  /**
+   * ⚠️⚠️ **宁可漏报** —— 载荷压根没给 entities.urls 时不报截断。
+   * 真机那条误报正是这种:查不到归属却当成「不在里面」。
+   */
+  it('⚠️⚠️ 载荷没给 entities.urls → **不报**截断(宁可漏报不要误报)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '看这个 https://t.co/abc123' }),
+    ]));
+    expect(
+      a.items[0].truncationEvidence?.trailingUrlIsEntity,
+      '样本该是「查不到归属」(undefined),不是 false',
+    ).toBeUndefined();
+    expect(
+      a.items[0].incomplete,
+      '查不到归属就报截断 —— 那是在猜,不是在判',
+    ).toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐⭐ 2026-10-04 真机**第三次误报** —— 这次 72 条里误报 **50 条**
+   *
+   *   「今天地铁人不多 不开车很舒服 还可以玩手机 https://t.co/3nxAcK91hb」
+   *   正文 47 字、display_text_range 到 23 —— 我判成「X 说显示不全」。
+   *
+   * ⚠️⚠️ 那 23 字**本来就是全文**,后面是 X 给配图自动加的链接。
+   * **X 本来就把末尾实体 URL 排除在显示区间之外**。
+   * 实测差值分布坐实:35/50 差正好 **24** = 空格 + t.co(23 字符)。
+   *
+   * ⭐ 三次误报(①带图的 t.co ②链接卡片 ③这次)都因为
+   * 我拿「看起来像」的特征当判据,而不是先量真实分布。
+   */
+  it('⭐⭐⭐ range 之后只剩 t.co → **不算截断**(真机误报 50 条的那种)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '今天地铁人不多 不开车很舒服 还可以玩手机 https://t.co/3nxAcK91hb',
+        display_text_range: [0, 23],
+        entities: { urls: [] },
+        extended_entities: { media: [{ type: 'photo' }] },
+      }),
+    ]));
+    /** ⚠️ 先确认样本真造出了「range 短于正文」 */
+    expect(a.items[0].truncationEvidence?.displayTextRange, '样本前提不成立').toEqual([0, 23]);
+    expect(
+      a.items[0].incomplete,
+      'range 后面只剩一个 t.co 却判成截断 —— 真机 72 条误报了 50 条',
+    ).toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐⭐ **`display_text_range` 是码点偏移,不是 UTF-16 单元** —— 2026-10-04
+   *
+   * 我原先在类型注释里写「单位是 UTF-16 code unit」——**那是我的假设,错的**。
+   * 一个 emoji = 1 码点 = 2 单元,于是带 emoji 的推文永远对不齐:
+   *   「突破8000了 🎉🎉 https://t.co/…」range=11,
+   *   按单元切出 `\udf89…`(半个 emoji)→ 被当成「还剩正文」→ 误报截断。
+   *
+   * ⭐ 真机回放实证:改按码点后,72 条里的误报 **50 → 3**(剩下 3 条是
+   * 报告预览只存 80 字把 URL 切断造成的,不是代码问题)。
+   */
+  it('⭐⭐⭐ 带 emoji 时按**码点**比 —— 不按 .length(真机误报的一类)', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '突破8000了 🎉🎉 https://t.co/Obu512wWpx',
+        display_text_range: [0, 11],
+      }),
+    ]));
+    expect(a.items[0].truncationEvidence?.displayTextRange, '样本前提不成立').toEqual([0, 11]);
+    expect(
+      a.items[0].incomplete,
+      '按 UTF-16 单元切 → 切出半个 emoji 被当成「还剩正文」',
+    ).toBeUndefined();
+  });
+
+  it('⭐⭐ textUnits 也按码点 —— 否则它与 range 不是同一把尺', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '🎉🎉', display_text_range: [0, 2] }),
+    ]));
+    expect(
+      a.items[0].truncationEvidence?.textUnits,
+      'textUnits 按 .length 算成 4 —— 与 range 的单位对不上',
+    ).toBe(2);
+  });
+
+  it('⚠️ range 之后只剩空白 → 也不算截断', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '正文到这里 ', display_text_range: [0, 5] }),
+    ]));
+    expect(a.items[0].incomplete, '末尾一个空格就报截断').toBeUndefined();
+  });
+
+  /** ⭐⭐ X 自己说正文显示不全 —— 比我的任何推断都硬 */
+  it('⭐⭐ display_text_range 短于正文**且还剩真正文** → 算截断', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, { full_text: '这条正文很长但被砍了', display_text_range: [0, 4] }),
+    ]));
+    expect(a.items[0].truncationEvidence?.displayTextRange, '样本前提不成立').toEqual([0, 4]);
+    expect(a.items[0].incomplete).toBe('text-truncated');
+  });
+
+  /**
+   * ⭐⭐ **判据的依据必须留痕** —— 不管结论是什么。
+   * 起因:真机报告写「正文被截断」而我拿不出它凭什么这么说
+   * (原始载荷只在内存,跑完就没)。
+   */
+  it('⭐⭐ 没报截断的推**也有** verdict —— 成功路径也要留痕', () => {
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].incomplete).toBeUndefined();
+    expect(
+      a.items[0].truncationEvidence?.verdict,
+      '没报截断就不留依据 —— 下次核对又要靠人截图',
+    ).toBeTruthy();
+  });
+
+  it('⭐⭐ 有 note_tweet(长推全文)时**一律不算**截断', () => {
+    /** ⭐ 拿到全文了就是拿到了,末尾是什么都无所谓 */
+    const t = tweet({
+      note_tweet: { note_tweet_results: { result: { text: '全文'.repeat(500) } } },
+    }, { full_text: '截断版… https://t.co/x' });
+    const a = auditTimelinePayload(payload([t]));
+    expect(a.items[0].incomplete, '有全文却报截断').toBeUndefined();
+  });
+
+  it('⭐ 正常短推不报截断', () => {
+    const a = auditTimelinePayload(payload([tweet()]));
+    expect(a.items[0].incomplete).toBeUndefined();
+  });
+
+  it('⚠️ 空正文不报截断 —— 那是「没正文」不是「截断了」', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { full_text: '' })]));
+    expect(a.items[0].incomplete, '空正文被报成截断 —— 两种问题混了').toBeUndefined();
+  });
+});
+
+/**
+ * ⭐⭐⭐ 长文正文的**去处** —— 2026-10-03 真机发现
+ *
+ * @KA594594 一跑 40 条,**38 条是长文**,正文全不在列表页。
+ * 本来以为要「模拟人点进卡片」,结果地址**就在载荷里**:
+ * 末尾那个 t.co 的 `expanded_url` 就是 `https://x.com/i/article/<id>`。
+ * 实测 38/38 全配上,反向(有地址却没标缺正文)0 条。
+ *
+ * ⚠️ article id **不等于**推文 id(实测 5/5 都不同)→ 推不出来,
+ * 只能从载荷取。这正是它非存不可的原因。
+ */
+describe('⭐⭐⭐ 长文正文的去处(articleUrl)', () => {
+  /** ⭐ 照真机那条的形状造:长文 + 23 字 t.co + entities 里挂着 article 地址 */
+  const articleTweet = (): ReturnType<typeof tweet> => tweet(
+    { article: { article_results: { result: { title: '从深圳老板到造反者' } } } },
+    {
+      full_text: 'https://t.co/so8J01gutF',
+      entities: {
+        urls: [{
+          url: 'https://t.co/so8J01gutF',
+          expanded_url: 'https://x.com/i/article/2105111183481266176',
+        }],
+      },
+    },
+  );
+
+  it('⭐⭐⭐ 长文缺正文时**带出地址** —— 补正文不用猜 URL', () => {
+    const a = auditTimelinePayload(payload([articleTweet()]));
+    expect(a.items[0].incomplete, '样本没造出「长文缺正文」—— 测不到该现象')
+      .toBe('article-no-body');
+    expect(
+      a.items[0].articleUrl,
+      '长文地址没带出来 —— 补正文就只能回去点卡片',
+    ).toBe('https://x.com/i/article/2105111183481266176');
+  });
+
+  it('⭐⭐ article id **不等于**推文 id —— 所以非从载荷取不可', () => {
+    const a = auditTimelinePayload(payload([articleTweet()]));
+    const aid = /\/i\/article\/(\d+)/.exec(a.items[0].articleUrl ?? '')?.[1];
+    expect(aid, '没取到 article id').toBeTruthy();
+    expect(
+      aid,
+      'article id 与推文 id 相同 —— 若真相同就能推导,这条测试的前提不成立',
+    ).not.toBe(a.items[0].id);
+  });
+
+  it('⚠️ 普通外链**不当**长文地址 —— 只认 /i/article/', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({}, {
+        full_text: '看这个 https://t.co/abc',
+        entities: { urls: [{ url: 'https://t.co/abc', expanded_url: 'https://youtube.com/watch?v=1' }] },
+      }),
+    ]));
+    expect(a.items[0].articleUrl, '普通外链被当成了长文地址').toBeUndefined();
+  });
+
+  /**
+   * ⭐⭐⭐ **面板靠它决定按钮出不出现** —— 这一环断了是静默的:
+   * 按钮永远不显示,而核对报告照样说「38 篇有地址」,
+   * 两边看着都对,就是点不到(`feedback-guard-must-pin-live-code`)。
+   */
+  it('⭐⭐⭐ articleUrl 要**活过 summarizeAudits** —— 面板从那里取', () => {
+    const sum = summarizeAudits([auditTimelinePayload(payload([articleTweet()]))]);
+    expect(
+      sum.items[0]?.articleUrl,
+      'summarizeAudits 把 articleUrl 丢了 —— 面板的「取长文正文」按钮永远不出现',
+    ).toBe('https://x.com/i/article/2105111183481266176');
+    expect(sum.items[0]?.incomplete, '按钮还要靠 incomplete 筛').toBe('article-no-body');
+  });
+
+  it('⚠️ 长文但载荷**没给地址** → articleUrl 空,不编一个出来', () => {
+    const a = auditTimelinePayload(payload([
+      tweet({ article: { article_results: { result: {} } } }, { full_text: '标题' }),
+    ]));
+    expect(a.items[0].incomplete).toBe('article-no-body');
+    expect(a.items[0].articleUrl, '没地址却给了值 —— 那是编的').toBeUndefined();
+  });
+});
+
+/**
+ * ⭐⭐⭐ 单篇页的长文**正文** —— 2026-10-03 真机
+ *
+ * 进 `/i/article/<id>`,16 条响应里只有 **`TweetResultByRestId`**
+ * 带 `content_state`(14KB)。端点名**一点都不像 article** ——
+ * 那是推不出来、必须问真机的平台事实。
+ *
+ * ⚠️ 此前解析器把 `content_state` 只当「有没有」的旗子(JSON.stringify),
+ * 于是正文明明到手、`textLen` 照样报 23(那个 t.co 短链)——
+ * 与 `project-x-article-body-lost` 同一个形态(23 字 vs 16081 字)。
+ */
+describe('⭐⭐⭐ 长文正文:单篇页载荷里真的取出来', () => {
+  const contentState = {
+    blocks: [
+      { text: '九、两次退潮，两代女人', type: 'header-two' },
+      { text: '三十年前和今天，其实存在一个非常重要的区别。', type: 'unstyled' },
+      /** ⚠️ atomic 是媒体占位,text 是**单个空格** */
+      { text: ' ', type: 'atomic' },
+      { text: '两代女性面对的是两个不同的问题。', type: 'unstyled' },
+    ],
+  };
+  /** ⭐ 照真机形状造:`TweetResultByRestId` 是**单条推**,不走 instructions */
+  const singlePayload = (cs: unknown, title = '从深圳老板到造反者'): string => JSON.stringify({
+    data: {
+      tweetResult: {
+        result: {
+          rest_id: '2105111536603959409',
+          legacy: { id_str: '2105111536603959409', full_text: 'https://t.co/so8J01gutF' },
+          article: { article_results: { result: { title, content_state: cs } } },
+          core: { user_results: { result: { legacy: { screen_name: 'KA594594' } } } },
+        },
+      },
+    },
+  });
+
+  it('⭐⭐⭐ 单篇页载荷(非 instructions 形状)也能解出推文', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(a.items.length, '单篇页解不出来 —— 解析器只认时间线形状').toBe(1);
+    expect(a.items[0].isArticle).toBe(true);
+  });
+
+  /**
+   * ⭐⭐ 判据用**精确长度**,不用 `> 50`。
+   * ⚠️ 注入验证实测:退回 `JSON.stringify(content_state)` 时
+   * `textLen` 是一百多、`preview` 里照样有「两次退潮」(它在 JSON 里面)——
+   * **松判据放过了「只当旗子」那一版**。精确值才分得开三种实现。
+   */
+  const EXPECTED_LEN = '从深圳老板到造反者'.length + 2            // 标题 + 两个换行
+    + '九、两次退潮，两代女人'.length + 1
+    + '三十年前和今天，其实存在一个非常重要的区别。'.length + 1
+    + '两代女性面对的是两个不同的问题。'.length;
+
+  it('⭐⭐⭐ 正文**真的取出来**,不是只当「有没有」的旗子', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(
+      a.items[0].textLen,
+      '长度对不上 —— 要么还是 23 字 t.co,要么塞的是 JSON 字符串',
+    ).toBe(EXPECTED_LEN);
+    expect(a.items[0].preview, '正文内容没进来').toContain('两次退潮');
+    /** ⭐⭐ 钉死「不是 JSON」—— JSON.stringify 那版会带结构字符 */
+    expect(a.items[0].preview, '正文里有 JSON 结构字符 —— 塞的是 stringify 的结果不是正文')
+      .not.toContain('"type"');
+  });
+
+  it('⭐⭐ 标题也算进正文 —— 它**不在** blocks 里', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(a.items[0].preview, '标题丢了').toContain('从深圳老板到造反者');
+  });
+
+  /**
+   * ⚠️⚠️ 判据**不能看 preview** —— 它 `.replace(/\s+/g,' ')` 把空白全压平了,
+   * 空行在那里**永远看不见**(注入验证实测:不滤也全绿)。
+   * ⭐ 改钉精确长度:多一个 atomic 空格就是多 2 个 code unit(空格+换行)。
+   */
+  it('⚠️ atomic 的单空格要滤掉 —— 不滤会多出孤立空行', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(
+      a.items[0].textLen,
+      'atomic 的空格没滤 —— 正文里会夹一行只有空格的空行',
+    ).toBe(EXPECTED_LEN);
+  });
+
+  it('⭐⭐ 拿到正文 → **不再**报「长文没正文」', () => {
+    const a = auditTimelinePayload(singlePayload(contentState));
+    expect(a.items[0].incomplete, '正文都拿到了还报缺').toBeUndefined();
+  });
+
+  /** ⚠️ 列表页那份(没 content_state)仍要照常报缺 —— 别把两种混了 */
+  it('⚠️ 列表页那份(无 content_state)照样报「长文没正文」', () => {
+    const a = auditTimelinePayload(singlePayload(undefined));
+    expect(a.items[0].incomplete, '列表页也说有正文了 —— 那会漏掉 38 篇').toBe('article-no-body');
+  });
+});
+
+/**
+ * ⭐⭐⭐ 去重要留**更全**的那份 —— 2026-10-03
+ *
+ * 长文会出现两次:列表页那份只有 23 字 t.co,单篇页那份才有正文。
+ * ⚠️⚠️ 原先「保留先出现的」会把**补回来的正文整个丢掉** ——
+ * 逐篇跑完 38 趟,报告照样说「缺 38 篇」。
+ * 写采集编排时实测证出来的(不是推断),与
+ * `project-x-upsert-overwrites-richer-text` 是同一形态(深→浅降级)。
+ */
+describe('⭐⭐⭐ 同一条推的两份:留更全的', () => {
+  const art = (cs: unknown): string => JSON.stringify({
+    data: { tweetResult: { result: {
+      rest_id: '111',
+      legacy: { id_str: '111', full_text: 'https://t.co/x' },
+      article: { article_results: { result: { title: 'T', content_state: cs } } },
+      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+    } } },
+  });
+  const listPage = art(undefined);
+  const fullPage = art({ blocks: [{ text: '正文'.repeat(50), type: 'unstyled' }] });
+
+  it('⭐⭐⭐ 先列表页后单篇页 → 留**单篇页**那份(补回来的不许被丢)', () => {
+    const a1 = auditTimelinePayload(listPage);
+    const a2 = auditTimelinePayload(fullPage);
+    /** ⚠️ 先确认样本真造出了「一浅一深」 */
+    expect(a1.items[0].incomplete, '样本的浅那份不缺正文 —— 测不到该现象').toBe('article-no-body');
+    expect(a2.items[0].incomplete, '样本的深那份没正文 —— 测不到该现象').toBeUndefined();
+
+    const s = summarizeAudits([a1, a2]);
+    expect(s.items.length, '没去重').toBe(1);
+    expect(
+      s.items[0].incomplete,
+      '补回来的正文被丢了 —— 跑完 38 趟报告还说「缺 38 篇」',
+    ).toBeUndefined();
+    expect(s.items[0].textLen).toBe(a2.items[0].textLen);
+  });
+
+  it('⭐⭐ 顺序反过来也留深的 —— 不是靠「后面覆盖前面」', () => {
+    const s = summarizeAudits([auditTimelinePayload(fullPage), auditTimelinePayload(listPage)]);
+    expect(s.items.length).toBe(1);
+    expect(s.items[0].incomplete, '浅的那份把深的盖掉了 —— 深→浅降级').toBeUndefined();
+  });
+
+  it('⚠️ 一样长就不换 —— 免得来回横跳', () => {
+    const a = auditTimelinePayload(fullPage);
+    const b = auditTimelinePayload(fullPage);
+    const s = summarizeAudits([a, b]);
+    expect(s.items.length).toBe(1);
+    expect(s.items[0].textLen).toBe(a.items[0].textLen);
+  });
+
+  it('⚠️ 没 id 的条目照样留下 —— 不许被去重吃掉', () => {
+    const noId = JSON.stringify({
+      data: { tweetResult: { result: {
+        legacy: { full_text: '没有 id 的推' },
+        core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+      } } },
+    });
+    const s = summarizeAudits([auditTimelinePayload(noId), auditTimelinePayload(noId)]);
+    expect(s.items.length, '没 id 的被当成同一条去重掉了').toBe(2);
+  });
+});
+
+/**
+ * ⭐⭐ 「空的」与「读不懂」是两件事 —— 2026-10-04 真机
+ *
+ * 配方搜索翻 44 页,报告里一条
+ * 「不是合法 JSON(Unexpected end of JSON input)—— **可能被截断了**」。
+ * ⚠️ 真相是**空响应体**(CDP 没读到 body),而那句话把人指向
+ * 「腿把响应切了」这个错方向。
+ * ⭐ 本函数的文档注释早就写着这两件事要分开 —— 代码却混着。
+ */
+describe('⭐⭐ 空响应体 ≠ 解析失败', () => {
+  it('⭐⭐ 空串 → 说「响应体是空的」,不说「可能被截断」', () => {
+    const a = auditTimelinePayload('');
+    expect(a.problems.join(''), '把「没拿到内容」说成了「被截断」—— 指向错方向')
+      .toContain('响应体是空的');
+    expect(a.problems.join('')).not.toContain('可能被截断');
+  });
+
+  it('⭐ 只有空白也算空', () => {
+    expect(auditTimelinePayload('   \n ').problems.join('')).toContain('响应体是空的');
+  });
+
+  /** ⚠️ 真正读不懂的仍要说「不是合法 JSON」—— 别把两类又并回去 */
+  it('⚠️ 半截 JSON 仍报「不是合法 JSON」', () => {
+    const a = auditTimelinePayload('{"data":{"search');
+    expect(a.problems.join(''), '真的解析失败却说成空的').toContain('不是合法 JSON');
+    expect(a.problems.join('')).not.toContain('响应体是空的');
+  });
+});
+
+/**
+ * ⭐⭐⭐ **完整记录(五维)** —— 用户 2026-10-04:
+ * 「真正的分析,可以分**人、事、物、时、空**五个维度。」
+ *
+ * ⚠️⚠️ 在这之前,解析器**只产出给人看的核对结果**:
+ * `preview` 80 字、媒体只有 `['photo']` —— 于是辛苦取回的
+ * **长文正文 23446 字在解析这一步就被扔了**,接 repo 也没东西可存。
+ *
+ * ⭐ 「物」这一维在原先的三分法里**没有位置** —— 被归进「事」,
+ * 媒体和链接就当成附属品丢掉。五维一摆缺口立刻显形。
+ */
+describe('⭐⭐⭐ TweetRecord:五维都要留下来', () => {
+  const rich = (): string => payload([tweet({}, {
+    full_text: '看这个 #VPN @someone https://t.co/abc',
+    created_at: 'Fri Oct 04 12:00:00 +0000 2026',
+    favorited: true,
+    entities: {
+      hashtags: [{ text: 'VPN' }],
+      user_mentions: [{ screen_name: 'someone' }],
+      urls: [{ url: 'https://t.co/abc', expanded_url: 'https://example.com/real' }],
+    },
+    extended_entities: { media: [{ type: 'photo', media_url_https: 'https://pbs.twimg.com/a.jpg' }] },
+  })]);
+
+  it('⭐⭐⭐【事】全文**不截断** —— 核对结果那份只有 80 字', () => {
+    const long = '正'.repeat(500);
+    const a = auditTimelinePayload(payload([tweet({
+      note_tweet: { note_tweet_results: { result: { text: long } } },
+    }, { full_text: '截断版…' })]));
+    expect(a.items[0].preview.length, '核对结果本就该短').toBeLessThanOrEqual(80);
+    expect(
+      a.items[0].record.text.length,
+      '记录里也被截了 —— 长文正文 23446 字就是这么丢的',
+    ).toBe(500);
+  });
+
+  it('⭐⭐⭐【物】媒体要带 **URL**,不只是 type', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.media, '媒体只有 type —— 「配了什么图」永远答不上来')
+      .toEqual([{ type: 'photo', url: 'https://pbs.twimg.com/a.jpg' }]);
+  });
+
+  it('⭐⭐【物】外链存**展开后**的地址 —— t.co 是 X 的包装', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.links, '存了 t.co —— 那不是我们要的链接').toEqual(['https://example.com/real']);
+  });
+
+  it('⭐⭐【物】话题标签与 @提及', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.hashtags).toEqual(['VPN']);
+    expect(r.mentions).toEqual(['someone']);
+  });
+
+  it('⭐⭐【时】互动数要带**读到它的时刻**', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.metricsAt, '没有 metricsAt —— 「赞 7」是今天还是上周分不出来').toBeTruthy();
+    expect(Number.isNaN(Date.parse(r.metricsAt)), 'metricsAt 不是合法时间').toBe(false);
+  });
+
+  /** ⚠️ 发布时间没带就 undefined —— **别拿采集时间顶替** */
+  it('⚠️【时】载荷没给发布时间 → undefined,不拿当前时间充数', () => {
+    const a = auditTimelinePayload(payload([tweet({}, { created_at: undefined })]));
+    expect(a.items[0].record.createdAt, '拿采集时间顶替了发布时间 —— 时序分析会全错')
+      .toBeUndefined();
+  });
+
+  it('⭐⭐【事】推文链接要**拼出来存**,不只是「能不能拼」', () => {
+    const r = auditTimelinePayload(rich()).items[0].record;
+    expect(r.tweetUrl, 'URL 本身没留 —— 原先只有 hasTweetUrl 这个布尔')
+      .toMatch(/^https:\/\/x\.com\/.+\/status\/\d+$/);
+  });
+
+  /**
+   * ⚠️ 载荷**真的没带**时才该是 undefined。
+   * ⭐ 默认 fixture 是带 `relationship_perspectives` 的(following: false),
+   * 所以这里要**显式删掉**才测得到该现象
+   * (`feedback-check-sample-contains-phenomenon`:
+   * 　别拿不含某现象的样本论证该现象 —— 第一版就栽在这)。
+   */
+  it('⚠️【人】载荷**没带**关系字段 → undefined,不兜底成 false', () => {
+    const t = tweet();
+    const u = (t as Record<string, unknown>).core as Record<string, unknown>;
+    const res = ((u.user_results as Record<string, unknown>).result) as Record<string, unknown>;
+    delete res.relationship_perspectives;
+    delete (res.legacy as Record<string, unknown>).following;
+    delete (res.legacy as Record<string, unknown>).followed_by;
+
+    const r = auditTimelinePayload(payload([t])).items[0].record;
+    expect(r.following, '没带却说成「不关注」—— 那是编的').toBeUndefined();
+    expect(r.followedBy).toBeUndefined();
+  });
+
+  it('⭐ 载荷**带了** false 时就是 false —— 别矫枉过正', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    expect(r.following, '带了 false 却报成 undefined').toBe(false);
+  });
+
+  it('⭐ 没有【物】的推:四样都是空数组,不是 undefined', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    expect(r.media).toEqual([]);
+    expect(r.links).toEqual([]);
+    expect(r.hashtags).toEqual([]);
+    expect(r.mentions).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 落库的字段名**照抄 X 的词** —— 用户 2026-10-04:
+ * 「这个还是按照 x 的分类吧 **following/follower**」。
+ *
+ * ⚠️ 我原先把它们叫 `iFollow` / `followsMe` —— **我自造的说法**。
+ * 载荷原名就是 `relationship_perspectives.following` / `.followed_by`。
+ * ⭐ 少一层翻译就少一层漂移 —— 与 `project-x-persistent-tracking` 那条
+ * 「措辞一律用『追踪』不用『关注』」同一个道理:**名字要对得上它描述的那件事**。
+ */
+describe('⭐⭐⭐ 记录的关系字段用 X 的原词', () => {
+  it('⭐⭐⭐ 叫 following / followedBy,不是我自造的 iFollow / followsMe', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    expect(Object.keys(r), '记录里还在用自造的名字')
+      .toEqual(expect.arrayContaining(['following', 'followedBy']));
+    expect(Object.keys(r), '自造的名字还留在记录里 —— 落库会把它写进表')
+      .not.toEqual(expect.arrayContaining(['iFollow', 'followsMe']));
+  });
+
+  it('⭐ 值仍来自载荷的 relationship_perspectives —— 只改名不改语义', () => {
+    const r = auditTimelinePayload(payload([tweet()])).items[0].record;
+    /** 默认 fixture:following=false / followed_by=true */
+    expect(r.following, '「我关注他」取错了字段').toBe(false);
+    expect(r.followedBy, '「他关注我」取错了字段').toBe(true);
+  });
+});

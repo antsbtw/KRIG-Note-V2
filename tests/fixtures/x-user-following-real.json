@@ -1,0 +1,194 @@
+{
+ "data": {
+  "user": {
+   "result": {
+    "timeline": {
+     "timeline": {
+      "instructions": [
+       {
+        "type": "TimelineAddEntries",
+        "entries": [
+         {
+          "entryId": "user-0",
+          "content": {
+           "itemContent": {
+            "user_results": {
+             "result": {
+              "__typename": "User",
+              "action_counts": {
+               "favorites_count": 282
+              },
+              "affiliates_highlighted_label": {},
+              "avatar": {
+               "image_url": "https://pbs.twimg.com/sample1.jpg"
+              },
+              "banner": {
+               "image_url": "https://pbs.twimg.com/profile_banners/2104238221890867200/1790525445"
+              },
+              "core": {
+               "created_at": "Sun Sep 27 16:00:05 +0000 2026",
+               "name": "样本1",
+               "screen_name": "sample1"
+              },
+              "follow_request_sent": false,
+              "grok_translated_bio_with_availability": {
+               "is_available": false
+              },
+              "has_graduated_access": true,
+              "id": "VXNlcjoyMTA0MjM4MjIxODkwODY3MjAw",
+              "is_blue_verified": true,
+              "location": {
+               "location": ""
+              },
+              "media_permissions": {
+               "can_media_tag": true
+              },
+              "notifications_settings": {
+               "notifications_enabled": false
+              },
+              "parody_commentary_fan_label": "None",
+              "pinned_items": {
+               "tweet_ids_str": [
+                "2106941567055561004"
+               ]
+              },
+              "possibly_sensitive": false,
+              "privacy": {
+               "protected": false
+              },
+              "profile_bio": {
+               "description": "样本 bio 1"
+              },
+              "profile_description_language": "zh",
+              "profile_image_shape": "Circle",
+              "profile_metadata": {
+               "profile_interstitial_type": ""
+              },
+              "profile_translation": {
+               "translator_type": "none"
+              },
+              "relationship_counts": {
+               "followers": 1874,
+               "following": 2096
+              },
+              "relationship_perspectives": {
+               "blocked_by": false,
+               "blocking": false,
+               "followed_by": true,
+               "following": true,
+               "live_following": false,
+               "muting": false
+              },
+              "rest_id": "100001",
+              "super_follow_eligible": false,
+              "super_followed_by": false,
+              "super_following": false,
+              "tweet_counts": {
+               "media_tweets": 34,
+               "tweets": 418
+              },
+              "verification": {
+               "verified": false
+              },
+              "website": {
+               "url": ""
+              }
+             }
+            }
+           }
+          }
+         },
+         {
+          "entryId": "user-1",
+          "content": {
+           "itemContent": {
+            "user_results": {
+             "result": {
+              "__typename": "User",
+              "action_counts": {
+               "favorites_count": 17
+              },
+              "affiliates_highlighted_label": {},
+              "avatar": {
+               "image_url": "https://pbs.twimg.com/sample2.jpg"
+              },
+              "banner": {
+               "image_url": ""
+              },
+              "core": {
+               "created_at": "Tue Sep 08 06:45:48 +0000 2026",
+               "name": "样本2",
+               "screen_name": "sample2"
+              },
+              "follow_request_sent": false,
+              "grok_translated_bio_with_availability": {
+               "is_available": false
+              },
+              "has_graduated_access": true,
+              "id": "VXNlcjoyMDk3MjE0MzgyNzY5ODUyNDE2",
+              "is_blue_verified": true,
+              "location": {
+               "location": ""
+              },
+              "media_permissions": {
+               "can_media_tag": true
+              },
+              "notifications_settings": {
+               "notifications_enabled": false
+              },
+              "parody_commentary_fan_label": "None",
+              "pinned_items": {},
+              "possibly_sensitive": false,
+              "privacy": {
+               "protected": false
+              },
+              "profile_bio": {
+               "description": "样本 bio 2"
+              },
+              "profile_image_shape": "Circle",
+              "profile_metadata": {
+               "profile_interstitial_type": ""
+              },
+              "profile_translation": {
+               "translator_type": "none"
+              },
+              "relationship_counts": {
+               "followers": 3924,
+               "following": 4215
+              },
+              "relationship_perspectives": {
+               "blocked_by": false,
+               "blocking": false,
+               "followed_by": true,
+               "following": true,
+               "live_following": false,
+               "muting": false
+              },
+              "rest_id": "100002",
+              "super_follow_eligible": false,
+              "super_followed_by": false,
+              "super_following": false,
+              "tweet_counts": {
+               "media_tweets": 8,
+               "tweets": 72
+              },
+              "verification": {
+               "verified": false
+              },
+              "website": {
+               "url": ""
+              }
+             }
+            }
+           }
+          }
+         }
+        ]
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+}

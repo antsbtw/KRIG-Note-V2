@@ -1,24 +1,62 @@
 /**
- * 给 `web.input` 注入脚本用的**最小真 DOM** —— 让脚本真的跑一遍
+ * 给注入脚本测试用的 DOM 环境 —— ⭐ **CSS 语义交给 jsdom**,这里只补 jsdom 没有的
  *
- * ── 为什么不 mock 一个假 querySelector ──
- * `project-x-inject-template-escape`(采集停摆一整天)的形态是
- * **源码里是对的,求值之后才是错的**:模板字面量吃掉 `\/`,浏览器收到非法正则。
- * 只断言「脚本文本里包含某某字符串」对这类缺陷**零区分力**。
- * 所以这里用 `new Function` 真的求值,并给它一个**行为接近真 DOM** 的对象:
- * `querySelector` / `querySelectorAll` / `getBoundingClientRect` / 事件派发都真的做事。
+ * ── 为什么从手写引擎换成 jsdom(2026-09-30,用户拍板)──
  *
- * ⚠️ 这不是完整 DOM 实现,只支持被测脚本真正用到的那些:
- * `#id` / `.class` / `tag` / `[attr="v"]` / `tag.class` 组合、逗号分隔多候选、后代空格。
- * 支持不了的写法会**抛错**,不会静默返回空 —— 静默返回空会让测试"绿得毫无意义"。
+ * 原实现自己写了一个极简 selector 引擎。**五轮独立复核,每一轮都在它里面
+ * 抓到语义错,而且每轮修复又引入新错**:
+ *
+ *  1 轮:`elementFromPoint` 不看 selector / 不看坐标(手写假 DOM 的必然结果)
+ *  2 轮:没给 rect 的元素默认占 (0,0,100,20) → **幻影命中区**
+ *  3 轮:派生 `textContent` 读一个全仓没人写的 `__text` → 恒空串
+ *  4 轮:`el.querySelector` 返回自身;`^=""` / `$=""` 全匹配
+ *  5 轮:修 4 轮时引入 —— `[attr=""]` 被一起毙掉;
+ *        **Gmail 的 `div[data-message-id] div.ii` 返回 null**(踩中真实业务路径)
+ *
+ * ⭐ 判断:错**全部**出在「自己实现 CSS 语义」这件事上,而我们还没开始碰
+ * Outlook / QQ / 163 的 selector。继续手写 = 继续按轮次出错。
+ * → CSS 匹配、后代组合、属性算子、`closest`、文档顺序,**一律交给 jsdom**。
+ *
+ * ── 这里仍然自己做的三件(jsdom 没有 / 不够)──
+ *
+ *  ① **几何**:jsdom 的 `getBoundingClientRect` 恒返回全 0、没有
+ *     `elementFromPoint`。被测脚本靠几何做命中与邻域回退,必须自己给。
+ *     ⭐ 并保留「**没给 rect 就抛错**」—— 编造默认矩形正是幻影命中区的由来。
+ *  ② **事件留痕**:`el.events` / `clicked` / `focused` / `scrolled` ——
+ *     断言「真的点了 / 真的粘了」的依据,jsdom 不记录这些。
+ *  ③ **求值入口**:`evalInDom` 用 `return (${script});` 包住 ——
+ *     脚本文本以换行开头,不加括号会被 ASI 切断、**恒返回 undefined 且不报错**。
+ *
+ * ⚠️ API 一字未改(`el` / `makeDom` / `evalInDom` / `FakeEl` 的字段),
+ * 五个测试文件、86 处 `el()` 调用无需改动 —— 换的是引擎不是接口。
  */
 
+import { JSDOM } from 'jsdom';
+
+/** 元素矩形 —— 给 `elementFromPoint` 命中判定用。**不给则读几何即抛**(见下) */
+export type FakeRect = { left: number; top: number; width: number; height: number };
+
+/**
+ * 测试里持有的元素句柄。
+ *
+ * ⚠️ 它**包装**一个真的 jsdom `Element`(`node`),CSS 相关的一切走 jsdom;
+ * 这里只额外暴露测试要断言的留痕字段。
+ */
 export type FakeEl = {
-  tagName: string;
-  attrs: Record<string, string>;
-  children: FakeEl[];
-  parentElement: FakeEl | null;
+  /** 真的 jsdom 元素 —— selector / closest / 文档顺序都由它负责 */
+  readonly node: Element;
+  readonly tagName: string;
+  readonly attrs: Record<string, string>;
+  /**
+   * ⭐ 只读、由真 DOM 现算 —— **不是存下来的数组**。
+   * 换 jsdom 后真 DOM 是唯一权威;存一份句柄数组就是存一份会不同步的影子状态
+   * (实测:往数组里 push/filter 元素,脚本看到的 DOM 纹丝不动 → 2 条测试超时)。
+   * 要改结构请操作 `.node`(`node.remove()` / `appendChild`)。
+   */
+  readonly children: FakeEl[];
+  readonly parentElement: FakeEl | null;
   textContent: string;
+  innerText: string;
   value?: string;
   contentEditable?: string;
   /** 派发到这个元素上的事件类型序列 —— 断言「真的点了 / 真的粘了」的依据 */
@@ -26,283 +64,382 @@ export type FakeEl = {
   focused?: boolean;
   scrolled?: boolean;
   clicked?: number;
+  /** ⭐ 是否显式给了 rect —— `elementFromPoint` 只考虑给了的 */
+  readonly hasRect: boolean;
   getAttribute(name: string): string | null;
   querySelector(sel: string): FakeEl | null;
   querySelectorAll(sel: string): FakeEl[];
-  getBoundingClientRect(): { left: number; top: number; width: number; height: number };
+  getBoundingClientRect(): {
+    left: number; top: number; width: number; height: number;
+    right: number; bottom: number;
+  };
+  closest(sel: string): FakeEl | null;
   focus(): void;
   click(): void;
   scrollIntoView(): void;
   dispatchEvent(evt: { type: string; detail?: unknown }): boolean;
 };
 
-/** 建一个元素。`props` 里可给 textContent / value / contentEditable */
-export function el(
-  tagName: string,
-  attrs: Record<string, string> = {},
-  props: Partial<Pick<FakeEl, 'textContent' | 'value' | 'contentEditable'>> = {},
-  children: FakeEl[] = [],
-): FakeEl {
-  const node: FakeEl = {
-    tagName: tagName.toUpperCase(),
-    attrs,
-    children,
-    parentElement: null,
-    textContent: props.textContent ?? '',
-    value: props.value,
-    contentEditable: props.contentEditable,
-    events: [],
-    clicked: 0,
-    getAttribute(name) {
-      return name in this.attrs ? this.attrs[name] : null;
-    },
-    querySelector(sel) {
-      return querySelectorAllIn(descendants(this), sel)[0] ?? null;
-    },
-    querySelectorAll(sel) {
-      return querySelectorAllIn(descendants(this), sel);
-    },
-    getBoundingClientRect() {
-      return { left: 0, top: 0, width: 100, height: 20 };
-    },
-    focus() {
-      this.focused = true;
-    },
-    click() {
-      this.clicked = (this.clicked ?? 0) + 1;
-      this.events.push({ type: 'click' });
-    },
-    scrollIntoView() {
-      this.scrolled = true;
-    },
-    dispatchEvent(evt) {
-      this.events.push(evt);
-      return true;
-    },
-  };
-  for (const c of children) c.parentElement = node;
-  // textContent 未显式给时,由子孙拼出来(贴近真 DOM,contains 校验要用)
-  if (props.textContent === undefined && children.length > 0) {
-    Object.defineProperty(node, 'textContent', {
-      get() {
-        return descendants(node).filter((n) => n !== node).map((n) => n.attrs['__text'] ?? '').join('');
-      },
-      configurable: true,
-    });
-  }
-  return node;
-}
+/** 每个 jsdom 元素 → 它的 FakeEl 句柄。脚本拿到的是 jsdom 元素,断言拿 FakeEl */
+const handles = new WeakMap<Element, FakeEl>();
 
-function descendants(root: FakeEl): FakeEl[] {
-  const out: FakeEl[] = [root];
-  for (const c of root.children) out.push(...descendants(c));
-  return out;
+/** 当前焦点元素 —— 由 `.focus()` 维护,`document.activeElement` 读它 */
+let activeEl: Element | null = null;
+
+/** 当前活跃的 jsdom 文档 —— `el()` 要用它建元素,`makeDom()` 时重建 */
+/**
+ * ⚠️ 必须给 `url` —— 不给的话 origin 是 opaque,
+ * 任何碰 `localStorage` 的代码会抛 `SecurityError`(实测踩到)。
+ */
+let activeDoc: Document = makeJsdomDoc();
+
+/** 当前 jsdom window —— `evalInDom` 要从它取 HTMLInputElement 等构造器 */
+function activeWin(): Window & typeof globalThis {
+  const w = activeDoc.defaultView;
+  if (!w) throw new Error('[fake-dom] jsdom window 不见了');
+  return w as unknown as Window & typeof globalThis;
 }
 
 /**
- * 极简 selector 匹配。⚠️ 不支持的语法**抛错** —— 静默返回空会让测试假绿。
+ * 建一个 jsdom 文档,并**接管 `getBoundingClientRect`**。
+ *
+ * ⚠️⚠️ 必须接管:jsdom 原生实现**恒返回全 0**(没有布局引擎)。
+ * 不接管的话,脚本通过 `document.querySelectorAll` 拿到的元素几何全是 0 ——
+ * 于是 `y >= top-24 && y <= bottom+24` 在 y 较小时恒成立,
+ * **幻影命中区会换个形式回来**(实测:间隙回退用例与「没 rect 该抛」用例同时失败)。
+ *
+ * ⭐ 接管后:给了 rect 的返我们的几何,没给的**抛错** ——
+ * 与「布局是测试的输入」这条原则一致,且脚本侧与测试侧看到的是同一套语义。
  */
-function matchesSimple(node: FakeEl, part: string): boolean {
-  // 形如 `div.box[data-x="1"]#id` 的组合;后代选择器由调用方拆
-  const tokens = part.match(/^[a-zA-Z][\w-]*|\.[\w-]+|#[\w-]+|\[[^\]]+\]/g);
-  if (!tokens || tokens.join('') !== part) {
-    throw new Error(`[fake-dom] 不支持的 selector 片段: ${part}(测试要扩展 fake-dom,不要绕过)`);
+function makeJsdomDoc(): Document {
+  const win = new JSDOM('<!doctype html><html><body></body></html>', {
+    url: 'https://fake.test/page',
+  }).window;
+  const proto = win.Element.prototype as unknown as {
+    getBoundingClientRect(): unknown;
+  };
+  /**
+   * ⭐⭐ 同族的其它几何属性也要接管 —— jsdom **静默返回 0**(没有布局引擎)。
+   *
+   * ⚠️ 2026-09-30 第六轮复核点名的遗留风险:`getBoundingClientRect` 接管了,
+   * 但 `offsetTop` / `offsetHeight` 仍静默 0 —— 那是**同一类「幻影几何」**:
+   * 读到 0 不报错,于是依赖它的判据恒成立/恒不成立。
+   *
+   * ⭐ 实测 `sync-driver.ts:332` 就用
+   * `document.documentElement.scrollHeight - window.innerHeight` ——
+   * renderer 那批(L2 剩下的 18 处)一接上来就会踩。
+   *
+   * 做法与 rect 一致:**给了 rect 的从 rect 推导,没给的抛错**。
+   */
+  for (const prop of ['offsetTop', 'offsetLeft', 'offsetWidth', 'offsetHeight'] as const) {
+    Object.defineProperty(win.HTMLElement.prototype, prop, {
+      configurable: true,
+      get(this: Element) {
+        const h = handles.get(this);
+        if (!h) return 0;                       // 非 el() 建的(如 body):明确给 0
+        const r = h.getBoundingClientRect();    // ⭐ 没 rect 时它会抛,这是有意的
+        return prop === 'offsetTop' ? r.top
+          : prop === 'offsetLeft' ? r.left
+            : prop === 'offsetWidth' ? r.width
+              : r.height;
+      },
+    });
   }
-  for (const t of tokens) {
-    if (t.startsWith('.')) {
-      const classes = (node.attrs['class'] ?? '').split(/\s+/);
-      if (!classes.includes(t.slice(1))) return false;
-    } else if (t.startsWith('#')) {
-      if (node.attrs['id'] !== t.slice(1)) return false;
-    } else if (t.startsWith('[')) {
-      const m = t.match(/^\[([\w-]+)(?:=["']?([^\]"']*)["']?)?\]$/);
-      if (!m) throw new Error(`[fake-dom] 不支持的属性 selector: ${t}`);
-      const [, name, want] = m;
-      const got = node.attrs[name];
-      if (got === undefined) return false;
-      if (want !== undefined && got !== want) return false;
-    } else {
-      if (node.tagName !== t.toUpperCase()) return false;
-    }
-  }
-  return true;
+
+  proto.getBoundingClientRect = function getRect(this: Element) {
+    const h = handles.get(this);
+    // body 等非 el() 建的元素:给一个明确的「整页」矩形,不抛
+    if (!h) return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0 };
+    return h.getBoundingClientRect();   // ⭐ 没 rect 时它会抛,这是有意的
+  };
+  return win.document;
 }
 
-/** 在给定候选集合里跑一个(可能带后代空格的)selector */
-function querySelectorAllIn(pool: FakeEl[], sel: string): FakeEl[] {
-  const parts = sel.trim().split(/\s+/);
-  let current = pool;
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (i === 0) {
-      current = current.filter((n) => matchesSimple(n, part));
-    } else {
-      // 后代:在上一轮命中的元素的子孙里找
-      const next: FakeEl[] = [];
-      for (const anc of current) {
-        for (const d of descendants(anc)) {
-          if (d !== anc && matchesSimple(d, part) && !next.includes(d)) next.push(d);
-        }
-      }
-      current = next;
-    }
+/**
+ * 没给 `rect` 的元素:**读几何直接抛**,而不是给一个编造的矩形。
+ *
+ * ── 演进过程(记下来免得有人改回去)──
+ *  · 初版 `(0,0,100,20)` → **幻影命中区**:未布局元素都挤在左上角,
+ *    实测点 (50,10) 提取到了声明在别处的邮件
+ *  · 改 `(0,0,0,0)` → 仍不够:被测脚本的 ±24px 邻域回退把原点附近的它捞回来
+ *    (**0 面积 ≠ 不可达**)
+ *  · 改远处哨兵 `(-1e6,…)` → 当下无假阴,但「按 top 升序取第一个」
+ *    「取最上方」「top<0 判断」这些写法以后都会被它带偏
+ *  · ⭐ 终版:**抛错** —— 与「不支持的写法就抛」同一条原则。
+ *    要参与几何的元素**必须显式给 rect**:布局是测试的输入,不该由假 DOM 替你猜。
+ */
+function noRectError(tag: string): never {
+  throw new Error(
+    `[fake-dom] <${tag}> 没有 rect 却被读取几何 —— 要参与命中/布局判定的元素`
+    + '必须显式传 { rect: { left, top, width, height } }。'
+    + '(编造一个默认矩形会形成幻影命中区,曾让「点空白处」误提取到别的元素)',
+  );
+}
+
+/** 建一个元素。`props` 里可给 textContent / value / contentEditable / rect */
+export function el(
+  tagName: string,
+  attrs: Record<string, string> = {},
+  props: Partial<Pick<FakeEl, 'textContent' | 'value' | 'contentEditable'>> & { rect?: FakeRect } = {},
+  children: FakeEl[] = [],
+): FakeEl {
+  const node = activeDoc.createElement(tagName);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of children) node.appendChild(c.node);
+  // ⚠️ 显式 textContent 要在挂子节点**之后**设,否则会被 appendChild 的内容覆盖/反之
+  if (props.textContent !== undefined) node.textContent = props.textContent;
+  if (props.value !== undefined) node.setAttribute('value', props.value);
+  if (props.contentEditable !== undefined) {
+    node.setAttribute('contenteditable', props.contentEditable);
+    /**
+     * ⚠️ jsdom 不把 `contenteditable` **属性**映射成 `el.contentEditable` **性质**
+     * (它没实现这个 reflected property)。而被测脚本写的是
+     * `el.contentEditable === 'true'`(`input-scripts.ts:115`)——
+     * 不补这一步,所有 contenteditable 路径会被判成"既非 input 也非 contenteditable"。
+     */
+    Object.defineProperty(node, 'contentEditable', {
+      value: props.contentEditable, writable: true, configurable: true,
+    });
   }
-  return current;
+
+  const handle: FakeEl = {
+    node,
+    tagName: tagName.toUpperCase(),
+    attrs,
+    get children() { return Array.from(node.children).map((n) => mustWrap(n)); },
+    get parentElement() { return wrap(node.parentElement); },
+    events: [],
+    clicked: 0,
+    hasRect: props.rect !== undefined,
+    value: props.value,
+    contentEditable: props.contentEditable,
+    get textContent() { return node.textContent ?? ''; },
+    set textContent(v: string) { node.textContent = v; },
+    /** innerText 与 textContent 同源 —— 脚本常写 `innerText || textContent` */
+    get innerText() { return node.textContent ?? ''; },
+    set innerText(v: string) { node.textContent = v; },
+    getAttribute(name) { return node.getAttribute(name); },
+    // ⭐ selector 全部走 jsdom:后代组合、属性算子、文档顺序都由它保证
+    querySelector(sel) { return wrap(node.querySelector(sel)); },
+    querySelectorAll(sel) { return Array.from(node.querySelectorAll(sel)).map((n) => mustWrap(n)); },
+    closest(sel) { return wrap(node.closest(sel)); },
+    getBoundingClientRect() {
+      const r = props.rect ?? noRectError(tagName);
+      // ⚠️ right/bottom 必须算出来 —— 被测脚本普遍用它们做纵向邻域判定
+      return { ...r, right: r.left + r.width, bottom: r.top + r.height };
+    },
+    focus() { handle.focused = true; activeEl = node; },
+    click() { handle.clicked = (handle.clicked ?? 0) + 1; handle.events.push({ type: 'click' }); },
+    scrollIntoView() { handle.scrolled = true; },
+    dispatchEvent(evt) { handle.events.push(evt); return true; },
+  };
+  handles.set(node, handle);
+
+  /**
+   * ⭐⭐ 在**真 jsdom 节点**上接管四个动作,把留痕记进句柄。
+   *
+   * ⚠️ 换 jsdom 后脚本拿到的是真元素,它调的是 `node.dispatchEvent(...)`
+   * 而不是句柄的方法 —— 不接管的话 `el.events` / `clicked` / `focused`
+   * 全程为空,而那是「真的点了 / 真的粘了」的唯一依据
+   * (实测:11 条 input 测试同时失败)。
+   *
+   * ⭐ 仍然调用 jsdom 原生实现(`Reflect.apply`),所以真实的事件传播、
+   * `preventDefault`、监听器全都照常工作 —— 只是**顺带记一笔**。
+   */
+  const nodeAny = node as unknown as Record<string, unknown>;
+  const origDispatch = nodeAny.dispatchEvent as (e: unknown) => boolean;
+  nodeAny.dispatchEvent = function tracked(this: unknown, e: { type?: string }): boolean {
+    handle.events.push(e as { type: string });
+    return Reflect.apply(origDispatch, this, [e]) as boolean;
+  };
+  const origFocus = nodeAny.focus as () => void;
+  nodeAny.focus = function tracked(this: unknown): void {
+    handle.focused = true;
+    // ⚠️ jsdom 的 activeElement 不随 .focus() 变(无真实焦点系统),
+    // 而脚本写 `document.activeElement || document.body`(input-scripts.ts:310)——
+    // 不同步的话 press 会派发到 body 而不是刚 focus 的框。
+    activeEl = node;
+    Reflect.apply(origFocus, this, []);
+  };
+  const origClick = nodeAny.click as () => void;
+  nodeAny.click = function tracked(this: unknown): void {
+    handle.clicked = (handle.clicked ?? 0) + 1;
+    handle.events.push({ type: 'click' });
+    Reflect.apply(origClick, this, []);
+  };
+  nodeAny.scrollIntoView = function tracked(): void { handle.scrolled = true; };
+
+  return handle;
+}
+
+function wrap(n: Element | null): FakeEl | null {
+  return n ? handles.get(n) ?? null : null;
+}
+
+/**
+ * ⚠️ jsdom 元素必须有对应句柄 —— 没有说明它不是 `el()` 建的。
+ * **抛错不返回 null**:静默跳过会让「脚本查到了东西但测试看不见」。
+ */
+function mustWrap(n: Element): FakeEl {
+  const h = handles.get(n);
+  if (!h) throw new Error(`[fake-dom] <${n.tagName}> 不是 el() 建的,没有句柄`);
+  return h;
 }
 
 export type FakeDom = {
-  root: FakeEl;
   /** 脚本里的 `document` */
   document: Record<string, unknown>;
   /** 脚本里的 `window` */
   window: Record<string, unknown>;
   /** `document.execCommand` 被调用的记录 —— 兜底路径的证据 */
   execCommands: Array<{ name: string; value: unknown }>;
+  /** 脚本里的 `location` —— 提取类脚本常把 `location.href` 写进结果做留痕 */
+  location: { href: string };
   activeElement: FakeEl | null;
 };
 
 /** 用一组顶层元素造一个可求值的 DOM 环境 */
 export function makeDom(topLevel: FakeEl[]): FakeDom {
-  const root = el('body', {}, {}, topLevel);
-  const all = () => descendants(root);
-  const execCommands: FakeDom['execCommands'] = [];
+  const jsdomDoc = activeDoc;
+  const body = jsdomDoc.body;
+  while (body.firstChild) body.removeChild(body.firstChild);
+  for (const n of topLevel) body.appendChild(n.node);
 
+  /**
+   * ⭐ 每个新页面焦点归零 —— `activeEl` 是模块级的,不重置就会**跨测试泄漏**:
+   * 上一个测试 focus 过的元素(已脱离文档)成了新页面的 activeElement,
+   * press 会把按键派发给它(2026-09-30 复核实测)。
+   */
+  activeEl = null;
+
+  const execCommands: FakeDom['execCommands'] = [];
   const dom: FakeDom = {
-    root,
     execCommands,
     activeElement: null,
     document: {},
     window: {},
+    location: { href: 'https://fake.test/page' },
   };
 
   dom.document = {
-    body: root,
-    get activeElement() {
-      return dom.activeElement;
+    body,
+    // 真 DOM:没有焦点时 activeElement 是 body,不是 null
+    get activeElement() { return dom.activeElement?.node ?? activeEl ?? body; },
+    // ⭐ 全部转给 jsdom
+    querySelector: (sel: string) => jsdomDoc.querySelector(sel),
+    querySelectorAll: (sel: string) => Array.from(jsdomDoc.querySelectorAll(sel)),
+    /**
+     * ⭐ 按矩形真做命中判定(jsdom 没有这个 API)。
+     *
+     * ⚠️ **只考虑显式给了 rect 的元素** —— 没给的直接跳过,
+     * 既不编造矩形(幻影命中区),也不因为读几何而抛错。
+     * ⭐ 真 DOM 语义:点在空白处返回 `<body>` 而不是 null
+     * (被测脚本写 `el && el.closest ? … : null`,两条路径不同,不该抹平)。
+     */
+    elementFromPoint: (x: number, y: number): Element => {
+      let hit: Element | null = null;
+      for (const n of Array.from(jsdomDoc.body.querySelectorAll('*'))) {
+        const h = handles.get(n);
+        if (!h?.hasRect) continue;
+        const r = h.getBoundingClientRect();
+        if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) hit = n;
+      }
+      return hit ?? body;
     },
-    querySelector(sel: string) {
-      return querySelectorAllIn(all(), sel)[0] ?? null;
-    },
-    querySelectorAll(sel: string) {
-      return querySelectorAllIn(all(), sel);
-    },
-    createRange() {
-      return { selectNodeContents() {}, collapse() {} };
-    },
-    execCommand(name: string, _showUi: boolean, value: unknown) {
+    createRange: () => ({ selectNodeContents() {}, collapse() {} }),
+    execCommand: (name: string, _ui?: boolean, value?: unknown) => {
       execCommands.push({ name, value });
       return true;
     },
   };
-
-  // 元素的 focus 要能反映到 document.activeElement(press 脚本依赖它)
-  for (const node of all()) {
-    const orig = node.focus.bind(node);
-    node.focus = () => {
-      orig();
-      dom.activeElement = node;
-    };
-  }
-
+  const win = activeWin();
   dom.window = {
-    HTMLTextAreaElement: { prototype: { __kind: 'textarea' } },
-    HTMLInputElement: { prototype: { __kind: 'input' } },
-    getSelection() {
-      return { removeAllRanges() {}, addRange() {} };
-    },
+    getSelection: () => ({ removeAllRanges() {}, addRange() {} }),
+    /**
+     * ⚠️ 脚本读的是 **`window.HTMLTextAreaElement.prototype`**
+     * (`input-scripts.ts:182`),不是裸全局 —— 必须挂在这里。
+     * ⭐ 用 jsdom 的真构造器:它真的有 `value` 的 descriptor
+     * (手写时代要专门做 Object shim)。
+     */
+    HTMLInputElement: win.HTMLInputElement,
+    HTMLTextAreaElement: win.HTMLTextAreaElement,
   };
-
   return dom;
 }
 
 /**
- * 真求值一段注入脚本。
+ * 真的求值一段注入脚本。
  *
- * ⚠️ 用 `new Function` —— **脚本文本必须先被 JS 引擎解析**,
- * 于是「求值后不是合法 JS」这类缺陷(那次转义事故)在这里就会当场抛。
+ * ⚠️⚠️ **必须加括号** —— 脚本文本以换行开头,写成 `return\n(function…)`
+ * 会被 ASI 在 return 后插分号 → **恒返回 undefined 而不报错**,
+ * 测试会「绿得毫无意义」。
  */
 export function evalInDom(dom: FakeDom, script: string): unknown {
+  const win = activeWin();
+  const ev = makeEventClasses(win as unknown as { Event: typeof Event });
   const fn = new Function(
-    'document',
-    'window',
-    'DataTransfer',
-    'ClipboardEvent',
-    'Event',
-    'InputEvent',
-    'MouseEvent',
-    'KeyboardEvent',
-    'Object',
-    // ⚠️ 必须加括号:脚本文本以换行开头,写成 `return\n(function...)` 会被 ASI
-    // 在 return 后插分号 —— 结果恒 undefined 而**不报错**,测试会「绿得毫无意义」。
-    // (与 dom-script-eval.test.ts 的 `return (${...});` 同一手法)
+    'document', 'window', 'location',
+    'DataTransfer', 'ClipboardEvent', 'Event', 'InputEvent', 'MouseEvent', 'KeyboardEvent',
+    'Node', 'Object', 'HTMLInputElement', 'HTMLTextAreaElement',
     `return (${script});`,
   );
   return fn(
-    dom.document,
-    dom.window,
-    FakeDataTransfer,
-    FakeClipboardEvent,
-    FakeEvent,
-    FakeInputEvent,
-    FakeMouseEvent,
-    FakeKeyboardEvent,
-    makeObjectShim(dom),
+    dom.document, dom.window, dom.location,
+    FakeDataTransfer, ev.FakeClipboardEvent, ev.FakeEvent, ev.FakeInputEvent, ev.FakeMouseEvent, ev.FakeKeyboardEvent,
+    // ⭐ 脚本里用 Node.DOCUMENT_POSITION_* 做文档顺序比较
+    win.Node,
+    Object,
+    /**
+     * ⭐ native value setter 那条兜底路径要
+     * `Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')` ——
+     * 用 jsdom 的真构造器,它真的有这个 descriptor(手写时代要专门 shim)。
+     */
+    win.HTMLInputElement,
+    win.HTMLTextAreaElement,
   );
 }
 
-/**
- * `Object` 的 shim —— 只为 `getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')`
- * 这一处。native value setter 那条兜底路径靠它工作,必须真的能被拿到并调用。
- */
-function makeObjectShim(dom: FakeDom): typeof Object {
-  const shim = Object.create(Object) as typeof Object;
-  (shim as unknown as Record<string, unknown>).getOwnPropertyDescriptor = (
-    target: unknown,
-    prop: string,
-  ) => {
-    const kind = (target as { __kind?: string })?.__kind;
-    if (kind && prop === 'value') {
-      return {
-        set(this: FakeEl, v: string) {
-          this.value = v;
-          dom.activeElement = this;
-        },
-      };
-    }
-    return Object.getOwnPropertyDescriptor(target as object, prop);
-  };
-  return shim;
-}
-
 class FakeDataTransfer {
-  data: Record<string, string> = {};
-  setData(type: string, value: string) {
-    this.data[type] = value;
-  }
-  getData(type: string) {
-    return this.data[type] ?? '';
-  }
+  private data: Record<string, string> = {};
+  setData(type: string, value: string): void { this.data[type] = value; }
+  getData(type: string): string { return this.data[type] ?? ''; }
 }
 
-class FakeEvent {
-  type: string;
-  constructor(type: string, public init?: Record<string, unknown>) {
-    this.type = type;
+/**
+ * ⭐ 事件类必须**继承 jsdom 自己的 `Event`** —— 换 jsdom 后脚本调的是真节点的
+ * `dispatchEvent`,它只收真 `Event`;传手写的普通对象会抛
+ * 「parameter 1 is not of type 'Event'」,而脚本的 try/catch 把它吞成 `false`
+ * → 合成 paste 被误判失败、静默降级到 os-paste(2026-09-30 复核实测,A 组 3 条的真因)。
+ *
+ * ⚠️ 仍保留 `init`(FakeInputHost 从它取 clipboardData 模拟站点 paste handler)
+ * 与 `key`(press 用)—— 手写版有这两个字段,改写时丢了。
+ *
+ * ⚠️ 不直接用 jsdom 的 MouseEvent/KeyboardEvent:脚本传 `view: window`,
+ * 而这里的 window 是普通对象,jsdom 会拒收并被脚本 try 吞掉 → 事件凭空消失。
+ */
+function makeEventClasses(win: { Event: typeof Event }) {
+  class FakeEvent extends win.Event {
+    init?: Record<string, unknown>;
+    constructor(type: string, init?: Record<string, unknown>) {
+      super(type, init as EventInit);
+      this.init = init;
+    }
   }
-}
-class FakeInputEvent extends FakeEvent {}
-class FakeMouseEvent extends FakeEvent {}
-class FakeKeyboardEvent extends FakeEvent {
-  key?: string;
-  constructor(type: string, init?: Record<string, unknown>) {
-    super(type, init);
-    this.key = init?.key as string | undefined;
+  class FakeInputEvent extends FakeEvent {}
+  class FakeMouseEvent extends FakeEvent {}
+  class FakeKeyboardEvent extends FakeEvent {
+    key?: string;
+    constructor(type: string, init?: Record<string, unknown>) {
+      super(type, init);
+      this.key = init?.key as string | undefined;
+    }
   }
-}
-class FakeClipboardEvent extends FakeEvent {
-  clipboardData?: FakeDataTransfer;
-  constructor(type: string, init?: Record<string, unknown>) {
-    super(type, init);
-    this.clipboardData = init?.clipboardData as FakeDataTransfer | undefined;
+  class FakeClipboardEvent extends FakeEvent {
+    clipboardData: FakeDataTransfer;
+    constructor(type: string, init?: Record<string, unknown>) {
+      super(type, init);
+      this.clipboardData = (init?.clipboardData as FakeDataTransfer | undefined) ?? new FakeDataTransfer();
+    }
   }
+  return { FakeEvent, FakeInputEvent, FakeMouseEvent, FakeKeyboardEvent, FakeClipboardEvent };
 }

@@ -13,8 +13,28 @@
  * - 现迁到 driver 层,bus 改为接口注入(实例化方传具体实现)
  */
 
-// Vite ?raw import:把 .js 文件原文当字符串读(运行时 string)
-import syncInjectRaw from './sync-inject.js?raw';
+/**
+ * ⭐ 脚本 id —— 脚本**本体**已登记在 main 侧
+ * (`web-capability/dom/renderer-scripts.ts`),这里只认一个名字。
+ *
+ * ⚠️ 不从 `@platform` import 那个常量:renderer 不许 import 能力层
+ * (`ipc-dom-boundary-guard` 钉着)。两边各写一份字面量,
+ * 由守卫钉住它们一致 —— 这是刻意的取舍:宁可重复一个字符串,
+ * 不要把 main 的模块拖进渲染进程。
+ */
+const RENDERER_SCRIPTS_SYNC_INJECT = 'renderer.sync-inject';
+
+/** C 组「应用动作」的脚本 id(同样在 main 侧登记,守卫双向对照) */
+const SCRIPTS = {
+  scrollDelta: 'renderer.sync-scroll-delta',
+  scrollAnchor: 'renderer.sync-scroll-anchor',
+  scrollPct: 'renderer.sync-scroll-pct',
+  click: 'renderer.sync-click',
+  input: 'renderer.sync-input',
+  submit: 'renderer.sync-submit',
+  highlight: 'renderer.sync-highlight',
+  inputEnter: 'renderer.sync-input-enter',
+} as const;
 import { SYNC_ACTION, WEB_TRANSLATE_PROTOCOL } from './sync-protocol';
 
 const SYNC_POLL_MS = 80;
@@ -39,6 +59,8 @@ interface WebviewElement extends HTMLElement {
   loadURL(url: string): void;
   isLoading(): boolean;
   executeJavaScript(code: string): Promise<unknown>;
+  /** ⭐ guest 的 webContents id —— 走 web.dom IPC 面时用它指认页面 */
+  getWebContentsId(): number;
 }
 
 // ── Event types(从 V1 直迁) ──
@@ -194,48 +216,72 @@ export class SyncDriver {
     const translated = await this.onInputEnter(event.value, event.selector);
     const finalValue = translated || event.value;
 
-    try {
-    this.webviewEl.executeJavaScript(`
-      (function() {
-        window.__krigInputLock = true;
-        try {
-          var el = document.querySelector(${JSON.stringify(event.selector)});
-          if (!el) return;
-          el.value = ${JSON.stringify(finalValue)};
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-          el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-          var form = el.closest('form');
-          if (form) {
-            if (form.requestSubmit) form.requestSubmit();
-            else form.submit();
-          }
-        } catch(e) {}
-        setTimeout(function() { window.__krigInputLock = false; }, 200);
-      })();
-    `).catch(() => {});
-    } catch { /* webview 未就绪 */ }
+    // ⭐ 2026-09-30 同 C 组:脚本体搬进 web.dom,这里只传参
+    this.run(SCRIPTS.inputEnter, { selector: event.selector, value: finalValue });
   }
 
   // ── Private ──
 
+  /**
+   * 注入同步内核。⭐ 2026-09-30 改走 `web.dom` IPC 面(L2 收口步 2)。
+   *
+   * ── 换掉了什么 ──
+   *
+   * 旧做法:`syncInjectRaw.replace(/占位符/g, this.side)` ——
+   * 把运行时值**文本替换进脚本源码**,与 `project-x-inject-template-escape`
+   * 同机制,**而且已经咬过一次**(占位符在 `sync-inject.js` 出现 2 处:
+   * 一处注释一处真实变量,当初 `replace(string,string)` 只换了注释 →
+   * sync 行为异常;靠加 `/g` 修好但机制没变)。
+   *
+   * 新做法:脚本登记在 `web.dom` 的 `RENDERER_SCRIPTS.syncInject`,
+   * 这里只给 **scriptId + 参数** —— 给不了脚本文本,也就拼不出坏脚本。
+   * ⭐ 附带获得 `trace` 留痕(旧路径一行痕迹都没有)。
+   *
+   * ⚠️ 失败**不再静默吞**:如实 warn 一行。
+   * 旧注释说「失败无所谓:dom-ready 兜底会重 inject」—— 重试机制保留,
+   * 但「什么都不说」是另一回事:双开同步失效时日志里一个字都没有,
+   * 那正是可靠性纲领 §44 要治的。
+   */
   private injectSyncScript(): void {
     if (!this.webviewEl) return;
-    // 注意:用 /regex/g 全局替换 — replace(string,string) 只替换第一个匹配,inject 文件
-    // 里 __KRIG_SIDE__ 出现 2 处(注释+真实变量),只替换第一个会让 sync 行为异常
-    const script = (syncInjectRaw as unknown as string).replace(/__KRIG_SIDE__/g, this.side);
-    // Electron webview.executeJavaScript 在 webview 未 attached / dom-ready 时**同步 throw**
-    // (不是返回 rejected promise),必须 try/catch — 否则上调用层(start / reinject)崩
-    // 引发 React 组件异常 → 白屏。
-    // 失败无所谓:start 路径的 dom-ready 兜底会重 inject;poll 路径下次 80ms 再试。
+    let wcId: number;
     try {
-      this.webviewEl.executeJavaScript(script).catch(() => {});
+      // ⚠️ webview 未 attached 时 getWebContentsId 会抛(同 executeJavaScript)
+      wcId = this.webviewEl.getWebContentsId();
     } catch {
-      /* webview 未就绪,等下次重试 */
+      // webview 未就绪 —— 这是**预期**状态(start 的 dom-ready 兜底会重来),
+      // 不是故障,故不 warn。⭐ 但下面真正的失败会 warn。
+      return;
     }
+    void window.electronAPI
+      ?.webDomRun({ wcId }, RENDERER_SCRIPTS_SYNC_INJECT, { side: this.side })
+      .then((r) => {
+        if (r.status === 'failed') {
+          console.warn(`[sync-driver] 注入同步内核失败(${this.side}): ${r.reason}`);
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn(`[sync-driver] 注入同步内核异常(${this.side}):`, err);
+      });
   }
 
-  /** 清空 guest 的事件队列(passive 时丢弃) */
+  /**
+   * 清空 guest 的事件队列(passive 时丢弃)。
+   *
+   * ⚠️⚠️ **刻意留在 renderer 直连,不走 web.dom** —— 与下面的 `poll` 同理,
+   * 判据见 `docs/handoff/web-dom-ipc-surface-design.md` §二:
+   *
+   * **注入脚本里有没有运行时值?** 这两处都是**写死的字面量**
+   * (读/清 `window.__krigSyncQueue`),**零参数、零拼接** ——
+   * 根本不存在转义事故的攻击面,而那正是 L2 收口要治的病。
+   *
+   * ⭐ 而 `poll` 每 `SYNC_POLL_MS`(80ms)跑一次 = **12.5 次/秒/webview**,
+   * 走 IPC 是 renderer→main→guest→main→renderer **四跳**,双开就是 25 次/秒往返。
+   * **为它们走 IPC 是有成本无收益。**
+   *
+   * ⚠️ 写明这条是为了下一个人**不把它当成漏掉的** ——
+   * 判据是「有没有运行时值」,不是「整不整齐」。
+   */
   private drainQueue(): void {
     if (!this.webviewEl || this.webviewEl.isLoading()) return;
     // 同 injectSyncScript:executeJavaScript 在 webview 未就绪时同步 throw,必须 try/catch
@@ -290,179 +336,85 @@ export class SyncDriver {
 
   // ── Apply methods(从 V1 直迁,改命名空间) ──
 
-  private applyScrollDelta(deltaY: number): void {
+  /**
+   * ⭐ 2026-09-30:C 组 7 个「应用动作」改走 `web.dom` IPC 面(L2 收口步 3)。
+   *
+   * ── 换掉了什么 ──
+   *
+   * 这些方法原本把运行时值**直接插进脚本文本**(`${deltaY}` / `${event.pctY}` /
+   * `${event.checked}`),与 `project-x-inject-template-escape` 同机制。
+   * ⚠️⚠️ 其中 **deltaY / pctY 来自滚动事件回调,NaN 是真实可能** ——
+   * 而 `JSON.stringify(NaN)` === `'null'`,浏览器把 `scrollBy(0, null)` 当 `0`,
+   * **静默滚了个寂寞还不报错**(2026-09-30 在 mail 那一刀实测过同一个坑)。
+   * ⭐ 现在走 `requireFiniteNumber` 校验 —— 坏数字当场拒绝并说明原因。
+   *
+   * ⚠️ 脚本体**一个字没改**,逐字搬进 `dom/renderer-scripts.ts`;
+   * 这里只负责把参数**绑定**过去。
+   */
+  private run(scriptId: string, params: Record<string, string | number | boolean>): void {
     if (!this.webviewEl) return;
+    let wcId: number;
     try {
-      this.webviewEl.executeJavaScript(`
-        (function() {
-          var targetY = Math.round(window.scrollY + ${deltaY});
-          window.__krigProgramScrollY = targetY;
-          window.scrollBy(0, ${deltaY});
-        })();
-      `).catch(() => {});
-    } catch { /* webview 未就绪 */ }
+      // ⚠️ webview 未 attached 时会抛(同 executeJavaScript)—— 这是**预期**状态,
+      //    不是故障(下一次事件会再来),故不 warn。
+      wcId = this.webviewEl.getWebContentsId();
+    } catch {
+      return;
+    }
+    void window.electronAPI
+      ?.webDomRun({ wcId }, scriptId, params)
+      .then((r) => {
+        if (r.status === 'failed') {
+          // ⚠️ 不静默 —— 同步失效时日志里必须有话(旧实现是 .catch(() => {}))
+          console.warn(`[sync-driver] ${scriptId} 失败(${this.side}): ${r.reason}`);
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn(`[sync-driver] ${scriptId} 异常(${this.side}):`, err);
+      });
+  }
+
+  // ── Apply methods(脚本体已搬进 web.dom,这里只传参)──
+
+  private applyScrollDelta(deltaY: number): void {
+    this.run(SCRIPTS.scrollDelta, { deltaY });
   }
 
   private applyScrollAnchor(event: ScrollAnchorEvent): void {
-    if (!this.webviewEl) return;
     if (event.anchor) {
-      const anchorJSON = JSON.stringify(event.anchor);
-      try {
-        this.webviewEl.executeJavaScript(`
-          (function() {
-            try {
-              var anchor = ${anchorJSON};
-              var els = document.getElementsByTagName(anchor.tag);
-              var el = els[anchor.index];
-              if (el) {
-                var rect = el.getBoundingClientRect();
-                var targetY = window.scrollY + rect.top + (anchor.offsetRatio * rect.height);
-                window.__krigSmoothScrolling = true;
-                window.scrollTo({ top: targetY, behavior: 'smooth' });
-                setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
-              }
-            } catch(e) {}
-          })();
-        `).catch(() => {});
-      } catch { /* webview 未就绪 */ }
+      this.run(SCRIPTS.scrollAnchor, { anchor: JSON.stringify(event.anchor) });
     } else if (event.pctY !== undefined) {
-      try {
-        this.webviewEl.executeJavaScript(`
-          (function() {
-            var maxY = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-            window.__krigSmoothScrolling = true;
-            window.scrollTo({ top: ${event.pctY} * maxY, behavior: 'smooth' });
-            setTimeout(function() { window.__krigSmoothScrolling = false; }, 400);
-          })();
-        `).catch(() => {});
-      } catch { /* webview 未就绪 */ }
+      this.run(SCRIPTS.scrollPct, { pctY: event.pctY });
     }
   }
 
   private applyClickSync(event: ClickEvent): void {
     if (this.clickSyncLock) return;
-    if (!this.webviewEl) return;
     this.clickSyncLock = true;
-
-    const toggleStateJSON = JSON.stringify(event.toggleState || null);
-    try {
-    this.webviewEl.executeJavaScript(`
-      (function() {
-        window.__krigClickLock = true;
-        try {
-          var el = document.querySelector(${JSON.stringify(event.selector)});
-          if (!el) return;
-          var toggleState = ${toggleStateJSON};
-          var shouldClick = true;
-          if (toggleState) {
-            if (toggleState.attr === 'aria-expanded' && toggleState.value !== null) {
-              var toggle = el.closest ? (el.closest('[aria-expanded]') || el) : el;
-              var current = toggle.getAttribute('aria-expanded');
-              if (current === toggleState.value) shouldClick = false;
-            } else if (toggleState.controlledSelector && toggleState.visible !== undefined) {
-              var controlled = document.querySelector(toggleState.controlledSelector);
-              if (controlled) {
-                var style = window.getComputedStyle(controlled);
-                var isVisible = style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0';
-                if (isVisible === toggleState.visible) shouldClick = false;
-              }
-            }
-          }
-          if (shouldClick) el.click();
-        } catch(e) {}
-        setTimeout(function() { window.__krigClickLock = false; }, 100);
-      })();
-    `).catch(() => {});
-    } catch { /* webview 未就绪 */ }
-
+    this.run(SCRIPTS.click, {
+      selector: event.selector,
+      toggleState: JSON.stringify(event.toggleState || null),
+    });
     setTimeout(() => { this.clickSyncLock = false; }, 100);
   }
 
   private applyInputSync(event: InputSyncEvent): void {
-    if (!this.webviewEl) return;
-    try {
-    this.webviewEl.executeJavaScript(`
-      (function() {
-        window.__krigInputLock = true;
-        try {
-          var el = document.querySelector(${JSON.stringify(event.selector)});
-          if (!el) return;
-          var tag = el.tagName.toLowerCase();
-          if (tag === 'input' || tag === 'textarea') {
-            if (el.type === 'checkbox' || el.type === 'radio') {
-              el.checked = ${event.checked};
-            } else {
-              el.value = ${JSON.stringify(event.value)};
-            }
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-          } else if (tag === 'select') {
-            el.value = ${JSON.stringify(event.value)};
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-          } else if (el.isContentEditable) {
-            el.textContent = ${JSON.stringify(event.value)};
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-        } catch(e) {}
-        setTimeout(function() { window.__krigInputLock = false; }, 50);
-      })();
-    `).catch(() => {});
-    } catch { /* webview 未就绪 */ }
+    this.run(SCRIPTS.input, {
+      selector: event.selector,
+      value: event.value ?? '',
+      checked: Boolean(event.checked),
+    });
   }
 
   private applySubmitSync(event: SubmitFormEvent): void {
-    if (!this.webviewEl) return;
-    try {
-    this.webviewEl.executeJavaScript(`
-      (function() {
-        window.__krigInputLock = true;
-        try {
-          var form = document.querySelector(${JSON.stringify(event.selector)});
-          if (!form) return;
-          var formData = ${JSON.stringify(event.formData)};
-          for (var name in formData) {
-            var input = form.querySelector('[name="' + name + '"], #' + name);
-            if (!input) continue;
-            if (input.type === 'checkbox' || input.type === 'radio') {
-              input.checked = formData[name].checked;
-            } else {
-              input.value = formData[name].value;
-            }
-          }
-          form.submit();
-        } catch(e) {}
-        setTimeout(function() { window.__krigInputLock = false; }, 200);
-      })();
-    `).catch(() => {});
-    } catch { /* webview 未就绪 */ }
+    this.run(SCRIPTS.submit, {
+      selector: event.selector,
+      formData: JSON.stringify(event.formData),
+    });
   }
 
   private applySelectionHighlight(event: SelectionEvent): void {
-    if (!this.webviewEl) return;
-    const blocksJSON = JSON.stringify(event.blocks);
-    try {
-      this.webviewEl.executeJavaScript(`
-        (function() {
-          if (!document.getElementById('__krigHighlightStyle')) {
-            var style = document.createElement('style');
-            style.id = '__krigHighlightStyle';
-            style.textContent = '.__krig-highlight { background-color: rgba(138,180,248,0.15) !important; outline: 2px solid rgba(138,180,248,0.5) !important; outline-offset: 2px !important; border-radius: 4px !important; }';
-            document.head.appendChild(style);
-          }
-          var old = document.querySelectorAll('.__krig-highlight');
-          for (var i = 0; i < old.length; i++) old[i].classList.remove('__krig-highlight');
-          var blocks = ${blocksJSON};
-          if (!blocks) return;
-          for (var j = 0; j < blocks.length; j++) {
-            try {
-              var els = document.getElementsByTagName(blocks[j].tag);
-              var el = els[blocks[j].index];
-              if (el) el.classList.add('__krig-highlight');
-            } catch(e) {}
-          }
-        })();
-      `).catch(() => {});
-    } catch { /* webview 未就绪 */ }
+    this.run(SCRIPTS.highlight, { blocks: JSON.stringify(event.blocks) });
   }
 }
 

@@ -274,46 +274,5 @@ async function isLanded(webContents: WebContents, verifyScript: string): Promise
   }
 }
 
-/**
- * 定位发送 / 发布按钮 —— ⚠️ 只「查存在 + 是否可用」,**不 click**。
- *
- * 写方向红线:发布那一下永远留给用户。X 侧用本原语「校验粘贴后发布按钮已出现/可点」
- * 作为「内容已正确落进框」的辅助信号,但绝不程序点击。AI 侧的自动发送走自己的
- * clickSendButton(问答语义),不复用本原语。
- *
- * @returns { found: 是否找到按钮, enabled: 找到且未 disabled / aria-disabled }
- */
-export async function locateSendButton(
-  webContents: WebContents,
-  sendSelector: string,
-): Promise<{ found: boolean; enabled: boolean }> {
-  if (!sendSelector) return { found: false, enabled: false };
-  const script = `
-    (function() {
-      var sel = ${JSON.stringify(sendSelector)};
-      var selectors = sel.split(',').map(function(s) { return s.trim(); });
-      for (var i = 0; i < selectors.length; i++) {
-        if (!selectors[i]) continue;
-        var el = document.querySelector(selectors[i]);
-        if (el) {
-          var disabled = el.disabled === true || el.getAttribute('aria-disabled') === 'true';
-          return { found: true, enabled: !disabled };
-        }
-      }
-      return { found: false, enabled: false };
-    })();
-  `;
-  try {
-    const r = await webContents.executeJavaScript(script);
-    return {
-      found: Boolean(r?.found),
-      enabled: Boolean(r?.enabled),
-    };
-  } catch (err) {
-    console.error('[webview-input] locateSendButton failed:', err);
-    return { found: false, enabled: false };
-  }
-}
-
-/** OS 级粘贴用的修饰键(Cmd / Ctrl)— 供调用方需要时复用(如自定义发送序列) */
+/** OS 级粘贴的修饰键(mac=Cmd,其余=Ctrl)—— 供同族原语复用 */
 export { PASTE_MODIFIER };

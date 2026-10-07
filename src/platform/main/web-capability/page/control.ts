@@ -38,6 +38,26 @@ export const READY_POLL_MS = 200;
 
 /** ⭐ 连续几轮不变才算到底。**默认 3** —— 一轮就停是血泪③ 的复发形态 */
 export const DEFAULT_STUCK_ROUNDS = 3;
+/**
+ * ⭐⭐ **抢救上限** —— 换位置最多试这么多次。
+ * ⚠️ 没有上限的话,「每次都说跳成了、但位置就是不动」会变成**死循环**
+ * (脚本回 true 不代表内容真的长出来了)。
+ * ⭐ 历史代码的形态是「stuck>=2 试、stuck>=8 放弃」= 大约 3 次机会;
+ * 这里给 50:名单长的号中途会反复卡,次数太小等于没抢救。
+ */
+export const MAX_RESCUES = 50;
+/**
+ * ⭐ 跳完等多久再滚 —— 历史代码实测 1.5s。
+ * ⚠️ 不等的话虚拟列表还没渲染,下一轮回读到的还是同一个位置。
+ */
+export const RESCUE_SETTLE_MS = 1500;
+/**
+ * ⭐⭐ 连续几次抢救没换来**位置变化**就认到底。
+ * ⚠️ 真机:30 人的名单滚 838 轮、耗光 50 次额度 ——
+ * 判据是「脚本说跳成了」而不是「跳完有没有用」,那是没闭环。
+ * ⭐ 取 3:给虚拟列表两次慢渲染的机会,又不至于空转几百轮。
+ */
+export const RESCUE_NO_GAIN_LIMIT = 3;
 export const DEFAULT_MAX_ROUNDS = 50;
 export const DEFAULT_SETTLE_MS = 800;
 /** 每轮滚屏高的几成:0.55~0.85 抖动(匀速是风控最容易识别的特征) */
@@ -332,11 +352,32 @@ export class ControlEngine {
     let lastY = start.value.y;
     const startY = start.value.y;
     let stuck = 0;
+    /** ⭐ 换位置抢救了几次 —— 要写进停因,否则这个判据只活在这一次运行里 */
+    let rescued = 0;
+    /** ⭐ 上次抢救时的位置 —— 用来判「抢救到底有没有换来新内容」 */
+    let lastRescueY = -1;
+    /** ⭐ 连续几次抢救没换来位置变化 */
+    let rescueNoGain = 0;
     let rounds = 0;
     let reachedBottom = false;
     let stopReason = `达到轮次上限 ${maxRounds}`;
 
     for (let i = 1; i <= maxRounds; i++) {
+      /**
+       * ⭐⭐ **每轮开头问一次「要不要停」** —— 用户 2026-10-02:
+       * 「停应该包含两个动作 —— 停止翻页/停止取数据吧?」
+       *
+       * ⚠️ 放在轮次开头而不是结尾:结尾问的话,人点停时正在跑的那一轮
+       * 还会把 settleMs 等完(默认 800ms),感觉上仍是「没反应」。
+       *
+       * ⚠️ 取消**不是失败** —— 已滚过的轮次是真实的,照常回报告。
+       * 回 Failed 会让「人主动停的」与「滚不动」长得一样。
+       */
+      if (options.shouldStop?.()) {
+        stopReason = `人工取消(第 ${i} 轮前)`;
+        rounds = i - 1;
+        break;
+      }
       rounds = i;
       const roundStart = Date.now();
 
@@ -360,6 +401,22 @@ export class ControlEngine {
 
       // 每轮后等渲染(给懒加载补货时间)
       await this.sleep(settleMs);
+
+      /**
+       * ⭐⭐ 每轮滚完,给业务一个做自己事情的时机(如 X 点开「Show more」)。
+       *
+       * ⚠️ **抛异常不中断滚动** —— 业务的事做砸了不该让整轮采集作废
+       * (而且症状会变成「滚了两轮就停」,离真因很远)。
+       * ⭐ 放在 `settleMs` **之后**:那时懒加载的内容才渲染出来,
+       * 折叠按钮也才存在。
+       */
+      if (options.afterRound) {
+        try {
+          await options.afterRound(i);
+        } catch (err) {
+          console.warn(`[web.page] afterRound(第 ${i} 轮)抛异常,滚动继续:`, err);
+        }
+      }
 
       // ⭐ 血泪③:只有位置**连续多轮不变**才算真到底
       if (pos.y === lastY) stuck += 1;
@@ -397,9 +454,77 @@ export class ControlEngine {
           break;
         }
       }
+      /**
+       * ⭐⭐⭐ **滚不动先别急着判到底 —— 换个位置再试**(2026-10-06)。
+       *
+       * ⚠️⚠️ 虚拟列表滚过去的 DOM 会被删掉,「位置不动」常常是
+       * **新内容还没渲染**,不是真到底。历史代码里有这一步,
+       * 重建时丢了 —— 真机后果:关注 5319 人只采到 169,
+       * 而停因言之凿凿写着「滚到底」。
+       *
+       * ⭐ 在判到底**之前**试:回调说「我换过位置了」就再给一轮机会。
+       * ⚠️ `rescued` 要计数并**写进停因** —— 不然「抢救过几次」这个
+       * 判断依据又只活在这一次运行里。
+       */
+      if (stuck >= stuckRounds && options.onStuck && rescued < MAX_RESCUES) {
+        let moved = false;
+        try {
+          moved = await options.onStuck(stuck);
+        } catch (err) {
+          /** ⚠️ 抢救本身炸了不该让整趟滚动失败 —— 但也**绝不静默** */
+          console.warn(`[web.page] onStuck(第 ${i} 轮)抛异常,按到底处理:`, err);
+        }
+        if (moved) {
+          rescued += 1;
+          /**
+           * ⭐⭐ **跳完要等一等** —— 历史代码等 1.5s,照抄。
+           * ⚠️ 不等的话:`scrollIntoView` 刚触发、虚拟列表还没渲染出新内容,
+           * 下一轮回读到的还是同一个位置 → 又判卡住 → 空转。
+           * ⭐ 「做了动作」和「动作生效了」是两件事,中间要给时间。
+           *
+           * ⚠️⚠️ **这一行没有测试盖住**(2026-10-06 注入验过:删掉它仍全绿)——
+           * 假页面是同步渲染的,「等不等」对它没区别。
+           * ⭐ 真机才验得出来,**别因为测试绿就以为它可有可无**
+           * (`project-x-collect-two-legs`:CDP 这类时序行为只有真机验得出)。
+           */
+          await this.sleep(RESCUE_SETTLE_MS);
+          /** ⭐ 清零重新数 —— 换过位置之后它应该能再滚一段 */
+          stuck = 0;
+          /**
+           * ⭐⭐⭐ **抢救要回读有没有用** —— 2026-10-06 真机逼出来的。
+           *
+           * ⚠️⚠️ verifiedFollowers 实测:30 个人的名单滚了 **838 轮**、
+           * 把 50 次抢救额度**全部耗光**才停 —— 因为判「抢救成功」用的是
+           * 「脚本说跳成了」,而脚本只要找得到最后一张卡片就回 true,
+           * **跟有没有新内容无关**。于是真到底之后还在反复抢救。
+           *
+           * ⭐ `feedback-pdca-close-the-loop`:判据要回读**真实产出量**,
+           * 不是「动作做了没有」。这里的产出量就是**位置有没有真的变**。
+           * ⚠️ 连续 `RESCUE_NO_GAIN_LIMIT` 次抢救后位置纹丝不动 → 真到底了,
+           * 别再耗额度。
+           */
+          if (pos.y === lastRescueY) {
+            rescueNoGain += 1;
+            if (rescueNoGain >= RESCUE_NO_GAIN_LIMIT) {
+              reachedBottom = true;
+              stopReason = `滚到底(抢救 ${rescued} 次后位置仍是 ${pos.y},真的没有更多了)`;
+              break;
+            }
+          } else {
+            rescueNoGain = 0;
+          }
+          lastRescueY = pos.y;
+          /**
+           * ⚠️ **不 `continue`** —— 那会跳过本轮的滚动,
+           * 而我们正需要它滚一下来验证「换位置到底有没有用」。
+           * 落到循环末尾自然进下一轮即可。
+           */
+        }
+      }
       if (stuck >= stuckRounds) {
         reachedBottom = true;
-        stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${pos.y} 未变)`;
+        stopReason = `滚到底(连续 ${stuck} 轮 scrollY=${pos.y} 未变`
+          + (rescued > 0 ? `,中途换位置抢救 ${rescued} 次` : '') + ')';
         break;
       }
     }
@@ -407,7 +532,20 @@ export class ControlEngine {
     const scrolledPx = lastY - startY;
 
     // ── A 层自校验:滚动确实发生了(§9.5)。不过要**如实标红**,不许静默 ──
+    /**
+     * ⭐⭐ **人工取消不算 problem** —— 2026-10-02 加。
+     *
+     * ⚠️ 不排除的话,人点「停」会撞上下面
+     * 「要求滚到底,但 N 轮后仍未到底 —— 结果不完整」这一条,
+     * 于是**人主动停的**被报成「结果不完整」,还会把整个结果降级成 `degraded`。
+     * ⭐ 那是**错的归类**:没到底是人的意图,不是缺陷。
+     * 混在一起会让真正的「滚不动」被淹在一堆人工取消里。
+     */
+    const cancelled = stopReason.startsWith('人工取消');
+
     const problems: string[] = [];
+    // ⚠️ 「一动没动」仍然要报 —— 即使是人工取消:
+    //    滚了零像素就点停,与「滚不动」是同一个需要知道的事实。
     if (scrolledPx <= 0) {
       // ⚠️ 这条是本层最重要的一条:滚动没生效时,后面所有判断都建立在假数据上。
       // 现有实现只查 `maxY <= 0`,漏掉「起点不为 0 但一动没动」的情形
@@ -415,13 +553,14 @@ export class ControlEngine {
         `页面从未向下移动(起点 ${startY} → 终点 ${lastY})—— 滚动没生效`,
       );
     }
-    if (stop.kind === 'atBottom' && !reachedBottom) {
+    // ⭐ 下面三条都是「没达成目标」—— 人工取消时目标本来就被放弃了,不算 problem
+    if (!cancelled && stop.kind === 'atBottom' && !reachedBottom) {
       problems.push(`要求滚到底,但 ${rounds} 轮后仍未到底 —— 结果不完整`);
     }
-    if (stop.kind === 'anchorAppears' && !stopReason.startsWith('停止判据满足')) {
+    if (!cancelled && stop.kind === 'anchorAppears' && !stopReason.startsWith('停止判据满足')) {
       problems.push(`要求等锚点出现,但直到停止都没出现 —— 结果不完整`);
     }
-    if (stop.kind === 'custom' && !stopReason.startsWith('停止判据满足')) {
+    if (!cancelled && stop.kind === 'custom' && !stopReason.startsWith('停止判据满足')) {
       problems.push(`要求等自定义判据满足,但直到停止都没满足 —— 结果不完整`);
     }
 

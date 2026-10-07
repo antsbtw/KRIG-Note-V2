@@ -12,6 +12,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { stripComments } from '../helpers/source-scan';
+// ⚠️ 剥注释一律用共享的字符状态机版(tests/helpers/source-scan.ts)。
+// 本文件原先手写 `.replace(/\/\/.*$/gm, '')`:遇到 `'https://…'` 会把 URL 连同
+// 同一行后面的真代码一起吃掉 → 违规藏在那一行就查不到(2026-09-30 注入实测全绿)。
 
 function listTs(dir: string): string[] {
   const out: string[] = [];
@@ -21,10 +25,6 @@ function listTs(dir: string): string[] {
     else if (entry.name.endsWith('.ts')) out.push(full);
   }
   return out;
-}
-
-function stripComments(code: string): string {
-  return code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
 }
 
 const AI_DIR = join(process.cwd(), 'src/platform/main/ai');
@@ -43,6 +43,8 @@ describe('守卫自检 —— 先证明剥注释真的在工作', () => {
     expect(stripComments('a(); // executeJavaScript')).not.toContain('executeJavaScript');
     expect(stripComments('/* executeJavaScript */ a();')).not.toContain('executeJavaScript');
     expect(stripComments('wc.executeJavaScript(x);')).toContain('executeJavaScript');
+    // 字符串里的 // (URL)后面的真代码必须留下 —— 正则版在这里会把它吃掉
+    expect(stripComments("const u = 'https://x.com'; executeJavaScript();")).toContain('executeJavaScript();');
   });
 });
 
@@ -92,14 +94,20 @@ describe('⭐ 脚本文本只在 inject-scripts/ 里(不许在业务代码现拼
    */
   const KNOWN_DEBT = [
     'src/platform/main/ai/ai-sync-orchestrator.ts',
-    'src/platform/main/ai/extractors/chatgpt-extract-turn.ts',
     'src/platform/main/ai/extractors/claude-api-extractor.ts',
-    'src/platform/main/ai/extractors/claude-extract-turn.ts',
     'src/platform/main/ai/extractors/gemini-conversation-query.ts',
-    'src/platform/main/ai/extractors/gemini-extract-turn.ts',
     'src/platform/main/ai/extractors/gemini-full-extraction.ts',
     'src/platform/main/ai/writer.ts',
   ];
+  /**
+   * ⭐ 2026-09-30 **还掉三条**(L2 收口第 2 批):
+   * `chatgpt-extract-turn` / `claude-extract-turn` / `gemini-extract-turn`
+   * 的「按坐标定位第几条」已收进 `web.dom` 预注册表(`dom/locate-scripts.ts`),
+   * 三份实现合一(前两份原本**逐字节相同**,只差 selector 常量)。
+   *
+   * ⭐ 是本守卫**自己发现**它们已修好并要求删的 ——
+   * 「只减不增」这条规则在这次真正起了作用,不是摆设。
+   */
 
   /** 现在还在现拼脚本的文件 */
   function currentOffenders(): string[] {

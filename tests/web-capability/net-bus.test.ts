@@ -238,3 +238,70 @@ describe('list 过滤与 downloads', () => {
     expect(bus.downloads(B)).toEqual([]);
   });
 });
+
+/**
+ * ⭐⭐⭐ **请求头不许被后一步抹掉** —— 2026-10-06 真机,403 查了三轮的真因。
+ *
+ * ⚠️⚠️ Electron 的钩子顺序是:
+ * 　`onBeforeRequest`(**没有**请求头)
+ * 　→ `onSendHeaders`(**有**请求头)
+ * 　→ `onCompleted`(details 里本来就没有请求头)
+ * 而 `recordResponseComplete` 原先拿新 record **整条替换**旧的 ——
+ * 最后一步把 `onSendHeaders` 记下的头整条抹掉。
+ *
+ * ⭐ 后果:X 游标翻页要原样重发 authorization / x-csrf-token,
+ * 回查永远拿到「0 个请求头」→ 重发 **403** → 一翻页就停。
+ * ⚠️ 与 `project-x-upsert-overwrites-richer-text` 同形:**深→浅降级**。
+ */
+describe('⭐⭐⭐ 请求头要活到最后', () => {
+  it('⭐⭐⭐ onCompleted 不许抹掉 onSendHeaders 记下的请求头', () => {
+    const bus = new NetworkEventBus();
+    const url = 'https://x.com/i/api/graphql/abc/Followers?variables=%7B%7D';
+
+    // ① onBeforeRequest —— 没有请求头
+    bus.recordRequestStart(rec({ requestId: 'r1', pageId: A, url }));
+    // ② onSendHeaders —— 补上请求头
+    bus.recordRequestStart(rec({
+      requestId: 'r1', pageId: A, url,
+      requestHeaders: { authorization: 'Bearer AAA', 'x-csrf-token': 'tok1' },
+    }));
+    // ③ onCompleted —— details 里**没有**请求头
+    bus.recordResponseComplete(rec({ requestId: 'r1', pageId: A, url, status: 200 }));
+
+    const got = bus.list(A, {}).find((r) => r.requestId === 'r1');
+    expect(got, '记录没了?').toBeTruthy();
+    expect(got?.status, '新字段该覆盖').toBe(200);
+    expect(got?.requestHeaders?.authorization, 'onCompleted 把请求头抹掉了 → 翻页必 403')
+      .toBe('Bearer AAA');
+    expect(got?.requestHeaders?.['x-csrf-token']).toBe('tok1');
+  });
+
+  it('⭐⭐ 带 body 的那条路同样要保住请求头', () => {
+    /** ⚠️ `recordResponseComplete(record, body)` 走的是另一个分支 */
+    const bus = new NetworkEventBus();
+    bus.recordRequestStart(rec({
+      requestId: 'r2', pageId: A,
+      requestHeaders: { authorization: 'Bearer BBB' },
+    }));
+    bus.recordResponseComplete(
+      rec({ requestId: 'r2', pageId: A, status: 200 }),
+      new TextEncoder().encode('{"ok":1}'),
+    );
+    const got = bus.list(A, {}).find((r) => r.requestId === 'r2');
+    expect(got?.requestHeaders?.authorization).toBe('Bearer BBB');
+    expect(got?.bodyRef, 'body 也要存下').toBeTruthy();
+  });
+
+  it('⭐⭐ 新的请求头**可以**覆盖旧的 —— 不是只进不出', () => {
+    /** ⚠️ 判据太宽会把「头变了」也挡住,那是另一种错 */
+    const bus = new NetworkEventBus();
+    bus.recordRequestStart(rec({
+      requestId: 'r3', pageId: A, requestHeaders: { authorization: 'OLD' },
+    }));
+    bus.recordResponseComplete(rec({
+      requestId: 'r3', pageId: A, requestHeaders: { authorization: 'NEW' },
+    }));
+    const got = bus.list(A, {}).find((r) => r.requestId === 'r3');
+    expect(got?.requestHeaders?.authorization).toBe('NEW');
+  });
+});

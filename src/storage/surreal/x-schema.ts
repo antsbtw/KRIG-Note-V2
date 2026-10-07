@@ -1629,6 +1629,249 @@ DEFINE FIELD IF NOT EXISTS auto          ON x_reply_draft TYPE option<bool>;
 `;
 
 /**
+ * ⭐⭐⭐ 1.2.15 —— `media` 的**数组元素**要 FLEXIBLE(2026-10-05 真机)
+ *
+ * ⚠️⚠️ 1.2.14 把 media 定成 `option<array>`,写入时被拒:
+ * `Found field 'media[0].type', but no such field exists for table 'x_tweet'`
+ * —— **SCHEMAFULL 表会校验数组里每个元素的字段**。
+ *
+ * ⭐ 这是 `project-surreal-flexible-parse-error` 记的**第二刀**:
+ * `DEFINE FIELD media` 会**自动派生**一条 `media[*] TYPE object`,
+ * 它**不继承**父字段的 FLEXIBLE → 元素是严格 object,未声明子字段全拒。
+ *
+ * ⚠️⚠️ **坑中坑**:自动派生的那条已占位,`DEFINE FIELD IF NOT EXISTS media[*]`
+ * 会被**静默跳过**(它认为已存在)——看着跑了其实没生效。
+ * ⭐ 所以必须 `REMOVE` 再 `DEFINE`,且**不带 IF NOT EXISTS**。
+ *
+ * ⚠️ `links/hashtags/mentions` 是 `array<string>` —— 元素是标量,不受影响。
+ */
+const X_SCHEMA_1_2_15 = `
+REMOVE FIELD IF EXISTS media ON x_tweet;
+DEFINE FIELD media ON x_tweet TYPE option<array<object>> FLEXIBLE;
+REMOVE FIELD IF EXISTS media[*] ON x_tweet;
+DEFINE FIELD media[*] ON x_tweet TYPE object FLEXIBLE;
+`;
+
+/**
+ * ⭐⭐⭐ 1.2.16 —— 用户表补 `rest_id` 等采集字段(2026-10-05)
+ *
+ * 用户一句「人,就是x的用户呀」定下来的事:**follower 和推文作者是同一个实体**
+ * ——同一个 X 用户,两条发现路径。所以**不建新表**,落到 `x_author`。
+ * (表名取窄了,但存量数据和引用都在,不改名。)
+ *
+ * ⚠️⚠️ **缺的是 `rest_id`** —— 而这张表自己的注释早就写明了为什么要:
+ * 「数字 id(rest_id)—— 契约的 x_uid 用它匹配最稳,**handle 会改名**」
+ * (那句写在 `x_ws_account` 上,`x_author` 却没有这个字段)。
+ * ⭐ 没有它,一个人改了 handle 就会变成**两行**,而
+ * `idx_author_handle UNIQUE` 只保证「同名不重复」,保证不了「同人不重复」。
+ *
+ * ⚠️ `rest_id` 的索引**不能是 UNIQUE**:存量 1000+ 行全是空的,
+ * UNIQUE 会让第二行空值直接撞上(SurrealDB 的 UNIQUE 把 NONE 也算一个值)。
+ * ⭐ 所以建普通索引 —— 它要的是查得快,不是约束。
+ *
+ * ── ⚠️ 为什么只加这三个字段 ──
+ * `XUserRecord` 的其余字段(bio/location/followers_count/following/
+ * followed_by/is_blue_verified/account_created_at/list_seq/list_source/
+ * list_memberships)**1.2.4 到 1.2.9 已经全部加过了** ——
+ * 我开工前查了 `INFO`(grep schema)才知道,差点又建一张重复的表。
+ */
+const X_SCHEMA_1_2_16 = `
+-- ⭐ 数字 id —— 改名不会变,比 handle 稳(表里原先只有 handle)
+DEFINE FIELD IF NOT EXISTS rest_id   ON x_author TYPE option<string>;
+-- ⚠️ 普通索引不是 UNIQUE:存量行 rest_id 全空,UNIQUE 会被空值撞死
+DEFINE INDEX IF NOT EXISTS idx_author_rest_id ON x_author FIELDS rest_id;
+-- 最近一次从名单里见到他是什么时候(与 list_seen_at 同义,这里补齐采集时刻)
+DEFINE FIELD IF NOT EXISTS fetched_at ON x_author TYPE option<datetime>;
+`;
+
+/**
+ * ⭐⭐⭐ 1.2.17 —— 人的字段补齐(2026-10-05,**拿真载荷定的**)
+ *
+ * 用户:「人有哪些数据?**要先观察清楚**,不要数据都采不齐呢。」
+ *
+ * ⚠️⚠️ 真机 `Following` 载荷实测(50 个用户的样本):
+ * X 已经把字段全搬进带类型的子对象,**`legacy` 这个键根本不存在了**。
+ * 而解析器原先只读 `legacy.*` → 粉丝数/关注数/地点/注册时间
+ * **整列空采了三跑**(0/221),覆盖率一直算着却没人报警。
+ *
+ * ⭐ 这次补的是**真载荷里确实有、而库里没地方放**的三样:
+ * 　`website.url` → website          (实测 5/50 有 —— 稀疏是正常的)
+ * 　`verification.verified` → is_verified(⚠️ 与蓝V**不是一回事**)
+ * 　`privacy.protected` → is_protected (受保护的号采不到他的推)
+ * ⚠️ `tweet_count` / `media_count` **1.2.9 就有了**,只是没人往里写 ——
+ * 开工前查了 schema 才没白建一遍。
+ */
+const X_SCHEMA_1_2_17 = `
+-- 个人网站(实测 5/50 有值,稀疏正常)
+DEFINE FIELD IF NOT EXISTS website      ON x_author TYPE option<string>;
+-- ⚠️ 老的认证标,与 is_blue_verified(买的蓝V)不是一回事
+DEFINE FIELD IF NOT EXISTS is_verified  ON x_author TYPE option<bool>;
+-- 受保护的号:采不到他的推,业务要分得出来
+DEFINE FIELD IF NOT EXISTS is_protected ON x_author TYPE option<bool>;
+`;
+
+/**
+ * ⭐⭐⭐ 1.2.18 —— 断点续采补字段(2026-10-07)
+ *
+ * 用户:「要用断点续采」。而 `x_collect_cursor` **1.0.3 就建好了、零消费者** ——
+ * 又一例「表建好没人用」。现在接上,顺便补两个它缺的字段。
+ *
+ * ⚠️⚠️ 为什么非要断点续采(真机算过的账):
+ * `Followers` 端点约 **50 次/窗口**就 429(三跑都停在 48/49)。
+ * 而 X 每次都从**第 1 页**给游标 —— 直接再点一次的话:
+ * 　翻 1-48 轮全是已入库的那 2442 人 → 第 49 轮又 429 → **一个新人都拿不到**。
+ * ⭐ 必须从上次停下的游标接着翻,配额才花在新数据上。
+ *
+ * ⚠️ 游标**会过期**:拿旧游标请求失败要能**退回从头采**,不是报错了事。
+ */
+const X_SCHEMA_1_2_18 = `
+-- ⭐ 上次停在第几轮 —— 面板显示「上次停在第 N 页」用
+DEFINE FIELD IF NOT EXISTS last_round   ON x_collect_cursor TYPE option<int>;
+-- ⭐ 上次为什么停的 —— 429 / 到头了 / 人点停,决定下次要不要续
+DEFINE FIELD IF NOT EXISTS last_reason  ON x_collect_cursor TYPE option<string>;
+-- ⭐ 累计采到多少 —— 对账用(与 x_author 里该名单的行数应当接近)
+DEFINE FIELD IF NOT EXISTS total_seen   ON x_collect_cursor TYPE option<int>;
+`;
+
+export async function x_migration_1_2_18(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_18);
+
+  /** ⭐⭐ 问库要答案 —— 整段 DDL 可能被拒收而「看着跑了」 */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>(
+    'INFO FOR TABLE x_collect_cursor',
+  );
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['last_round', 'last_reason', 'total_seen']) {
+    if (!(f in fields)) {
+      throw new Error(`[x-schema 1.2.18] ${f} 没加上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.18] x_collect_cursor 断点字段已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.18', appliedAt = $now,
+      description = '断点续采:x_collect_cursor 补 last_round / last_reason / total_seen'`,
+    { rid: new RecordId('schema_version', '1.2.18'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_17(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_17);
+
+  /** ⭐⭐ 问库要答案 —— 整段 DDL 可能被拒收而「看着跑了」 */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['website', 'is_verified', 'is_protected']) {
+    if (!(f in fields)) {
+      throw new Error(`[x-schema 1.2.17] ${f} 没加上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.17] x_author website / is_verified / is_protected 已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.17', appliedAt = $now,
+      description = '人的字段补齐(真载荷实测):website / is_verified / is_protected'`,
+    { rid: new RecordId('schema_version', '1.2.17'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_16(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_16);
+
+  /**
+   * ⭐⭐ **问库要答案,不信自述** —— `project-surreal-flexible-parse-error`
+   * 的教训:整段 DDL 可能**被整体拒收**而「看着跑了」。
+   * ⚠️ SDK 的 `query()` 已经拆掉 HTTP 的 `result` 外壳
+   * (`project-surreal-sdk-vs-http-shape`:我曾照 curl 的形状改代码,
+   * 结果守卫每次启动必抛、app 起不来)。
+   */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['rest_id', 'fetched_at']) {
+    if (!(f in fields)) {
+      throw new Error(
+        `[x-schema 1.2.16] ${f} 没加上 —— 整段 DDL 可能被拒收(parse error 会让后面几条一起消失)`,
+      );
+    }
+  }
+  console.log('[x-schema 1.2.16] x_author.rest_id / fetched_at 已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.16', appliedAt = $now,
+      description = 'x_author 补 rest_id(handle 会改名)—— 用户表就是 x_author,不建新表'`,
+    { rid: new RecordId('schema_version', '1.2.16'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_15(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_15);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.15', appliedAt = $now,
+      description = 'media 数组元素 FLEXIBLE —— 否则 media[0].type 被整条拒收'`,
+    { rid: new RecordId('schema_version', '1.2.15'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐⭐ 1.2.14 —— 按**五维**补齐落库字段(用户 2026-10-04)
+ *
+ * 「真正的分析,可以分**人、事、物、时、空**五个维度。」
+ *
+ * ⚠️⚠️ 补的大多是**【物】**这一维 —— 它在原先的三分法里**没有位置**,
+ * 被归进「事」,于是媒体和链接当成推文的附属品丢掉了:
+ * 旧表只有 `has_media` 这类布尔,**媒体 URL / 外链 / 话题标签 / @提及 一个都没存**。
+ *
+ * ⭐ 【物】**不独立成表**:它们连存都没存过,形态是猜的
+ * (用户 2026-09-01:「边的形态在真实数据跑出来之前是猜的」)。
+ * 先作为推文字段存,等真跑出量再说要不要抽实体。
+ *
+ * ⚠️ 关系字段用 **X 自己的词** `following` / `followed_by`
+ * (用户 2026-10-04:「还是按照 x 的分类吧」)—— 少一层翻译少一层漂移。
+ */
+const X_SCHEMA_1_2_14 = `
+-- 【事】
+DEFINE FIELD IF NOT EXISTS is_long_text     ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS article_url      ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS quoted_status_id ON x_tweet TYPE option<string>;
+
+-- 【人】⚠️ 名字照抄 X 的 relationship_perspectives
+DEFINE FIELD IF NOT EXISTS author_rest_id   ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS author_bio       ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS is_blue_verified ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS following        ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS followed_by      ON x_tweet TYPE option<bool>;
+
+-- 【物】⚠️ media 存 type+URL;只存 type 等于没采
+-- ⚠️⚠️ \`array<object>\` 的 FLEXIBLE **不下传到元素**
+--    (project-x-surreal-flexible-parse-error:自动派生的 .* 不继承),
+--    所以元素形状不另外约束,存什么是什么。
+DEFINE FIELD IF NOT EXISTS media            ON x_tweet TYPE option<array>;
+DEFINE FIELD IF NOT EXISTS links            ON x_tweet TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS hashtags         ON x_tweet TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS mentions         ON x_tweet TYPE option<array<string>>;
+
+-- 【我的动作】⚠️ 这是「我对它做过什么」,不是推文本体
+DEFINE FIELD IF NOT EXISTS liked            ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS retweeted        ON x_tweet TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS bookmarked       ON x_tweet TYPE option<bool>;
+
+-- ⭐ 查询速度:用户 2026-10-04 明确要求。按最常用的三条路建索引。
+-- ⚠️ 不预建用不上的索引 —— 索引不是越多越好,写入要维护它们。
+DEFINE INDEX IF NOT EXISTS idx_tweet_author   ON x_tweet FIELDS author_handle;
+DEFINE INDEX IF NOT EXISTS idx_tweet_created  ON x_tweet FIELDS created_at;
+DEFINE INDEX IF NOT EXISTS idx_tweet_recipe   ON x_tweet FIELDS search_recipe;
+`;
+
+export async function x_migration_1_2_14(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_14);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.14', appliedAt = $now,
+      description = 'x_tweet 五维字段:物(媒体URL/外链/标签/提及)+人(关系用 X 原词)+我的动作'`,
+    { rid: new RecordId('schema_version', '1.2.14'), now: Date.now() },
+  );
+}
+
+/**
  * 1.2.13 —— 搜索水位:按**搜索词**记「采到最新一条是什么时候发的」(2026-09-27)
  *
  * ── 用户拍板 ──

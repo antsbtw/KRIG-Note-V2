@@ -23,7 +23,7 @@ import { reportInstallCoverage } from '@slot/diagnostics/install-coverage';
 import { startKeymapListener } from '@slot/keymap-registry/keymap-listener';
 import { reportRendererAlive } from './diagnostics/renderer-alive';
 import { getActiveWorkspaceIdSync, onMyWsIdReady } from '@workspace/workspace-instance/use-workspace';
-import { initNoteBaseSnapshotSync } from '@views/note/data-model';
+import { runViewCommandRegistrars } from '@slot/view-type-registry/view-type-registry';
 
 // ── 系统主题同步（跟随 nativeTheme）──
 // 初始用 matchMedia 快速设一次，再用主进程权威值覆盖（避免 Chromium matchMedia 与
@@ -35,15 +35,6 @@ function applyTheme(dark: boolean): void {
 applyTheme(window.matchMedia('(prefers-color-scheme: dark)').matches);
 window.electronAPI?.getNativeTheme().then(({ dark }) => applyTheme(dark)).catch(() => {/* ignore */});
 window.electronAPI?.onNativeThemeChanged(({ dark }) => applyTheme(dark));
-import { registerNoteCommands } from '@views/note/note-commands';
-import { registerWebCommands } from '@views/web/web-commands';
-import { registerWebBookmarkCommands } from '@views/web/web-bookmark-commands';
-import { registerEBookCommands } from '@views/ebook/bookshelf-commands';
-import { registerAICommands } from '@views/ai/ai-commands';
-/** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
-import { registerMailCommands } from '@views/mail/mail-commands';
-import { registerGraphCanvasCommands } from '@views/graph-canvas-view/canvas-commands';
-import { registerThoughtCommands } from '@views/thought/thought-commands';
 // W5:capability 显式 side-effect import — 触发各 capability 的
 // capabilityRegistry.register 副作用(原本由 L5-alive 直 import 触发,L5-alive
 // 改 getCapabilityApi 后 import 链断,需要在 renderer 显式拉)
@@ -93,26 +84,29 @@ import '@views/mail';   // Mail View self-register(NavSide tab 📧 order=7;网�
  * 底层能力(采集/判断/备料)不在这里,工作台那条编排链不受影响。 */
 import '@views/graph-canvas-view'; // L5-G1:GraphCanvasView self-register(D-1=A 命名)
 import '@views/thought'; // 横切思考层 NavSide 主舞台 self-register
+/**
+ * ⭐⭐ **X 模块的渲染进程入口 —— 就这一行。**
+ *
+ * ⚠️ X 是第一个**两个进程都要有入口**的模块:
+ * main 侧那行在 `main/index.ts`(push 语义页面表/锚点表给底座),
+ * 本行注册 view 与 navSide tab。
+ * 判据:**每个进程 ≤ 1 处,且必须是自注册行** ——
+ * 删 X = 删一个目录 + 删这两行。守卫 `tests/modules/x-module-detachable.test.ts`。
+ */
+import '@modules/x/renderer';
 import './app.css';
 
 // S3-a:ws 楼长状态由主进程管理，use-workspace.ts 的 ensureInit() 在首次 hook 调用时自动拉一次全量状态。
 // 此处仍保留 getBus 初始化供 L3.5 alive 计数。
 
-// Phase 1 多窗口 merge:订阅其他窗口写成功后的 blockHashes 基线广播（全局一次性）
-initNoteBaseSnapshotSync();
-
 // U1-c1-batch + 多窗口(S3-b):命令注册必须在本窗口 myWsId 确定后才能执行。
 // 用 onMyWsIdReady 订阅——仅在本窗口 IPC 确认的 wsId 就绪后触发一次，
 // 避免新窗口用 snapshot.activeId（ws-1）注册命令。
 onMyWsIdReady((rendererWsId) => {
-  registerNoteCommands(rendererWsId);
-  registerWebCommands(rendererWsId);
-  registerWebBookmarkCommands(rendererWsId);
-  registerEBookCommands(rendererWsId);
-  registerAICommands(rendererWsId);
-  registerMailCommands(rendererWsId);
-  registerGraphCanvasCommands(rendererWsId);
-  registerThoughtCommands(rendererWsId);
+  // ⭐ 各 view 在自己的 self-register 里填了 `commands` 字段,registry 收着,
+  // 这里一次性跑掉 —— 卸载一个模块只需删上面那一行 `import '@views/xxx'`。
+  // (2026-09-30 之前:每个模块要在本文件占两行,8 个模块共 16 行接线)
+  runViewCommandRegistrars(rendererWsId);
   // L3.5 bus 初始化(首次 wsId 就绪时补一次,确保 alive 计数 >= 1)
   workspaceManager.getBus(rendererWsId);
 });

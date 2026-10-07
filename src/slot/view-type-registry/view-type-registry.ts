@@ -156,10 +156,38 @@ class ViewTypeRegistry {
     if (def.keymap) {
       keymapRegistry.register(def.id, def.keymap);
     }
+    // ⭐ commands 只登记不执行 —— 它要等本窗口真 wsId(见 ViewDefinition.commands)
+    if (def.commands) {
+      this.commandRegistrars.set(def.id, def.commands);
+      // ⚠️ 若 wsId 已经到了(view 晚注册),当场补跑一次,否则这个 view 的命令
+      // 会**静默没有** —— onMyWsIdReady 是一次性的,晚订阅收不到第二次。
+      if (this.readyWsId !== null) def.commands(this.readyWsId);
+    }
+  }
+
+  /**
+   * ⭐ 各 view 登记的命令注册器(id → registrar)。
+   * 只存不跑:命令注册要本窗口真 wsId,而那是异步到的。
+   */
+  private commandRegistrars = new Map<string, (wsId: string) => void>();
+
+  /** 本窗口 wsId 一旦就绪就记下 —— 给「晚注册的 view」补跑用 */
+  private readyWsId: string | null = null;
+
+  /**
+   * ⭐ renderer 在 `onMyWsIdReady` 里调一次:把已登记的命令注册器全跑掉。
+   *
+   * 之后再注册的 view 会在 `distributeToRegistries` 里当场补跑,
+   * 所以**先注册**和**后注册**两种顺序都不会漏。
+   */
+  runCommandRegistrars(wsId: string): void {
+    this.readyWsId = wsId;
+    this.commandRegistrars.forEach((run) => run(wsId));
   }
 
   /** 取消该 view 的所有 Registry 子项 */
   private unregisterRegistries(id: string): void {
+    this.commandRegistrars.delete(id);
     contextMenuRegistry.unregisterByView(id);
     toolbarRegistry.unregisterByView(id);
     slashRegistry.unregisterByView(id);
@@ -174,4 +202,15 @@ export const viewTypeRegistry = new ViewTypeRegistry();
 /** 公开 API:L5 view 通过此函数注册 */
 export function registerView(def: ViewDefinition): void {
   viewTypeRegistry.register(def);
+}
+
+/**
+ * ⭐ 跑掉所有 view 登记的命令注册器(renderer 在 onMyWsIdReady 里调一次)。
+ *
+ * 在此之前 renderer 要为每个模块写**两行**(具名 import + 显式调用);
+ * 现在模块在自己的 self-register 里填 `commands` 字段即可,
+ * 卸载该模块 = 删掉 renderer 里那一行 `import '@views/xxx'`。
+ */
+export function runViewCommandRegistrars(wsId: string): void {
+  viewTypeRegistry.runCommandRegistrars(wsId);
 }

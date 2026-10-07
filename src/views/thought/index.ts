@@ -24,8 +24,11 @@ import { registerFloatingToolbar } from './floating-toolbar-content';
 import { registerSlashMenu } from './slash-menu-content';
 import { registerHandleMenu } from './handle-menu-content';
 import { registerContextMenu } from './context-menu-content';
+import { registerThoughtCommands } from './thought-commands';
 
 registerView({
+  /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
+  commands: registerThoughtCommands,
   id: 'thought-view',
   install: [
     // V1 ThoughtEditor 字面 = NoteEditor variant='thought' 薄包装,完整继承

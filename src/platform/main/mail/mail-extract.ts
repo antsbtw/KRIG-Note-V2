@@ -58,7 +58,7 @@ export interface MailExtractResult {
  * - { __noMail: true }  点中位置向上找不到邮件容器
  * - 字段对象           命中容器,字段尽力抓(可能部分为空)
  */
-function buildExtractScript(
+export function buildExtractScript(
   x: number,
   y: number,
   mailSelector: string,
@@ -68,23 +68,57 @@ function buildExtractScript(
   const sel = JSON.stringify(mailSelector);
   const bodySel = JSON.stringify(bodySelector ?? '');
   const subjSel = JSON.stringify(subjectSelector ?? '');
+  /**
+   * ⭐ 2026-09-30:坐标改走**绑定值**(L2 收口第 3 批)。
+   *
+   * 原来是 `elementFromPoint(${'${x}'}, ${'${y}'})` —— 裸插进脚本文本,
+   * 与 `project-x-inject-template-escape` 同族(求值后的样子与源码所见不同,
+   * 而 tsc 与单测都发现不了)。selector 三个本来就 stringify 过,坐标漏了。
+   *
+   * ⚠️ **只改绑定,不改逻辑** —— ① 段的回退语义(只在 ±24 带内找、
+   * 取「中心距最近」)与 `web.dom` 的 `ordinal-by-point`
+   * (带外也找、取「边缘距最近」+ maxDy 240)**不一样**,
+   * 合并会改行为。收口批次不许顺手改语义,否则出问题分不清是谁带来的。
+   */
+  /**
+   * ⚠️⚠️ **`JSON.stringify` 不是坏数字的安全网** —— 2026-09-30 复核实测:
+   * `JSON.stringify(NaN)` / `JSON.stringify(Infinity)` 都给 **`null`**,
+   * 而浏览器把 `elementFromPoint(null, null)` 当成 `(0, 0)` ——
+   * 于是**悄悄提取最左边那封邮件,不报任何错**。
+   *
+   * ⭐ 这是我这次改绑定**引入的回归**:改之前 NaN 原样进脚本、
+   * 浏览器当场报错、用户看得见失败。「从报错变成静默取错」比原来更坏。
+   *
+   * ⭐ 挡坏数字只能靠**校验**,不能靠序列化。同 `dom/locate-scripts.ts`
+   * 的 `requireNumber`。
+   */
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    throw new Error(
+      `[mail-extract] 坐标必须是有限数字,收到 x=${String(x)} y=${String(y)}`
+      + ' —— 拒绝构造脚本(NaN/Infinity 会被浏览器当成 0,静默提取错的那封)',
+    );
+  }
+  const bindX = JSON.stringify(x);
+  const bindY = JSON.stringify(y);
   return `
 (function() {
   try {
     var sel = ${sel};
     var bodySel = ${bodySel};
     var subjSel = ${subjSel};
+    var X = ${bindX};
+    var Y = ${bindY};
 
     // ① 坐标 → 邮件容器(命中优先,间隙回退纵向 ±24px 最近的)
-    var el = document.elementFromPoint(${x}, ${y});
+    var el = document.elementFromPoint(X, Y);
     var box = el && el.closest ? el.closest(sel) : null;
     if (!box) {
       var list = Array.prototype.slice.call(document.querySelectorAll(sel));
       var best = null, bestDist = Infinity;
       for (var i = 0; i < list.length; i++) {
         var r = list[i].getBoundingClientRect();
-        if (${y} >= r.top - 24 && ${y} <= r.bottom + 24) {
-          var d = Math.abs((r.top + r.bottom) / 2 - ${y});
+        if (Y >= r.top - 24 && Y <= r.bottom + 24) {
+          var d = Math.abs((r.top + r.bottom) / 2 - Y);
           if (d < bestDist) { bestDist = d; best = list[i]; }
         }
       }
@@ -99,6 +133,24 @@ function buildExtractScript(
     }
     // selector 支持逗号分隔多候选,querySelector 本身即按文档顺序返回首个匹配,
     // 故顺序命中是天然的(与 web-service-base/webview-input 同约定)。
+    /**
+     * ⚠️⚠️ **已知风险,刻意未改(2026-09-30 复核提出,待单独立项)**
+     *
+     * root.querySelector(s) || document.querySelector(s) —— 容器内找不到就
+     * **退到整页找**。在 Gmail 会话视图(一屏多封展开)里,这可能取到
+     * **别封邮件的正文**,而且**不报错**:结果看起来完整,内容是错的。
+     *
+     * ⚠️ 注意本注释**在模板字面量内部** —— 不许写反引号,
+     * 否则会提前终止字符串、把后面的 JS 当 TS 解析
+     * (feedback-comment-breaks-what-it-documents:注释弄坏它所注释的代码)。
+     *
+     * ⭐ 为什么不顺手修:改掉它会**改变提取行为**(某些邮箱可能正依赖这条兜底
+     * 才能拿到正文),要真机逐家验证(Gmail/Outlook/QQ/163)才能定。
+     * 本批次是「收口注入 + 补守卫」,不含行为变更 —— 混在一起出问题分不清来源。
+     *
+     * 立项时的判据:Gmail 会话视图展开两封,右键第二封,
+     * 取到的正文必须是第二封的。
+     */
     function pick(root, s) {
       if (!s) return null;
       try { return root.querySelector(s) || document.querySelector(s); }
@@ -173,13 +225,19 @@ export async function extractMail(
     return { success: false, error: `未知邮箱服务:${serviceId}` };
   }
 
-  const script = buildExtractScript(
-    x,
-    y,
-    profile.selectors.mailElement,
-    profile.selectors.mailBody,
-    profile.selectors.mailSubject,
-  );
+  let script: string;
+  try {
+    script = buildExtractScript(
+      x,
+      y,
+      profile.selectors.mailElement,
+      profile.selectors.mailBody,
+      profile.selectors.mailSubject,
+    );
+  } catch (e) {
+    // ⭐ 坐标非法在这里变成一个**说得出原因**的失败,而不是静默取错那封
+    return { success: false, error: e instanceof Error ? e.message : String(e) };
+  }
 
   let raw: unknown;
   try {

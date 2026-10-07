@@ -47,7 +47,7 @@ export interface MailServiceSelectors {
    * 单封邮件的容器(阶段 0 右键提取用)。
    *
    * 语义:用户右键点在邮件正文/列表行上时,由 guest 内 `elementFromPoint(x,y).closest(sel)`
-   * 向上找到的那个「一封邮件」的边界。web-service-base 的 buildHitTestScript 会在
+   * 向上找到的那个「一封邮件」的边界。mail-extract 的定位段会在
    * miss 时于 ±24px 纵向邻域回退。
    *
    * ⚠️ SPIKE 待实机校验:下列为「待确认」初值,需在真机 devtools 逐个核对。

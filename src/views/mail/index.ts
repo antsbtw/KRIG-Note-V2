@@ -13,10 +13,13 @@
 import { registerView } from '@slot/view-type-registry/register-view';
 import { MailView } from './MailView';
 import { registerMailAccountPopup } from './account-popup';
+import { registerMailCommands } from './mail-commands';
 
 registerMailAccountPopup();
 
 registerView({
+  /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
+  commands: registerMailCommands,
   id: 'mail-view',
   install: ['mail-service'],
   component: MailView,

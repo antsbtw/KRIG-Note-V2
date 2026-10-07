@@ -139,11 +139,30 @@ export class NetworkEventBus {
 
   recordResponseComplete(record: NetworkRecord, body?: Uint8Array): void {
     const list = this.requests.get(record.pageId) ?? [];
-    let stored: NetworkRecord = record;
+    /**
+     * ⭐⭐⭐ **保住先前记下的请求头** —— 2026-10-06,403 查了三轮的真因。
+     *
+     * ⚠️⚠️ 这里原本直接拿新 `record` **整条替换**旧的。
+     * 而链路顺序是:
+     * 　`onBeforeRequest`(无头)→ `onSendHeaders`(**有头**)
+     * 　→ `onCompleted`(**又没头**,它的 details 里本来就没有)
+     * 最后这一步把 `onSendHeaders` 辛苦记下的头**整条抹掉** ——
+     * 于是 CaptureSession 回查时永远拿到「0 个请求头」,
+     * 游标翻页重发必然 **403**(真机实证:种子带了 0 个请求头)。
+     *
+     * ⭐ 改成**合并**:新字段覆盖旧的,但旧的有、新的没有的**保留**。
+     * ⚠️ 这是「后一步不该抹掉前一步的成果」—— 与 upsert 那一族同形
+     * (`project-x-upsert-overwrites-richer-text`:深→浅降级)。
+     */
+    const prev = list.find((r) => r.requestId === record.requestId);
+    const merged: NetworkRecord = prev
+      ? { ...prev, ...record, requestHeaders: record.requestHeaders ?? prev.requestHeaders }
+      : record;
+    let stored: NetworkRecord = merged;
     if (body) {
       const bodyRef = record.bodyRef ?? this.mintBodyRef();
       this.storeBody(bodyRef, body);
-      stored = { ...record, bodyRef, bodyBytes: body.byteLength };
+      stored = { ...merged, bodyRef, bodyBytes: body.byteLength };
     }
     this.requests.set(
       record.pageId,
@@ -397,6 +416,43 @@ export class NetworkEventBus {
     if (binding) {
       this.providerBindings.set(key, { ...binding, canonicalRequestId });
     }
+
+    /**
+     * ⭐⭐⭐ **body 到手了要发事件** —— 2026-10-02 真机实测逼出来的。
+     *
+     * ── 真因(探针实测,不是推断)──
+     *
+     * 本方法原来只更新记录、`return ok(next)`,**从不 emit** ——
+     * 于是 CDP 这条路径下订阅者**永远收不到 `response-complete`**:
+     *
+     *   webRequest.onCompleted → recordResponseComplete(无 body)
+     *       → 发了事件,但 `bodyRef` 是 undefined → 订阅者判为 **noBody**
+     *   CDP loadingFinished   → attachProviderBody(有 body)
+     *       → 更新了记录、存了 body、**一声不吭**
+     *
+     * 两条腿各做一半,谁也没把「body 到手了」告诉订阅者。
+     * ⚠️ 真机症状:接线 ✅ attach ✅ **捕获 0 条** —— 而 body 其实就在库里。
+     *
+     * ⭐ 为什么补发而不是改 webRequest 那侧等 body:
+     * 两侧是**异步竞速**的(CDP 的 body 可能先到也可能后到),
+     * 让任一侧等另一侧都会引入超时与悬挂。
+     * 「谁拿到 body 谁喊一声」是唯一不依赖顺序的做法。
+     *
+     * ⚠️ 这会让同一个 requestId 发**两次** `response-complete`
+     * (一次无 body、一次有 body)—— 这是**有意**的,且必须如此:
+     * 「有响应」与「载荷到手」本来就是两个时刻,合并会丢掉前者,
+     * 而前者正是 `noBody`(通道哑了)的判据。
+     * ⭐ 订阅者按 `bodyRef` 有无区分即可,`CaptureSession` 已经这么做了。
+     */
+    this.emit({
+      kind: 'response-complete',
+      pageId: next.pageId,
+      frameId: next.frameId ?? null,
+      requestId: next.requestId,
+      status: next.status,
+      bodyRef,
+      at: next.finishedAt ?? new Date(this.now()).toISOString(),
+    });
     return ok(next);
   }
 

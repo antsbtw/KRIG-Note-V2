@@ -9,8 +9,15 @@ import { registerView } from '@slot/view-type-registry/register-view';
 import { WebView } from './WebView';
 import { registerWebContextMenu } from './context-menu-integration';
 import { registerNavSide, registerBookmarkContextMenu } from './nav-side-content';
+import { registerWebCommands } from './web-commands';
+import { registerWebBookmarkCommands } from './web-bookmark-commands';
 
 registerView({
+  /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
+  commands: (wsId: string): void => {
+    registerWebCommands(wsId);
+    registerWebBookmarkCommands(wsId);
+  },
   id: 'web-view',
   install: [
     // W4.2 C4:依赖 web-rendering capability(charter § 1.2 注册原则)
@@ -23,7 +30,6 @@ registerView({
   navSideTab: { label: 'Web', icon: '🌐', order: 3, navSideOnSwitch: 'collapse' },
 });
 
-// registerWebCommands / registerWebBookmarkCommands 已迁到 renderer/index.tsx 显式传 wsId 调用
 registerWebContextMenu();
 registerNavSide();
 registerBookmarkContextMenu();

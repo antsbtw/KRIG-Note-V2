@@ -24,7 +24,8 @@
       "@shell/*":        ["src/shell/*"],
       "@workspace/*":    ["src/workspace/*"],
       "@slot/*":         ["src/slot/*"],
-      "@shared/*":       ["src/shared/*"]
+      "@shared/*":       ["src/shared/*"],
+      "@modules/*":      ["src/modules/*"]
     }
   },
   "include": ["src/**/*"],

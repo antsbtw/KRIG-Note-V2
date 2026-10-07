@@ -29,10 +29,13 @@ import { registerEpubContextMenu } from './epub-context-menu-content';
 import { EBookOpenPopup } from './ebook-open-popup/EBookOpenPopup';
 import { EBookAaPopup } from './ebook-aa-popup/EBookAaPopup';
 import { EBOOK_OPEN_POPUP_ID, EBOOK_AA_POPUP_ID } from './popup-ids';
+import { registerEBookCommands } from './bookshelf-commands';
 
 const VIEW = 'ebook-view';
 
 registerView({
+  /** ⭐ 命令注册(registry 收着,等本窗口 wsId 就绪后跑)—— 卸载本模块只需删 renderer 里那一行 import */
+  commands: registerEBookCommands,
   id: VIEW,
   install: [
     'ebook-library',    // L5-C1:书架 + 文件夹 + 标注 + 数据传输

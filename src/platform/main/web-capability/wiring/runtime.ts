@@ -8,7 +8,7 @@
 import { PageRegistry } from '../page';
 import { NetworkEventBus, CdpBodyProvider } from '../net';
 import { TraceRecorder, HealthProbe, NetMonitor } from '../trace';
-import { ScriptRegistry, registerAIScripts } from '../dom';
+import { ScriptRegistry, registerAIScripts, registerLocateScripts, registerRendererScripts } from '../dom';
 import { ElectronDomRunner } from './electron-dom';
 import { FsTraceSink } from './fs-trace-sink';
 import { ControlEngine } from '../page';
@@ -21,7 +21,54 @@ import { lookupWebContents } from './page-hosts';
 
 export const pageRegistry = new PageRegistry();
 export const netBus = new NetworkEventBus();
-export const bodyProvider = new CdpBodyProvider(netBus);
+/**
+ * ⭐⭐ 载荷「没到手」时**落盘**,不只 console.warn —— 2026-10-02。
+ *
+ * ⚠️ 真机实测逼出来的:点开始捕获后接线 ✅ attach ✅ 但一条载荷都没有,
+ * 而 `body-provider` 里四处静默 return 全只打 console.warn →
+ * 「捕 0 条」这个结果**没有任何可读的成因**。
+ *
+ * ⭐ 四种 reason 各指一个方向,混在一起就查不动:
+ * · get-body-failed    CDP 取 body 报错(通道还活着,单条失败)
+ * · body-undecodable   拿到了但解不出
+ * · oversize-kept      ⭐ **提醒,不是失败**:载荷比提醒阈值大,但已**原样完整**交出。
+ *                      ⚠️ 本层既不截断也不丢弃 —— 用户 2026-10-02:
+ *                      「要保持获取到的信息的完整性,而不是片段」
+ * · correlate-failed   ⚠️ 配不上 webRequest 记录 —— 整条链最常见的死法
+ *
+ * ⚠️ 这里**不限流**:一条坏就记一条。刷屏本身就是信号
+ * (「webRequest 侧零接线」那次的症状正是它刷屏)。
+ */
+export const bodyProvider = new CdpBodyProvider(netBus, (miss) => {
+  /**
+   * ⚠️ `category` **按成因分**,不是统一一个 ——
+   * 分类学在 `types.ts` 里写着各自的含义,混成一类就失去了按类统计的意义:
+   * · 取 body 报错 / 解不出 → 依赖的 IPC 失败 = `resource-failure`
+   * · 被自己设的上限挡了   → 不是故障,是命中了未预期的构造 = `unexpected-format`
+   * · 配不上 webRequest    → 两侧编号对不上,**链路级**的失效 = `systemic`
+   */
+  const category = miss.reason === 'correlate-failed'
+    ? 'systemic' as const
+    /**
+     * ⚠️ `oversize-kept` 归 `unexpected-format`:**它不是故障** ——
+     * 数据完好无损地交出去了,只是比预期大。
+     * ⭐ 不归 resource-failure(没有任何资源失败)、
+     * 　 更不归 contract-violation(没有违反任何契约)——
+     * 　 归错类会让「内存提醒」混进真故障堆里,把真的问题淹掉。
+     */
+    : miss.reason === 'oversize-kept'
+      ? 'unexpected-format' as const
+      : 'resource-failure' as const;
+  traceRecorder.degradation({
+    layer: 'web.net',
+    operation: 'capture-body',
+    category,
+    reason: `${miss.reason}: ${miss.detail ?? ''}`.trim(),
+    // ⚠️ `inputRef` 的注释明确说「指向输入的引用(如 bodyRef / pageId)」—— 就是为此准备的
+    inputRef: String(miss.pageId),
+    rawSnippet: miss.url,
+  });
+});
 /**
  * ⭐ 诊断留痕的落盘根目录。
  *
@@ -49,6 +96,10 @@ export const healthProbe = new HealthProbe();
 /** ⭐ 预注册脚本表 —— 业务方只能按 id 取用,拼不出坏脚本 */
 export const scriptRegistry = new ScriptRegistry();
 registerAIScripts(scriptRegistry);
+// ⭐ 服务无关的定位脚本(三家 AI 提取器共用「按坐标定位第几条」)
+registerLocateScripts(scriptRegistry);
+// ⭐ renderer 侧注入脚本(双开同步内核等)—— 走 IPC 面由 renderer 触发
+registerRendererScripts(scriptRegistry);
 export const domRunner = new ElectronDomRunner(scriptRegistry, traceRecorder);
 
 /**
@@ -172,11 +223,77 @@ export function registerPageTable(owner: string, resolver: PageResolver): void {
 }
 
 /** 已注册的语义页面名(按 owner 分组)—— 验收台列给人看,免得靠记忆猜 */
-export function listPageNames(): Array<{ owner: string; names: string[] }> {
-  return Array.from(pageTables.entries()).map(([owner, t]) => ({
-    owner,
-    names: typeof t.names === 'function' ? t.names() : [],
-  }));
+export function listPageNames(): Array<{
+  owner: string;
+  names: string[];
+  /**
+   * ⭐ 每个页面要哪些参数 —— **面板据此渲染输入框**,不许自己抄一份。
+   *
+   * ⚠️ 旧实现栽过(原文):面板有**四处写死的正则**决定「要不要显示 handle
+   * 输入框」,新页面不在里面 → 框不显示 → 参数不传 → resolve 返 null。
+   * 「写死清单不会自己长」同族第五刀。
+   *
+   * ⚠️ 解释器**不一定**实现 `paramsOf`(接口只要求 `resolve`)——
+   * 没有就给空表,而不是假装每个页面都零参数。
+   */
+  params: Record<string, string[]>;
+  /**
+   * ⭐ 每个参数该填什么样的值 —— 面板当 placeholder 用。
+   * ⚠️ 提示放在**业务的表**里,不放面板:面板里写
+   * `k === 'handle' ? … : …` 就是「写死清单」的开端。
+   */
+  hints: Record<string, string>;
+  /**
+   * ⭐⭐ **哪些参数不填也能跑** —— 面板据此决定「缺不缺参数」。
+   *
+   * ⚠️ 2026-10-02 补。起因:`x.search` 的 `f`(live/top)与 `days`(时间窗)
+   * 都有默认值,但面板的判据是「`params` 里的全填满才让点」——
+   * 于是这两个成了事实上的必填,人不填就点不了,**而面板不说为什么**。
+   *
+   * ⚠️ 旧实现栽过同一刀(原文):
+   * > 面板原来把这个清单**写死成只有 `'f'`**,于是新增可选参数(如 `days`)
+   * > 会被当成必填 → 不填就禁用按钮,而人根本不知道该填什么。
+   *
+   * ⭐ 所以真源在**业务的页面表**里,面板问它要。
+   * ⚠️ 解释器不一定实现 `optionalOf` —— 没有就给空数组
+   * (= 全部必填,与改这版之前的行为一致,不会突然放宽)。
+   */
+  optional: Record<string, string[]>;
+}> {
+  return Array.from(pageTables.entries()).map(([owner, t]) => {
+    const names = typeof t.names === 'function' ? t.names() : [];
+    const withParams = t as {
+      paramsOf?: (n: string) => readonly string[];
+      hintOf?: (p: string) => string;
+      /** ⭐ 可选参数 —— 与 `paramsOf` 同款鸭子类型,底座不认识任何业务 */
+      optionalOf?: (n: string) => readonly string[];
+    };
+    const params: Record<string, string[]> = {};
+    const hints: Record<string, string> = {};
+    const optional: Record<string, string[]> = {};
+    if (typeof withParams.paramsOf === 'function') {
+      for (const n of names) {
+        const ps = [...withParams.paramsOf(n)];
+        params[n] = ps;
+        if (typeof withParams.hintOf === 'function') {
+          for (const k of ps) hints[k] = withParams.hintOf(k);
+        }
+        /**
+         * ⚠️ 只收**本页真有的**可选参数 —— 业务方可能回一张全局表
+         * (如 `['f','days','since']`),直接透传会让面板以为
+         * `x.profile` 的 handle 也有个叫 `days` 的可选参数。
+         * ⭐ 与 `params[n]` 取交集,面板拿到的就一定是这一页的事。
+         */
+        if (typeof withParams.optionalOf === 'function') {
+          const opt = new Set(withParams.optionalOf(n));
+          optional[n] = ps.filter((k) => opt.has(k));
+        } else {
+          optional[n] = [];
+        }
+      }
+    }
+    return { owner, names, params, hints, optional };
+  });
 }
 
 /**

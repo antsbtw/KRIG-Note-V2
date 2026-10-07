@@ -1,0 +1,2321 @@
+/**
+ * ⭐⭐⭐ 采一页的全流程 —— 采集 → 研判 → 按深度补全 → 再核对
+ *
+ * ⭐ 这些测试能存在,正因为编排从 JSX 的 onClick 里**搬了出来**:
+ * 写在 onClick 里的东西测不了,而「逐篇补 38 篇」这种循环
+ * 恰恰是最该测的(`feedback-pdca-close-the-loop`:循环要闭环)。
+ */
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { runCollect, type RunDeps, type RunHarvest } from '@modules/x/x-collect-run';
+
+const TIMELINE_URL = 'https://x.com/i/api/graphql/abc/UserTweetsTimeline';
+const ARTICLE_URL = 'https://x.com/i/api/graphql/abc/TweetResultByRestId';
+
+/** ⭐ 一条长文:列表页那份(无正文)/ 单篇页那份(有正文) */
+function articleTweet(id: string, withBody: boolean): unknown {
+  const result: Record<string, unknown> = { title: `标题${id}` };
+  if (withBody) result.content_state = { blocks: [{ text: '正文'.repeat(60), type: 'unstyled' }] };
+  return {
+    rest_id: id,
+    legacy: {
+      id_str: id,
+      full_text: `https://t.co/a${id}`,
+      entities: { urls: [{ url: `https://t.co/a${id}`, expanded_url: `https://x.com/i/article/${id}` }] },
+    },
+    article: { article_results: { result } },
+    core: { user_results: { result: { legacy: { screen_name: 'KA594594' } } } },
+  };
+}
+
+/** ⭐ 一条被折叠的普通推 */
+function foldedTweet(id: string): unknown {
+  return {
+    rest_id: id,
+    legacy: { id_str: id, full_text: '开头…' },
+    core: { user_results: { result: { legacy: { screen_name: 'KA594594' } } } },
+  };
+}
+
+const timelinePayload = (tweets: unknown[]): string => JSON.stringify({
+  data: { user: { result: { timeline: { timeline: { instructions: [
+    {
+      type: 'TimelineAddEntries',
+      entries: tweets.map((t, i) => ({
+        entryId: `tweet-${i}`, content: { itemContent: { tweet_results: { result: t } } },
+      })),
+    },
+  ] } } } } },
+});
+
+const singlePayload = (t: unknown): string => JSON.stringify({
+  data: { tweetResult: { result: t } },
+});
+
+/**
+ * ⭐ 假底座:第一次 harvest 回列表页,之后每次 `gotoPage` 回对应那篇的正文。
+ * ⚠️ `failArticles` 用来造「进去了但没拿到」。
+ */
+function makeDeps(opts: {
+  listTweets: unknown[];
+  failArticles?: ReadonlySet<string>;
+  emptyArticles?: ReadonlySet<string>;
+}): { deps: RunDeps; calls: string[] } {
+  const calls: string[] = [];
+  const deps: RunDeps = {
+    async harvest(plan) {
+      if (plan.gotoPage) {
+        const url = plan.gotoPage.params?.articleId ?? '';
+        const id = /\/i\/article\/(\d+)/.exec(url)?.[1] ?? '?';
+        calls.push(`article:${id}`);
+        if (opts.failArticles?.has(id)) return null;
+        const body = !opts.emptyArticles?.has(id);
+        return {
+          items: [{ url: ARTICLE_URL, text: singlePayload(articleTweet(id, body)) }],
+        } satisfies RunHarvest;
+      }
+      calls.push('list');
+      return {
+        items: [{ url: TIMELINE_URL, text: timelinePayload(opts.listTweets) }],
+        rounds: 3, scrolledPx: 900, reachedBottom: true, stopReason: '已到底',
+      } satisfies RunHarvest;
+    },
+  };
+  return { deps, calls };
+}
+
+describe('⭐⭐⭐ 深度决定跑不跑、跑几趟', () => {
+  const listTweets = [articleTweet('901', false), articleTweet('902', false), foldedTweet('903')];
+
+  it('⭐ as-is:**一趟都不多跑**', async () => {
+    const { deps, calls } = makeDeps({ listTweets });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(calls, 'as-is 还去取长文 —— 那就不是 as-is').toEqual(['list']);
+    expect(r.plan?.todo, 'as-is 不该有要做的').toEqual([]);
+    expect(r.plan?.skipped.length, '缺的没如实记账').toBe(3);
+  });
+
+  it('⭐⭐ expand-only:**不进**单篇页(展开已由每轮脚本做掉)', async () => {
+    const { deps, calls } = makeDeps({ listTweets });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'expand-only' });
+    expect(calls, 'expand-only 偷偷进了单篇页').toEqual(['list']);
+    expect(r.plan?.skipped.map((n) => n.id), '两篇长文该被挡下').toEqual(['901', '902']);
+  });
+
+  it('⭐⭐⭐ full:**逐篇**进单篇页,一篇一趟', async () => {
+    const { deps, calls } = makeDeps({ listTweets });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls, '没逐篇去取').toEqual(['list', 'article:901', 'article:902']);
+    expect(r.fetched.length).toBe(2);
+    expect(r.fetched.every((f) => f.ok), '取回来却报失败').toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **跑完要回读真实产出** —— 不是「跑完了」就算成。
+ * `feedback-pdca-close-the-loop`:我踩过「数错元素致该数恒为 0」。
+ */
+describe('⭐⭐⭐ 补回来的正文要真的进账', () => {
+  it('⭐⭐⭐ 补完后**不再报「长文没正文」** —— 否则等于白跑', async () => {
+    const { deps } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const item = r.summary?.items.find((t) => t.id === '901');
+    expect(item, '补回来的那条不见了').toBeDefined();
+    expect(
+      item?.incomplete,
+      '跑了一趟、报告照样说缺 —— 补回来的被去重丢掉了',
+    ).toBeUndefined();
+    expect(item!.textLen, '正文没并进去').toBeGreaterThan(50);
+  });
+
+  it('⭐⭐ 没补的那层照样报缺 —— 不许「看着全齐了」', async () => {
+    const { deps } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    const item = r.summary?.items.find((t) => t.id === '901');
+    expect(item?.incomplete, '没补却不报缺 —— 报告会显得全齐了').toBe('article-no-body');
+  });
+
+  /** ⚠️ 进去了但没解出正文,**不许记成功** */
+  it('⚠️⚠️ 进去了没拿到正文 → 记 **ok:false**,说清为什么', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false)],
+      emptyArticles: new Set(['901']),
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok, '没拿到正文却记成功 —— 账是假的').toBe(false);
+    expect(r.fetched[0].why, '没说为什么失败').toBeTruthy();
+  });
+
+  it('⚠️ 导航失败 → 记失败,**不中断**其余几篇', async () => {
+    const { deps, calls } = makeDeps({
+      listTweets: [articleTweet('901', false), articleTweet('902', false)],
+      failArticles: new Set(['901']),
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls, '一篇坏就不跑后面了 —— 一条坏不该让整批作废')
+      .toEqual(['list', 'article:901', 'article:902']);
+    expect(r.fetched[0].ok).toBe(false);
+    expect(r.fetched[1].ok, '后面那篇被连累了').toBe(true);
+  });
+});
+
+describe('⚠️ 边界', () => {
+  it('⚠️ 一条都没采到 → 不崩,也不假报研判结果', async () => {
+    const deps: RunDeps = { async harvest() { return { items: [] }; } };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.summary).toBeNull();
+    expect(r.plan, '没推文却给了研判结果').toBeNull();
+    expect(r.fetched).toEqual([]);
+  });
+
+  it('⚠️ 采集整个失败 → 如实回空,不往下跑补全', async () => {
+    const deps: RunDeps = { async harvest() { return null; } };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.harvest).toBeNull();
+    expect(r.audits).toEqual([]);
+  });
+
+  it('⭐ 全是完整的推 → 一趟都不多跑', async () => {
+    const plain = {
+      rest_id: '1', legacy: { id_str: '1', full_text: '一条正常的推文' },
+      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+    };
+    const { deps, calls } = makeDeps({ listTweets: [plain] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toEqual(['list']);
+    expect(r.plan?.todo).toEqual([]);
+  });
+});
+
+/**
+ * ⭐⭐ 响应数要**算整轮** —— 2026-10-04 真机
+ *
+ * 那份报告写着「收到 **20** 条响应,其中 **64** 条是时间线载荷」——
+ * 64 > 20,一眼假。真因:`pages` 算的是整轮(列表页 + 38 篇长文页),
+ * 而 `totalResponses` 只拿了**第一趟**的 `harvest.items.length`。
+ * ⚠️ 两个数来自不同的跑,却摆在同一句话里。
+ */
+describe('⭐⭐ 响应数算整轮,不是只算第一趟', () => {
+  it('⭐⭐ 补了几篇,响应数就要把那几篇算进去', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false), articleTweet('902', false)],
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    /** 列表页 1 条 + 两篇各 1 条 = 3 */
+    expect(
+      r.totalResponses,
+      '响应数只算了第一趟 —— 报告会写出「收到 20 条、其中 64 条」这种话',
+    ).toBe(3);
+  });
+
+  it('⭐ 不补时就是第一趟那个数', async () => {
+    const { deps } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(r.totalResponses).toBe(1);
+  });
+
+  /**
+   * ⭐⭐ 失败原因要**分得开** —— 真机 2 篇失败时
+   * 「进去了但没解出正文」一句话盖住了三种成因,看了不知道查哪。
+   */
+  it('⭐⭐ 失败原因按成因分:没响应 / 没推文 / 有推文没正文', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false)],
+      emptyArticles: new Set(['901']),
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok).toBe(false);
+    expect(
+      r.fetched[0].why,
+      '失败原因没说清是哪一种 —— 留了痕也等于没留',
+    ).toContain('它没正文');
+  });
+});
+
+/**
+ * ⭐⭐⭐ 回读产出要回读**那一条**的 —— 2026-10-04 真机
+ *
+ * 面板报「取回长文正文 **19/19**」,报告里却只有 **17 篇**有正文。
+ * ⚠️⚠️ 真因:成功判据是 `find(t => t.isArticle && !t.incomplete)` ——
+ * **任意一条**有正文的长文都算数。而单篇页载荷里不止一条推
+ * (引用的、相关的都在),于是认的根本不是我要的那一条。
+ *
+ * ⭐ `feedback-pdca-close-the-loop`:「数错元素致该数恒为 0」——
+ * 这次是反过来,**数错元素致该数恒为满**,一样等于没在看。
+ */
+describe('⭐⭐⭐ 成功判据只认目标那一条', () => {
+  /** ⭐ 单篇页载荷里**另有**一条带正文的长文(引用/相关),但目标那条没有 */
+  function depsWithBystander(): RunDeps {
+    return {
+      async harvest(plan) {
+        if (plan.gotoPage) {
+          return {
+            items: [{
+              url: ARTICLE_URL,
+              text: JSON.stringify({
+                data: { threaded_conversation: { instructions: [{
+                  type: 'TimelineAddEntries',
+                  entries: [
+                    // 目标那条:**没有**正文
+                    { entryId: 'a', content: { itemContent: { tweet_results: {
+                      result: articleTweet('901', false),
+                    } } } },
+                    // 旁边那条:有正文 —— 旧判据会认它
+                    { entryId: 'b', content: { itemContent: { tweet_results: {
+                      result: articleTweet('999', true),
+                    } } } },
+                  ],
+                }] } },
+              }),
+            }],
+          } satisfies RunHarvest;
+        }
+        return {
+          items: [{ url: TIMELINE_URL, text: timelinePayload([articleTweet('901', false)]) }],
+        } satisfies RunHarvest;
+      },
+    };
+  }
+
+  it('⭐⭐⭐ 同页另一条有正文 → 目标那条仍记**失败**', async () => {
+    const r = await runCollect(depsWithBystander(), { wantPages: 1, depth: 'full' });
+    /** ⚠️ 先确认样本真造出了「旁边那条有正文」 */
+    const got = r.summary?.items.find((t) => t.id === '999');
+    expect(got?.incomplete, '样本里旁边那条没正文 —— 测不到该现象').toBeUndefined();
+
+    expect(
+      r.fetched[0].ok,
+      '认了旁边那条 —— 面板会报 19/19 而报告只有 17 篇',
+    ).toBe(false);
+    expect(r.fetched[0].why, '没说清是「它没正文」').toContain('它没正文');
+  });
+
+  it('⭐⭐ 面板的「取回 N/N」要与报告里真有正文的篇数**对得上**', async () => {
+    const { deps } = makeDeps({
+      listTweets: [articleTweet('901', false), articleTweet('902', false)],
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const okCount = r.fetched.filter((f) => f.ok).length;
+    const withBody = (r.summary?.items ?? [])
+      .filter((t) => t.isArticle && t.incomplete === undefined).length;
+    expect(
+      okCount,
+      `面板说取回 ${okCount} 篇、报告里有正文的 ${withBody} 篇 —— 两边对不上`,
+    ).toBe(withBody);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 采完要**回到原来那一页** —— 2026-10-04 真机
+ *
+ * 用户 2026-10-03 原话:
+ * 「点击进去观看,观看完毕,**点击返回上一下**,继续往下浏览。」
+ *
+ * ⚠️⚠️ 我上一版只做了前半句。四次跑的实测后果:
+ *   推文 **97 → 40 → 21**,而每次都报「滚到底 ✓」。
+ * 因为每轮跑完都停在最后一篇长文页,而「采这一页」采的是**当前页** ——
+ * 下一次跑时当前页已经不是主页而是一篇文章。三张截图的地址栏坐实了这点。
+ */
+describe('⭐⭐⭐ 采完回到原来那一页', () => {
+  function withBack(listTweets: unknown[]): { deps: RunDeps; calls: string[] } {
+    const base = makeDeps({ listTweets });
+    const calls = base.calls;
+    return {
+      calls,
+      deps: {
+        ...base.deps,
+        goBack: async () => { calls.push('goBack'); return true; },
+      },
+    };
+  }
+
+  it('⭐⭐⭐ 补过长文 → **最后要回去**', async () => {
+    const { deps, calls } = withBack([articleTweet('901', false)]);
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls, '补完没回原页 —— 下一轮会从长文页开始采')
+      .toEqual(['list', 'article:901', 'goBack']);
+  });
+
+  it('⭐⭐ 回去必须在**所有篇都补完之后** —— 不是补一篇回一次', async () => {
+    const { deps, calls } = withBack([articleTweet('901', false), articleTweet('902', false)]);
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toEqual(['list', 'article:901', 'article:902', 'goBack']);
+  });
+
+  it('⚠️ 一篇都没补 → **不必回**(压根没离开过)', async () => {
+    const { deps, calls } = withBack([articleTweet('901', false)]);
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(calls, '没离开页面却跑去导航了 —— 白跑一趟还可能打断现场')
+      .toEqual(['list']);
+  });
+
+  it('⚠️ 回不去**不算整轮失败** —— 数据已经采到了,但要留痕', async () => {
+    const base = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const deps: RunDeps = { ...base.deps, goBack: async () => false };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok, '回不去把已经采到的也判成失败了').toBe(true);
+    expect(r.summary?.items.length, '数据没留下').toBeGreaterThan(0);
+  });
+
+  it('⚠️ 调用方没给 goBack → 不崩(老行为不变)', async () => {
+    const { deps } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(r.fetched[0].ok).toBe(true);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **判断-执行-再判断** —— 2026-10-04 真机
+ *
+ * 那一跑:面板报「取回长文正文 **38/38**」零失败,报告却说「**缺 19 篇**」。
+ * ⚠️ 两个数都对 —— 补长文时**单篇页载荷里还夹着别的长文**(引用的、相关的),
+ * 它们被一起收进账,**却从来没被请求过**。
+ *
+ * ⭐ `feedback-pdca-close-the-loop` 的①:
+ * 反复执行的循环必须「判断-执行-**再判断**-再执行」。
+ */
+describe('⭐⭐⭐ 补的时候带出新的长文 → 同一轮里补上', () => {
+  /** ⭐ 取 901 时,单篇页载荷里**夹带**一篇没正文的 902 */
+  function depsBringsAlong(): { deps: RunDeps; calls: string[] } {
+    const calls: string[] = [];
+    return {
+      calls,
+      deps: {
+        async harvest(plan) {
+          if (plan.gotoPage) {
+            const id = /\/i\/article\/(\d+)/.exec(plan.gotoPage.params?.articleId ?? '')?.[1] ?? '?';
+            calls.push(`article:${id}`);
+            const tweets = [articleTweet(id, true)];
+            // ⭐ 取第一篇时夹带出 902(没正文)
+            if (id === '901') tweets.push(articleTweet('902', false));
+            return {
+              items: [{ url: ARTICLE_URL, text: timelinePayload(tweets) }],
+            } satisfies RunHarvest;
+          }
+          calls.push('list');
+          return {
+            items: [{ url: TIMELINE_URL, text: timelinePayload([articleTweet('901', false)]) }],
+          } satisfies RunHarvest;
+        },
+      },
+    };
+  }
+
+  it('⭐⭐⭐ 夹带出来的那篇**同一轮补上**,不留到下次', async () => {
+    const { deps, calls } = depsBringsAlong();
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls, '夹带出来的 902 没被补 —— 报告会说「缺 1 篇」而面板说零失败')
+      .toEqual(['list', 'article:901', 'article:902']);
+    expect(r.fetched.length).toBe(2);
+    expect(r.fetched.every((f) => f.ok), '补回来的报了失败').toBe(true);
+  });
+
+  it('⭐⭐ 补完之后账上**不再缺** —— 面板与报告说同一件事', async () => {
+    const { deps } = depsBringsAlong();
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const stillMissing = (r.summary?.items ?? [])
+      .filter((t) => t.incomplete === 'article-no-body');
+    expect(
+      stillMissing.length,
+      `面板说取回 ${r.fetched.filter((f) => f.ok).length} 篇零失败，账上却还缺 ${stillMissing.length} 篇`,
+    ).toBe(0);
+  });
+
+  /** ⚠️ 取不到正文的那几篇**不许**让循环空转 */
+  it('⚠️⚠️ 取不到正文的不重试 —— 否则循环空转', async () => {
+    const { deps, calls } = makeDeps({
+      listTweets: [articleTweet('901', false)],
+      emptyArticles: new Set(['901']),
+    });
+    const r = await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const tries = calls.filter((c) => c === 'article:901').length;
+    expect(tries, '同一篇试了多次 —— 取不到的会把循环拖死').toBe(1);
+    expect(r.fetched[0].ok).toBe(false);
+  });
+
+  it('⭐ 没有夹带时只跑一轮 —— 不做无谓的再判', async () => {
+    const { deps, calls } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toEqual(['list', 'article:901']);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **主动翻页** —— 2026-10-04 真机逼出来的
+ *
+ * 配方搜索三跑,每跑都只拿到 **1 条 `SearchTimeline`**。排除法验过:
+ * · 不是噪音(挡掉 m3u8 后 6 条响应全干净,仍是 1)
+ * · 不是滚动不够(21 条推文约 17000px,**实际滚了 47360px**)
+ * · 不是结果就这么多(**「游标 1/1 页有」—— X 自己说还有下一页**)
+ * ⭐ 对照 x.profile 同样滚 4 万 px 出 **43** 条载荷 ——
+ * **个人主页滚动会自动翻页,搜索页不会**。
+ */
+describe('⭐⭐⭐ 拿游标主动翻页', () => {
+  const SEED = 'https://x.com/i/api/graphql/qid/SearchTimeline?variables=%7B%22rawQuery%22%3A%22vpn%22%7D';
+
+  /** ⭐ 第 n 页:带 n 条推 + 一个游标(最后一页没有游标) */
+  const page = (n: number, cursor: string | null): string => {
+    const entries: unknown[] = [{
+      entryId: `tweet-${n}`,
+      content: { itemContent: { tweet_results: { result: {
+        rest_id: `t${n}`,
+        legacy: { id_str: `t${n}`, full_text: `第${n}页` },
+        core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+      } } } },
+    }];
+    if (cursor !== null) {
+      entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+    }
+    return JSON.stringify({
+      data: { search_by_raw_query: { search_timeline: { timeline: {
+        instructions: [{ type: 'TimelineAddEntries', entries }],
+      } } } },
+    });
+  };
+
+  /** ⭐ 假底座:首页给 seed,之后每次 runScript 推进一页 */
+  function pagingDeps(pages: ReadonlyArray<string | null>): {
+    deps: RunDeps; scripts: Array<{ id: string; cursor: string }>;
+  } {
+    const scripts: Array<{ id: string; cursor: string }> = [];
+    let idx = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        const cur = pages[idx];
+        return {
+          items: cur === null ? [] : [{ url: SEED, text: cur }],
+        } satisfies RunHarvest;
+      },
+      async runScript(id, params) {
+        scripts.push({ id, cursor: String(params.cursor ?? '') });
+        idx += 1;
+        return { ok: true };
+      },
+    };
+    return { deps, scripts };
+  }
+
+  it('⭐⭐⭐ 有游标就一直翻 —— 不是只采第一页', async () => {
+    const { deps, scripts } = pagingDeps([
+      page(1, 'c1'), page(2, 'c2'), page(3, null),
+    ]);
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(scripts.length, '只翻了一次或没翻 —— 搜索页会永远停在 20 条').toBe(2);
+    expect(scripts.map((x) => x.cursor), '游标没跟着往后走').toEqual(['c1', 'c2']);
+    expect(r.summary?.items.length, '后面几页的推文没进账').toBe(3);
+  });
+
+  it('⭐⭐ 没有游标 → **立刻停**,不空转', async () => {
+    const { deps, scripts } = pagingDeps([page(1, null)]);
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(scripts.length, '没游标还去翻 —— 白跑').toBe(0);
+  });
+
+  /** ⚠️ 游标不变 = 翻不动了,必须停 —— 否则 40 轮空转 */
+  it('⚠️⚠️ 游标**不再变化** → 停,不死循环', async () => {
+    const { deps, scripts } = pagingDeps([
+      page(1, 'same'), page(2, 'same'), page(3, 'same'),
+    ]);
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(scripts.length, '同一个游标翻了多次 —— 会空转到轮次上限').toBe(1);
+  });
+
+  it('⚠️ 翻页脚本抛错 → **不毁整轮**,已采到的还在', async () => {
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: page(1, 'c1') }] };
+      },
+      async runScript() { throw new Error('页面没了'); },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(r.summary?.items.length, '第一页也丢了 —— 翻页失败不该毁掉已采的').toBe(1);
+  });
+
+  /**
+   * ⭐⭐⭐ **X 会一直给新游标、却回同一批推** —— 2026-10-04 真机
+   *
+   * 那一跑翻满 40 轮上限:44 页载荷、原始 680 条,**去重后只剩 42 条**。
+   * ⚠️⚠️ 原判据写 `这一页有几条推 === 0` 才停 —— 而 X 每页照样回 15 条,
+   * 停止条件**永远到不了**。
+   * ⭐ `feedback-pdca-close-the-loop` 的「数错元素」:
+   * 数「页里有几条」而不是「**新收了几条**」,该数恒 > 0 等于没在判。
+   */
+  it('⭐⭐⭐ 游标一直变但推文是同一批 → **按「没有新推文」停**', async () => {
+    /** ⭐ 每页都有推、都有新游标,但**推文 id 永远是 t1** */
+    const samePage = (cursorNo: number): string => JSON.stringify({
+      data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          { entryId: 'tweet-1', content: { itemContent: { tweet_results: { result: {
+            rest_id: 't1',
+            legacy: { id_str: 't1', full_text: '同一条' },
+            core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+          } } } } },
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: `c${cursorNo}` } },
+        ],
+      }] } } } },
+    });
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: samePage(n) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    /**
+     * ⭐⭐⭐ **停不停由调用方说** —— 用户 2026-10-04:
+     * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+     * 　而不是你在采集中定下来。」
+     *
+     * ⚠️⚠️ 我在这上面连栽两次,**两次都是把业务判断写死进采集层**:
+     * ① `EMPTY_ROUNDS_TO_STOP = 3` → 真机对照实验证否(窄 43 / 宽 42,
+     * 　 查询放宽十几倍结果一样,而 4/4 页都有游标 —— 刹车踩早了)
+     * ② 然后我「改成 12」—— **还是同一个错误**,只换了个数。
+     *
+     * ⭐ 所以本条现在喂一个 `stopPaging` 进去,钉的是
+     * 「**采集层照业务说的办**」,不再钉某个魔法数字。
+     */
+    const r = await runCollect(
+      { ...deps, stopPaging: (st) => (st.emptyRounds >= 3 ? { go: false, why: '业务:够了' } : { go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    expect(n, '业务说停了却还在翻 —— 采集层自作主张').toBeLessThanOrEqual(4);
+    expect(r.summary?.items.length, '同一条推被算成了多条').toBe(1);
+  });
+
+  /** ⚠️ 一轮重复不许立刻停 —— X 偶尔回一页旧的,下一页又有新的 */
+  it('⚠️⚠️ 中间夹一页重复的 → **不停**,继续往后翻', async () => {
+    const pages = [page(1, 'c1'), page(1, 'c2'), page(2, 'c3'), page(3, null)];
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: pages[Math.min(n, pages.length - 1)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(
+      r.summary?.items.length,
+      '夹了一页重复就停了 —— 后面的新推文全丢（2604 账号卡死在 2244 就是这么来的）',
+    ).toBe(3);
+  });
+
+  it('⚠️ 调用方没给 runScript → 不翻页(老行为不变)', async () => {
+    const { deps } = pagingDeps([page(1, 'c1'), page(2, null)]);
+    const noScript: RunDeps = { harvest: deps.harvest };
+    const r = await runCollect(noScript, { wantPages: 1, depth: 'as-is' });
+    expect(r.summary?.items.length).toBe(1);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **「几轮没新推文」不许当主判据** —— 2026-10-04 对照实验
+ *
+ * 同一条链路只换查询:
+ *   窄配方(9关键词 AND 6求助词 AND lang:zh) → **43 条 / 5 页**
+ *   宽配方(3关键词,不加求助词,不限语言)     → **42 条 / 4 页**
+ * ⚠️ 查询放宽十几倍结果几乎一样 → 42 不是「真实数量」,**是刹车踩早了**。
+ * 而那一跑 **4/4 页都有游标** —— X 一直说还有下一页。
+ *
+ * ⭐ `project-x-cursor-paging` 早写过同一条:
+ * 「几页没新人」当到底,把 2604 个账号卡死在 2244(三跑同数),
+ * 拆掉刹车后 2244 → 2634。**我昨天又加了回来,同一个坑第二次。**
+ */
+describe('⭐⭐⭐ 翻页停止只认「X 说了算」', () => {
+  const SEED2 = 'https://x.com/i/api/graphql/qid/SearchTimeline?variables=%7B%7D';
+
+  /** ⭐ 前 5 轮全是旧推(真机那种),第 6 轮才出新的 —— 刹车=3 会在此之前停 */
+  it('⭐⭐⭐ 中间连着好几轮旧推 → **不停**,后面的新推文要采到', async () => {
+    const tweet = (id: string): unknown => ({
+      rest_id: id,
+      legacy: { id_str: id, full_text: `推${id}` },
+      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+    });
+    const mk = (ids: string[], cursor: string): string => JSON.stringify({
+      data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((id) => ({
+            entryId: `tweet-${id}`,
+            content: { itemContent: { tweet_results: { result: tweet(id) } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } },
+    });
+    /** 第 0 页新,1~5 页全旧,第 6 页又有新的 */
+    const pages = [
+      mk(['t1'], 'c0'), mk(['t1'], 'c1'), mk(['t1'], 'c2'),
+      mk(['t1'], 'c3'), mk(['t1'], 'c4'), mk(['t1'], 'c5'),
+      mk(['t9'], 'c6'),
+    ];
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED2, text: pages[Math.min(n, pages.length - 1)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(
+      r.summary?.items.map((t) => t.id).sort(),
+      '连着几轮旧推就停了 —— 后面的新推文全丢（2604 卡死在 2244 就是这么来的）',
+    ).toEqual(['t1', 't9']);
+  });
+});
+
+/**
+ * ⭐⭐⭐ **分界:采集层只答「X 还给不给」** —— 用户 2026-10-04 原话
+ *
+ * 「判断是否停下来是由**业务编排时的研判逻辑**来定,
+ * 　而不是你在**采集**中定下来。」
+ *
+ * ⚠️⚠️ 我在这上面连栽两次,两次都是把业务判断写死进采集层
+ * (先 `EMPTY_ROUNDS_TO_STOP = 3`,被证否后「改成 12」——**还是同一个错误**)。
+ */
+describe('⭐⭐⭐ 停不停由业务定,不由采集层定', () => {
+  const S = 'https://x.com/i/api/graphql/q/SearchTimeline?variables=%7B%7D';
+  const mk = (id: string, cursor: string): string => JSON.stringify({
+    data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+      type: 'TimelineAddEntries',
+      entries: [
+        { entryId: `tweet-${id}`, content: { itemContent: { tweet_results: { result: {
+          rest_id: id,
+          legacy: { id_str: id, full_text: `推${id}` },
+          core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+        } } } } },
+        { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+      ],
+    }] } } } },
+  });
+
+  /** ⭐ X 一直有新东西给:每轮都是新推 + 新游标 */
+  function endless(): { deps: RunDeps; rounds: () => number } {
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: S, text: mk(`t${n}`, `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    return { deps, rounds: () => n };
+  }
+
+  it('⭐⭐⭐ 业务说「翻 3 轮就够」→ 采集层**照办**', async () => {
+    const { deps, rounds } = endless();
+    await runCollect(
+      { ...deps, stopPaging: (st) => (st.round >= 3 ? { go: false, why: '业务:翻够 3 轮' } : { go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    expect(rounds(), '业务说停了还在翻').toBe(3);
+  });
+
+  it('⭐⭐⭐ 业务说「一直翻」→ 采集层**不自作主张**停', async () => {
+    const { deps, rounds } = endless();
+    await runCollect(
+      { ...deps, stopPaging: () => ({ go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    /** ⚠️ X 一直给新的,业务也没喊停 → 只有安全网能拦住它 */
+    expect(rounds(), '采集层自己踩了刹车 —— 那是业务的判断').toBeGreaterThan(50);
+  });
+
+  /**
+   * ⚠️ 「连续几轮没新推文」**只是事实,不是判据** ——
+   * 采集层把它报给业务,**由业务决定要不要当刹车**。
+   */
+  it('⭐⭐ 连续空轮只上报,**不自己停**', async () => {
+    /** X 一直回同一条推、但游标一直变(真机那种) */
+    let n = 0;
+    const seen: number[] = [];
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: S, text: mk('same', `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+      stopPaging: (st) => {
+        seen.push(st.emptyRounds);
+        return st.emptyRounds >= 5 ? { go: false, why: '业务:连 5 轮没新的' } : { go: true };
+      },
+    };
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(seen, '没把「连续空轮」如实报给业务').toContain(5);
+    expect(n, '业务说停了却没停').toBe(5);
+  });
+
+  it('⚠️ 不给 stopPaging → 翻到 X 不给为止(游标不变就停)', async () => {
+    let n = 0;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⚠️ 游标**恒定** = X 翻不动了 —— 这条是采集层该管的 */
+        return { items: [{ url: S, text: mk(`t${n}`, 'same-cursor') }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(n, '游标不变还在翻 —— 「X 还给不给」是采集层的本职').toBe(1);
+  });
+});
+
+/**
+ * ⭐⭐⭐ 采集层**不许**再长出「采多少算够」的常量 —— 结构守卫
+ *
+ * ⚠️ 行为测试盖不住这件事:我可以加一个新常量、把测试一起改了,
+ * 两边都绿。**而我已经连栽两次**(3 → 12,换个数还是同一个错)。
+ */
+describe('⭐⭐⭐ 采集层不许自带「够了没有」的阈值', () => {
+  it('⭐⭐⭐ 没有 EMPTY_ROUNDS_TO_STOP 这类业务阈值', () => {
+    const src = readFileSync(
+      join(__dirname, '..', '..', 'src/modules/x/x-collect-run.ts'),
+      'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '');  // ⚠️ 剥块注释 —— 注释里会提到这个名字
+
+    expect(
+      src,
+      '采集层又写死了「连续几轮没新的就停」—— 那是业务的研判\n'
+      + '⭐ 用户 2026-10-04:「判断是否停下来是由业务编排时的研判逻辑来定，'
+      + '而不是你在采集中定下来。」',
+    ).not.toMatch(/EMPTY_ROUNDS_TO_STOP|emptyRounds\s*>=\s*\d/);
+
+    /** ⭐ 安全网**可以有**,但名字要说清它是安全网,且远大于业务阈值 */
+    expect(src, '连安全网都没了 —— X 一直给新游标会永远转下去')
+      .toContain('PAGING_SAFETY_ROUNDS');
+  });
+
+  it('⭐⭐ 停止判据里只有「X 还给不给」那两条', () => {
+    const src = readFileSync(
+      join(__dirname, '..', '..', 'src/modules/x/x-collect-run.ts'),
+      'utf-8',
+    );
+    const i = src.indexOf('async function pageUntilDone');
+    expect(i, 'pageUntilDone 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    /**
+     * ⚠️ 切到**下一个顶层函数**为止,不是第一个 `\n}` ——
+     * 2026-10-07 加了断点续采的返回类型 `}>` 之后,
+     * 第一个 `\n}` 落在**类型声明里**,切片只剩几十字符,
+     * 断言当场变红(好事:说明它钉的是真东西)。
+     */
+    const after = src.indexOf('\n/**', i);
+    const body = src.slice(i, after > i ? after : undefined);
+    expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(300);
+    /** ① 没游标 ② 游标不变 —— 这两条是采集层的本职 */
+    expect(body, '不判「没有下一页游标」').toContain('没有下一页游标');
+    expect(body, '不判「游标不再变化」').toContain('游标不再变化');
+  });
+});
+
+/**
+ * ⭐⭐⭐ **「停止」要停得住** —— 用户 2026-10-04:
+ * 「停止按钮不起作用的,怎么点击停止也不停止?」
+ *
+ * ⚠️⚠️ 真因:「停止」只发底座的 `scrollStop`,那**只能停滚动**。
+ * 一跑有三段,后两段是编排自己的循环(主动翻页 / 逐篇补长文),
+ * **听不见** —— 而人点停止时多半正在这两段里。
+ */
+describe('⭐⭐⭐ 停止要停得住每一段', () => {
+  const S2 = 'https://x.com/i/api/graphql/q/SearchTimeline?variables=%7B%7D';
+  const mkPage = (id: string, cursor: string): string => JSON.stringify({
+    data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+      type: 'TimelineAddEntries',
+      entries: [
+        { entryId: `tweet-${id}`, content: { itemContent: { tweet_results: { result: {
+          rest_id: id,
+          legacy: { id_str: id, full_text: `推${id}` },
+          core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+        } } } } },
+        { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+      ],
+    }] } } } },
+  });
+
+  it('⭐⭐⭐ 翻页中途喊停 → **立刻停**,已采到的留着', async () => {
+    let n = 0;
+    let stopped = false;
+    const deps: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: S2, text: mkPage(`t${n}`, `c${n}`) }] };
+      },
+      async runScript() { n += 1; if (n >= 3) stopped = true; return { ok: true }; },
+      cancelled: () => stopped,
+    };
+    const r = await runCollect(deps, { wantPages: 1, depth: 'as-is' });
+    expect(n, '喊停了还在翻 —— 「停止」是个摆设').toBe(3);
+    expect(r.summary?.items.length, '停下来就把已采的丢了').toBeGreaterThan(0);
+  });
+
+  it('⭐⭐⭐ 补长文中途喊停 → **立刻停**(一篇 9 秒,38 篇 6 分钟)', async () => {
+    let stopped = false;
+    const base = makeDeps({
+      listTweets: [
+        articleTweet('901', false), articleTweet('902', false), articleTweet('903', false),
+      ],
+    });
+    const calls = base.calls;
+    const deps: RunDeps = {
+      ...base.deps,
+      async harvest(plan) {
+        const r = await base.deps.harvest(plan);
+        if (plan.gotoPage && calls.filter((c) => c.startsWith('article:')).length >= 2) {
+          stopped = true;
+        }
+        return r;
+      },
+      cancelled: () => stopped,
+    };
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    const tries = calls.filter((c) => c.startsWith('article:')).length;
+    expect(tries, '喊停了还在逐篇补 —— 人要干等 6 分钟').toBe(2);
+  });
+
+  it('⚠️ 不给 cancelled → 照常跑完(老调用方行为不变)', async () => {
+    const { deps, calls } = makeDeps({ listTweets: [articleTweet('901', false)] });
+    await runCollect(deps, { wantPages: 1, depth: 'full' });
+    expect(calls).toContain('article:901');
+  });
+});
+
+/**
+ * ⭐⭐⭐ **翻页为什么停,要能读出来** —— 用户 2026-10-05:「翻页够 50 页啦?」
+ *
+ * ⚠️⚠️ 上一跑翻了 **47 轮**(填的 50)—— 没到上限,所以是三道数据判据之一停的,
+ * 而我**读不出是哪一道**:三句停止原因都只走 `say()`,只进面板进度条,**不落盘**。
+ * ⭐ 正是刚在落库那边验过的教训(加留痕后第一跑就定案),翻页这边我又漏了一处。
+ */
+describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
+  const SE = 'https://x.com/i/api/graphql/q/SearchTimeline?variables=%7B%7D';
+  const mk = (id: string, cursor: string | null): string => JSON.stringify({
+    data: { search_by_raw_query: { search_timeline: { timeline: { instructions: [{
+      type: 'TimelineAddEntries',
+      entries: [
+        { entryId: `tweet-${id}`, content: { itemContent: { tweet_results: { result: {
+          rest_id: id,
+          legacy: { id_str: id, full_text: `推${id}` },
+          core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+        } } } } },
+        ...(cursor === null ? [] : [{ entryId: 'c', content: { cursorType: 'Bottom', value: cursor } }]),
+      ],
+    }] } } } },
+  });
+
+  function deps(pages: ReadonlyArray<string>): RunDeps {
+    let n = 0;
+    return {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SE, text: pages[Math.min(n, pages.length - 1)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+  }
+
+  /**
+   * ⚠️ 样本要**真的造出「最后一页没游标」** ——
+   * 第一版让假底座重复返回最后一页,于是「游标重复」先触发,
+   * 测到的是另一道闸(`feedback-check-sample-contains-phenomenon`)。
+   */
+  it('⭐⭐⭐ 没有下一页游标 → 停因说清楚', async () => {
+    let n = 0;
+    const d: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 每次都给**不同 id**,但第二页起没有游标 */
+        return { items: [{ url: SE, text: mk(`t${n}`, n === 0 ? 'c1' : null) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    /**
+     * ⚠️⚠️ **实测发现的真实行为**(不是测试写错):
+     * 游标是「从最新一份账往回找第一个有值的」—— 所以后面的页没游标时,
+     * 会**回退到更早那个**,于是先撞上「游标重复」那道闸。
+     * ⭐ 「没有下一页游标」只在**所有页都没给过游标**时才触发。
+     * 两道闸都停得住,停因都带得出来 —— 这才是本条要钉的。
+     */
+    expect(r.paging?.stopReason, '停因没带出来 —— 又要去留痕里翻').toBeTruthy();
+    expect(r.paging?.stopReason).toMatch(/游标/);
+  });
+
+  it('⭐⭐ 一页都没给过游标 → 停因是「没有下一页游标」', async () => {
+    let n = 0;
+    const d: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SE, text: mk(`t${n}`, null) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    expect(r.paging?.stopReason).toContain('没有下一页游标');
+    expect(r.paging?.rounds, '一轮都不该翻').toBe(0);
+  });
+
+  it('⭐⭐⭐ 游标不再变化 → 停因说清楚', async () => {
+    const r = await runCollect(deps([mk('1', 'same'), mk('2', 'same')]), { wantPages: 1, depth: 'as-is' });
+    expect(r.paging?.stopReason).toContain('游标不再变化');
+  });
+
+  it('⭐⭐ 业务判定停 → 带上业务给的理由', async () => {
+    const base = deps([mk('1', 'c1'), mk('2', 'c2'), mk('3', 'c3'), mk('4', 'c4')]);
+    const r = await runCollect(
+      { ...base, stopPaging: (st) => (st.round >= 2 ? { go: false, why: '已翻够 2 页' } : { go: true }) },
+      { wantPages: 1, depth: 'as-is' },
+    );
+    expect(r.paging?.stopReason, '业务说的理由没带出来').toBe('已翻够 2 页');
+  });
+
+  /**
+   * ⚠️ `freshTotal` 要算**翻页带来的新增**,不是总条数 ——
+   * 47 轮只换 40 条新推(每轮 0.85 条)这件事,得能从数字上读出来。
+   */
+  it('⭐⭐ freshTotal 只算翻页新增的,不含首轮滚动采到的', async () => {
+    /** 首轮给 t1;翻页给 t2、t3,然后到头 */
+    let n = 0;
+    const d: RunDeps = {
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        const pages = [mk('1', 'c1'), mk('2', 'c2'), mk('3', null)];
+        return { items: [{ url: SE, text: pages[Math.min(n, 2)] }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    expect(
+      r.paging?.freshTotal,
+      'freshTotal 把首轮那条也算进去了 —— 看不出翻页到底带来多少',
+    ).toBe(2);
+  });
+
+  it('⚠️ 不翻页时 paging 为 null —— 别报一个假的 0 轮', async () => {
+    const d: RunDeps = {
+      async harvest() { return { items: [{ url: SE, text: mk('1', 'c1') }] }; },
+    };
+    const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
+    expect(r.paging, '没翻页却报了翻页的账').toBeNull();
+  });
+});
+
+/**
+ * ⭐⭐⭐ **一个入口采所有** —— 用户 2026-10-05 的订正:
+ * 「不管采什么,都是采集页面的内容,而不应该增加一个采人的名单。
+ * 　跳转到那个页面,就采集那个页面…**输出要自行判断**。」
+ *
+ * ⚠️⚠️ 在这之前 `auditsOf` 用 `carriesTweets` 一筛,
+ * followers/following 的响应就**整个被丢掉不留痕** ——
+ * 而那些响应明明已经采回来了。我却为此加了第二个按钮让人去选。
+ */
+describe('一个入口:响应里有什么就产出什么', () => {
+  const FOLLOWERS = 'https://x.com/i/api/graphql/zz/Followers?variables=%7B%7D';
+
+  const userPage = (ids: number[], cursor?: string): string => {
+    const entries: unknown[] = ids.map((i) => ({
+      entryId: `user-${i}`,
+      content: { itemContent: { user_results: { result: {
+        rest_id: `${900 + i}`,
+        core: { screen_name: `user${i}`, name: `名字${i}` },
+        legacy: { description: `bio ${i}`, followers_count: 10 + i },
+      } } } },
+    }));
+    if (cursor) {
+      entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+    }
+    return JSON.stringify({ data: { user: { result: { timeline: { timeline: {
+      instructions: [{ type: 'TimelineAddEntries', entries }],
+    } } } } } });
+  };
+
+  it('⭐⭐⭐ followers 页:一条推文都没有,但人全在', async () => {
+    /**
+     * ⚠️⚠️ 这正是原先的坑:`audits.length === 0` 直接 return,
+     * 把已经采回来的人**整个丢掉**,于是看起来「必须加个采人按钮」。
+     */
+    const r = await runCollect({
+      async harvest() { return { items: [{ url: FOLLOWERS, text: userPage([1, 2, 3]) }] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.audits).toHaveLength(0);
+    expect(r.kind, '解出了人就该是 users,不是 empty').toBe('users');
+    expect(r.users.flatMap((a) => a.items).map((u) => u.handle))
+      .toEqual(['user1', 'user2', 'user3']);
+  });
+
+  it('⭐⭐⭐ 同一页既有推文又有用户 → mixed,两边都不丢', async () => {
+    const r = await runCollect({
+      async harvest() {
+        return { items: [
+          { url: TIMELINE_URL, text: timelinePayload([foldedTweet('1')]) },
+          { url: FOLLOWERS, text: userPage([7]) },
+        ] };
+      },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.kind).toBe('mixed');
+    expect(r.summary?.items.length).toBeGreaterThan(0);
+    expect(r.users.flatMap((a) => a.items)).toHaveLength(1);
+  });
+
+  it('⭐⭐⭐ 翻页拿回来的人也要收 —— 名次跨页连续', async () => {
+    /**
+     * ⚠️⚠️ `pageUntilDone` 原先只把**条数**传出来(为了累计响应数),
+     * 于是第 2 页之后的用户响应在那一层就蒸发了。
+     * ⭐ `seq` 是增量采集的命根子,必须跨页连续。
+     */
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        const page = n === 0 ? userPage([1, 2], 'c1')
+          : n === 1 ? userPage([3, 4], 'c2') : userPage([5, 6]);
+        return { items: [{ url: FOLLOWERS, text: page }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    const all = r.users.flatMap((a) => a.items);
+    expect(all.map((u) => u.handle)).toEqual(['user1', 'user2', 'user3', 'user4', 'user5', 'user6']);
+    expect(all.map((u) => u.seq), '名次必须跨页连续,不是每页从 0 重来')
+      .toEqual([0, 1, 2, 3, 4, 5]);
+  });
+
+  it('⭐⭐⭐ 人也算「新东西」—— 否则 followers 页 fresh 恒 0 会误停', async () => {
+    /**
+     * ⚠️⚠️ 这条是**注入验证逼出来的**:把「用户算新东西」那行删掉,
+     * 前面几条**全绿** —— 因为我的翻页样本从没走到 `stopPaging`,
+     * 「这一轮收到新东西了没有」这个判据压根没被测到。
+     * ⭐ 又是 `feedback-check-sample-contains-phenomenon`。
+     *
+     * ⭐⭐ 真机后果:followers 页每轮 fresh=0 → 业务那道
+     * 「连续几轮没新的就停」会在第一轮就误停,而 X 一直说还有。
+     */
+    const seen: Array<{ fresh: number; empty: number }> = [];
+    let n = 0;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 每页都是**没见过的人** —— fresh 应当 > 0 */
+        const page = n === 0 ? userPage([1, 2], 'c1')
+          : n === 1 ? userPage([3, 4], 'c2') : userPage([5, 6]);
+        return { items: [{ url: FOLLOWERS, text: page }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+      stopPaging: (st) => {
+        seen.push({ fresh: st.freshThisRound, empty: st.emptyRounds });
+        return { go: true };
+      },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[0].fresh, '这一页两个新人,fresh 必须是 2').toBe(2);
+    expect(seen[0].empty, '有新人就不该算空轮').toBe(0);
+  });
+
+  it('⭐⭐⭐ 翻页回来的是同一批人 → 不许重复计数、不许重编名次', async () => {
+    /**
+     * ⚠️⚠️ **真机 2026-10-05 的数据损坏**(verified_followers,面板报
+     * 「解出 420 人·入库 新 40·更新 380」而库里**只有 40 行**):
+     * 翻页 10 轮每轮都回同一批 20 人(面板自己写着「新采到 0 条」),
+     * 而 `takeUsers` **照单全收**、每轮重新编号 ——
+     * 于是同一个人被编了 10 个不同的 seq,
+     * 最后一轮的号覆盖掉前面所有,库里 `list_seq` 只剩 380…419。
+     *
+     * ⭐ 「420 人」里有 380 个是**同一批人的影子**。
+     * ⚠️ 这正是 `project-x-upsert-insert-ignore` 那一族:
+     * 数字好看、库里不对,而两者**都不报错**。
+     *
+     * ⭐ 判据:去重后人数 = 真实人数,且 seq 从 0 连续。
+     */
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 每一轮都回**同一批人**,但游标一直在变(真机就是这样) */
+        return { items: [{ url: FOLLOWERS, text: userPage([1, 2], `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    const all = r.users.flatMap((a) => a.items);
+    expect(all.map((u) => u.handle).sort(), '同一批人翻 N 轮,不该变成 N 倍')
+      .toEqual(['user1', 'user2']);
+    expect(all.map((u) => u.seq), '名次必须是 0 起的真实名次,不是最后一轮的号')
+      .toEqual([0, 1]);
+  });
+
+  it('⭐⭐ 全是老人的那一页不记账 —— 别拿条目数充数', async () => {
+    /**
+     * ⚠️ 去重之后,「这一页一个新人都没有」会留下一个 items 为空的壳。
+     * 堆在 `users` 里的话,「采到几页人」这个数还是会被虚高的条目数骗 ——
+     * 跟刚修掉的「420 人」是同一种假象,只是换了个计量单位。
+     */
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: userPage([1, 2], `c${n}`) }] };
+      },
+      async runScript() { n += 1; return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.users.length, '翻了很多轮但只有第一轮有新人 → 只该有 1 份账')
+      .toBe(1);
+    expect(r.users.every((a) => a.items.length > 0)).toBe(true);
+  });
+
+  it('⭐⭐⭐ 滚动轮数是安全网不是目标 —— 别再把自己的闸门当平台限制', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-05:`maxRounds ?? 60` 把 following 卡在 **150 人**
+     * (滚 60 轮 42687px 到上限,X 还有一大截)。
+     * ⭐⭐ 与 `project-x-followers-2500-ceiling` **同一个错误**:
+     * 所谓「X 天花板 2500」真因就是滚动轮数不够、而那轮数是人填的 ——
+     * 那条记忆开头就写着「已作废」,我又踩了一次。
+     *
+     * ⭐ 判据:调用方不给 maxRounds 时,传给底座的必须**远大于**
+     * 一个真实名单要滚的轮数(2645 人实测约 130+ 轮)。
+     */
+    let got: number | undefined;
+    await runCollect({
+      async harvest(plan) { got = plan.maxRounds; return { items: [] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+    expect(got, '默认轮数太小 = 给人多的号设了个看不见的天花板')
+      .toBeGreaterThanOrEqual(1000);
+  });
+
+  it('⭐⭐⭐ 时间安全网也要够大 —— 180s 把 following 卡在 150 人', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:滚 221 轮 162571px,**正好撞上底座默认的 180s**,
+     * 停在 150 人,而停因写成「人工取消」——人根本没点。
+     * ⭐⭐ **同一个错误的第三次**:
+     * ①「X 天花板 2500」(真因滚动轮数不够)
+     * ② `maxRounds ?? 60`(卡在 150 人)
+     * ③ `maxMs` 180s
+     * 每次都是**我设的闸门被当成了平台的限制**。
+     */
+    let got: number | undefined;
+    await runCollect({
+      async harvest(plan) { got = plan.maxMs; return { items: [] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+    expect(got, '2000+ 人的名单按实测速度要十几分钟')
+      .toBeGreaterThanOrEqual(10 * 60 * 1000);
+  });
+
+  it('⭐⭐ 调用方显式给了就听它的 —— 安全网可以调小,但要是显式的', async () => {
+    let got: number | undefined;
+    await runCollect({
+      async harvest(plan) { got = plan.maxRounds; return { items: [] }; },
+    }, { wantPages: 1, depth: 'as-is', maxRounds: 5 });
+    expect(got).toBe(5);
+  });
+
+  it('⭐⭐⭐ 一轮回多条响应时,游标要取**最靠后**那条 —— 否则第二轮就撞重复', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:关注 5319 人,只采到 236(4.4%),
+     * 翻页**第 2 轮就停**,停因「游标不再变化」。
+     *
+     * ⭐ 真因:一次翻页 harvest 会回**十几条**响应(滚动还在继续产出),
+     * 而取游标用的是 `.reverse().find(...)` = **数组里最后那条**。
+     * 响应到达顺序**不等于**分页顺序,拿到一条靠前的游标发出去,
+     * X 就把**已经走过的那一页**再给一遍 → 游标撞进 `seenCursors` → 停。
+     *
+     * ⭐ 判据:同一轮里出现多个游标时,要用**没见过的那个**继续翻,
+     * 而不是闭着眼取最后一条。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        if (n === 1) return { items: [{ url: FOLLOWERS, text: page([1, 2], 'c1') }] };
+        /**
+         * ⭐ 第 2 轮起**一次回两条**:一条是旧游标(c1,已经用过),
+         * 一条是新的。闭眼取最后一条就会撞上 c1 → 停。
+         */
+        const fresh = `c${n}`;
+        return { items: [
+          { url: FOLLOWERS, text: page([n * 10], fresh) },
+          { url: FOLLOWERS, text: page([n * 10 + 1], 'c1') },
+        ] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 1, depth: 'as-is' });
+
+    expect(r.paging?.stopReason, '不该在第 2 轮就报「游标不再变化」')
+      .not.toContain('游标不再变化');
+    expect(r.paging?.rounds, '应该能一直翻下去').toBeGreaterThan(3);
+  });
+
+  it('⭐⭐⭐ X 说「到头了」就停 —— TimelineTerminateTimeline', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:第 3 轮 X 回了 `TimelineTerminateTimeline: Bottom`
+     * 外加游标 `0|...`(A 段为 0 = 边界),**明说没有了**;
+     * 可翻页又空转了 7 轮(4-10 轮全部零新增),
+     * 游标 A 段冻住、只有 B 段(时间戳)在匀速递增 ——
+     * 等于拿着同一个位置反复问「下一页呢」。
+     *
+     * ⭐⭐ 解析器**早就解出了 `terminated`**,而 `x-collect-run` 从来没读过它
+     * ——那条检查原本在 x-user-run 里,合并成单入口时**丢了**。
+     * ⚠️ 这正是 `feedback-grep-shared-edge-before-delete` 的反面教训:
+     * 删文件前我 grep 的是「谁 import 它」,而不是「它做了什么别处没有的事」。
+     */
+    const page = (ids: number[], cursor: string, terminated = false): string => {
+      const instructions: unknown[] = [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }];
+      if (terminated) {
+        instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      }
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        /** ⭐ 第 3 次 harvest 起 X 就说到头了,但**仍然附带游标** */
+        const done = n >= 3;
+        return { items: [{ url: FOLLOWERS, text: page([n], `c${n}`, done) }] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason, 'X 明说到头了就该停,别再空转')
+      .toContain('到头');
+    /** ⭐ 停在它说的那一轮附近,不是一路空转到上限 */
+    expect(r.paging?.rounds).toBeLessThanOrEqual(3);
+  });
+
+  it('⭐⭐⭐ 人流名单滚到底后**仍要翻页** —— 翻页产出率高一个数量级', async () => {
+    /**
+     * ⚠️⚠️ 用户 2026-10-06 原话:「提取完毕怎么还在翻页呢?没有逻辑吗?」
+     *
+     * 真因:翻页段的入口条件只有 `if (deps.runScript)` ——
+     * **无条件跑**,从不看滚动阶段是不是已经把活干完了。
+     * 人流名单滚到底(`reachedBottom=true`)本身就是「这一页没有更多了」的
+     * 数据判据,再从头翻一遍纯属空转:
+     * 既浪费时间,又让面板显示「还在翻页」,看起来像卡住了。
+     *
+     * ⭐ 判据:滚动已经到底 → 翻页一轮都不该跑。
+     * ⚠️ 注意**不是**所有页都这样:搜索页滚动不翻页(X 的页面差异),
+     * 那里到底了也得靠主动翻页 —— 所以判据要看「**到底了并且解出过人**」,
+     * 不是无脑跳过。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+
+    let pagingHarvests = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 第一趟:滚到底了,并且解出了人 */
+        if (pagingHarvests === 0) {
+          pagingHarvests += 1;
+          return {
+            items: [{ url: FOLLOWERS, text: page([1, 2, 3], 'c1') }],
+            reachedBottom: true,
+            stopReason: '滚到底(连续 3 轮 scrollY 未变)',
+          };
+        }
+        /** ⚠️ 走到这里就说明又去翻页了 —— 不该发生 */
+        pagingHarvests += 1;
+        return { items: [{ url: FOLLOWERS, text: page([99], 'c2') }] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    /**
+     * ⚠️⚠️ **2026-10-06 订正**:这条原先断言「人流名单滚到底就一轮都不翻」,
+     * 但真机数据推翻了它 —— x.following 那跑:
+     * 　滚动 765 轮 / 557085px → 只入账 **69 人**
+     * 　翻页**第 1 轮**(15 条响应)→ 直接 **+100 人**
+     * ⭐ 翻页产出率高一个数量级,「滚到底」只说明 DOM 不再长高,
+     * **不等于 X 没有下一页**(游标还在给)。
+     *
+     * ⭐ 用户当初抱怨的是「**提取完毕还在翻页**」= 翻了 9 轮零新增的空转,
+     * 不是「翻页本身不该有」。空转由数据判据治(X 说到头 / 游标不变 /
+     * 业务说够了),不是一刀切禁掉。
+     * ⚠️ 这条测试现在钉的是:**人流名单滚到底后仍然要翻页**。
+     */
+    expect(r.paging?.rounds, '人流名单滚到底后仍要翻页 —— 它的产出率更高')
+      .toBeGreaterThan(0);
+    expect(pagingHarvests).toBeGreaterThan(1);
+  });
+
+  it('⭐⭐⭐ 没滚到底的页面照常翻页 —— 搜索页滚动不翻页,别误伤', async () => {
+    /**
+     * ⚠️ 判据太宽会被无视,那是另一种假绿。
+     * 实测:搜索页滚 4 万 px 只出 1 条载荷,**必须靠主动翻页**。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        /** ⭐ `reachedBottom: false` —— 滚动没到底 */
+        return {
+          items: [{ url: FOLLOWERS, text: page([n], `c${n}`) }],
+          reachedBottom: false,
+        };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 3, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '没到底就该翻页').toBeGreaterThan(0);
+  });
+
+  it('⭐⭐⭐ 滚到底但**什么都没采到** → 还是要翻页试试,不能当「采完了」', async () => {
+    /**
+     * ⚠️⚠️ 这条是注入验证逼出来的:把 `gotSomething` 改成恒 true,
+     * 前面两条**照样绿** —— 因为我的样本里「滚到底」和「采到了人」
+     * 永远同时成立,那个区别压根没被测到
+     * (`feedback-check-sample-contains-phenomenon`)。
+     *
+     * ⭐ 真实场景:页面不对 / 链路坏 / 载荷一条没收到 —— 这时「滚到底」
+     * 证明不了「这一页没有更多」,只证明「滚不动了」。
+     * 当成采完了就是**把失败伪装成成功**,正是要治的病。
+     */
+    let harvests = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        harvests += 1;
+        /** ⭐ 滚到底了,但一条可解析的响应都没有 */
+        return { items: [], reachedBottom: true, stopReason: '滚到底' };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 3, depth: 'as-is' });
+
+    expect(r.kind).toBe('empty');
+    /**
+     * ⭐ 关键只有一条:**不许说「已经采完」**。
+     * ⚠️ 至于接下来能不能翻页,是另一回事 —— 一条响应都没有时
+     * 连翻页的种子 URL 都没有(queryId/features 都在那条请求里),
+     * 所以它会如实报「没有可用来翻页的请求」。
+     * ⭐ 那也是**诚实的失败**,与「采完了」有本质区别:
+     * 前者指向「这一页链路坏了」,后者指向「这一页就这么多」。
+     * ⚠️ 我第一版断言「该多采一趟」—— 那是**我想当然**,
+     * 代码其实是对的(没种子就翻不动),错的是我的期望。
+     */
+    expect(r.paging?.stopReason, '什么都没采到时不该说「已经采完」')
+      .not.toContain('无需翻页');
+    expect(r.paging?.stopReason).toContain('没有可用来翻页的请求');
+    expect(harvests).toBe(1);
+  });
+
+  it('⭐⭐⭐ 被限流(429)要喊出来 —— 不许报成「滚到底了」', async () => {
+    /**
+     * ⚠️⚠️⚠️ **这是折腾七八轮的真因**(2026-10-06,用户:
+     * 「修复了7/8次,都是搞不定名单的采集,在干活吗?」)。
+     *
+     * 真机留痕按时间排:
+     *   10:30  响应 132 → 169 人
+     *   13:13  响应   9 →  30 人
+     *   15:53  响应   6 →  29 人
+     *   16:10  响应   4 →  20 人   ← 面板里 `429 Rate limit exceeded`
+     *
+     * **响应数一路掉**,而每一跑都理直气壮报「滚到底了」。
+     * 我这几轮改的滚动/翻页/游标全都**不是**真因 ——
+     * X 在限流我们,而采集层**看不见 HTTP 状态码**:
+     * `RunHarvest.items` 的类型里只有 `{url, text}`,
+     * 状态码在底座有、面板甚至红字显示着 429,**偏偏采集层拿不到**。
+     *
+     * ⭐ 这是「看着成功实际没有」最贵的一次:判据被我自己在类型边界上丢了。
+     * ⚠️ 限流下的「滚到底」是**假的** —— 内容没加载出来,不是没有内容。
+     */
+    const r = await runCollect({
+      async harvest() {
+        return {
+          items: [
+            { url: 'https://x.com/i/api/graphql/aa/BlueVerifiedFollowers', text: '{}', status: 429 },
+            { url: 'https://x.com/i/api/graphql/aa/ViewerBadgeCounts', text: 'Rate limit exceeded', status: 429 },
+          ],
+          reachedBottom: true,
+          stopReason: '滚到底(连续 3 轮未变)',
+        };
+      },
+    }, { wantPages: 10, depth: 'as-is' });
+
+    const problems = r.users.flatMap((a) => a.problems).concat(r.rateLimit ? [r.rateLimit] : []);
+    expect(problems.join(' '), '被限流了却一个字都不说').toContain('429');
+    expect(r.rateLimit, '要有专门的字段,别混在一堆 problems 里').toBeTruthy();
+  });
+
+  it('⭐⭐⭐ 无关端点的 429 **不算**限流 —— 我拿它误判过一整轮', async () => {
+    /**
+     * ⚠️⚠️⚠️ 2026-10-06 我的误判:看到面板里一行
+     * `429 ViewerBadgeCounts  Rate limit exceeded`,
+     * 就断言「X 在限流、前面七八轮全白干」。
+     * 用户点破:「我们肉眼能够在 view 中看到名单滚动,你告诉我限流啦?」
+     *
+     * ⭐ 事实:`ViewerBadgeCounts` 是 X 的**通知角标计数**,根本不在
+     * `X_PAGE_MATCHERS` 里;同一屏 `BlueVerifiedFollowers` 是
+     * **200 / 38.6KB / 20 个用户**,主链路好得很。
+     * ⚠️ 拿无关端点的失败去论证主链路被挡 = 制造假线索,
+     * 而且这次把人指向了「等几小时再说」这种最浪费的方向。
+     */
+    const r = await runCollect({
+      async harvest() {
+        return {
+          items: [
+            /** ⭐ 名单本身是好的 */
+            { url: 'https://x.com/i/api/graphql/aa/BlueVerifiedFollowers', text: '{}', status: 200 },
+            /** ⚠️ 无关端点被挡 —— 不该据此说「被限流」 */
+            { url: 'https://x.com/i/api/graphql/bb/ViewerBadgeCounts', text: '', status: 429 },
+          ],
+          reachedBottom: true,
+        };
+      },
+    }, { wantPages: 10, depth: 'as-is' });
+    expect(r.rateLimit, '无关端点的 429 不该报成限流').toBeUndefined();
+  });
+
+  it('⭐⭐ 没有 429 时不许瞎报限流', async () => {
+    /** ⚠️ 判据太宽会被无视,那是另一种假绿 */
+    const r = await runCollect({
+      async harvest() {
+        return {
+          items: [{ url: FOLLOWERS, text: '{}', status: 200 }],
+          reachedBottom: true,
+        };
+      },
+    }, { wantPages: 10, depth: 'as-is' });
+    expect(r.rateLimit).toBeUndefined();
+  });
+
+  it('⭐⭐⭐ uniqueUsers 只数人 —— 业务按人数收手,不能被推文数掺假', async () => {
+    /**
+     * ⚠️⚠️ 2026-10-06:面板的「页」数原先是 `st.round >= want`,
+     * 人填 10 就在第 10 轮停 —— 而一轮能带回 100 人,5319 人要 50+ 轮,
+     * **这个框把整次采集卡死在 169 人**。
+     * ⭐ 改成按人数收手,就必须有个**名副其实**的人数:
+     * `uniqueTweets` 是历史遗留名,数的是「推文 + 人」的总和。
+     */
+    const seen: Array<{ users: number; all: number }> = [];
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [{ url: FOLLOWERS, text: page([n * 2, n * 2 + 1], `c${n}`) }] };
+      },
+      async runScript() { return { ok: true }; },
+      stopPaging: (st) => {
+        seen.push({ users: st.uniqueUsers, all: st.uniqueTweets });
+        return { go: st.uniqueUsers < 6 };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen[seen.length - 1].users).toBeGreaterThanOrEqual(6);
+    /**
+     * ⭐⭐ **样本里必须同时有推文和人**,否则 `uniqueUsers === uniqueTweets`,
+     * 把实现改成 `seenKeys.size` 这条测试照样绿 ——
+     * 注入验证当场逮到(`feedback-check-sample-contains-phenomenon`:
+     * 样本里没有那个现象,就论证不了它)。
+     * ⚠️ 下面那条用**混合样本**补上这个缺口。
+     */
+    expect(seen.every((x) => x.users <= x.all), 'uniqueUsers 不该超过总数').toBe(true);
+  });
+
+  it('⭐⭐⭐ 混着推文时,uniqueUsers 必须**小于**总数', async () => {
+    /**
+     * ⚠️⚠️ 这条是注入验证逼出来的:上面那条样本**全是人**,
+     * 于是 `uniqueUsers` 写成 `seenKeys.size`(连推文一起数)也全绿。
+     * ⭐ 业务按人数收手,混进推文数会让它**提前停**——
+     * 正是「把人卡在半路」那一类。
+     */
+    let last: { users: number; all: number } | null = null;
+    let n = 0;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [
+          /** ⭐ 一条人流载荷 */
+          { url: FOLLOWERS, text: JSON.stringify({
+            data: { user: { result: { timeline: { timeline: { instructions: [{
+              type: 'TimelineAddEntries',
+              entries: [{
+                entryId: `user-${n}`,
+                content: { itemContent: { user_results: { result: {
+                  rest_id: `${900 + n}`,
+                  core: { screen_name: `user${n}`, name: `名字${n}` },
+                  legacy: {},
+                } } } },
+              }, { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: `c${n}` } }],
+            }] } } } } },
+          }) },
+          /** ⭐ 外加一条**推文**载荷 —— 它不该被算进人数 */
+          { url: TIMELINE_URL, text: timelinePayload([foldedTweet(`t${n}`)]) },
+        ] };
+      },
+      async runScript() { return { ok: true }; },
+      stopPaging: (st) => {
+        last = { users: st.uniqueUsers, all: st.uniqueTweets };
+        return { go: st.round < 3 };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(last).not.toBeNull();
+    expect(last!.users, '人数不该把推文算进来').toBeLessThan(last!.all);
+    expect(last!.users).toBeGreaterThan(0);
+  });
+
+  it('⭐⭐⭐ 一页一判一进:脚本回 body 就当场解析,不再多跑一次 harvest', async () => {
+    /**
+     * ⚠️⚠️ 旧代码注释里的实测(2026-09-18):
+     * 滚动 30 轮 / 76 秒只拿到 **201/2604 = 7.7%**,只触发 4 个载荷;
+     * 而游标翻页 **30 次请求拿 2000+ 人,快几十倍**。
+     * ⭐ 关键在「发一页 → **当场拿到这一页** → 判断 → 下一页」,
+     * 而不是「发请求 → 再跑一次 harvest 去等响应」——
+     * 后者两步之间隔着异步,会把滚动顺带触发的别的响应混进来。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+
+    let harvests = 0;
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        harvests += 1;
+        return { items: [{ url: FOLLOWERS, text: page([1, 2], 'c0') }] };
+      },
+      /** ⭐ 脚本直接把这一页的 body 交回来 */
+      async runScript() {
+        n += 1;
+        return n <= 3
+          ? { ok: true, status: 200, body: page([n * 10, n * 10 + 1], `c${n}`) }
+          : { ok: true, status: 200, body: page([1], `c${n}`) };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    /** ⭐⭐ 只采了**一趟** harvest(种子),其余全靠脚本回的 body */
+    expect(harvests, '拿到 body 就不该再跑 harvest 等响应').toBe(1);
+    expect(r.users.flatMap((a) => a.items).length).toBeGreaterThan(4);
+    /** ⭐ 留痕要记下走的是主路 */
+    expect(r.paging?.rounds_detail.some((d) => d.viaBody === true)).toBe(true);
+  });
+
+  it('⭐⭐⭐ 脚本回不出 body 时走 harvest 兜底,并如实记下', async () => {
+    /** ⚠️ 两条路要分得开 —— 否则「主路坏了」会被兜底悄悄盖住 */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [{ url: FOLLOWERS, text: page([n], `c${n}`) }] };
+      },
+      /** ⚠️ 老构建的形状:只回 bytes,没有 body */
+      async runScript() { return { ok: true, status: 200, bytes: 100 }; },
+    }, { wantPages: 3, depth: 'as-is' });
+
+    expect(r.paging?.rounds_detail.length).toBeGreaterThan(0);
+    expect(r.paging?.rounds_detail.every((d) => d.viaBody !== true), '该标成兜底')
+      .toBe(true);
+  });
+
+  it('⭐⭐⭐ 请求失败要当场停并说清楚 —— 不许当成「没有更多了」', async () => {
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: JSON.stringify({
+          data: { user: { result: { timeline: { timeline: { instructions: [{
+            type: 'TimelineAddEntries',
+            entries: [
+              { entryId: 'user-1', content: { itemContent: { user_results: { result: {
+                rest_id: '901', core: { screen_name: 'a', name: 'A' }, legacy: {},
+              } } } } },
+              { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: 'c1' } },
+            ],
+          }] } } } } },
+        }) }] };
+      },
+      async runScript() { return { ok: false, status: 404, why: 'HTTP 404' }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason).toContain('请求失败');
+    expect(r.paging?.stopReason, '别把失败说成「到头了」').not.toContain('到头');
+  });
+
+  it('⭐⭐⭐ 第一趟滚动只采「种子页」—— 不拿人填的页数去滚', async () => {
+    /**
+     * ⚠️⚠️ 真机:631 轮 448453px 只换来 23 人。
+     * ⭐ 滚动只为抄一条带 variables 的请求,后面全靠游标翻页。
+     */
+    let seedWant: number | undefined;
+    await runCollect({
+      async harvest(plan) { seedWant = plan.wantPages; return { items: [] }; },
+    }, { wantPages: 100, depth: 'as-is' });
+    expect(seedWant, '人填 100 页不该让滚动去滚 100 页').toBeLessThanOrEqual(3);
+  });
+
+  it('⭐⭐⭐ 种子里**有一页**说到头,不该让翻页一轮都不跑', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:种子滚动只花 2.7s(好事),但翻页 **0 轮**,
+     * 停因「X 说名单到头了」—— 而列表明明还长得很。
+     *
+     * 真因:`terminated` 用 `.some()` 扫**种子里所有**用户载荷。
+     * 种子一趟会收到好几条(截图里两条 BlueVerifiedFollowers),
+     * 其中**最后一页**带 terminate 是正常的,而第一页的游标还活着 ——
+     * 一条「到头了」就把整轮毒死在第 0 轮。
+     *
+     * ⭐ 判据该是「**我们接下来要用的那个游标**所在的那一页到头了没有」,
+     * 不是「种子里有没有任何一页到头」。
+     */
+    const page = (ids: number[], cursor: string | null, terminated: boolean): string => {
+      const entries: unknown[] = ids.map((i) => ({
+        entryId: `user-${i}`,
+        content: { itemContent: { user_results: { result: {
+          rest_id: `${900 + i}`,
+          core: { screen_name: `user${i}`, name: `名字${i}` },
+          legacy: {},
+        } } } },
+      }));
+      if (cursor) {
+        entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+      }
+      const instructions: unknown[] = [{ type: 'TimelineAddEntries', entries }];
+      if (terminated) instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 种子一趟收到两条:一条还有游标,一条是别的端点给的「到头了」 */
+        return { items: [
+          { url: FOLLOWERS, text: page([1, 2], 'c-alive', false) },
+          { url: FOLLOWERS, text: page([3], null, true) },
+        ] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10, n * 10 + 1], `c${n}`, false) };
+      },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '种子里有一页到头,不该让翻页一轮都不跑')
+      .toBeGreaterThan(0);
+    expect(r.users.flatMap((a) => a.items).length).toBeGreaterThan(3);
+  });
+
+  it('⭐⭐⭐ 翻页某一轮收到多页时,也要「全都到头」才停', async () => {
+    /**
+     * ⚠️ 与种子那条同源:走兜底(harvest)时一轮可能收到好几条,
+     * 其中一条带 terminate 很正常(列表末页),
+     * 不能因此把整轮判死 —— 否则第 1 轮就停。
+     * ⭐ 注入验证逼出来的:只改种子那一处,这条路**没有测试盖住**。
+     */
+    const page = (ids: number[], cursor: string | null, terminated: boolean): string => {
+      const entries: unknown[] = ids.map((i) => ({
+        entryId: `user-${i}`,
+        content: { itemContent: { user_results: { result: {
+          rest_id: `${900 + i}`,
+          core: { screen_name: `user${i}`, name: `名字${i}` },
+          legacy: {},
+        } } } },
+      }));
+      if (cursor) {
+        entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+      }
+      const instructions: unknown[] = [{ type: 'TimelineAddEntries', entries }];
+      if (terminated) instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        if (n === 1) return { items: [{ url: FOLLOWERS, text: page([1], 'c-alive', false) }] };
+        /** ⭐ 翻页回来的这一轮:一条还有游标,一条说到头 */
+        return { items: [
+          { url: FOLLOWERS, text: page([n * 10], `c${n}`, false) },
+          { url: FOLLOWERS, text: page([n * 10 + 1], null, true) },
+        ] };
+      },
+      /** ⚠️ 不回 body —— 逼它走兜底那条路 */
+      async runScript() { return { ok: true, status: 200, bytes: 10 }; },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.rounds, '一轮里有一页到头,不该第 1 轮就停')
+      .toBeGreaterThan(1);
+  });
+
+  it('⭐⭐⭐ 翻页要把种子那条的请求头原样带上 —— 少了就是 403', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:翻页第 1 轮 **HTTP 403**。
+     * 我们只带了 cookie(`credentials:"include"`),而 X 的 GraphQL
+     * 还要 `authorization` 与 `x-csrf-token`。
+     * ⭐ 旧版的做法是**复用 X 刚发过的那条请求**原样重发;
+     * 自己拼鉴权那条路本仓早否决过(token 会过期、随版本变)。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let sent: Record<string, unknown> | null = null;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{
+          url: FOLLOWERS,
+          text: page([1], 'c1'),
+          /** ⭐ 种子那条带着 X 的真实请求头 */
+          requestHeaders: { authorization: 'Bearer SEED', 'x-csrf-token': 'tok1' },
+        }] };
+      },
+      async runScript(_id, params) {
+        sent = params;
+        return { ok: true, status: 200, body: page([2], 'c2') };
+      },
+    }, { wantPages: 2, depth: 'as-is' });
+
+    expect(sent, '翻页脚本压根没被调').not.toBeNull();
+    const h = (sent as unknown as { headers?: Record<string, string> }).headers;
+    expect(h?.authorization, '没把种子的 authorization 带上 → 403').toBe('Bearer SEED');
+    expect(h?.['x-csrf-token']).toBe('tok1');
+  });
+
+  it('⭐⭐⭐ 种子要挑**带请求头**的那一条 —— 两条腿都会收到同一条响应', async () => {
+    /**
+     * ⚠️⚠️ 403 的第二刀(2026-10-06):请求头**只有 CDP 腿拿得到**
+     * (钩子腿跑在页面里,看不见真实请求头)。
+     * 同一条响应两条腿都会收到,而原先 `find` 取**第一条** ——
+     * 撞上钩子腿那份就拿到个**没有鉴权头的种子**,重发必然 403。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let sent: Record<string, unknown> | null = null;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [
+          /** ⚠️ 钩子腿那份排在前面,**没有请求头** */
+          { url: FOLLOWERS, text: page([1], 'c1') },
+          /** ⭐ CDP 腿那份带着头 */
+          {
+            url: FOLLOWERS,
+            text: page([2], 'c1'),
+            requestHeaders: { authorization: 'Bearer CDP', 'x-csrf-token': 'tok' },
+          },
+        ] };
+      },
+      async runScript(_id, params) {
+        sent = params;
+        return { ok: true, status: 200, body: page([3], 'c2') };
+      },
+    }, { wantPages: 2, depth: 'as-is' });
+
+    const h = (sent as unknown as { headers?: Record<string, string> } | null)?.headers;
+    expect(h?.authorization, '挑到了没有头的那条种子 → 必然 403').toBe('Bearer CDP');
+  });
+
+  it('⭐⭐⭐ 被限流(429)要退避重试,不许把剩下的全丢了', async () => {
+    /**
+     * ⚠️⚠️ 真机 2026-10-06:followers 翻到**第 49 轮** 429,
+     * 诊断写着 `authorization=有，x-csrf-token=有` —— 不是鉴权问题,是真限流。
+     * 原先直接 break:2469 人到手,**剩下 3000 多人整批丢掉**,
+     * 而 X 只是让我们慢一点,不是不给。
+     * ⭐ 照本仓已有的那套(限速 + 指数退避 + 熔断)。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const waits: number[] = [];
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        /** ⭐ 第 2 次被限流,之后恢复 */
+        if (n === 2) return { ok: false, status: 429, why: 'HTTP 429' };
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`) };
+      },
+      /** ⭐ 注入的等待:测试里不真等 */
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 5, depth: 'as-is' });
+
+    expect(waits.length, '被限流了却没退避').toBeGreaterThan(0);
+    expect(r.paging?.stopReason, '退避成功后不该停在限流上').not.toContain('限流');
+    /** ⭐ 限流那一轮之后还继续采到了人 */
+    expect(r.users.flatMap((a) => a.items).length).toBeGreaterThan(2);
+  });
+
+  it('⭐⭐⭐ 退避到上限仍被挡 → 如实说「不是采完了」', async () => {
+    /** ⚠️ 这时最怕的是把「被挡住」说成「采完了」—— 人会以为没有更多 */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    const waits: number[] = [];
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      /** ⚠️ 一直 429 */
+      async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason).toContain('限流');
+    expect(r.paging?.stopReason, '别把被挡说成采完了').toContain('不是采完了');
+    /** ⭐ 退避要**翻倍**,不是每次等一样久 */
+    expect(waits.length).toBeGreaterThan(1);
+    expect(waits[1]).toBeGreaterThan(waits[0]);
+  });
+
+  it('⭐⭐ 不给 wait 时行为不变 —— 老调用方不受影响', async () => {
+    const page = (c: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          { entryId: 'user-1', content: { itemContent: { user_results: { result: {
+            rest_id: '901', core: { screen_name: 'a', name: 'A' }, legacy: {},
+          } } } } },
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: c } },
+        ],
+      }] } } } } },
+    });
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page('c0') }] };
+      },
+      async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
+    }, { wantPages: 5, depth: 'as-is' });
+    /** ⚠️ 没有 wait 就退不了避,照旧当失败停 —— 但停因要说得出是 429 */
+    expect(r.paging?.stopReason).toContain('429');
+  });
+
+  it('⭐⭐⭐ 每轮之间要有**随机**停顿 —— 匀速请求是风控最容易识别的特征', async () => {
+    /**
+     * ⚠️⚠️ 用户 2026-10-06:「是的,不能太快,这样会引发限流。」
+     * 旧代码注释原话:「随机停顿:**匀速请求是风控最容易识别的特征**」(1800~3300ms)。
+     * 而我重建的翻页是**连珠炮**:48 轮零间隔 → X 把**整个会话**挡掉,
+     * 连它自己的页面都报 `Something went wrong`。
+     * ⭐ 判据两条:**有停顿** 且 **不是定值**(定值本身也是指纹)。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const waits: number[] = [];
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`) };
+      },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 12, depth: 'as-is' });
+
+    expect(waits.length, '一个停顿都没有 —— 连珠炮会被风控识别').toBeGreaterThan(5);
+    /**
+     * ⭐⭐ **只看轮间抖动那些**(短的),不能把批间长停顿算进来 ——
+     * ⚠️ 注入验证逼出来的:第一版拿全部 waits 判「有几种不同值」,
+     * 批间那个 20s 自带一种值,于是**把抖动改成定值照样绿**。
+     * `feedback-guard-scope-to-the-branch`:要缩到真正被测的那一类。
+     */
+    const jitters = waits.filter((w) => w < 10_000);
+    expect(jitters.length, '切不出轮间抖动就什么也证明不了').toBeGreaterThan(3);
+    expect(new Set(jitters).size, '停顿是定值,等于另一种指纹').toBeGreaterThan(1);
+    /** ⭐ 量级要够:亚秒级的「停顿」挡不住风控 */
+    expect(Math.min(...jitters)).toBeGreaterThanOrEqual(1000);
+  });
+
+  it('⭐⭐⭐ 每翻一批要主动歇一次 —— 别等被挡了再退避', async () => {
+    /**
+     * ⚠️ 实测 `Followers` 两跑都卡在 **48/49 轮**,
+     * 所以批次要明显小于它,中途主动歇比被挡了再退避划算。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const waits: number[] = [];
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`) };
+      },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 40, depth: 'as-is' });
+
+    /** ⭐ 批间停顿明显长于轮间抖动 —— 翻 40 轮至少歇过一次 */
+    expect(Math.max(...waits), '没有批间长停顿').toBeGreaterThanOrEqual(10_000);
+  });
+
+  it('⭐⭐⭐ 给了断点就从断点翻 —— 不许再用种子那一页的游标', async () => {
+    /**
+     * ⚠️⚠️ `Followers` 端点约 50 次/窗口就 429,而 X 每次都从**第 1 页**给游标。
+     * 不续采的话:翻 1-48 轮全是已入库的人 → 第 49 轮又 429
+     * → **整个配额浪费在重采上,一个新人都拿不到**。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let firstSent: string | undefined;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 种子给的是**第 1 页**的游标 */
+        return { items: [{ url: FOLLOWERS, text: page([1], 'SEED-PAGE-1') }] };
+      },
+      async runScript(_id, params) {
+        if (firstSent === undefined) {
+          firstSent = (params as { cursor?: string }).cursor;
+        }
+        return { ok: true, status: 200, body: page([2], 'c2') };
+      },
+    }, { wantPages: 2, depth: 'as-is', resumeCursor: 'RESUME-FROM-HERE' });
+
+    expect(firstSent, '第一轮没用断点,又从第 1 页开始了').toBe('RESUME-FROM-HERE');
+  });
+
+  it('⭐⭐⭐ 停下来要把手里的游标带出去 —— 被挡那次最需要它', async () => {
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        /** ⚠️ 第 3 轮起一直 429 —— 模拟撞配额 */
+        if (n >= 3) return { ok: false, status: 429, why: 'HTTP 429' };
+        return { ok: true, status: 200, body: page([n * 10], `cursor-${n}`) };
+      },
+      async wait() { /* 测试里不真等 */ },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason).toContain('限流');
+    expect(r.nextCursor, '被挡下却没带出游标 —— 下次只能从头采').toBeTruthy();
+    expect(r.exhausted, '没到头就不该标 exhausted').toBe(false);
+  });
+
+  it('⭐⭐⭐ X 说到头了就**不带**游标 —— 下次该从头采拿新增', async () => {
+    /** ⚠️ 带着一个已经到底的游标去续,只会立刻又到底,白跑一趟 */
+    const page = (ids: number[], cursor: string | null, done: boolean): string => {
+      const entries: unknown[] = ids.map((i) => ({
+        entryId: `user-${i}`,
+        content: { itemContent: { user_results: { result: {
+          rest_id: `${900 + i}`,
+          core: { screen_name: `user${i}`, name: `名字${i}` },
+          legacy: {},
+        } } } },
+      }));
+      if (cursor) {
+        entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+      }
+      const instructions: unknown[] = [{ type: 'TimelineAddEntries', entries }];
+      if (done) instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0', false) }] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`, n >= 2) };
+      },
+      async wait() { /* noop */ },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.exhausted, 'X 说到头了却没标').toBe(true);
+    expect(r.nextCursor, '到头了还带游标 —— 下次会白跑一趟').toBeUndefined();
+  });
+
+  it('⭐⭐⭐ 退避要一次等够 —— 7.5 分钟那套实测注定失败', async () => {
+    /**
+     * ⚠️⚠️ 原先 4 次翻倍(30s/60s/120s/240s ≈ 7.5 分钟),
+     * **三跑全部退避到底仍被挡** —— X 的窗口恢复要更久。
+     * ⭐ 退避的意义是「等到恢复」,等不到就是纯浪费 7.5 分钟然后照样停。
+     * 用户 2026-10-07 定:**一次等够**(实测人工等十几分钟再点就能接着采)。
+     * ⚠️ 次数反而要少:断点续采已经兜住了,等太久不如把控制权交回给人。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    const waits: number[] = [];
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
+      async wait(ms) { waits.push(ms); },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    /** ⭐ 退避那几次(长的)—— 轮间抖动是秒级,切出来才不混 */
+    const backoffs = waits.filter((w) => w >= 60_000);
+    expect(backoffs.length, '一次退避都没有').toBeGreaterThan(0);
+    expect(Math.min(...backoffs), '退避不足 10 分钟 —— 实测等不到恢复')
+      .toBeGreaterThanOrEqual(10 * 60_000);
+    /** ⚠️ 次数别太多:断点兜住了,等太久该把控制权交回给人 */
+    expect(backoffs.length, '退避次数太多 —— 人会以为卡死了').toBeLessThanOrEqual(3);
+  });
+
+  it('⭐⭐ 什么都没解出来才是 empty', async () => {
+    const r = await runCollect({
+      async harvest() { return { items: [{ url: 'https://video.twimg.com/a.m4s', text: 'x' }] }; },
+    }, { wantPages: 1, depth: 'as-is' });
+    expect(r.kind).toBe('empty');
+    expect(r.users).toHaveLength(0);
+  });
+});

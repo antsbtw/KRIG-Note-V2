@@ -90,4 +90,20 @@ export interface ViewDefinition {
   floatingToolbar?: Omit<FloatingToolbarItem, 'view'>[];
   /** view 全局快捷键(可选;只在该 view 是当前活跃 view 时生效)— W4.1 */
   keymap?: KeymapBinding[];
+  /**
+   * ⭐ 本 view 的命令注册器(可选)—— 让模块「删一行就卸载干净」。
+   *
+   * ── 为什么它不能像别的字段那样当场执行 ──
+   *
+   * 命令注册需要 **本窗口的 wsId**,而那是异步到的(`onMyWsIdReady`)。
+   * 多窗口下不能用 `snapshot.activeId` 顶替 —— 新窗口会拿到 ws-1,
+   * 命令就注册到别人头上了(见 renderer/index.tsx 的 U1-c1-batch 注释)。
+   *
+   * 所以这里**只登记不执行**:registry 收着,等 renderer 拿到真 wsId 后
+   * 统一调 `runViewCommandRegistrars(wsId)`。
+   *
+   * ⭐ 收益:模块卸载从「删 import + 删调用」两处变成**删一行 self-register**。
+   * 2026-09-30 之前 8 个模块各要在 renderer 占两行,共 16 行接线。
+   */
+  commands?: (wsId: string) => void;
 }

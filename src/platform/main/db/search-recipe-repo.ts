@@ -126,7 +126,15 @@ export async function seedRecipes(): Promise<void> {
         help_signals: recipe.helpSignals ?? [],
         min_likes: recipe.minLikes ?? 0,
         min_retweets: recipe.minRetweets ?? 0,
-        lang: recipe.lang ?? null,
+        /**
+         * ⚠️⚠️ **传 undefined 不传 null** —— `lang` 是 `option<string>`。
+         * SurrealDB 的 `NONE` 与 `NULL` 是两个值,`option<T>` 只收 NONE;
+         * SDK 绑定 undefined→NONE、null→NULL(实测)。
+         * 传 null 会被拒:`Expected \`none | string\` but found \`NULL\``
+         * —— 真机 2026-10-04 存配方时就这么报的。
+         * ⭐ `project-surreal-none-vs-null` 的铁律:**看到 `?? null` 就是 bug**。
+         */
+        lang: recipe.lang === undefined || recipe.lang === '' ? undefined : recipe.lang,
         since_hours: recipe.sinceHours ?? 24,
         result_type: recipe.resultType,
         interval_minutes: recipe.intervalMinutes,
@@ -191,7 +199,15 @@ export async function upsertRecipe(
     help_signals: recipe.helpSignals ?? [],
     min_likes: recipe.minLikes ?? 0,
     min_retweets: recipe.minRetweets ?? 0,
-    lang: recipe.lang ?? null,
+    /**
+         * ⚠️⚠️ **传 undefined 不传 null** —— `lang` 是 `option<string>`。
+         * SurrealDB 的 `NONE` 与 `NULL` 是两个值,`option<T>` 只收 NONE;
+         * SDK 绑定 undefined→NONE、null→NULL(实测)。
+         * 传 null 会被拒:`Expected \`none | string\` but found \`NULL\``
+         * —— 真机 2026-10-04 存配方时就这么报的。
+         * ⭐ `project-surreal-none-vs-null` 的铁律:**看到 `?? null` 就是 bug**。
+         */
+        lang: recipe.lang === undefined || recipe.lang === '' ? undefined : recipe.lang,
     since_hours: recipe.sinceHours ?? 24,
     result_type: recipe.resultType,
     interval_minutes: recipe.intervalMinutes,
