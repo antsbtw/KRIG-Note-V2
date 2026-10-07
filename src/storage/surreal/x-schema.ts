@@ -1710,6 +1710,51 @@ DEFINE FIELD IF NOT EXISTS is_verified  ON x_author TYPE option<bool>;
 DEFINE FIELD IF NOT EXISTS is_protected ON x_author TYPE option<bool>;
 `;
 
+/**
+ * ⭐⭐⭐ 1.2.18 —— 断点续采补字段(2026-10-07)
+ *
+ * 用户:「要用断点续采」。而 `x_collect_cursor` **1.0.3 就建好了、零消费者** ——
+ * 又一例「表建好没人用」。现在接上,顺便补两个它缺的字段。
+ *
+ * ⚠️⚠️ 为什么非要断点续采(真机算过的账):
+ * `Followers` 端点约 **50 次/窗口**就 429(三跑都停在 48/49)。
+ * 而 X 每次都从**第 1 页**给游标 —— 直接再点一次的话:
+ * 　翻 1-48 轮全是已入库的那 2442 人 → 第 49 轮又 429 → **一个新人都拿不到**。
+ * ⭐ 必须从上次停下的游标接着翻,配额才花在新数据上。
+ *
+ * ⚠️ 游标**会过期**:拿旧游标请求失败要能**退回从头采**,不是报错了事。
+ */
+const X_SCHEMA_1_2_18 = `
+-- ⭐ 上次停在第几轮 —— 面板显示「上次停在第 N 页」用
+DEFINE FIELD IF NOT EXISTS last_round   ON x_collect_cursor TYPE option<int>;
+-- ⭐ 上次为什么停的 —— 429 / 到头了 / 人点停,决定下次要不要续
+DEFINE FIELD IF NOT EXISTS last_reason  ON x_collect_cursor TYPE option<string>;
+-- ⭐ 累计采到多少 —— 对账用(与 x_author 里该名单的行数应当接近)
+DEFINE FIELD IF NOT EXISTS total_seen   ON x_collect_cursor TYPE option<int>;
+`;
+
+export async function x_migration_1_2_18(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_18);
+
+  /** ⭐⭐ 问库要答案 —— 整段 DDL 可能被拒收而「看着跑了」 */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>(
+    'INFO FOR TABLE x_collect_cursor',
+  );
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['last_round', 'last_reason', 'total_seen']) {
+    if (!(f in fields)) {
+      throw new Error(`[x-schema 1.2.18] ${f} 没加上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.18] x_collect_cursor 断点字段已添加');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.18', appliedAt = $now,
+      description = '断点续采:x_collect_cursor 补 last_round / last_reason / total_seen'`,
+    { rid: new RecordId('schema_version', '1.2.18'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_17(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_17);
 
