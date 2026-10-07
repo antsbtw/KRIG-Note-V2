@@ -798,7 +798,14 @@ describe('⭐⭐⭐ 采集层不许自带「够了没有」的阈值', () => {
     );
     const i = src.indexOf('async function pageUntilDone');
     expect(i, 'pageUntilDone 不见了 —— 本条要重写').toBeGreaterThan(-1);
-    const body = src.slice(i, src.indexOf('\n}', i));
+    /**
+     * ⚠️ 切到**下一个顶层函数**为止,不是第一个 `\n}` ——
+     * 2026-10-07 加了断点续采的返回类型 `}>` 之后,
+     * 第一个 `\n}` 落在**类型声明里**,切片只剩几十字符,
+     * 断言当场变红(好事:说明它钉的是真东西)。
+     */
+    const after = src.indexOf('\n/**', i);
+    const body = src.slice(i, after > i ? after : undefined);
     expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(300);
     /** ① 没游标 ② 游标不变 —— 这两条是采集层的本职 */
     expect(body, '不判「没有下一页游标」').toContain('没有下一页游标');
@@ -2145,6 +2152,120 @@ describe('一个入口:响应里有什么就产出什么', () => {
 
     /** ⭐ 批间停顿明显长于轮间抖动 —— 翻 40 轮至少歇过一次 */
     expect(Math.max(...waits), '没有批间长停顿').toBeGreaterThanOrEqual(10_000);
+  });
+
+  it('⭐⭐⭐ 给了断点就从断点翻 —— 不许再用种子那一页的游标', async () => {
+    /**
+     * ⚠️⚠️ `Followers` 端点约 50 次/窗口就 429,而 X 每次都从**第 1 页**给游标。
+     * 不续采的话:翻 1-48 轮全是已入库的人 → 第 49 轮又 429
+     * → **整个配额浪费在重采上,一个新人都拿不到**。
+     */
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let firstSent: string | undefined;
+    await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⭐ 种子给的是**第 1 页**的游标 */
+        return { items: [{ url: FOLLOWERS, text: page([1], 'SEED-PAGE-1') }] };
+      },
+      async runScript(_id, params) {
+        if (firstSent === undefined) {
+          firstSent = (params as { cursor?: string }).cursor;
+        }
+        return { ok: true, status: 200, body: page([2], 'c2') };
+      },
+    }, { wantPages: 2, depth: 'as-is', resumeCursor: 'RESUME-FROM-HERE' });
+
+    expect(firstSent, '第一轮没用断点,又从第 1 页开始了').toBe('RESUME-FROM-HERE');
+  });
+
+  it('⭐⭐⭐ 停下来要把手里的游标带出去 —— 被挡那次最需要它', async () => {
+    const page = (ids: number[], cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          ...ids.map((i) => ({
+            entryId: `user-${i}`,
+            content: { itemContent: { user_results: { result: {
+              rest_id: `${900 + i}`,
+              core: { screen_name: `user${i}`, name: `名字${i}` },
+              legacy: {},
+            } } } },
+          })),
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+      },
+      async runScript() {
+        n += 1;
+        /** ⚠️ 第 3 轮起一直 429 —— 模拟撞配额 */
+        if (n >= 3) return { ok: false, status: 429, why: 'HTTP 429' };
+        return { ok: true, status: 200, body: page([n * 10], `cursor-${n}`) };
+      },
+      async wait() { /* 测试里不真等 */ },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.paging?.stopReason).toContain('限流');
+    expect(r.nextCursor, '被挡下却没带出游标 —— 下次只能从头采').toBeTruthy();
+    expect(r.exhausted, '没到头就不该标 exhausted').toBe(false);
+  });
+
+  it('⭐⭐⭐ X 说到头了就**不带**游标 —— 下次该从头采拿新增', async () => {
+    /** ⚠️ 带着一个已经到底的游标去续,只会立刻又到底,白跑一趟 */
+    const page = (ids: number[], cursor: string | null, done: boolean): string => {
+      const entries: unknown[] = ids.map((i) => ({
+        entryId: `user-${i}`,
+        content: { itemContent: { user_results: { result: {
+          rest_id: `${900 + i}`,
+          core: { screen_name: `user${i}`, name: `名字${i}` },
+          legacy: {},
+        } } } },
+      }));
+      if (cursor) {
+        entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
+      }
+      const instructions: unknown[] = [{ type: 'TimelineAddEntries', entries }];
+      if (done) instructions.push({ type: 'TimelineTerminateTimeline', direction: 'Bottom' });
+      return JSON.stringify({
+        data: { user: { result: { timeline: { timeline: { instructions } } } } },
+      });
+    };
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: FOLLOWERS, text: page([1], 'c0', false) }] };
+      },
+      async runScript() {
+        n += 1;
+        return { ok: true, status: 200, body: page([n * 10], `c${n}`, n >= 2) };
+      },
+      async wait() { /* noop */ },
+    }, { wantPages: 100, depth: 'as-is' });
+
+    expect(r.exhausted, 'X 说到头了却没标').toBe(true);
+    expect(r.nextCursor, '到头了还带游标 —— 下次会白跑一趟').toBeUndefined();
   });
 
   it('⭐⭐ 什么都没解出来才是 empty', async () => {

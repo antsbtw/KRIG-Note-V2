@@ -204,6 +204,17 @@ export type RunResult = {
    * 「**现在该停手等一等**」,不是「哪个字段没解出来」。
    */
   readonly rateLimit?: string;
+  /**
+   * ⭐⭐⭐ **停下来时手里那个游标** —— 断点续采靠它(2026-10-07)。
+   *
+   * ⚠️ 无论是被 429 挡下、人点停、还是翻够了,都要带出来 ——
+   * **被挡那次正是最需要它的一次**:不带的话下次从第 1 页开始,
+   * 50 次配额全浪费在重采已入库的人上。
+   * ⭐ `undefined` = 没有可续的(X 说到头了 / 压根没翻页)。
+   */
+  readonly nextCursor?: string;
+  /** ⭐ X 说过「到头了」没有 —— 到头后下次该**从头采**(拿新增),不是续 */
+  readonly exhausted?: boolean;
 };
 
 /** ⚠️ 补全有上限 —— 安全网,不是目标(`feedback-pdca-close-the-loop`) */
@@ -373,7 +384,18 @@ async function pageUntilDone(
    * ⭐ 传整份出去,「这一页里有什么」由外面那层决定怎么用。
    */
   onRound: (rep: RunHarvest) => void,
-): Promise<{ audits: TimelineAudit[]; paging: NonNullable<RunResult['paging']> }> {
+  /**
+   * ⭐⭐⭐ **从这个游标接着翻** —— 断点续采。
+   * ⚠️ 不给就用种子那一页的游标(从头采)。
+   */
+  resumeCursor?: string,
+): Promise<{
+  audits: TimelineAudit[];
+  paging: NonNullable<RunResult['paging']>;
+  /** ⭐ 停下来时手里那个游标 —— 下次从这里续 */
+  nextCursor?: string;
+  exhausted: boolean;
+}> {
   const all = [...audits];
   /** ⭐ 停止原因**要带出去**,不能只 say() —— say 的东西关掉就没了 */
   let stopReason = '跑满安全网（未触发任何数据判据）';
@@ -403,7 +425,13 @@ async function pageUntilDone(
   ) ?? seedCandidates[0];
   if (seed === undefined) {
     say('没有可用来翻页的请求 —— 跳过主动翻页');
-    return { audits: all, paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0, rounds_detail: [] } };
+    return {
+      audits: all,
+      paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0, rounds_detail: [] },
+      /** ⚠️ 连请求模板都没有,谈不上续采 */
+      nextCursor: undefined,
+      exhausted: false,
+    };
   }
 
   /**
@@ -422,6 +450,12 @@ async function pageUntilDone(
    * 没有「见过没见过」可挑);真正的挑选逻辑在循环里。
    */
   let lastUserCursor: string | undefined = (() => {
+    /**
+     * ⭐⭐⭐ **有断点就从断点开始** —— 2026-10-07。
+     * ⚠️ 种子那一页给的永远是**第 1 页**的游标(X 每次都从头给),
+     * 拿它续采等于重走已经走过的 48 轮,配额全浪费。
+     */
+    if (resumeCursor !== undefined && resumeCursor !== '') return resumeCursor;
     const cs = dispatchPayloads(rep.items).users
       .map((a) => a.cursor)
       .filter((c): c is string => c !== undefined && c !== '');
@@ -758,6 +792,12 @@ async function pageUntilDone(
   return {
     audits: all,
     paging: { rounds: round, stopReason, freshTotal: seenKeys.size - seedCount, rounds_detail: roundsDetail },
+    /**
+     * ⭐⭐⭐ **把手里那个游标带出去** —— 下次从这里续。
+     * ⚠️ X 说到头了就**不带**:那时续采没有意义,下次该从头采拿新增。
+     */
+    nextCursor: terminated ? undefined : lastUserCursor,
+    exhausted: terminated,
   };
 }
 
@@ -774,6 +814,14 @@ export async function runCollect(
     wantPages: number; depth: FetchDepth; maxRounds?: number; maxMs?: number;
     /** ⭐ 第一趟滚动采几页就够 —— 只为抄请求模板,默认 `SEED_PAGES` */
     seedPages?: number;
+    /**
+     * ⭐⭐⭐ **从这个游标接着翻** —— 断点续采(2026-10-07)。
+     * ⚠️⚠️ `Followers` 端点约 50 次/窗口就 429,而 X 每次都从**第 1 页**给游标。
+     * 不续采的话:翻 1-48 轮全是已入库的人 → 第 49 轮又 429
+     * → **整个配额浪费在重采上,一个新人都拿不到**。
+     * ⭐ 不给就从头采(首跑、或上次已到头)。
+     */
+    resumeCursor?: string;
   },
 ): Promise<RunResult> {
   const say = (m: string): void => deps.onProgress?.(m);
@@ -967,6 +1015,9 @@ export async function runCollect(
    */
   const isUserList = userAudits.some((a) => a.items.length > 0);
   let paging: RunResult['paging'] = null;
+  /** ⭐ 断点续采:停下来时手里那个游标 + X 有没有说到头 */
+  let nextCursor: string | undefined;
+  let exhausted = false;
   if (scrolledToBottom && gotSomething && !isUserList) {
     say('滚到底了 —— 这一页已经采完,跳过翻页');
     paging = {
@@ -980,9 +1031,11 @@ export async function runCollect(
       totalResponses += one.items.length;
       /** ⭐ 翻页回来的用户也收下 —— 名次接着往下编 */
       takeUsers(one);
-    });
+    }, opts.resumeCursor);
     audits = r.audits;
     paging = r.paging;
+    nextCursor = r.nextCursor;
+    exhausted = r.exhausted;
   }
 
   /**
@@ -999,6 +1052,8 @@ export async function runCollect(
       /** ⭐ 由数据算:解出了人就是 users,真的什么都没有才是 empty */
       kind: gotUsers ? 'users' : 'empty',
       rateLimit,
+      nextCursor,
+      exhausted,
     };
   }
 
@@ -1142,5 +1197,7 @@ export async function runCollect(
     /** ⭐ 两种都解出来了就是 mixed —— 那是真实情况不是异常 */
     kind: userAudits.some((a) => a.items.length > 0) ? 'mixed' : 'tweets',
     rateLimit,
+    nextCursor,
+    exhausted,
   };
 }
