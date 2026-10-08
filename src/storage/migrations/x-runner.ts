@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11, x_migration_1_2_12, x_migration_1_2_13, x_migration_1_2_14, x_migration_1_2_15, x_migration_1_2_16, x_migration_1_2_17, x_migration_1_2_18, x_migration_1_2_19 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11, x_migration_1_2_12, x_migration_1_2_13, x_migration_1_2_14, x_migration_1_2_15, x_migration_1_2_16, x_migration_1_2_17, x_migration_1_2_18, x_migration_1_2_19, x_migration_1_2_20 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -217,6 +217,11 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.2.19',
     description: '落库账本 x_collect_log(只追加:增长曲线 / 名单更新时间 / 对账)',
     up: x_migration_1_2_19,
+  },
+  {
+    version: '1.2.20',
+    description: 'x_author 身份改为 rest_id(handle 只是当前名字,旧名进 handle_history;合并改名重复)',
+    up: x_migration_1_2_20,
   },
 ];
 

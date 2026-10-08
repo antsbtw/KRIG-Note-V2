@@ -152,6 +152,8 @@ export function registerXDataIpc(): void {
               updated: r.updated,
               /** ⭐ 无 handle 被挡下的单独记 —— 它不是写库失败,混一起会指错层 */
               skippedNoHandle: r.skippedNoHandle,
+              /** ⭐ 身份是数字 id —— 没有 id 的不建人,单独记 */
+              skippedNoRestId: r.skippedNoRestId,
               failed: r.failed.length,
               firstFailure: r.failed[0]?.why ?? '(none)',
               listSource: p.ctx.listSource,
