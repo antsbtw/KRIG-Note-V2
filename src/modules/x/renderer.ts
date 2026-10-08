@@ -34,11 +34,13 @@
 import { registerView } from '@slot/view-type-registry/register-view';
 import { XWebView } from './XWebView';
 import { XWorkbenchView } from './XWorkbenchView';
+import { XOpsView } from './XOpsView';
 import { registerXCommands } from './x-commands';
 
 /** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
 export const X_WEB_VIEW_ID = 'x-web-view';
 export const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
+export const X_OPS_VIEW_ID = 'x-ops-view';
 
 /** ① 左栏:X 的网页 */
 registerView({
@@ -85,4 +87,30 @@ registerView({
   install: [],
   component: XWorkbenchView,
   slotPickerEntry: { label: 'X 操作台', icon: '🛠', order: 6 },
+});
+
+/**
+ * ③ 运营 —— ⭐ X 的**业务平台**(2026-10-07)
+ *
+ * 用户原话:「这个view，是一个和x view是同级别的，也可以放大做到全屏，可以放在左边右边的。」
+ * ⭐ 所以与 X 网页一样上 navSide(能开在左栏),也自动进 SlotPicker(能开在右栏);
+ * 最常用的入口是 X 网页顶条上的「📊 运营」按钮(开/关右栏)。
+ * ⚠️ 与操作台区分:操作台是测试后台、将来隐藏;业务功能只进运营。
+ */
+registerView({
+  id: X_OPS_VIEW_ID,
+  install: [],
+  component: XOpsView,
+  navSideTab: {
+    label: '运营',
+    icon: '📊',
+    /** ⭐ 6.5 —— 紧挨 X 网页(6);1–7 与 99 已被占用 */
+    order: 6.5,
+    /**
+     * ⚠️ 运营没有自己的 navSide 面板内容 —— 切过来收起 navSide,
+     * 且禁止点已激活 tab 展开一栏空的(与 X 网页同款)。
+     */
+    navSideOnSwitch: 'collapse',
+    navSideDisabled: true,
+  },
 });

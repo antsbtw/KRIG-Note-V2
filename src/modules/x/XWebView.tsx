@@ -40,6 +40,11 @@ const X_HOME = 'https://x.com/home';
 
 /** ⭐ 操作台的 view id —— 与 `renderer.ts` 的注册共用同一个字面量 */
 const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
+/**
+ * ⭐ 运营的 view id —— 同上,与 `renderer.ts` 共用同一个字面量。
+ * ⚠️ 不 import renderer.ts:那会把 registerView 的副作用拖进来(循环引用)。
+ */
+const X_OPS_VIEW_ID = 'x-ops-view';
 
 type WebRenderingApi = {
   Host: React.ForwardRefExoticComponent<HostProps & React.RefAttributes<HostHandle>>;
@@ -136,6 +141,25 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
     else bus.slot.openRight(X_WORKBENCH_VIEW_ID);
   }, [workspaceId]);
 
+  /**
+   * ⭐⭐ 「运营」按钮 —— 用户 2026-10-07:「同意叫运营-在toolbar中放置这样的button，
+   * 点击后弹出right slot view」。
+   * ⚠️ 与操作台同一手法:读「右栏现在装的是谁」是读状态,不是猜自己在哪一栏。
+   */
+  const opsOpen = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => workspaceManager.get(workspaceId)?.slotBinding.right === X_OPS_VIEW_ID,
+  );
+
+  const handleToggleOps = useCallback(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    // ⚠️ 用当下的真状态判断,不缓存
+    const openNow = workspaceManager.get(workspaceId)?.slotBinding.right === X_OPS_VIEW_ID;
+    if (openNow) bus.slot.closeRight();
+    else bus.slot.openRight(X_OPS_VIEW_ID);
+  }, [workspaceId]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 顶条:地址显示 + 召出右栏 */}
@@ -156,6 +180,21 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         >
           {url}
         </span>
+        {/* ⭐ 业务平台入口:开/关右栏的「运营」 */}
+        <button
+          type="button"
+          onClick={handleToggleOps}
+          title={opsOpen ? '关闭运营' : '打开运营'}
+          style={{
+            background: opsOpen ? 'var(--accent-bg, #2d4a6b)' : 'transparent',
+            border: '1px solid var(--border-color, #444)',
+            borderRadius: 4,
+            color: opsOpen ? 'var(--text-primary, #ddd)' : 'var(--text-secondary, #aaa)',
+            cursor: 'pointer', fontSize: 12, padding: '3px 8px', flex: '0 0 auto',
+          }}
+        >
+          📊 运营
+        </button>
         {/* ⭐ 最高频动作:直接开/关操作台,不必去 picker 里认名字 */}
         <button
           type="button"

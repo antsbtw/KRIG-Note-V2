@@ -95,7 +95,12 @@ export type XDataInvoke =
       };
     }
   /** ⭐ 清断点 —— 面板「从头采」用。⚠️ 删的是派生状态,人一个不少 */
-  | { readonly op: 'clearCursor'; readonly scope: string };
+  | { readonly op: 'clearCursor'; readonly scope: string }
+  /**
+   * ⭐⭐ 运营 → 状态 的全部数字(2026-10-07)—— 返回 `OpsStatus`(x-ops-status.ts)。
+   * 人数 / 推文数 / 各名单更新时间 / 近几天账本 / 还没采集的类别。
+   */
+  | { readonly op: 'opsStatus' };
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:

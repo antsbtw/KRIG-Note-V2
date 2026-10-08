@@ -348,7 +348,7 @@ export function XConsole(
   const [userRun, setUserRun] = useState<{
     listSource: string;
     users: number;
-    saved: { inserted: number; updated: number; skippedNoHandle: number; failed: unknown[] } | null;
+    saved: { inserted: number; updated: number; skippedNoHandle: number; skippedNoRestId?: number; failed: unknown[] } | null;
     reason: string;
   } | null>(null);
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
@@ -1092,7 +1092,7 @@ export function XConsole(
                           saved: su.status === 'ok'
                             ? (su.value as {
                               inserted: number; updated: number;
-                              skippedNoHandle: number; failed: unknown[];
+                              skippedNoHandle: number; skippedNoRestId?: number; failed: unknown[];
                             })
                             : null,
                           reason: su.status === 'ok' ? '' : (su as { reason?: string }).reason ?? '',
@@ -1371,6 +1371,11 @@ export function XConsole(
                         {userRun.saved.skippedNoHandle > 0 && (
                           <>　·　<span style={{ opacity: 0.8 }}>
                             无 handle 挡下 {userRun.saved.skippedNoHandle}
+                          </span></>
+                        )}
+                        {(userRun.saved.skippedNoRestId ?? 0) > 0 && (
+                          <>　·　<span style={{ opacity: 0.8 }}>
+                            无数字 id 挡下 {userRun.saved.skippedNoRestId}
                           </span></>
                         )}
                         {userRun.saved.failed.length > 0 && (

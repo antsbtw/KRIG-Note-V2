@@ -1733,6 +1733,208 @@ DEFINE FIELD IF NOT EXISTS last_reason  ON x_collect_cursor TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS total_seen   ON x_collect_cursor TYPE option<int>;
 `;
 
+/**
+ * ⭐⭐⭐ 1.2.19 —— 落库账本 `x_collect_log`(2026-10-07)
+ *
+ * 用户要「运营 → 状态」里有**一周的数据增长曲线**。
+ * ⚠️ 库里画不出来:`x_author.fetched_at` / `x_tweet.fetched_at` **每次重采都改成当天**,
+ * 拿它画曲线,重采一遍所有人就都成了「今天新增」—— 曲线是假的。
+ *
+ * ⭐ 解法:**只追加不覆盖**的账本,每次落库记一行(何时 / 人还是推文 / 哪个名单或来源 /
+ * 新增几 / 更新几 / 失败几)。曲线 = 按天汇总 inserted;名单更新时间 = 该名单最后一行。
+ * ⭐ 附带**对账**:账本 inserted 合计应等于表行数 —— 不等就有数据没走正规路径进库。
+ *
+ * ⭐ 过去的部分从留痕(web-trace/lifecycle 的 x-save*-ok 事件)补:
+ * 2026-10-07 实测留痕合计 人 6342 / 推文 130,与库里行数**一条不差**。
+ * 补导由 `scripts/x-backfill-collect-log.mjs` 做(`origin = 'trace-backfill'`)。
+ */
+const X_SCHEMA_1_2_19 = `
+DEFINE TABLE IF NOT EXISTS x_collect_log SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS at       ON x_collect_log TYPE datetime;
+-- users | tweets
+DEFINE FIELD IF NOT EXISTS kind     ON x_collect_log TYPE string ASSERT $value IN ['users', 'tweets'];
+-- 人:名单词(followers / following / verifiedFollowers);推文:来源页(x.search …)
+DEFINE FIELD IF NOT EXISTS source   ON x_collect_log TYPE string;
+DEFINE FIELD IF NOT EXISTS given    ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS inserted ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS updated  ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS failed   ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS ws_id    ON x_collect_log TYPE option<string>;
+-- live(落库时实时记)| trace-backfill(从留痕补的)
+DEFINE FIELD IF NOT EXISTS origin   ON x_collect_log TYPE string;
+DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
+`;
+
+/**
+ * ⭐⭐⭐ 1.2.20 —— `x_author` 的身份从 handle 改成数字 id(rest_id)(2026-10-07)
+ *
+ * handle 会变、rest_id 不变。用 handle 当 record id 的两个毛病(真库实测):
+ * ① 改名 → 一个人两行(当时 7 例:ray16ok → dieulinxx、citydesk_x → xiaoxielaile …)
+ * ② 旧 handle 被别人注册 → 采到新人时**覆盖旧人那一行**(人工字段落到别人头上,不报错)
+ * → record id = rest_id;handle 只是「当前名字」,旧名进 `handle_history`(只加不减)。
+ *
+ * ⚠️ 为什么现在改:人工字段(blocked / watched / note / is_self / x_blocking)**全是 0**,
+ * 合并重复行不会丢任何人工成果。等有了屏蔽名单再改,风险就大了。
+ *
+ * ⚠️ handle 的 UNIQUE 必须去掉:旧 handle 会被别人复用,同一时刻两行同 handle 是合法的
+ * (一个是改名前的旧人、一个是新注册的人)。
+ */
+const X_SCHEMA_1_2_20 = `
+REMOVE INDEX IF EXISTS idx_author_handle ON x_author;
+DEFINE INDEX IF NOT EXISTS idx_author_handle ON x_author FIELDS handle;
+-- 曾用名:改名时把旧 handle 加进来,只加不减
+DEFINE FIELD IF NOT EXISTS handle_history ON x_author TYPE option<array<string>>;
+`;
+
+/** 人工字段 —— 合并时取「或」,一个都不许丢(与 x-user-repo 的 USER_BUSINESS_FIELDS 同一组) */
+type AuthorRow = Record<string, unknown> & { id: RecordId; rest_id?: string; handle: string; fetched_at?: unknown };
+
+/**
+ * ⭐ 一组同 rest_id 的旧行 → 一份新内容。
+ * 采集字段取**最近一次采到**的那行;名单归属取并集;其它 handle 进曾用名;人工字段取「或」。
+ * 导出给离线测试用。
+ */
+export function mergeAuthorRows(rows: readonly AuthorRow[]): Record<string, unknown> {
+  const ts = (r: AuthorRow): number => {
+    const f = r.fetched_at as { toString(): string } | undefined;
+    const t = f === undefined ? NaN : Date.parse(f instanceof Date ? f.toISOString() : String(f));
+    return Number.isNaN(t) ? -Infinity : t;
+  };
+  const sorted = [...rows].sort((a, b) => ts(b) - ts(a));
+  const primary = sorted[0];
+  const { id: _id, ...content } = primary;
+  const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+
+  content.list_memberships = [...new Set(sorted.flatMap((r) => strs(r.list_memberships)))];
+  content.handle_history = [...new Set([
+    ...sorted.flatMap((r) => strs(r.handle_history)),
+    ...sorted.map((r) => r.handle),
+  ])].filter((h) => h !== primary.handle);
+
+  const anyTrue = (k: string): boolean => sorted.some((r) => r[k] === true);
+  content.blocked = anyTrue('blocked');
+  content.watched = anyTrue('watched');
+  content.is_self = anyTrue('is_self');
+  if (sorted.some((r) => r.x_blocking !== undefined)) content.x_blocking = anyTrue('x_blocking');
+  const notes = [...new Set(sorted.map((r) => r.note).filter((n): n is string => typeof n === 'string' && n !== ''))];
+  if (notes.length > 0) content.note = notes.join(' / ');
+  for (const k of ['blocked_at', 'blocked_reason', 'watched_at', 'watch_source']) {
+    const v = sorted.find((r) => r[k] !== undefined)?.[k];
+    if (v !== undefined) content[k] = v;
+  }
+  const depths = sorted.map((r) => r.watch_depth).filter((d): d is number => typeof d === 'number');
+  if (depths.length > 0) content.watch_depth = Math.max(...depths);
+  return content;
+}
+
+export async function x_migration_1_2_20(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_20);
+
+  const info = await db.query<[{ fields?: Record<string, unknown>; indexes?: Record<string, string> }]>(
+    'INFO FOR TABLE x_author',
+  );
+  if (!('handle_history' in (info?.[0]?.fields ?? {}))) {
+    throw new Error('[x-schema 1.2.20] handle_history 没建上 —— 整段 DDL 可能被拒收');
+  }
+  if (/UNIQUE/.test(info?.[0]?.indexes?.idx_author_handle ?? 'UNIQUE')) {
+    throw new Error('[x-schema 1.2.20] idx_author_handle 还是 UNIQUE(或不存在)—— 旧 handle 被复用时会写不进');
+  }
+
+  /** ── 搬数据:按 rest_id 分组 ── */
+  const [rows] = await db.query<[AuthorRow[]]>('SELECT * FROM x_author');
+  const groups = new Map<string, AuthorRow[]>();
+  let noRestId = 0;
+  for (const r of rows ?? []) {
+    if (typeof r.rest_id !== 'string' || r.rest_id === '') { noRestId += 1; continue; }
+    const g = groups.get(r.rest_id);
+    if (g) g.push(r); else groups.set(r.rest_id, [r]);
+  }
+
+  /** ⭐ 可重跑:已经以 rest_id 为身份、且没有重复的组,跳过 */
+  const todo = [...groups.entries()].filter(([rid, g]) =>
+    !(g.length === 1 && String(g[0].id.id) === rid));
+  const mergedAway = [...groups.values()].reduce((s, g) => s + g.length - 1, 0);
+
+  const BATCH = 200;
+  for (let i = 0; i < todo.length; i += BATCH) {
+    const batch = todo.slice(i, i + BATCH).map(([rid, g]) => ({
+      rid,
+      content: mergeAuthorRows(g),
+      /** ⚠️ 旧 id 恰好等于新 id 时不能删(删了就把刚写的新行删了) */
+      olds: g.map((r) => r.id).filter((id) => String(id.id) !== rid),
+    }));
+    await db.query(
+      `BEGIN TRANSACTION;
+       FOR $g IN $batch {
+         FOR $old IN $g.olds { DELETE $old; };
+         UPSERT type::record('x_author', $g.rid) CONTENT $g.content;
+       };
+       COMMIT TRANSACTION;`,
+      { batch },
+    );
+  }
+
+  /** ── ⭐⭐ 问库要答案:一人一行、身份 = rest_id ── */
+  const [[total], dupGroups, [badKey]] = await db.query<[[{ n: number }], Array<{ n: number }>, [{ n: number }]]>(`
+    SELECT count() AS n FROM x_author WHERE rest_id != NONE GROUP ALL;
+    SELECT count() AS n FROM
+      (SELECT rest_id, count() AS n FROM x_author WHERE rest_id != NONE GROUP BY rest_id)
+      WHERE n > 1 GROUP ALL;
+    SELECT count() AS n FROM x_author WHERE rest_id != NONE AND <string> record::id(id) != rest_id GROUP ALL;
+  `);
+  const t = total?.n ?? 0;
+  const dup = dupGroups?.[0]?.n ?? 0;
+  const bad = badKey?.n ?? 0;
+  if (t !== groups.size || dup !== 0 || bad !== 0) {
+    throw new Error(`[x-schema 1.2.20] 搬完对不上:有 id 的行 ${t}(应为 ${groups.size})· 仍重复的 id ${dup} · 身份不是 rest_id 的 ${bad} 行`);
+  }
+  if (noRestId > 0) {
+    /** ⚠️ 不阻断启动,但响亮地说出来 —— 这些行没法按数字 id 认人 */
+    console.warn(`[x-schema 1.2.20] ⚠️ ${noRestId} 行没有 rest_id,保持原样未迁移`);
+  }
+
+  /**
+   * ⭐ 账本补一条更正 —— 账本只追加不修改;合并掉的行用一条负数记录说清楚去了哪,
+   * 对账(账本新增合计 = 表行数)继续成立。origin = 'migration',状态页的曲线与采集时间不计它。
+   */
+  if (mergedAway > 0) {
+    await db.query(
+      `CREATE x_collect_log SET at = time::now(), kind = 'users', source = 'merge-renamed',
+         given = 0, inserted = $n, updated = 0, failed = 0, origin = 'migration'`,
+      { n: -mergedAway },
+    );
+  }
+  console.log(`[x-schema 1.2.20] x_author 身份改为 rest_id:${groups.size} 人,合并改名重复 ${mergedAway} 行`);
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.20', appliedAt = $now,
+      description = 'x_author 身份改为 rest_id(handle 只是当前名字,旧名进 handle_history;合并改名重复)'`,
+    { rid: new RecordId('schema_version', '1.2.20'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_19(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_19);
+
+  /** ⭐⭐ 问库要答案 —— 整段 DDL 可能被拒收而「看着跑了」 */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>(
+    'INFO FOR TABLE x_collect_log',
+  );
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['at', 'kind', 'source', 'given', 'inserted', 'updated', 'failed', 'ws_id', 'origin']) {
+    if (!(f in fields)) {
+      throw new Error(`[x-schema 1.2.19] x_collect_log.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.19] x_collect_log 落库账本已建');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.19', appliedAt = $now,
+      description = '落库账本 x_collect_log(只追加:增长曲线 / 名单更新时间 / 对账)'`,
+    { rid: new RecordId('schema_version', '1.2.19'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_18(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_18);
 

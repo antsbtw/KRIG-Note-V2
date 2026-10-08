@@ -185,3 +185,63 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
   });
 });
 
+
+/**
+ * ⭐⭐ 运营 —— X 的业务平台(2026-10-07)
+ *
+ * 用户原话:「这个view，是一个和x view是同级别的，也可以放大做到全屏，可以放在左边右边的。」
+ * 「同意叫运营-在toolbar中放置这样的button，点击后弹出right slot view」
+ */
+describe('⭐⭐ 运营 view', () => {
+  const stripComments = (s: string): string =>
+    s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const OPS = stripComments(readFileSync(join(process.cwd(), 'src/modules/x/XOpsView.tsx'), 'utf-8'));
+
+  it('⭐ 与 X 网页同级:上 navSide(能开在左栏),SlotPicker 自动列出(能开在右栏)', () => {
+    const v = byId('x-ops-view');
+    expect(v, 'x-ops-view 没注册').toBeDefined();
+    /** SlotPickerPopup 列的是 navSideTab ∪ slotPickerEntry —— 有 navSideTab 就能进右栏 */
+    expect(v!.navSideTab?.label).toBe('运营');
+    expect(v!.component, '与别的 view 共用了组件').not.toBe(byId('x-web-view')!.component);
+    expect(v!.component).not.toBe(byId('x-workbench-view')!.component);
+  });
+
+  it('⭐ navSide 顺位不与别人撞', () => {
+    const orders = all().map((x) => x.navSideTab?.order).filter((o) => o !== undefined);
+    expect(new Set(orders).size, 'navSide order 有重复 —— 两个 tab 会争位置').toBe(orders.length);
+  });
+
+  it('⭐⭐ X 网页上有「运营」按钮,且 view id 与注册的一致', () => {
+    const web = stripComments(readFileSync(join(process.cwd(), 'src/modules/x/XWebView.tsx'), 'utf-8'));
+    const id = byId('x-ops-view')!.id;
+    expect(web.includes(`'${id}'`), `XWebView 里找不到 '${id}' —— 按钮点了静默无反应`).toBe(true);
+    expect(web).toMatch(/bus\.slot\.openRight\(X_OPS_VIEW_ID\)/);
+  });
+
+  it('⭐⭐ 全屏是覆盖层:不碰 slot 布局(否则右栏进全屏会重建实例、全屏态丢失)', () => {
+    expect(OPS, '全屏样式不是 position: fixed').toMatch(/position:\s*'fixed'/);
+    /**
+     * ⚠️ 切出全屏那一段,断言里**没有**开关槽的调用 ——
+     * eBook 的做法(closeRight/closeLeft 腾栏)在右栏会触发实例重建。
+     */
+    const i = OPS.indexOf('setFullscreen((f) => !f)');
+    expect(i, '全屏切换找不到了 —— 本条要重写').toBeGreaterThan(-1);
+    expect(OPS).not.toMatch(/setNavSideCollapsed/);
+    /**
+     * ⚠️ 匹配**任何写法**的开关槽(`bus.slot.x(` / `getBus(..)?.slot.x(` …)——
+     * 第一版只认 `bus.slot.close`,注入 `getBus(id)?.slot.closeRight()` 进全屏切换时**仍全绿**。
+     */
+    const closeCalls = OPS.match(/\.close(Left|Right)\(/g) ?? [];
+    expect(closeCalls.length, '关槽调用只该出现在 ✕(handleClose)里,各一次').toBe(2);
+    expect(OPS, '运营自己不该开槽 —— 全屏靠覆盖层').not.toMatch(/\.open(Left|Right)\(/);
+    const close = OPS.slice(OPS.indexOf('const handleClose'), OPS.indexOf('}, [workspaceId, slot]);'));
+    expect(close.length, '切出来的 handleClose 是空的').toBeGreaterThan(50);
+    expect(close).toMatch(/bus\.slot\.closeRight\(/);
+    expect(close).toMatch(/bus\.slot\.closeLeft\(/);
+  });
+
+  it('⭐⭐ ✕ 关哪一栏由 slot prop 决定,不读 slotBinding 反推(project-dont-guess-own-slot)', () => {
+    expect(OPS).not.toMatch(/slotBinding/);
+    expect(OPS).toMatch(/slot === 'right'/);
+  });
+});

@@ -21,6 +21,15 @@
  * (`project-x-upsert-insert-ignore` 的教训是「该更新的没更新」,
  * 这张表的风险是反向的「不该更新的被更新」。两头都要防。)
  *
+ * ── ⭐⭐⭐ 身份 = 数字 id(rest_id),不是 handle(2026-10-07 改,schema 1.2.20)──
+ *
+ * handle 会变、rest_id 不变。用 handle 当 record id 的两个毛病(真库实测):
+ * ① 改名 → 一个人两行(当时 7 例,如 ray16ok → dieulinxx)
+ * ② 旧 handle 被别人注册 → 采到新人时**覆盖旧人那一行**,屏蔽/追踪/备注落到别人头上,不报错
+ * → record id = rest_id;handle 只是「当前名字」,改名时旧名进 `handle_history`(只加不减)。
+ * ⚠️ 没有 rest_id 的记录**不建人**(skippedNoRestId 报数),绝不退回用 handle 建一行 ——
+ * 那会把上面两个毛病原样请回来。
+ *
  * ── ⭐ 三条从别处买来的经验,这里一开始就遵守 ──
  *
  * ① **handle 必须归一化**(`project-x-handle-normalize`)
@@ -53,7 +62,7 @@ export const USER_COLLECTED_FIELDS = [
   'website', 'is_blue_verified', 'is_verified', 'is_protected',
   'i_follow', 'follows_me',
   'account_created_at', 'list_source', 'list_seq', 'list_seen_at',
-  'list_memberships', 'fetched_at',
+  'list_memberships', 'handle_history', 'fetched_at',
 ] as const;
 
 /**
@@ -94,6 +103,11 @@ export type SaveUsersResult = {
    * 两者混在一起会让人去查错误的那一层。解析器也会在 `problems` 里报它。
    */
   readonly skippedNoHandle: number;
+  /**
+   * ⭐⭐ **没有数字 id 被挡下的** —— 身份是 rest_id,没有它就不知道这是谁(2026-10-07)。
+   * ⚠️ 同样不混进 `failed`:不是写库出错,是载荷没给 id。
+   */
+  readonly skippedNoRestId: number;
 };
 
 /** ⚠️ 空串当成「没有」—— option<T> 要传 undefined,不是 null 也不是 '' */
@@ -113,7 +127,21 @@ function toDatetime(raw: string | undefined): string | undefined {
 
 type OldRow = {
   readonly list_memberships?: unknown;
+  readonly handle?: string;
+  readonly handle_history?: unknown;
 };
+
+/**
+ * ⭐ 曾用名 —— **只加不减**。handle 变了,把旧名加进去(去重、不含当前名)。
+ * ⚠️ 返回新数组,别原地改旧值。
+ */
+function mergeHandleHistory(old: OldRow | undefined, current: string): string[] {
+  const prev = Array.isArray(old?.handle_history)
+    ? old.handle_history.filter((x): x is string => typeof x === 'string')
+    : [];
+  const all = old?.handle !== undefined && old.handle !== current ? [...prev, old.handle] : prev;
+  return [...new Set(all)].filter((h) => h !== current);
+}
 
 /**
  * ⭐⭐ 合并名单归属 —— **只加不减**(schema 1.2.4 定的语义)。
@@ -139,6 +167,7 @@ export async function saveUsers(
   let inserted = 0;
   let updated = 0;
   let skippedNoHandle = 0;
+  let skippedNoRestId = 0;
   const failed: Array<{ handle: string; why: string }> = [];
 
   for (const r of records) {
@@ -152,6 +181,12 @@ export async function saveUsers(
       skippedNoHandle += 1;
       continue;
     }
+    /** ⭐⭐ 身份是数字 id —— 没有就不建人,绝不退回用 handle 当身份 */
+    const restId = opt(r.restId);
+    if (restId === undefined) {
+      skippedNoRestId += 1;
+      continue;
+    }
 
     try {
       /**
@@ -159,15 +194,15 @@ export async function saveUsers(
        * 也取出旧的 `list_memberships` 来累加(②)。
        */
       const found = await db.query<[OldRow[]]>(
-        'SELECT list_memberships FROM x_author WHERE handle = $handle LIMIT 1',
-        { handle },
+        "SELECT list_memberships, handle, handle_history FROM type::record('x_author', $rest_id)",
+        { rest_id: restId },
       );
       const old = (found[0] ?? [])[0];
       const exists = old !== undefined;
 
       const vars = {
         handle,
-        rest_id: opt(r.restId),
+        rest_id: restId,
         display_name: opt(r.name),
         avatar: opt(r.avatar),
         bio: opt(r.bio),
@@ -196,6 +231,7 @@ export async function saveUsers(
         list_seq: r.seq,
         list_seen_at: now,
         list_memberships: mergeMemberships(old?.list_memberships, ctx.listSource),
+        handle_history: mergeHandleHistory(old, handle),
         fetched_at: now,
       };
 
@@ -203,8 +239,8 @@ export async function saveUsers(
        * ⭐⭐⭐ **`UPSERT type::record(...)` 而不是 `UPSERT x_author ... WHERE`**。
        * ⚠️⚠️ 带 `WHERE` 的 UPSERT 没匹配到就**什么都不写、也不报错** ——
        * 2026-10-05 真机实证过:面板报「入库 44 条」而库里 0 行。
-       * ⭐ 用归一化的 handle 当 record id:天然唯一,重采自动落回同一行,
-       * 也就天然守住了「同一个人只有一行」。
+       * ⭐⭐ 用**数字 id** 当 record id(2026-10-07 起,原先是 handle):
+       * 改名、handle 被别人复用都不会让一个人变两行或两个人并一行。
        * ⚠️ `project-surreal-id-field-readonly`:**不 DEFINE FIELD id**,
        * 只在 record id 的位置用它。
        *
@@ -213,7 +249,7 @@ export async function saveUsers(
        * 那是人工与 AI 的成果,重采覆盖掉不可逆(见 USER_BUSINESS_FIELDS)。
        */
       await db.query(
-        `UPSERT type::record('x_author', $handle) SET
+        `UPSERT type::record('x_author', $rest_id) SET
            handle = $handle,
            rest_id = $rest_id,
            display_name = $display_name,
@@ -232,6 +268,7 @@ export async function saveUsers(
            list_source = $list_source, list_seq = $list_seq,
            list_seen_at = type::datetime($list_seen_at),
            list_memberships = $list_memberships,
+           handle_history = $handle_history,
            fetched_at = type::datetime($fetched_at)`,
         vars,
       );
@@ -253,8 +290,9 @@ export async function saveUsers(
     `[x.user-repo] 落库 ${records.length} 人(${ctx.listSource})`
     + ` → 新 ${inserted} / 更新 ${updated}`
     + (skippedNoHandle > 0 ? ` / 无 handle 挡下 ${skippedNoHandle}` : '')
+    + (skippedNoRestId > 0 ? ` / 无数字 id 挡下 ${skippedNoRestId}` : '')
     + (failed.length > 0 ? ` / 失败 ${failed.length}：${failed[0].why}` : ''),
   );
 
-  return { inserted, updated, failed, skippedNoHandle };
+  return { inserted, updated, failed, skippedNoHandle, skippedNoRestId };
 }

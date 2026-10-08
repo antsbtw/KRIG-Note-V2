@@ -100,14 +100,37 @@ describe('x_author 写库守卫', () => {
       .toMatch(/const handle = normalizeHandle\(r\.handle\)/);
   });
 
-  it('⭐⭐ record id 用的是归一化后的 handle,不是原始串', () => {
+  it('⭐⭐⭐ record id 是数字 id(rest_id),不是 handle(2026-10-07 改)', () => {
+    /**
+     * handle 会变、rest_id 不变。用 handle 当身份:改名 → 一人两行(真库 7 例);
+     * 旧 handle 被别人注册 → 两个人并一行(人工字段落到别人头上,不报错)。
+     */
     const sql = upsertSql();
-    /** ⚠️ 用 `$handle`(已归一化)而不是 `r.handle` */
-    expect(sql).toContain("type::record('x_author', $handle)");
+    expect(sql).toContain("type::record('x_author', $rest_id)");
+    expect(sql).not.toContain("type::record('x_author', $handle)");
     const vFrom = SRC.indexOf('const vars = {');
     const vars = SRC.slice(vFrom, SRC.indexOf('};', vFrom));
-    expect(vars, 'vars.handle 必须是归一化后的那个局部变量')
-      .toMatch(/^\s*handle,\s*$/m);
+    expect(vars, 'vars.handle 仍必须是归一化后的那个局部变量').toMatch(/^\s*handle,\s*$/m);
+    expect(vars, 'vars.rest_id 必须是过了「非空」闸门的那个').toMatch(/rest_id: restId,/);
+  });
+
+  it('⭐⭐⭐ 没有数字 id 不建人 —— 绝不退回用 handle 当身份', () => {
+    const fn = SRC.slice(SRC.indexOf('export async function saveUsers'));
+    const guard = fn.slice(fn.indexOf('if (restId === undefined)'));
+    expect(guard.length, '「没有 rest_id」的闸门不见了').toBeGreaterThan(20);
+    const branch = guard.slice(0, guard.indexOf('}'));
+    expect(branch).toMatch(/skippedNoRestId \+= 1/);
+    expect(branch).toMatch(/continue/);
+    expect(branch, '不是写库失败').not.toMatch(/failed\.push/);
+    /** 找旧行也按 rest_id,不按 handle */
+    expect(fn).toMatch(/FROM type::record\('x_author', \$rest_id\)/);
+    expect(fn).not.toMatch(/WHERE handle = \$handle/);
+  });
+
+  it('⭐⭐ 改名时旧名进 handle_history(只加不减)', () => {
+    expect(upsertSql()).toMatch(/handle_history = \$handle_history/);
+    const vFrom = SRC.indexOf('const vars = {');
+    expect(SRC.slice(vFrom, SRC.indexOf('};', vFrom))).toMatch(/handle_history: mergeHandleHistory\(old, handle\)/);
   });
 
   it('⭐⭐⭐ UPSERT 不许带 WHERE —— 没匹配到就什么都不写且不报错', () => {
