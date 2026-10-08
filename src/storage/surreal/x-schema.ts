@@ -1733,6 +1733,60 @@ DEFINE FIELD IF NOT EXISTS last_reason  ON x_collect_cursor TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS total_seen   ON x_collect_cursor TYPE option<int>;
 `;
 
+/**
+ * ⭐⭐⭐ 1.2.19 —— 落库账本 `x_collect_log`(2026-10-07)
+ *
+ * 用户要「运营 → 状态」里有**一周的数据增长曲线**。
+ * ⚠️ 库里画不出来:`x_author.fetched_at` / `x_tweet.fetched_at` **每次重采都改成当天**,
+ * 拿它画曲线,重采一遍所有人就都成了「今天新增」—— 曲线是假的。
+ *
+ * ⭐ 解法:**只追加不覆盖**的账本,每次落库记一行(何时 / 人还是推文 / 哪个名单或来源 /
+ * 新增几 / 更新几 / 失败几)。曲线 = 按天汇总 inserted;名单更新时间 = 该名单最后一行。
+ * ⭐ 附带**对账**:账本 inserted 合计应等于表行数 —— 不等就有数据没走正规路径进库。
+ *
+ * ⭐ 过去的部分从留痕(web-trace/lifecycle 的 x-save*-ok 事件)补:
+ * 2026-10-07 实测留痕合计 人 6342 / 推文 130,与库里行数**一条不差**。
+ * 补导由 `scripts/x-backfill-collect-log.mjs` 做(`origin = 'trace-backfill'`)。
+ */
+const X_SCHEMA_1_2_19 = `
+DEFINE TABLE IF NOT EXISTS x_collect_log SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS at       ON x_collect_log TYPE datetime;
+-- users | tweets
+DEFINE FIELD IF NOT EXISTS kind     ON x_collect_log TYPE string ASSERT $value IN ['users', 'tweets'];
+-- 人:名单词(followers / following / verifiedFollowers);推文:来源页(x.search …)
+DEFINE FIELD IF NOT EXISTS source   ON x_collect_log TYPE string;
+DEFINE FIELD IF NOT EXISTS given    ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS inserted ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS updated  ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS failed   ON x_collect_log TYPE int;
+DEFINE FIELD IF NOT EXISTS ws_id    ON x_collect_log TYPE option<string>;
+-- live(落库时实时记)| trace-backfill(从留痕补的)
+DEFINE FIELD IF NOT EXISTS origin   ON x_collect_log TYPE string;
+DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
+`;
+
+export async function x_migration_1_2_19(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_19);
+
+  /** ⭐⭐ 问库要答案 —— 整段 DDL 可能被拒收而「看着跑了」 */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>(
+    'INFO FOR TABLE x_collect_log',
+  );
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['at', 'kind', 'source', 'given', 'inserted', 'updated', 'failed', 'ws_id', 'origin']) {
+    if (!(f in fields)) {
+      throw new Error(`[x-schema 1.2.19] x_collect_log.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.19] x_collect_log 落库账本已建');
+
+  await db.query(
+    `UPSERT $rid SET version = '1.2.19', appliedAt = $now,
+      description = '落库账本 x_collect_log(只追加:增长曲线 / 名单更新时间 / 对账)'`,
+    { rid: new RecordId('schema_version', '1.2.19'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_18(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_18);
 

@@ -16,10 +16,29 @@ import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
 import { saveUsers } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
+import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
+
+/**
+ * ⭐⭐ 落库后记账本(x_collect_log)—— 增长曲线 / 名单更新时间 / 对账全靠它。
+ * ⚠️ 记账失败**不让落库报失败**(人已经进库了),但**留痕**:
+ * 漏记的那批会在状态页「对账」里现形(账本合计 ≠ 表行数),届时能从这条留痕查到原因。
+ */
+async function logCollect(e: CollectLogEntry): Promise<void> {
+  try {
+    await appendCollectLog(e);
+  } catch (err) {
+    const why = err instanceof Error ? err.message : String(err);
+    console.error(`[x.data] 账本没记上(${e.kind}/${e.source}):${why}`);
+    traceRecorder.lifecycle({
+      layer: 'web.net', event: 'x-collect-log-failed', pageId: 'x-data',
+      detail: { kind: e.kind, source: e.source, inserted: e.inserted, why },
+    });
+  }
+}
 
 /** ⚠️ 幂等 —— 多窗口/热重载下可能被调多次 */
 let wired = false;
@@ -88,6 +107,10 @@ export function registerXDataIpc(): void {
               source: p.ctx?.source ?? '(empty)',
             },
           });
+          await logCollect({
+            kind: 'tweets', source: p.ctx?.source || 'unknown', given: p.records.length,
+            inserted: r.inserted, updated: r.updated, failed: r.failed.length, wsId: p.ctx?.wsId,
+          });
           return { status: 'ok', value: r };
         }
 
@@ -134,6 +157,10 @@ export function registerXDataIpc(): void {
               listSource: p.ctx.listSource,
             },
           });
+          await logCollect({
+            kind: 'users', source: p.ctx.listSource, given: p.records.length,
+            inserted: r.inserted, updated: r.updated, failed: r.failed.length, wsId: p.ctx.wsId,
+          });
           return { status: 'ok', value: r };
         }
 
@@ -170,6 +197,10 @@ export function registerXDataIpc(): void {
           if (!p.recipeId) return failed('[x.recipe] delete 缺 recipeId');
           await deleteRecipe(p.recipeId);
           return { status: 'ok', value: { deleted: p.recipeId } };
+
+        /** ⭐⭐ 运营 → 状态(2026-10-07)—— 只读 */
+        case 'opsStatus':
+          return { status: 'ok', value: await readOpsStatus() };
 
         default:
           /** ⚠️ 不认识的 op 要**明说**,不静默回 ok */
