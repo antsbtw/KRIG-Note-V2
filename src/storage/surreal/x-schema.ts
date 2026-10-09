@@ -1766,6 +1766,34 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.23 —— 人是**被哪个配方找到的**(2026-10-08)
+ *
+ * 用户:「还缺少一种类型，就是我既没有关注他，他也没有关注我。是通过配方找到的用户。」
+ * 「建议这样的人，在搜索下来时就添加标签--哪个配方的收集下来的。」
+ *
+ * ⭐ 与人手打的 tags **分开存**:tags 只代表人的判断;配方来源是系统记录的事实,
+ * 不该因为人编辑标签而被误删。显示上挨着(「配方:xxx」),标签关键词过滤时一起搜。
+ * ⭐ 只加不减(同一个人可能被几个配方先后找到)。是**采集字段**,不是人工字段。
+ */
+const X_SCHEMA_1_2_23 = `
+DEFINE FIELD IF NOT EXISTS found_via_recipes ON x_author TYPE option<array<string>>;
+`;
+
+export async function x_migration_1_2_23(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_23);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  if (!('found_via_recipes' in (info?.[0]?.fields ?? {}))) {
+    throw new Error('[x-schema 1.2.23] x_author.found_via_recipes 没建上 —— 整段 DDL 可能被拒收');
+  }
+  console.log('[x-schema 1.2.23] x_author 配方来源字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.23', appliedAt = $now,
+      description = '人被哪个配方找到 found_via_recipes(只加不减)'`,
+    { rid: new RecordId('schema_version', '1.2.23'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.22 —— 人的**自由标签**(2026-10-08)
  *
  * 用户:「打标签由我用户自由的标注，最后根据关键词过滤标签就好了」

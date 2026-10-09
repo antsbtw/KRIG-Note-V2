@@ -149,3 +149,19 @@ export function recipeToQuery(r: SearchRecipe, now: number = Date.now()): Recipe
     problems,
   };
 }
+
+/**
+ * ⭐ 查询串 → 配方名(2026-10-08)—— 推文上记的是查询串(`search_recipe`),不是配方名。
+ * ⚠️ 查询串里的 `since:` / `until:` 每天都变,比对前去掉;其余必须**完全一致**。
+ * 对不上(配方后来改过、或不是配方发起的搜索)返回 undefined —— **不猜**。
+ */
+export function recipeNameForQuery(
+  q: string | undefined, recipes: readonly SearchRecipe[], now: number = Date.now(),
+): string | undefined {
+  if (q === undefined || q.trim() === '') return undefined;
+  const strip = (x: string): string => x.replace(/\s*\b(since|until):\S+/g, '').trim();
+  const want = strip(q);
+  const hits = recipes.filter((r) => strip(recipeToQuery(r, now).q) === want);
+  /** ⚠️ 两个配方生成同一个查询串时也不猜 */
+  return hits.length === 1 ? hits[0].name : undefined;
+}

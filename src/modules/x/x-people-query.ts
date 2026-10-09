@@ -14,13 +14,20 @@
  */
 
 /** 关系分组 —— 方向都从「我」出发说 */
-export type PeopleGroup = 'all' | 'mutual' | 'iWait' | 'theyWait';
+export type PeopleGroup = 'all' | 'mutual' | 'iWait' | 'theyWait' | 'none' | 'unknown';
 
 export const PEOPLE_GROUPS: ReadonlyArray<{ readonly id: PeopleGroup; readonly label: string; readonly where: string }> = [
   { id: 'all', label: '全部', where: '' },
   { id: 'mutual', label: '互关', where: 'i_follow = true AND follows_me = true' },
   { id: 'iWait', label: '我关注·他没回关', where: 'i_follow = true AND follows_me != true' },
   { id: 'theyWait', label: '他关注·我没回关', where: 'follows_me = true AND i_follow != true' },
+  /**
+   * ⭐ 互不关注 —— 用户 2026-10-08:「我既没有关注他，他也没有关注我。是通过配方找到的用户。」
+   * ⚠️ 两个标记都**明确是 false** 才算;有一个不知道(NONE)就归「关系不明」——
+   * 不知道就是不知道,不当成「互不关注」(用户同意的口径)。
+   */
+  { id: 'none', label: '互不关注', where: 'i_follow = false AND follows_me = false' },
+  { id: 'unknown', label: '关系不明', where: 'i_follow != true AND follows_me != true AND (i_follow = NONE OR follows_me = NONE)' },
 ];
 
 export type PeopleSort = 'followersDesc' | 'followersAsc' | 'createdDesc' | 'createdAsc';
@@ -120,10 +127,12 @@ export type PersonRow = {
   readonly account_created_at?: string;
   readonly excluded?: boolean;
   readonly tags?: readonly string[];
+  /** 被哪些配方找到的(系统记录,与人手打的标签分开)*/
+  readonly found_via_recipes?: readonly string[];
 };
 
 const LIST_FIELDS = `rest_id, handle, display_name, avatar, bio, followers_count,
-  is_blue_verified, i_follow, follows_me, excluded, tags,
+  is_blue_verified, i_follow, follows_me, excluded, tags, found_via_recipes,
   (IF account_created_at != NONE THEN <string> account_created_at ELSE NONE END) AS account_created_at`;
 
 export function buildPeopleQuery(
@@ -152,7 +161,8 @@ export function buildPeopleQuery(
      * ⚠️ 用换行把标签拼起来再找 —— 关键词不会含换行,所以不会「前一个标签的尾 + 后一个的头」
      * 拼出一个假命中(2026-10-08 临时库验过)。
      */
-    where.push("string::contains(string::lowercase(array::join(tags ?? [], '\\n')), $tag)");
+    /** ⭐ 配方来源也一起搜 —— 用户要的是「按配方收集来的」也能像标签一样筛 */
+    where.push("string::contains(string::lowercase(array::join(array::concat(tags ?? [], found_via_recipes ?? []), '\\n')), $tag)");
     vars.tag = tag;
   }
   const sort = PEOPLE_SORTS.find((x) => x.id === f.sort) ?? PEOPLE_SORTS[0];

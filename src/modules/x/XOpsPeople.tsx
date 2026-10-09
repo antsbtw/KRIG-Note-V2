@@ -232,7 +232,9 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
 
       {/* ② 关系概览 —— 点一格,下面列出这群人;再点一次回到全部 */}
       <div style={S.cells}>
-        {PEOPLE_GROUPS.filter((g) => g.id !== 'all').map((g) => {
+        {PEOPLE_GROUPS.filter((g) => g.id !== 'all'
+          /** 「关系不明」只在真有这类人时才占一格 */
+          && (g.id !== 'unknown' || (overview?.unknown.total ?? 0) > 0)).map((g) => {
           const v = overview?.[g.id];
           const active = filter.group === g.id;
           return (
@@ -246,6 +248,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
               <span style={S.cellLabel}>{g.label}</span>
               <span style={S.cellNum}>{v ? v.total.toLocaleString() : '…'}</span>
               <span style={S.muted}>蓝V {v ? v.blue.toLocaleString() : '…'}</span>
+              {g.id === 'none' && <span style={S.muted}>多为配方找到的</span>}
+              {g.id === 'unknown' && <span style={S.muted}>推文没带关系标记</span>}
             </button>
           );
         })}
@@ -336,6 +340,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                       <span style={S.tag}>{relationLabel(p)}</span>
                       <span style={S.muted}>粉丝 {fmt(p.followers_count)}</span>
                       {(p.tags ?? []).map((t) => <span key={t} style={S.userTag}>{t}</span>)}
+                      {(p.found_via_recipes ?? []).map((r) => <span key={`r:${r}`} style={S.recipeTag}>配方:{r}</span>)}
                     </div>
                     {p.bio && <div style={S.bio}>{p.bio}</div>}
                   </div>
@@ -479,6 +484,13 @@ function PersonCard(
               : (p.tags ?? []).map((t) => <span key={t} style={S.userTag}>{t}</span>)}
             <button type="button" style={S.btn} onClick={() => onEditTags(p)}>编辑标签</button>
           </div>
+          {(p.found_via_recipes ?? []).length > 0 && (
+            <div style={S.line}>
+              <span style={S.factKey}>来源</span>
+              {(p.found_via_recipes ?? []).map((r) => <span key={r} style={S.recipeTag}>配方:{r}</span>)}
+            </div>
+          )}
+
           <Section title="事实" note={p.fetched_at ? `采于 ${new Date(p.fetched_at).toLocaleString()}` : '采集时间未知'}>
             <Fact k="粉丝 / 关注 / 发推" v={`${fmt(p.followers_count)} / ${fmt(p.following_count)} / ${fmt(p.tweet_count)}`} />
             <Fact k="注册" v={p.account_created_at ? p.account_created_at.slice(0, 10) : '—'} />
@@ -732,6 +744,11 @@ const S: Record<string, CSSProperties> = {
   userTag: {
     display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, borderRadius: 10, padding: '0 8px',
     color: 'var(--accent-text, #8ab4f8)', background: 'var(--accent-bg, rgba(138,180,248,0.15))',
+  },
+  /** ⭐ 配方来源 —— 系统记录的事实,与你手打的标签样子分开(虚线框、不填色) */
+  recipeTag: {
+    display: 'inline-flex', alignItems: 'center', fontSize: 11, borderRadius: 10, padding: '0 8px',
+    color: 'var(--text-secondary, #aaa)', border: '1px dashed var(--border-color, #555)',
   },
   chipX: {
     background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontSize: 10,

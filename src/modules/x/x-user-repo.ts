@@ -50,6 +50,7 @@
 import { getXDB } from '@storage/surreal/client';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { XUserRecord } from './x-user-audit';
+import { authorsFromTweets, buildAuthorUpsert, type TweetAuthorSource } from './x-tweet-authors';
 
 /**
  * ⭐⭐ **采集字段** —— 重采可以覆盖(都来自载荷)。
@@ -301,3 +302,36 @@ export async function saveUsers(
   return { inserted, updated, failed, skippedNoHandle, skippedNoRestId };
 }
 
+/**
+ * ⭐⭐ 推文作者顺带写进人表(2026-10-08)—— SQL 在 `x-tweet-authors.ts`(纯,脚本共用)。
+ * 用户:「人的信息另外在采推文时顺带更新」;配方找到的人 = 「互不关注」那一格的来源。
+ * ⚠️ 只写有值的字段、不碰人工字段与名单字段 —— 见 buildAuthorUpsert。
+ */
+export async function saveTweetAuthors(
+  rows: readonly TweetAuthorSource[], recipeName: string | undefined,
+): Promise<{ inserted: number; updated: number; skippedNoRestId: number; failed: Array<{ restId: string; why: string }> }> {
+  const { authors, skippedNoRestId } = authorsFromTweets(rows);
+  const db = getXDB();
+  const now = new Date().toISOString();
+  let inserted = 0;
+  let updated = 0;
+  const failed: Array<{ restId: string; why: string }> = [];
+  for (const a of authors) {
+    try {
+      const q = buildAuthorUpsert(a, recipeName, now);
+      /** RETURN BEFORE:新建时 before 为空 → 新人 */
+      const [before] = await db.query<[Array<Record<string, unknown> | null>]>(q.sql, q.vars);
+      const b = before?.[0];
+      if (b === undefined || b === null) inserted += 1; else updated += 1;
+    } catch (e) {
+      failed.push({ restId: a.restId, why: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  console.log(
+    `[x.user-repo] 推文作者 ${authors.length} 人${recipeName ? `(配方 ${recipeName})` : '(没对上配方)'}`
+    + ` → 新 ${inserted} / 更新 ${updated}`
+    + (skippedNoRestId > 0 ? ` / 无数字 id 挡下 ${skippedNoRestId}` : '')
+    + (failed.length > 0 ? ` / 失败 ${failed.length}:${failed[0].why}` : ''),
+  );
+  return { inserted, updated, skippedNoRestId, failed };
+}

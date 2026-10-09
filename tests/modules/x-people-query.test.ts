@@ -249,7 +249,8 @@ describe('⭐⭐ 自由标签(schema 1.2.22)', () => {
   it('⭐⭐ 关键词过滤:换行拼接后找(不会跨标签误命中),关键词走参数', async () => {
     const { buildPeopleQuery: b, DEFAULT_PEOPLE_FILTER: d } = await import('@modules/x/x-people-query');
     const q = b({ ...d, tag: '  客户 ' }, 10, 0);
-    expect(q.sql).toContain("array::join(tags ?? [], '\\n')");
+    /** 配方来源也一起搜(2026-10-08) */
+    expect(q.sql).toContain("array::join(array::concat(tags ?? [], found_via_recipes ?? []), '\\n')");
     expect(q.vars.tag).toBe('客户');
     expect(b(d, 10, 0).sql).not.toContain('$tag');
     expect(b({ ...d, tag: "'); DELETE x_author; --" }, 1, 0).sql).not.toContain('DELETE');

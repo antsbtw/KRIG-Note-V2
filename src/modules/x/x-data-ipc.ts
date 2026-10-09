@@ -12,9 +12,10 @@ import { ipcMain } from 'electron';
 import {
   listAllRecipes, upsertRecipe, deleteRecipe,
 } from '@platform/main/db/search-recipe-repo';
+import { recipeNameForQuery } from './x-recipe-query';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
-import { saveUsers } from './x-user-repo';
+import { saveUsers, saveTweetAuthors } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
 import { queryPeople, readPeopleOverview, readPerson, readTagCatalog, setExcluded, setTags } from './x-people-repo';
@@ -113,6 +114,37 @@ export function registerXDataIpc(): void {
             inserted: r.inserted, updated: r.updated, failed: r.failed.length, wsId: p.ctx?.wsId,
           });
 
+          /**
+           * ⭐⭐ 作者顺带进人表(2026-10-08)—— 「互不关注 = 配方找到的人」的来源。
+           * ⚠️ 推文已经存好了;这一步失败**不让存推文报失败**,但留痕 + 记账(对账会现形)。
+           * 配方名:推文上记的是查询串,在这里对回配方名;对不上就不记(不猜)。
+           */
+          try {
+            const recipes = p.ctx?.searchRecipe ? await listAllRecipes() : [];
+            const recipeName = recipeNameForQuery(p.ctx?.searchRecipe, recipes);
+            const a = await saveTweetAuthors(p.records, recipeName);
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: a.failed.length > 0 ? 'x-save-authors-incomplete' : 'x-save-authors-ok',
+              pageId: 'x-data',
+              detail: {
+                inserted: a.inserted, updated: a.updated, skippedNoRestId: a.skippedNoRestId,
+                failed: a.failed.length, firstFailure: a.failed[0]?.why ?? '(none)',
+                recipe: recipeName ?? '(没对上配方)',
+              },
+            });
+            await logCollect({
+              kind: 'users', source: 'tweet-authors', given: a.inserted + a.updated + a.failed.length,
+              inserted: a.inserted, updated: a.updated, failed: a.failed.length, wsId: p.ctx?.wsId,
+            });
+          } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            console.error(`[x.data] 推文作者没写进人表:${why}`);
+            traceRecorder.lifecycle({
+              layer: 'web.net', event: 'x-save-authors-incomplete', pageId: 'x-data',
+              detail: { why },
+            });
+          }
           return { status: 'ok', value: r };
         }
 
