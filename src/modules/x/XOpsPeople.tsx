@@ -17,6 +17,8 @@
  * 我输入我自己想要的标签。最后提供一个标签关键词的过滤方式就好了，标签可以打多个的，自由一点。」
  *
  * ⭐ 关联(2026-10-08):用户「点击选定用户时，右边的x view跳转到这个人的主页」。
+ * ⭐⭐ 核对(2026-10-09):跳转时**顺手读这一页**(主页加载本来就会请求 UserByScreenName),
+ * 有变化直接更新库并在这一行提示。一次只核对一个;连点时只核对最后点的那个。
  * ⚠️ 操作台采集中不跳(跳走会打断采集),并说出来;已经在他主页就不重载。
  */
 
@@ -25,8 +27,10 @@ import {
   type CSSProperties, type ReactElement,
 } from 'react';
 import { xDataCall } from './x-data-types';
-import { X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, getXHostState, subscribeXHost } from './x-host-registry';
+import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
+import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
+import { auditUserPayload, type XUserRecord } from './x-user-audit';
+import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
 import {
   DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput,
   type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort,
@@ -82,31 +86,113 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   /** 没跳的原因 —— 说出来,不静默 */
   const [followNote, setFollowNote] = useState<string | null>(null);
 
+  const loadOverview = useCallback(() => {
+    void xDataCall({ op: 'peopleOverview' }).then((r) => {
+      if (r.status === 'ok') setOverview(r.value as PeopleOverview);
+      else setErr(r.reason);
+    });
+  }, []);
+  /** ⭐ 每个人最近一次核对的结果 —— 显示在列表那一行 */
+  const [verify, setVerify] = useState<Record<string, { kind: 'running' | 'same' | 'changed' | 'new' | 'miss'; text: string; at: number }>>({});
+  const verifying = useRef(false);
+  const pending = useRef<PersonRow | null>(null);
+
+  /** 把核对到的资料补进列表那一行(不重查整页) */
+  const patchRow = (r: XUserRecord): void => {
+    setRows((prev) => prev.map((x) => (x.rest_id !== r.restId ? x : {
+      ...x,
+      handle: r.handle.toLowerCase() || x.handle,
+      display_name: r.name || x.display_name,
+      avatar: r.avatar || x.avatar,
+      bio: r.bio || x.bio,
+      followers_count: r.followersCount ?? x.followers_count,
+      is_blue_verified: r.isBlueVerified ?? x.is_blue_verified,
+      i_follow: r.following ?? x.i_follow,
+      follows_me: r.followedBy ?? x.follows_me,
+    })));
+  };
+
   /**
-   * ⭐⭐ 让 X 网页打开这个人的主页。
-   * ⚠️ 三种情况不跳,各自说清楚:X 网页没开 / 操作台正在采集 / 已经在他主页。
+   * ⭐⭐ 让 X 网页打开这个人的主页,并**顺手核对**。
+   * ⚠️ 不跳的情况都说出来:X 网页没开 / 操作台正在采集(跳走会打断采集)。
+   * ⚠️ 核对期间登记「忙」,免得操作台同时在这个页面上采。
    */
-  const openInX = useCallback((handle: string): void => {
+  const VERIFY_BUSY = '运营正在核对这个人';
+  const runVerify = useCallback(async (p: PersonRow): Promise<void> => {
     if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
     const busy = getXHostBusy(wcId);
-    if (busy !== null) { setFollowNote(`${busy},没跳转(跳走会打断采集)`); return; }
-    const url = getXHostState(workspaceId)?.url ?? '';
-    if (new RegExp(`^https://(x|twitter)\\.com/${handle}/?(\\?.*)?$`, 'i').test(url)) {
-      setFollowNote(null);
-      return;
-    }
+    if (busy !== null && busy !== VERIFY_BUSY) { setFollowNote(`${busy},没跳转(跳走会打断采集)`); return; }
     setFollowNote(null);
-    void window.electronAPI!.webDomInvoke({
-      op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle },
-    }).then((g) => {
-      if (g.status === 'failed') setFollowNote(`X 网页没跳过去:${g.reason ?? '原因未知'}`);
-    });
-  }, [wcId, workspaceId]);
+    setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
+    setXHostBusy(wcId, VERIFY_BUSY);
+    let result: { kind: 'same' | 'changed' | 'new' | 'miss'; text: string };
+    try {
+      const h = await window.electronAPI!.webDomInvoke({
+        op: 'harvest', pageRef: { wcId },
+        plan: {
+          gotoPage: { name: X_PAGE_NAME.profile, params: { handle: p.handle } },
+          /** 只等主页资料那一条;来了就停,最多 3 轮、10 秒 */
+          pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
+          noisyUrlSubstrings: X_NOISY_URLS,
+        },
+      });
+      if (h.status === 'failed') {
+        result = { kind: 'miss', text: `没读到:${h.reason ?? '原因未知'}` };
+      } else {
+        const rep = h.value as { items?: Array<{ url: string; text: string }>; problems?: string[] };
+        const items = (rep.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
+        const users = items.flatMap((it) => auditUserPayload(it.text).items);
+        const rec = pickProfileUser(users, p.handle, p.rest_id);
+        if (!rec) {
+          /** ⚠️ 把采集层报的原因也带上(如「没能去到这一页」)—— 不只说「没来」 */
+          const why = rep.problems?.[0];
+          result = { kind: 'miss', text: items.length === 0
+            ? `没读到(主页资料那条请求没来${why ? `:${why}` : ''})` : '没读到(载荷里找不到这个人)' };
+        } else {
+          const r = await xDataCall({ op: 'refreshPerson', record: rec });
+          if (r.status === 'failed') {
+            result = { kind: 'miss', text: `没写进库:${r.reason}` };
+          } else {
+            const d = r.value as { isNew: boolean; changes: string[] };
+            patchRow(rec);
+            setCardRev((v) => v + 1);
+            if (d.changes.length > 0 || d.isNew) loadOverview();
+            result = d.isNew ? { kind: 'new', text: '库里没有,已补进来' }
+              : d.changes.length > 0 ? { kind: 'changed', text: `有变化:${d.changes.join(';')}(已更新)` }
+                : { kind: 'same', text: '刚核对,与库里一致' };
+          }
+        }
+      }
+    } catch (e) {
+      result = { kind: 'miss', text: `没读到:${e instanceof Error ? e.message : String(e)}` };
+    } finally {
+      setXHostBusy(wcId, null);
+    }
+    setVerify((v) => ({ ...v, [p.rest_id]: { ...result, at: Date.now() } }));
+  }, [wcId, loadOverview]);
+
+  /** ⭐ 一次只核对一个;核对中又点了别人,只记住**最后点的那个** */
+  const openInX = useCallback((p: PersonRow): void => {
+    const last = verify[p.rest_id];
+    /** 15 秒内刚核对过同一个人就不重来(双击也会先触发两次单击) */
+    if (last && last.kind !== 'miss' && Date.now() - last.at < 15_000) return;
+    if (verifying.current) { pending.current = p; return; }
+    verifying.current = true;
+    void (async () => {
+      let next: PersonRow | null = p;
+      while (next) {
+        await runVerify(next);
+        next = pending.current;
+        pending.current = null;
+      }
+      verifying.current = false;
+    })();
+  }, [runVerify, verify]);
 
   /** 单击:选中 + X 网页跟着跳 —— **不开人卡** */
   const selectPerson = (p: PersonRow): void => {
     setSelected(p.rest_id);
-    if (follow) openInX(p.handle);
+    if (follow) openInX(p);
   };
 
   /** 双击 / 右键「打开人卡」:开人卡 */
@@ -115,12 +201,6 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     setCardId(p.rest_id);
   };
 
-  const loadOverview = useCallback(() => {
-    void xDataCall({ op: 'peopleOverview' }).then((r) => {
-      if (r.status === 'ok') setOverview(r.value as PeopleOverview);
-      else setErr(r.reason);
-    });
-  }, []);
   useEffect(() => { loadOverview(); }, [loadOverview]);
 
   const loadCatalog = useCallback(() => {
@@ -343,6 +423,14 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                       {(p.found_via_recipes ?? []).map((r) => <span key={`r:${r}`} style={S.recipeTag}>配方:{r}</span>)}
                     </div>
                     {p.bio && <div style={S.bio}>{p.bio}</div>}
+                    {verify[p.rest_id] && (
+                      <div style={verify[p.rest_id].kind === 'changed' || verify[p.rest_id].kind === 'miss' ? S.verifyWarn : S.muted}>
+                        {{ running: '⏳', same: '✓', changed: '⚠', new: '＋', miss: '?' }[verify[p.rest_id].kind]} {verify[p.rest_id].text}
+                        {verify[p.rest_id].kind === 'miss' && (
+                          <button type="button" style={S.linkBtn} onClick={(e) => { e.stopPropagation(); openInX(p); }}>再读</button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -358,7 +446,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
           <PersonCard
             restId={cardId!}
             wcId={wcId}
-            onOpenInX={openInX}
+            onOpenInX={(person) => openInX(person)}
             rev={cardRev}
             onEditTags={(p) => setTagging(p)}
             onToggleExclude={(p) => {
@@ -419,8 +507,8 @@ function PersonCard(
     onEditTags: (p: PersonRow) => void;
     /** 标签改了要重读 —— 递增即重读 */
     rev: number;
-    /** ⭐ 与「点人跳主页」同一个函数 —— 忙不跳、已在不重载的判断只有一份 */
-    onOpenInX: (handle: string) => void;
+    /** ⭐ 与「点人跳主页」同一个函数 —— 忙不跳、一次只核对一个的规矩只有一份 */
+    onOpenInX: (p: PersonRow) => void;
   },
 ): ReactElement {
   const [p, setP] = useState<PersonDetail | null | undefined>(undefined);
@@ -435,7 +523,7 @@ function PersonCard(
   }, [restId, rev]);
 
   const openProfile = (): void => {
-    if (p) onOpenInX(p.handle);
+    if (p) onOpenInX(p);
   };
 
   return (
@@ -722,6 +810,8 @@ const S: Record<string, CSSProperties> = {
   fact: { display: 'flex', gap: 8, fontSize: 12 },
   factKey: { width: 104, flexShrink: 0, color: 'var(--text-muted, #888)' },
   factVal: { color: 'var(--text-primary, #ddd)', wordBreak: 'break-all' },
+  /** 核对有变化 / 没读到 —— 要让人注意,用正文色,不只靠颜色(前面有 ⚠ / ? 图标) */
+  verifyWarn: { fontSize: 11, color: 'var(--text-primary, #ddd)' },
   undo: {
     display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', borderRadius: 4,
     color: 'var(--text-primary, #ddd)', background: 'var(--accent-bg, rgba(138,180,248,0.15))',

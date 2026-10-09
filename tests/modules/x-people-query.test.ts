@@ -182,14 +182,16 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
     expect(PAGE).toMatch(/onClick=\{\(\) => selectPerson\(p\)\}/);
     const fn = PAGE.slice(PAGE.indexOf('const selectPerson'), PAGE.indexOf('};', PAGE.indexOf('const selectPerson')));
     expect(fn.length).toBeGreaterThan(30);
-    expect(fn).toMatch(/if \(follow\) openInX\(p\.handle\)/);
+    /** 2026-10-09 起传整个人(核对要用数字 id),不只传 handle */
+    expect(fn).toMatch(/if \(follow\) openInX\(p\)/);
   });
 
-  it('⭐⭐⭐ 采集中不跳 —— 先问「忙不忙」再 goto,且没跳要说出来', () => {
-    const fn = PAGE.slice(PAGE.indexOf('const openInX'), PAGE.indexOf('const selectPerson'));
+  it('⭐⭐⭐ 采集中不跳 —— 先问「忙不忙」再导航,且没跳要说出来', () => {
+    /** 2026-10-09 起导航改为「去主页并核对」(harvest + gotoPage),在 runVerify 里 */
+    const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
     expect(fn.length).toBeGreaterThan(200);
     const busy = fn.indexOf('getXHostBusy(wcId)');
-    const go = fn.indexOf("op: 'goto'");
+    const go = fn.indexOf('gotoPage:');
     expect(busy, '没问忙不忙').toBeGreaterThan(-1);
     expect(go).toBeGreaterThan(-1);
     expect(busy, '先 goto 后问忙 —— 采集已经被打断了').toBeLessThan(go);
@@ -202,9 +204,9 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
   });
 
   it('⭐ 人卡的按钮与点人走同一个 openInX(判断只有一份)', () => {
-    expect(PAGE).toMatch(/onOpenInX=\{openInX\}/);
+    expect(PAGE).toMatch(/onOpenInX=\{\(person\) => openInX\(person\)\}/);
     const card = PAGE.slice(PAGE.indexOf('function PersonCard'));
-    expect(card).not.toMatch(/op: 'goto'/);
+    expect(card).not.toMatch(/op: 'goto'|op: 'harvest'/);
     expect(PAGE).not.toContain('左栏');
   });
 });

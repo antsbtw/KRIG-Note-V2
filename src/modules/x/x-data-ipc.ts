@@ -15,7 +15,7 @@ import {
 import { recipeNameForQuery } from './x-recipe-query';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
-import { saveUsers, saveTweetAuthors } from './x-user-repo';
+import { saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
 import { queryPeople, readPeopleOverview, readPerson, readTagCatalog, setExcluded, setTags } from './x-people-repo';
@@ -280,6 +280,23 @@ export function registerXDataIpc(): void {
 
         case 'tagCatalog':
           return { status: 'ok', value: await readTagCatalog() };
+
+        case 'refreshPerson': {
+          const rec = p.record;
+          if (!rec || typeof rec.restId !== 'string' || rec.restId === '' || typeof rec.handle !== 'string') {
+            return failed('[x.data] refreshPerson 要一条带数字 id 的用户记录');
+          }
+          const d = await refreshPerson(rec);
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: 'x-person-refresh', pageId: 'x-data',
+            detail: { restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes },
+          });
+          /** ⭐ 新人记账 —— 否则状态页对账差出一个 */
+          if (d.isNew) {
+            await logCollect({ kind: 'users', source: 'profile-refresh', given: 1, inserted: 1, updated: 0, failed: 0 });
+          }
+          return { status: 'ok', value: d };
+        }
 
         default:
           /** ⚠️ 不认识的 op 要**明说**,不静默回 ok */

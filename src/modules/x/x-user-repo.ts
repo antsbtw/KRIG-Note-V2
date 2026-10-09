@@ -51,6 +51,7 @@ import { getXDB } from '@storage/surreal/client';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { XUserRecord } from './x-user-audit';
 import { authorsFromTweets, buildAuthorUpsert, type TweetAuthorSource } from './x-tweet-authors';
+import { buildPersonRefresh, diffPerson, type PersonBefore } from './x-person-refresh';
 
 /**
  * ⭐⭐ **采集字段** —— 重采可以覆盖(都来自载荷)。
@@ -335,4 +336,18 @@ export async function saveTweetAuthors(
     + (failed.length > 0 ? ` / 失败 ${failed.length}:${failed[0].why}` : ''),
   );
   return { inserted, updated, skippedNoRestId, failed };
+}
+
+/**
+ * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— SQL 在 `x-person-refresh.ts`(纯)。
+ * 观察时间 = 现在(主页刚加载)。返回是不是新人、以及关系/改名/蓝V 的变化(给人看)。
+ */
+export async function refreshPerson(r: XUserRecord): Promise<{ isNew: boolean; stale: boolean; changes: string[] }> {
+  if (!r.restId) throw new Error('[x.user-repo] 核对:载荷里没有数字 id,不知道这是谁');
+  const obs = new Date().toISOString();
+  const q = buildPersonRefresh(r, obs);
+  const [before] = await getXDB().query<[PersonBefore[]]>(q.sql, q.vars);
+  const d = diffPerson(before?.[0], r, obs);
+  console.log(`[x.user-repo] 核对 @${r.handle}(${r.restId}):${d.isNew ? '新人' : d.changes.length > 0 ? d.changes.join(';') : '与库里一致'}`);
+  return d;
 }

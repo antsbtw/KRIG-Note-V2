@@ -113,7 +113,12 @@ export type XDataInvoke =
   /** ⭐ 写一个人的全部标签(整组替换)—— 返回清洗后的标签 */
   | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
   /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */
-  | { readonly op: 'tagCatalog' };
+  | { readonly op: 'tagCatalog' }
+  /**
+   * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— 载荷解析在 renderer 做(auditUserPayload),
+   * 这里只写库。返回 `{ isNew, changes }`。
+   */
+  | { readonly op: 'refreshPerson'; readonly record: XUserRecord };
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:
