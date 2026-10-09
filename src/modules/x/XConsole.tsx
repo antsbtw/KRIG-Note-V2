@@ -54,6 +54,7 @@ import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect, type RunResult } from './x-collect-run';
 import { buildRunReport } from './x-run-report';
 import { recipeToQuery } from './x-recipe-query';
+import { setXHostBusy } from './x-host-registry';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
 
@@ -213,6 +214,15 @@ export function XConsole(
    * ⚠️ 原来有 stats / hook / payloads 三份(按腿分),那是实现细节漏到了界面上。
    */
   const [running, setRunning] = useState(false);
+  /**
+   * ⭐ 采集中登记「X 网页正忙」—— 运营的人页点人会让 X 网页跳到他主页,
+   * 采集途中跳走会打断采集(2026-10-08)。
+   */
+  useEffect(() => {
+    if (wcId == null || !running) return;
+    setXHostBusy(wcId, '操作台正在采集');
+    return () => setXHostBusy(wcId, null);
+  }, [wcId, running]);
   /** ⭐ 采够几页就停 —— 用户 2026-10-03:「每次采集 10 页」 */
   const [pagesWanted, setPagesWanted] = useState('10');
   const [report, setReport] = useState<HarvestReport | null>(null);

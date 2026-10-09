@@ -33,6 +33,7 @@ import { useCallback, useEffect, useState, type CSSProperties, type ReactElement
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { XOpsStatus } from './XOpsStatus';
+import { XOpsPeople } from './XOpsPeople';
 
 /** ⚠️ 标签与 id 同在一处 —— 分开写两份必漂 */
 type OpsCategory = 'status' | 'people' | 'tweets';
@@ -101,7 +102,9 @@ export function XOpsView({ workspaceId, slot }: ViewComponentProps): ReactElemen
       </div>
 
       <div style={S.body}>
-        {category === 'status' ? <XOpsStatus /> : (
+        {category === 'status' && <XOpsStatus />}
+        {category === 'people' && <XOpsPeople workspaceId={workspaceId} />}
+        {category === 'tweets' && (
         <div style={S.placeholder}>
           <div style={{ fontSize: 13, color: 'var(--text-primary, #ddd)' }}>{current.label}</div>
           <div>{current.hint}</div>

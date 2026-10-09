@@ -75,6 +75,10 @@ export const USER_BUSINESS_FIELDS = [
   'blocked', 'blocked_at', 'blocked_reason',
   'watched', 'watched_at', 'watch_source', 'watch_depth',
   'is_self', 'note', 'x_blocking',
+  /** ⭐ 排除(不在分析范围,schema 1.2.21)—— 人 > AI > 算法,采集绝不能碰 */
+  'excluded', 'excluded_source', 'excluded_at', 'excluded_reason',
+  /** ⭐ 自由标签(schema 1.2.22)—— 只有人打,采集绝不能碰 */
+  'tags',
 ] as const;
 
 /** ⭐ 落库时调用方要补的「空」—— 解析器不知道自己在哪采的 */
@@ -296,3 +300,4 @@ export async function saveUsers(
 
   return { inserted, updated, failed, skippedNoHandle, skippedNoRestId };
 }
+

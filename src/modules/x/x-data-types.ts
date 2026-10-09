@@ -23,6 +23,7 @@
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { TweetRecord } from './x-timeline-audit';
 import type { XUserRecord } from './x-user-audit';
+import type { PeopleFilter } from './x-people-query';
 
 /**
  * ⚠️ 通道名**不在这里** —— 在 `@shared/ipc/channel-names` 的 `X_DATA_INVOKE`。
@@ -100,7 +101,19 @@ export type XDataInvoke =
    * ⭐⭐ 运营 → 状态 的全部数字(2026-10-07)—— 返回 `OpsStatus`(x-ops-status.ts)。
    * 人数 / 推文数 / 各名单更新时间 / 近几天账本 / 还没采集的类别。
    */
-  | { readonly op: 'opsStatus' };
+  | { readonly op: 'opsStatus' }
+  /** ⭐ 运营 → 人:关系概览(每组人数 + 其中蓝V)—— 返回 `PeopleOverview` */
+  | { readonly op: 'peopleOverview' }
+  /** ⭐ 运营 → 人:列表 —— 返回 `{ total, rows }`;total 是命中总数,rows 最多 limit 条 */
+  | { readonly op: 'queryPeople'; readonly filter: PeopleFilter; readonly limit: number; readonly start: number }
+  /** ⭐ 运营 → 人卡:按数字 id 取一个人 —— 返回 `PersonDetail | null` */
+  | { readonly op: 'personDetail'; readonly restId: string }
+  /** ⭐ 排除 / 取消排除(人的决定,source = human)—— 返回 `{ restId, excluded }` */
+  | { readonly op: 'setExcluded'; readonly restId: string; readonly excluded: boolean }
+  /** ⭐ 写一个人的全部标签(整组替换)—— 返回清洗后的标签 */
+  | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
+  /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */
+  | { readonly op: 'tagCatalog' };
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:

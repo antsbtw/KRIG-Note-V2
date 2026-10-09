@@ -1766,6 +1766,71 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.22 —— 人的**自由标签**(2026-10-08)
+ *
+ * 用户:「打标签由我用户自由的标注，最后根据关键词过滤标签就好了」
+ * 「因为我觉得现在写死过滤字段有问题，不足以表达我需要的东西。」
+ * 「部分是精确字段，部分是标签…对于部分标签定义准确的，可以慢慢固定为精确字段。」
+ *
+ * ⭐ 事实(蓝V / 粉丝数…)是采来的 → 精确字段;「这个人对我是什么」是人的判断 → 标签。
+ * 标签只有人能打,没有 AI / 算法来源,所以不需要优先级规则(与 excluded 不同)。
+ * ⚠️ 人工字段 —— 进 USER_BUSINESS_FIELDS,采集绝不能碰。
+ * ⚠️ 「有哪些标签、各几人」不单独存,每次从人身上统计(派生可重算,改名删除只改一处)。
+ */
+const X_SCHEMA_1_2_22 = `
+DEFINE FIELD IF NOT EXISTS tags ON x_author TYPE option<array<string>>;
+DEFINE INDEX IF NOT EXISTS idx_author_tags ON x_author FIELDS tags;
+`;
+
+export async function x_migration_1_2_22(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_22);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  if (!('tags' in (info?.[0]?.fields ?? {}))) {
+    throw new Error('[x-schema 1.2.22] x_author.tags 没建上 —— 整段 DDL 可能被拒收');
+  }
+  console.log('[x-schema 1.2.22] x_author 标签字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.22', appliedAt = $now,
+      description = '人的自由标签 tags(人打的,关键词过滤)'`,
+    { rid: new RecordId('schema_version', '1.2.22'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.21 —— 「排除」:不在分析范围的人(2026-10-08)
+ *
+ * 用户:「先加一个排除吧--我收工先排除一部分，因为才几千人。我看到不愿意再需要分析的用户，就右键排除如何？」
+ * 起因:Musk / Trump / SpaceX 这类对业务没意义的号混在列表里(「我关注·他没回关」581 人里粉丝 ≥10 万的有 74 个)。
+ *
+ * ⭐ 与「大陆背景」同一套覆盖规则(用户 2026-10-08 定):**人 > AI > 算法**,
+ * 人定了另外两种就不能覆盖。所以除了值,还要存**来源**;人「取消排除」也存成 source = human、值 false。
+ * ⚠️ 这四个都是**人工字段** —— 进 USER_BUSINESS_FIELDS,采集一个都不许碰。
+ */
+const X_SCHEMA_1_2_21 = `
+DEFINE FIELD IF NOT EXISTS excluded        ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS excluded_source ON x_author TYPE option<string>
+  ASSERT $value = NONE OR $value INSIDE ['human', 'ai', 'rule'];
+DEFINE FIELD IF NOT EXISTS excluded_at     ON x_author TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS excluded_reason ON x_author TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_author_excluded ON x_author FIELDS excluded;
+`;
+
+export async function x_migration_1_2_21(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_21);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['excluded', 'excluded_source', 'excluded_at', 'excluded_reason']) {
+    if (!(f in fields)) throw new Error(`[x-schema 1.2.21] x_author.${f} 没建上 —— 整段 DDL 可能被拒收`);
+  }
+  console.log('[x-schema 1.2.21] x_author 排除字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.21', appliedAt = $now,
+      description = '排除(不在分析范围):excluded / excluded_source / excluded_at / excluded_reason'`,
+    { rid: new RecordId('schema_version', '1.2.21'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐⭐ 1.2.20 —— `x_author` 的身份从 handle 改成数字 id(rest_id)(2026-10-07)
  *
  * handle 会变、rest_id 不变。用 handle 当 record id 的两个毛病(真库实测):

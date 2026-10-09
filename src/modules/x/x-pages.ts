@@ -244,6 +244,8 @@ export const X_PAGE_NAME = {
   article: 'x.article',
   /** ⭐ 搜索 —— 配方翻译出查询串后去这一页 */
   search: 'x.search',
+  /** ⭐ 个人主页 —— 运营的人卡「在左栏打开主页」去这一页 */
+  profile: 'x.profile',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,

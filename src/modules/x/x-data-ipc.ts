@@ -17,6 +17,7 @@ import { saveTweets } from './x-tweet-repo';
 import { saveUsers } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
+import { queryPeople, readPeopleOverview, readPerson, readTagCatalog, setExcluded, setTags } from './x-people-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 
@@ -111,6 +112,7 @@ export function registerXDataIpc(): void {
             kind: 'tweets', source: p.ctx?.source || 'unknown', given: p.records.length,
             inserted: r.inserted, updated: r.updated, failed: r.failed.length, wsId: p.ctx?.wsId,
           });
+
           return { status: 'ok', value: r };
         }
 
@@ -203,6 +205,49 @@ export function registerXDataIpc(): void {
         /** ⭐⭐ 运营 → 状态(2026-10-07)—— 只读 */
         case 'opsStatus':
           return { status: 'ok', value: await readOpsStatus() };
+
+        /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
+        case 'peopleOverview':
+          return { status: 'ok', value: await readPeopleOverview() };
+
+        case 'queryPeople': {
+          /** ⚠️ limit 要有上界:几千行连头像一起过 IPC 再全渲染,面板会卡 */
+          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 500) {
+            return failed('[x.data] queryPeople 的 limit 要在 1–500 之间');
+          }
+          if (!Number.isInteger(p.start) || p.start < 0) {
+            return failed('[x.data] queryPeople 的 start 要是非负整数');
+          }
+          return { status: 'ok', value: await queryPeople(p.filter, p.limit, p.start) };
+        }
+
+        case 'personDetail':
+          if (typeof p.restId !== 'string' || p.restId === '') {
+            return failed('[x.data] personDetail 缺 restId —— 人的身份是数字 id');
+          }
+          return { status: 'ok', value: await readPerson(p.restId) };
+
+        case 'setExcluded':
+          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.excluded !== 'boolean') {
+            return failed('[x.data] setExcluded 要 restId(数字 id)和 excluded(true/false)');
+          }
+          await setExcluded(p.restId, p.excluded);
+          /** ⭐ 人的决定也留痕 —— 以后回头看「我排除过谁、何时」不用猜 */
+          console.log(`[x.people] ${p.excluded ? '排除' : '取消排除'} ${p.restId}`);
+          return { status: 'ok', value: { restId: p.restId, excluded: p.excluded } };
+
+        case 'setTags': {
+          if (typeof p.restId !== 'string' || p.restId === '' || !Array.isArray(p.tags)
+            || p.tags.some((t) => typeof t !== 'string')) {
+            return failed('[x.data] setTags 要 restId(数字 id)和 tags(字符串数组)');
+          }
+          const tags = await setTags(p.restId, p.tags);
+          console.log(`[x.people] 标签 ${p.restId} → ${tags.length > 0 ? tags.join('、') : '(清空)'}`);
+          return { status: 'ok', value: tags };
+        }
+
+        case 'tagCatalog':
+          return { status: 'ok', value: await readTagCatalog() };
 
         default:
           /** ⚠️ 不认识的 op 要**明说**,不静默回 ok */
