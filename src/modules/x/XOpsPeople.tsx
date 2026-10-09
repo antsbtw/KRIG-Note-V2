@@ -271,9 +271,9 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                 <input type="checkbox" checked={filter.blueOnly}
                   onChange={(e) => setFilter({ ...filter, blueOnly: e.target.checked })} /> 蓝V
               </label>
-              <label style={S.check} title="只是字面信号:港台、海外华人也会命中。「大陆背景」标注是下一块">
+              <label style={S.check} title="字面信号:有汉字、且没有 2 个以上假名字母(排除日文)。港台、海外华人也会命中;中日双语的中文用户会被当成日文">
                 <input type="checkbox" checked={filter.cnText}
-                  onChange={(e) => setFilter({ ...filter, cnText: e.target.checked })} /> 中文名或中文 bio
+                  onChange={(e) => setFilter({ ...filter, cnText: e.target.checked })} /> 中文名或 bio(不含日文)
               </label>
               <select
                 value={filter.scope} style={S.select}

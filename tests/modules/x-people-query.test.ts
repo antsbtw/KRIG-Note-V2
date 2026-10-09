@@ -326,3 +326,38 @@ describe('⭐ 单击选中、双击开人卡(2026-10-08)', () => {
     expect(PAGE).toMatch(/restId=\{cardId!\}/);
   });
 });
+
+describe('⭐⭐ 中文筛选要排除日文(2026-10-08)', () => {
+  /**
+   * 用户截图:「マルクロス /恐竜公式声優」被当成中文。日文也有汉字,但有中文没有的假名。
+   * 规则:≥ 2 个假名字母才算日文;「の」「・」「ー」不算(中文用户常装饰性地用)。
+   * 真库实测:与 JS 算法结果一致(4325);用例全部取自真实简介。
+   */
+  const toJs = async (): Promise<RegExp> => {
+    const { JA_KANA } = await import('@modules/x/x-people-query');
+    const k = JA_KANA.replace(/\\x\{([0-9a-f]+)\}/gi, '\\u{$1}');
+    return new RegExp(`${k}[\\s\\S]*${k}`, 'u');
+  };
+
+  it('⭐⭐ 日文号判为日文', async () => {
+    const ja = await toJs();
+    for (const t of ['マルクロス /恐竜公式声優', 'オーバーウォッチ の最新情報', '20代｜ふつうの社会人', '台湾人です。日本十年']) {
+      expect(ja.test(t), t).toBe(true);
+    }
+  });
+
+  it('⭐⭐⭐ 只用一个「の」、或用「・」的中文用户不能误伤', async () => {
+    const ja = await toJs();
+    for (const t of ['希望の凿痕 互关必回', '小刘の算法笔记 ai算法工程师', '程序员・编剧・AI导演', '日本語の初心者 身如黑洞', '加油ー']) {
+      expect(ja.test(t), t).toBe(false);
+    }
+  });
+
+  it('⭐ SQL:有汉字且不匹配日文;两个正则都走参数', async () => {
+    const { buildPeopleQuery: b, DEFAULT_PEOPLE_FILTER: d } = await import('@modules/x/x-people-query');
+    const q = b({ ...d, cnText: true }, 1, 0);
+    expect(q.sql).toMatch(/string::matches\(string::concat\(display_name \?\? '', ' ', bio \?\? ''\), \$cn\) AND !string::matches\(string::concat\(display_name \?\? '', ' ', bio \?\? ''\), \$ja\)/);
+    expect(typeof q.vars.ja).toBe('string');
+    expect(b(d, 1, 0).vars.ja).toBeUndefined();
+  });
+});

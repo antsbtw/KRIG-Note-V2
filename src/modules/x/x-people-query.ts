@@ -95,8 +95,9 @@ export type PeopleFilter = {
   readonly group: PeopleGroup;
   readonly blueOnly: boolean;
   /**
-   * 名字或 bio 里有中文 —— ⚠️ 这只是**字面信号**,不是「大陆背景」:
-   * 港台、海外华人都会命中。「大陆背景」是第 2 块的标注字段(人 > AI > 算法)。
+   * 名字或 bio 里有中文(不含日文)—— ⚠️ 这只是**字面信号**,不是「大陆背景」:
+   * 港台、海外华人都会命中,中日双语的中文用户会被当成日文。
+   * 「大陆背景」是标注字段(人 > AI > 算法),本规则就是其中的「算法」层。
    */
   readonly cnText: boolean;
   readonly text: string;
@@ -111,7 +112,18 @@ export const DEFAULT_PEOPLE_FILTER: PeopleFilter = {
 
 /** 中文字符 —— 走参数,免得在 SQL 字符串里层层转义 */
 const CN_REGEX = '[\\x{4e00}-\\x{9fff}]';
-const CN_WHERE = '(string::matches(display_name ?? \'\', $cn) OR string::matches(bio ?? \'\', $cn))';
+/**
+ * ⭐ 日文:**至少 2 个假名字母**(2026-10-08,用户截图里日文号被当成中文)。
+ * 日文也有汉字(「恐竜公式声優」),但有中文没有的假名。
+ * ⚠️ 不能「有假名就算日文」:中文用户常装饰性地用一个「の」(「希望の凿痕」「小刘の算法笔记」),
+ * 「・」「ー」也在片假名区。所以只数**字母**:平假名 ぁ-ゖ(不含 の)+ 片假名 ァ-ヺ,≥ 2 个。
+ * 真库实测:旧规则 4420 人 → 判为日文 95 人;用「の」的中文用户全保留。
+ * ⚠️ 已知会错:中日双语的中文用户(约十来个)—— 字面规则分不出,靠人标「大陆背景」纠正(人 > AI > 算法)。
+ */
+export const JA_KANA = '[\\x{3041}-\\x{306d}\\x{306f}-\\x{3096}\\x{30a1}-\\x{30fa}]';
+const JA_REGEX = `${JA_KANA}(?s:.*)${JA_KANA}`;
+const PROFILE_TEXT = "string::concat(display_name ?? '', ' ', bio ?? '')";
+const CN_WHERE = `(string::matches(${PROFILE_TEXT}, $cn) AND !string::matches(${PROFILE_TEXT}, $ja))`;
 
 /** 列表一行 —— 只取列表要显示的,人卡另取全量 */
 export type PersonRow = {
@@ -147,7 +159,7 @@ export function buildPeopleQuery(
   where.push(scope);
   if (g.where !== '') where.push(g.where);
   if (f.blueOnly) where.push('is_blue_verified = true');
-  if (f.cnText) { where.push(CN_WHERE); vars.cn = CN_REGEX; }
+  if (f.cnText) { where.push(CN_WHERE); vars.cn = CN_REGEX; vars.ja = JA_REGEX; }
   const text = f.text.trim().toLowerCase().replace(/^@/, '');
   if (text !== '') {
     where.push(`(string::contains(handle, $text)
