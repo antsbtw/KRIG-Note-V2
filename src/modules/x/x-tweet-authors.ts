@@ -9,6 +9,9 @@
  * ② **只写有值的字段** —— 推文载荷偶尔不带关系标记;写成 NONE 会把名单采来的正确标记冲掉
  * ③ 人工字段(排除/标签/大陆背景…)一个都不碰;名单字段(list_*)也不碰 —— 这不是名单
  * ④ 配方来源只加不减(array::union)
+ * ⑤ ⭐⭐ **旧的观察不许覆盖新的**(2026-10-08 真库实证):补导拿 10-05 推文里的「互不关注」
+ *    覆盖了 10-08 名单采到的「互关」(Laosun)。所以每个作者带**观察时间**,
+ *    只有比人表现有数据(fetched_at)更新时才写采集字段;实时采集的观察时间就是「现在」。
  */
 
 import { normalizeHandle } from '@shared/types/x-timeline-types';
@@ -22,6 +25,8 @@ export type TweetAuthor = {
   readonly isBlueVerified?: boolean;
   readonly iFollow?: boolean;
   readonly followsMe?: boolean;
+  /** ⭐ 这些字段是什么时候看到的 —— 旧的观察不覆盖新的(⑤) */
+  readonly observedAt: string;
 };
 
 /** 推文记录里与作者有关的那几个字段 —— 采集记录(TweetRecord)与库里的推文行都能映射成它 */
@@ -34,23 +39,29 @@ export type TweetAuthorSource = {
   readonly isBlueVerified?: boolean;
   readonly following?: boolean;
   readonly followedBy?: boolean;
+  /** 这条推文是什么时候采到的;缺了就当「现在」(实时采集) */
+  readonly observedAt?: string;
 };
 
 const nonEmpty = (v: string | undefined): string | undefined => (v === undefined || v.trim() === '' ? undefined : v);
 
 /**
  * ⭐ 从一批推文里取出作者,按数字 id 去重。
- * 同一个人多条推文时,**后面的有值字段覆盖前面的**,没值的不覆盖(②)。
+ * 同一个人多条推文时,按观察时间**从旧到新**合并:新的有值字段覆盖旧的,没值的不覆盖(②⑤)。
  */
-export function authorsFromTweets(rows: readonly TweetAuthorSource[]): { readonly authors: TweetAuthor[]; readonly skippedNoRestId: number } {
+export function authorsFromTweets(
+  rows: readonly TweetAuthorSource[], nowIso: string = new Date().toISOString(),
+): { readonly authors: TweetAuthor[]; readonly skippedNoRestId: number } {
   const byId = new Map<string, Record<string, unknown>>();
   let skippedNoRestId = 0;
-  for (const r of rows) {
+  const ordered = rows.map((r) => ({ r, at: r.observedAt ?? nowIso }))
+    .sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
+  for (const { r, at } of ordered) {
     const restId = nonEmpty(r.authorRestId);
     const handle = normalizeHandle(r.authorHandle ?? '');
     if (restId === undefined || handle === '') { skippedNoRestId += 1; continue; }
     const cur = byId.get(restId) ?? { restId };
-    const next: Record<string, unknown> = { ...cur, handle };
+    const next: Record<string, unknown> = { ...cur, handle, observedAt: at };
     const put = (k: string, v: unknown): void => { if (v !== undefined) next[k] = v; };
     put('name', nonEmpty(r.authorName));
     put('avatar', nonEmpty(r.authorAvatar));
@@ -81,19 +92,26 @@ export const TWEET_AUTHOR_FIELDS: readonly string[] = [
 /**
  * ⭐⭐ 写一个作者的 SQL。`RETURN BEFORE` —— 之前不存在就是新人(分 inserted / updated)。
  * ⚠️ 不用 `UPSERT ... WHERE`(没匹配到什么都不写也不报错,本仓栽过)。
+ * ⚠️⚠️ 采集字段只在「这次观察比库里新」时才写(⑤);**fetched_at 放在最后一个赋值** ——
+ * SET 按顺序执行,先改 fetched_at 的话后面的判断就拿新值比了。
+ * 配方来源不受时间限制(只加不减,旧推文也确实是那个配方找到的)。
  */
 export function buildAuthorUpsert(
-  a: TweetAuthor, recipeName: string | undefined, nowIso: string,
+  a: TweetAuthor, recipeName: string | undefined,
 ): { readonly sql: string; readonly vars: Record<string, unknown> } {
-  const sets = ['rest_id = $rest_id', 'handle = $handle', 'fetched_at = type::datetime($now)'];
-  const vars: Record<string, unknown> = { rest_id: a.restId, handle: a.handle, now: nowIso };
+  const NEWER = '(fetched_at = NONE OR fetched_at <= type::datetime($obs))';
+  const when = (col: string, v: string): string => `${col} = IF ${NEWER} THEN ${v} ELSE ${col} END`;
+  const sets = ['rest_id = $rest_id', when('handle', '$handle')];
+  const vars: Record<string, unknown> = { rest_id: a.restId, handle: a.handle, obs: a.observedAt };
   for (const [k, col] of FIELD_MAP) {
-    if (a[k] !== undefined) { sets.push(`${col} = $${col}`); vars[col] = a[k]; }
+    if (a[k] !== undefined) { sets.push(when(col, `$${col}`)); vars[col] = a[k]; }
   }
   if (recipeName !== undefined) {
     sets.push('found_via_recipes = array::union(found_via_recipes ?? [], [$recipe])');
     vars.recipe = recipeName;
   }
+  /** ⚠️ 必须最后 —— 见上 */
+  sets.push(when('fetched_at', 'type::datetime($obs)'));
   return {
     sql: `UPSERT type::record('x_author', $rest_id) SET ${sets.join(', ')} RETURN BEFORE;`,
     vars,

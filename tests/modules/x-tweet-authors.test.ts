@@ -16,6 +16,7 @@ import type { SearchRecipe } from '@shared/types/x-timeline-types';
 
 const read = (p: string): string => readFileSync(join(process.cwd(), p), 'utf8');
 const NOW = '2026-10-08T00:00:00.000Z';
+const OBS = { observedAt: NOW };
 
 describe('authorsFromTweets', () => {
   it('⭐ 按数字 id 去重;后面的有值字段覆盖,没值的不覆盖;handle 归一化;没 id 挡下', () => {
@@ -24,24 +25,24 @@ describe('authorsFromTweets', () => {
       { authorRestId: '1', authorHandle: 'foo', followedBy: false, authorBio: '' },
       { authorRestId: '', authorHandle: 'noid' },
       { authorRestId: '2', authorHandle: '' },
-    ]);
+    ], NOW);
     expect(skippedNoRestId).toBe(2);
-    expect(authors).toEqual([{ restId: '1', handle: 'foo', iFollow: true, followsMe: false, bio: 'bio1' }]);
+    expect(authors).toEqual([{ restId: '1', handle: 'foo', iFollow: true, followsMe: false, bio: 'bio1', observedAt: NOW }]);
   });
 });
 
 describe('buildAuthorUpsert', () => {
   it('⭐⭐⭐ 只写有值的字段 —— 推文没带关系标记时不许把名单采来的标记冲成 NONE', () => {
-    const q = buildAuthorUpsert({ restId: '1', handle: 'foo', name: '老朋友' }, undefined, NOW);
-    expect(q.sql).toContain('display_name = $display_name');
+    const q = buildAuthorUpsert({ restId: '1', handle: 'foo', name: '老朋友', ...OBS }, undefined);
+    expect(q.sql).toMatch(/display_name = IF [^;]+ THEN \$display_name ELSE display_name END/);
     expect(q.sql).not.toMatch(/i_follow|follows_me|is_blue_verified/);
-    expect(Object.keys(q.vars).sort()).toEqual(['display_name', 'handle', 'now', 'rest_id']);
+    expect(Object.keys(q.vars).sort()).toEqual(['display_name', 'handle', 'obs', 'rest_id']);
   });
 
   it('⭐⭐⭐ 人工字段一个都不碰(清单从人工字段常量推,不写死)', () => {
     const q = buildAuthorUpsert({
-      restId: '1', handle: 'foo', name: 'n', avatar: 'a', bio: 'b', isBlueVerified: true, iFollow: false, followsMe: false,
-    }, '配方A', NOW);
+      restId: '1', handle: 'foo', name: 'n', avatar: 'a', bio: 'b', isBlueVerified: true, iFollow: false, followsMe: false, ...OBS,
+    }, '配方A');
     expect(USER_BUSINESS_FIELDS.length).toBeGreaterThan(10);
     for (const f of USER_BUSINESS_FIELDS) {
       expect(q.sql, `${f} 是人工字段`).not.toMatch(new RegExp(`\\b${f}\\b`));
@@ -52,12 +53,12 @@ describe('buildAuthorUpsert', () => {
   });
 
   it('⭐⭐ 身份按数字 id、不带 WHERE、RETURN BEFORE 分新旧;配方只加不减', () => {
-    const q = buildAuthorUpsert({ restId: '42', handle: 'x' }, '配方A', NOW);
+    const q = buildAuthorUpsert({ restId: '42', handle: 'x', ...OBS }, '配方A');
     expect(q.sql).toContain("UPSERT type::record('x_author', $rest_id)");
     expect(q.sql).not.toMatch(/\bWHERE\b/);
     expect(q.sql).toMatch(/RETURN BEFORE;$/);
     expect(q.sql).toContain('found_via_recipes = array::union(found_via_recipes ?? [], [$recipe])');
-    expect(buildAuthorUpsert({ restId: '42', handle: 'x' }, undefined, NOW).sql).not.toContain('found_via_recipes');
+    expect(buildAuthorUpsert({ restId: '42', handle: 'x', ...OBS }, undefined).sql).not.toContain('found_via_recipes');
   });
 });
 
@@ -117,5 +118,43 @@ describe('接线', () => {
 
   it('⭐ 迁移 1.2.23 登记了', () => {
     expect(read('src/storage/migrations/x-runner.ts')).toMatch(/version: '1\.2\.23'[\s\S]{0,200}up: x_migration_1_2_23/);
+  });
+});
+
+describe('⭐⭐⭐ 旧的观察不许覆盖新的(2026-10-08 Laosun 那次)', () => {
+  /**
+   * 补导拿 10-05 推文里的「互不关注」覆盖了 10-08 名单采到的「互关」。
+   * 临时库验过:旧推文 vs 新名单 → 不动;新推文 vs 旧数据 → 更新;新人 → 写入;实时 → 更新。
+   */
+  it('采集字段都带「比库里新才写」的条件;fetched_at 是最后一个赋值', () => {
+    const q = buildAuthorUpsert({ restId: '1', handle: 'h', iFollow: false, followsMe: false, ...OBS }, 'R');
+    for (const col of ['handle', 'i_follow', 'follows_me', 'fetched_at']) {
+      expect(q.sql, `${col} 没带时间条件`).toMatch(new RegExp(`${col} = IF \\(fetched_at = NONE OR fetched_at <= type::datetime\\(\\$obs\\)\\) THEN`));
+    }
+    const sets = q.sql.slice(q.sql.indexOf(' SET ') + 5, q.sql.indexOf(' RETURN'));
+    expect(sets.trim().startsWith('rest_id')).toBe(true);
+    /**
+     * ⚠️ 第一版只比「最后一次 fetched_at 在 i_follow 之后」—— 注入「在最前面**再加**一次 fetched_at」时仍全绿,
+     * 而那一次就足以让后面所有判断拿新值比。改成:**只赋值一次,且是最后一项**。
+     */
+    /** ⚠️ 只数**赋值**(`fetched_at = IF`)—— 每个条件里都有 `fetched_at = NONE`,数它会把条件也算进去 */
+    expect(sets.match(/\bfetched_at = IF\b/g)?.length, 'fetched_at 被赋值不止一次').toBe(1);
+    expect(sets.trim(), 'fetched_at 不是最后一项 —— 后面的判断会拿新值比').toMatch(/fetched_at = IF [^,]+ END$/);
+    /** 配方来源不受时间限制(旧推文也确实是那个配方找到的) */
+    expect(sets).toMatch(/found_via_recipes = array::union/);
+  });
+
+  it('同一作者多条推文:按观察时间合并,最新的有值字段胜出', () => {
+    const { authors } = authorsFromTweets([
+      { authorRestId: '1', authorHandle: 'a', following: true, observedAt: '2026-10-07T00:00:00Z' },
+      { authorRestId: '1', authorHandle: 'a', following: false, observedAt: '2026-10-05T00:00:00Z' },
+    ]);
+    expect(authors[0]).toMatchObject({ iFollow: true, observedAt: '2026-10-07T00:00:00Z' });
+  });
+
+  it('补导脚本把推文的采集时间当观察时间传下去', () => {
+    const SCRIPT = read('scripts/x-backfill-tweet-authors.ts');
+    expect(SCRIPT).toMatch(/observedAt: t\.fetched_at/);
+    expect(SCRIPT).toMatch(/<string> fetched_at AS fetched_at FROM x_tweet/);
   });
 });

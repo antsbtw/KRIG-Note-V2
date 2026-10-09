@@ -310,15 +310,16 @@ export async function saveUsers(
 export async function saveTweetAuthors(
   rows: readonly TweetAuthorSource[], recipeName: string | undefined,
 ): Promise<{ inserted: number; updated: number; skippedNoRestId: number; failed: Array<{ restId: string; why: string }> }> {
-  const { authors, skippedNoRestId } = authorsFromTweets(rows);
-  const db = getXDB();
+  /** ⭐ 实时采集:观察时间就是现在(推文刚采到)—— 永远比库里新 */
   const now = new Date().toISOString();
+  const { authors, skippedNoRestId } = authorsFromTweets(rows, now);
+  const db = getXDB();
   let inserted = 0;
   let updated = 0;
   const failed: Array<{ restId: string; why: string }> = [];
   for (const a of authors) {
     try {
-      const q = buildAuthorUpsert(a, recipeName, now);
+      const q = buildAuthorUpsert(a, recipeName);
       /** RETURN BEFORE:新建时 before 为空 → 新人 */
       const [before] = await db.query<[Array<Record<string, unknown> | null>]>(q.sql, q.vars);
       const b = before?.[0];

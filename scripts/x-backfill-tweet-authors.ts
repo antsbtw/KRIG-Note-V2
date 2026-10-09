@@ -11,6 +11,8 @@
  * 采推文时一直只存推文、不存作者:配方搜到 130 条、123 个作者,只有 5 个在人表里。
  * 从这次起采推文会顺带写作者(x-data-ipc saveTweets),这个脚本补的是**之前**那批。
  *
+ * ⚠️⚠️ 每个作者带**推文的采集时间**当观察时间:旧推文不覆盖人表里更新的数据
+ * (2026-10-08 第一版没带,10-05 推文的「互不关注」冲掉了 10-08 名单的「互关」)。
  * ⚠️ 与实时写入用**同一套**纯函数(authorsFromTweets / buildAuthorUpsert / recipeNameForQuery),
  * 不另写一份。⚠️ 用 CJS(main 函数,不用顶层 await)—— .mts 会让 SDK 双包,RecordId 被编成 {}。
  * DBN 环境变量可指定别的 database(演练用)。
@@ -30,6 +32,7 @@ const DBN = process.env.DBN ?? 'krig_x';
 type TweetRow = {
   search_recipe?: string; author_rest_id?: string; author_handle?: string; author_name_at_post?: string;
   author_avatar?: string; author_bio?: string; is_blue_verified?: boolean; following?: boolean; followed_by?: boolean;
+  fetched_at?: string;
 };
 
 async function main(): Promise<void> {
@@ -55,7 +58,8 @@ async function main(): Promise<void> {
     const [recipeRows] = await db.query<any[]>('SELECT * FROM search_recipes');
     const recipes = (recipeRows ?? []).map((r: any) => ({ ...r, id: String(r.id) })) as SearchRecipe[];
     const [tweets] = await db.query<[TweetRow[]]>(`SELECT search_recipe, author_rest_id, author_handle,
-      author_name_at_post, author_avatar, author_bio, is_blue_verified, following, followed_by FROM x_tweet`);
+      author_name_at_post, author_avatar, author_bio, is_blue_verified, following, followed_by,
+      <string> fetched_at AS fetched_at FROM x_tweet`);
 
     /** ① 按配方分组 —— 对不上的单独一组,等人指定 */
     const groups = new Map<string, TweetAuthorSource[]>();
@@ -69,6 +73,8 @@ async function main(): Promise<void> {
         authorRestId: t.author_rest_id, authorHandle: t.author_handle, authorName: t.author_name_at_post,
         authorAvatar: t.author_avatar, authorBio: t.author_bio, isBlueVerified: t.is_blue_verified,
         following: t.following, followedBy: t.followed_by,
+        /** ⭐⭐ 旧推文的观察时间 —— 不许覆盖人表里更新的数据(Laosun 那次就是这么错的) */
+        observedAt: t.fetched_at,
       });
       groups.set(key, list);
     }
@@ -81,7 +87,6 @@ async function main(): Promise<void> {
     }
 
     let inserted = 0; let updated = 0; let noId = 0; const failed: string[] = [];
-    const now = new Date().toISOString();
     for (const [name, rows] of groups) {
       const { authors, skippedNoRestId } = authorsFromTweets(rows);
       noId += skippedNoRestId;
@@ -92,7 +97,7 @@ async function main(): Promise<void> {
       if (!APPLY) continue;
       for (const a of authors) {
         try {
-          const q = buildAuthorUpsert(a, name || undefined, now);
+          const q = buildAuthorUpsert(a, name || undefined);
           const [before] = await db.query<[Array<unknown>]>(q.sql, q.vars);
           if (before?.[0] === undefined || before?.[0] === null) inserted += 1; else updated += 1;
         } catch (e) { failed.push(`${a.restId}: ${(e as Error).message}`); }
