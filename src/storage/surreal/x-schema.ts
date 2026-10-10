@@ -1766,6 +1766,57 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.24 —— 运营设置 + 动作记录(2026-10-10)
+ *
+ * 用户 10-10 取消了「绝不由程序点按钮」的红线:「我的未来是要AI接管不少工作的」;
+ * 第一个程序动作是**取关**(用户:「取关的动作放在运营面板上,直接取关和更新」)。
+ * 用户:每日上限「这个作为变量，由我自己设定」。
+ *
+ * · x_setting:人可设定的变量(record id = 键,如 `unfollow.daily_cap`)。
+ * · x_action_log:**只追加**的动作记录 —— 谁决定(人/AI)、对谁、结果、何时。
+ *   「今天取关了几个」从这里数,不另存计数(派生可重算);
+ *   将来检验 AI 的判断也靠它。
+ */
+const X_SCHEMA_1_2_24 = `
+DEFINE TABLE IF NOT EXISTS x_setting SCHEMAFULL;
+-- ⚠️ 不叫 value:VALUE 是 SurrealQL 关键字(SELECT VALUE / RETURN VALUE),
+-- 2026-10-10 临时库实测「RETURN value」直接 parse error
+DEFINE FIELD IF NOT EXISTS setting_value ON x_setting TYPE any;
+DEFINE FIELD IF NOT EXISTS updated_at ON x_setting TYPE datetime;
+
+DEFINE TABLE IF NOT EXISTS x_action_log SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS at             ON x_action_log TYPE datetime;
+DEFINE FIELD IF NOT EXISTS action         ON x_action_log TYPE string ASSERT $value INSIDE ['unfollow'];
+DEFINE FIELD IF NOT EXISTS target_rest_id ON x_action_log TYPE string;
+DEFINE FIELD IF NOT EXISTS target_handle  ON x_action_log TYPE string;
+DEFINE FIELD IF NOT EXISTS decided_by     ON x_action_log TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS reason         ON x_action_log TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS result         ON x_action_log TYPE string ASSERT $value INSIDE ['ok', 'failed'];
+DEFINE FIELD IF NOT EXISTS detail         ON x_action_log TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id          ON x_action_log TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_action_log_at ON x_action_log FIELDS action, at;
+`;
+
+export async function x_migration_1_2_24(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_24);
+  const [s, a] = await db.query<[{ fields?: Record<string, unknown> }, { fields?: Record<string, unknown> }]>(
+    'INFO FOR TABLE x_setting; INFO FOR TABLE x_action_log;',
+  );
+  for (const f of ['setting_value', 'updated_at']) {
+    if (!(f in (s?.fields ?? {}))) throw new Error(`[x-schema 1.2.24] x_setting.${f} 没建上`);
+  }
+  for (const f of ['at', 'action', 'target_rest_id', 'target_handle', 'decided_by', 'result']) {
+    if (!(f in (a?.fields ?? {}))) throw new Error(`[x-schema 1.2.24] x_action_log.${f} 没建上`);
+  }
+  console.log('[x-schema 1.2.24] 运营设置与动作记录表已建');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.24', appliedAt = $now,
+      description = '运营设置 x_setting + 只追加的动作记录 x_action_log(取关)'`,
+    { rid: new RecordId('schema_version', '1.2.24'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.23 —— 人是**被哪个配方找到的**(2026-10-08)
  *
  * 用户:「还缺少一种类型，就是我既没有关注他，他也没有关注我。是通过配方找到的用户。」

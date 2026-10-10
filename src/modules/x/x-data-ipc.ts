@@ -18,7 +18,8 @@ import { saveTweets } from './x-tweet-repo';
 import { saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
-import { queryPeople, readPeopleOverview, readPerson, readTagCatalog, setExcluded, setTags } from './x-people-repo';
+import { queryPeople, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, setExcluded, setTags } from './x-people-repo';
+import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 
@@ -280,6 +281,44 @@ export function registerXDataIpc(): void {
 
         case 'tagCatalog':
           return { status: 'ok', value: await readTagCatalog() };
+
+        /** ⭐ 运营设置 / 取关闸门 / 动作记录(2026-10-10) */
+        case 'opsSettings':
+          return { status: 'ok', value: await readSettings() };
+
+        case 'setOpsSetting':
+          await writeSetting(p.key, p.value);
+          console.log(`[x.ops] 设置 ${p.key} = ${p.value}`);
+          return { status: 'ok', value: { key: p.key, value: p.value } };
+
+        case 'unfollowGate':
+          if (typeof p.dayStartIso !== 'string' || Number.isNaN(Date.parse(p.dayStartIso))) {
+            return failed('[x.data] unfollowGate 要 dayStartIso(本地今天的开始)');
+          }
+          return { status: 'ok', value: await readUnfollowGate(p.dayStartIso) };
+
+        case 'logAction': {
+          const e = p.entry;
+          if (!e || e.action !== 'unfollow' || !e.targetRestId || !e.targetHandle
+            || (e.decidedBy !== 'human' && e.decidedBy !== 'ai') || (e.result !== 'ok' && e.result !== 'failed')) {
+            return failed('[x.data] logAction 的记录不完整');
+          }
+          await appendAction(e);
+          /** ⭐ 动作也打到主进程日志 —— 人看的那块屏(feedback-log-where-the-human-looks) */
+          console.log(`[x.ops] ${e.decidedBy === 'human' ? '人' : 'AI'} ${e.action} @${e.targetHandle} → ${e.result}${e.detail ? `(${e.detail})` : ''}`);
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: `x-action-${e.result}`, pageId: 'x-data',
+            detail: { action: e.action, target: e.targetHandle, restId: e.targetRestId, by: e.decidedBy, detail: e.detail ?? '' },
+          });
+          return { status: 'ok', value: { logged: true } };
+        }
+
+        case 'personTweets':
+          if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] personTweets 缺 restId');
+          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) {
+            return failed('[x.data] personTweets 的 limit 要在 1–200 之间');
+          }
+          return { status: 'ok', value: await readPersonTweets(p.restId, p.limit) };
 
         case 'refreshPerson': {
           const rec = p.record;

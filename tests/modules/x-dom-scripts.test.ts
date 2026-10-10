@@ -6,7 +6,7 @@
  * 那一天就那么过去了 —— 所以这里必须真的跑。
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { X_DOM_SCRIPTS, X_SCRIPTS } from '@modules/x/x-dom-scripts';
 
 const script = (): string => {
@@ -138,7 +138,8 @@ describe('⭐⭐⭐ 脚本必须是合法 JS 且真能跑(**每一个**都查)',
     const evil = '"; globalThis.__pwned = 1; var _ = "';
     for (const sc of X_DOM_SCRIPTS) {
       /** ⭐ 把恶意值喂进**所有**可能的参数名,不猜哪个有用 */
-      const src = sc.build({ url: evil, cursor: evil, q: evil, evil } as never);
+      /** 2026-10-10 加 restId(取关脚本的参数)—— 清单不写全,新参数就在守卫视野外 */
+      const src = sc.build({ url: evil, cursor: evil, q: evil, restId: evil, evil } as never);
       /** ① 仍是合法 JS —— 逃出来的话这里就 throw 了 */
       expect(() => new Function(`return ${src}`), `脚本 ${sc.id} 被参数弄坏了`).not.toThrow();
       /**
@@ -172,6 +173,7 @@ describe('⭐⭐⭐ 脚本必须是合法 JS 且真能跑(**每一个**都查)',
   it('⭐ 不需要参数的脚本**不许**随参数变', () => {
     for (const sc of X_DOM_SCRIPTS) {
       if (sc.id === X_SCRIPTS.fetchNextPage) continue; // ⚠️ 它**确实**要参数
+      if (sc.id === X_SCRIPTS.unfollow) continue; // ⚠️ 它也要参数(他的数字 id)
       expect(
         sc.build({ evil: '"; window.x=1; "' } as never),
         `脚本 ${sc.id} 的产出随参数变了 —— 它本不需要参数`,
@@ -408,5 +410,83 @@ describe('⭐⭐⭐ 翻页脚本:请求头原样重发', () => {
     });
     expect(() => new Function(`return ${src}`)).not.toThrow();
     expect(src).toContain('var rawHeaders = {}');
+  });
+});
+
+/**
+ * ⭐⭐ 取关脚本的行为(2026-10-10)—— 用假页面真跑一遍,不只看能不能解析。
+ * ⚠️ 真页面上 X 的按钮标记对不对,只有真机验得出;这里钉的是脚本自己的逻辑。
+ */
+describe('⭐⭐ 取关脚本', () => {
+  type El = { testid: string; clicked: number; click: () => void; getAttribute: (k: string) => string };
+  const page = (initial: string[], onClick: Record<string, () => string[]>) => {
+    let present = new Set(initial);
+    const els = new Map<string, El>();
+    const el = (testid: string): El => {
+      if (!els.has(testid)) {
+        const e: El = {
+          testid, clicked: 0,
+          click: () => { e.clicked += 1; const next = onClick[testid]?.(); if (next) present = new Set(next); },
+          getAttribute: () => testid,
+        };
+        els.set(testid, e);
+      }
+      return els.get(testid)!;
+    };
+    const doc = {
+      querySelector: (sel: string) => {
+        const m = /data-testid="([^"]+)"/.exec(sel);
+        return m && present.has(m[1]) ? el(m[1]) : null;
+      },
+    };
+    return { doc, el };
+  };
+  const run = async (restId: string, doc: unknown): Promise<{ done: boolean; state: string }> => {
+    const src = X_DOM_SCRIPTS.find((x) => x.id === X_SCRIPTS.unfollow)!.build({ restId } as never) as string;
+    // eslint-disable-next-line no-new-func
+    const fn = new Function('document', `return ${src}`);
+    const p = fn(doc) as Promise<{ done: boolean; state: string }>;
+    await vi.runAllTimersAsync();
+    return p;
+  };
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('⭐⭐ 正常:点 Following → 点确认 → 按钮变回 Follow 才算成;点击顺序对', async () => {
+    const { doc, el } = page(['42-unfollow'], {
+      '42-unfollow': () => ['42-unfollow', 'confirmationSheetConfirm'],
+      confirmationSheetConfirm: () => ['42-follow'],
+    });
+    expect(await run('42', doc)).toEqual({ done: true, state: 'unfollowed' });
+    expect(el('42-unfollow').clicked).toBe(1);
+    expect(el('confirmationSheetConfirm').clicked).toBe(1);
+  });
+
+  it('⭐ 本来就没关注 → not-following,什么都不点', async () => {
+    const { doc, el } = page(['42-follow'], {});
+    expect(await run('42', doc)).toEqual({ done: false, state: 'not-following' });
+    expect(el('42-follow').clicked).toBe(0);
+  });
+
+  it('⭐⭐ 只认**他的** id 的按钮 —— 页面上别人的 Following 按钮不许点', async () => {
+    const { doc, el } = page(['99-unfollow'], {});
+    expect(await run('42', doc)).toEqual({ done: false, state: 'no-button' });
+    expect(el('99-unfollow').clicked).toBe(0);
+  });
+
+  it('⭐ 确认框没出来 / 按钮没变回来 → 如实报卡在哪一步', async () => {
+    const a = page(['42-unfollow'], { '42-unfollow': () => ['42-unfollow'] });
+    expect(await run('42', a.doc)).toEqual({ done: false, state: 'no-confirm' });
+    const b = page(['42-unfollow'], {
+      '42-unfollow': () => ['42-unfollow', 'confirmationSheetConfirm'],
+      confirmationSheetConfirm: () => ['42-unfollow'],
+    });
+    expect(await run('42', b.doc)).toEqual({ done: false, state: 'no-switch' });
+  });
+
+  it('⭐⭐⭐ id 只能是数字 —— 其它一律 bad-id,不去拼选择器', async () => {
+    const { doc } = page(['x-unfollow'], {});
+    expect((await run('x', doc)).state).toBe('bad-id');
+    expect((await run('42"] , [data-testid="x', doc)).state).toBe('bad-id');
   });
 });

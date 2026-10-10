@@ -246,6 +246,8 @@ export const X_PAGE_NAME = {
   search: 'x.search',
   /** ⭐ 个人主页 —— 运营的人卡「在左栏打开主页」去这一页 */
   profile: 'x.profile',
+  /** ⭐ 个人主页的「回复」标签页 —— 运营人卡「采他的帖子和回复」去这一页 */
+  withReplies: 'x.withReplies',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,

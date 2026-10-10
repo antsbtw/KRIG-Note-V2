@@ -108,7 +108,8 @@ describe('人卡与接线', () => {
 
   it('⭐⭐ 还没做的按钮必须禁用并说「还没做」—— 不做成点了没反应的假按钮', () => {
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    for (const label of ['分析他(还没做)', '采他的推文(还没做)']) {
+    /** 「采他的推文」2026-10-09 已做成真按钮(见下面「采他的帖子和回复」),只剩「分析他」还没做 */
+    for (const label of ['分析他(还没做)']) {
       const i = PAGE.indexOf(label);
       expect(i, `${label} 不见了`).toBeGreaterThan(-1);
       const tag = PAGE.slice(PAGE.lastIndexOf('<button', i), i);
@@ -361,5 +362,70 @@ describe('⭐⭐ 中文筛选要排除日文(2026-10-08)', () => {
     expect(q.sql).toMatch(/string::matches\(string::concat\(display_name \?\? '', ' ', bio \?\? ''\), \$cn\) AND !string::matches\(string::concat\(display_name \?\? '', ' ', bio \?\? ''\), \$ja\)/);
     expect(typeof q.vars.ja).toBe('string');
     expect(b(d, 1, 0).vars.ja).toBeUndefined();
+  });
+});
+
+describe('⭐⭐ 采他的帖子和回复(2026-10-09)', () => {
+  /** 用户:「再给一次操作button，让我获取他的profile及下面的聊天数据(post/replies)」;默认各 2 页(已同意) */
+  const PAGE = read('src/modules/x/XOpsPeople.tsx');
+  const fn = PAGE.slice(PAGE.indexOf('const collectTweets'), PAGE.indexOf('/** 单击:选中'));
+
+  it('⭐⭐ 主页帖子 + 回复两页都去,各 2 页,有时限', () => {
+    expect(fn.length).toBeGreaterThan(800);
+    expect(fn).toMatch(/name: X_PAGE_NAME\.profile, label: '帖子'/);
+    expect(fn).toMatch(/name: X_PAGE_NAME\.withReplies, label: '回复'/);
+    expect(fn).toMatch(/wantPages: 2, maxRounds: 8, maxMs: 30_000/);
+  });
+
+  it('⭐⭐⭐ 忙就不采;自己采期间登记忙,结束(含出错)一定清掉', () => {
+    expect(fn).toMatch(/const busy = getXHostBusy\(wcId\);\s*if \(busy !== null\)/);
+    expect(fn).toMatch(/setXHostBusy\(wcId, COLLECT_BUSY\)/);
+    expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);\s*\}/);
+  });
+
+  it('⭐⭐ 推文走 saveTweets(作者顺带进人表),来源记成哪一页', () => {
+    expect(fn).toMatch(/dispatchPayloads\(/);
+    expect(fn).toMatch(/summarizeAudits\(d\.tweets\)/);
+    expect(fn).toMatch(/op: 'saveTweets', records, ctx: \{ source: tab\.name \}/);
+  });
+
+  it('⭐⭐⭐ 人卡的「他的推文」按作者数字 id 查,不按 handle', async () => {
+    const { PERSON_TWEETS_SQL } = await import('@modules/x/x-people-query');
+    expect(PERSON_TWEETS_SQL).toContain('author_rest_id = $rest_id');
+    expect(PERSON_TWEETS_SQL).not.toMatch(/author_handle/);
+    expect(PERSON_TWEETS_SQL).toMatch(/<string> created_at/);
+    expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'personTweets'/);
+    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'personTweets':/);
+  });
+});
+
+describe('⭐⭐ 核对后关系变了要及时移出当前分组(2026-10-09)', () => {
+  /** 用户截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」;用户:「要做及时的调整才对吧」 */
+  it('⭐⭐⭐ inGroup 与分组口径一致:两个标记 9 种组合,每种恰好落在一个具体分组', async () => {
+    const { inGroup } = await import('@modules/x/x-people-query');
+    const vals = [true, false, undefined] as const;
+    const groups = ['mutual', 'iWait', 'theyWait', 'none', 'unknown'] as const;
+    for (const a of vals) for (const b of vals) {
+      const hits = groups.filter((g) => inGroup(g, a, b));
+      expect(hits, `i_follow=${a} follows_me=${b}`).toHaveLength(1);
+      expect(inGroup('all', a, b)).toBe(true);
+    }
+    expect(inGroup('iWait', true, false)).toBe(true);
+    expect(inGroup('none', false, false)).toBe(true);
+    expect(inGroup('unknown', false, undefined)).toBe(true);
+  });
+
+  it('⭐⭐ 核对回来按「那一刻」的分组判断(ref,不读闭包里的旧 filter),移出并减总数', () => {
+    const PAGE = read('src/modules/x/XOpsPeople.tsx');
+    const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
+    expect(fn).toMatch(/const g = filterRef\.current\.group;/);
+    expect(fn).toMatch(/if \(!inGroup\(g, iF, fM\)\) \{[\s\S]{0,200}setRows\(\(prev\) => prev\.filter/);
+    expect(fn).toMatch(/setTotal\(\(t\) => \(t === null \? t : t - 1\)\)/);
+    expect(PAGE).toMatch(/filterRef\.current = filter;/);
+  });
+
+  it('⚠️ 同一人重复核对的窗口只挡双击(3 秒)—— 刚取关马上再点要能更新', () => {
+    const PAGE = read('src/modules/x/XOpsPeople.tsx');
+    expect(PAGE).toMatch(/Date\.now\(\) - last\.at < 3_000\) return;/);
   });
 });

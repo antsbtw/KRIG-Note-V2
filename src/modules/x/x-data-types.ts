@@ -118,7 +118,24 @@ export type XDataInvoke =
    * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— 载荷解析在 renderer 做(auditUserPayload),
    * 这里只写库。返回 `{ isNew, changes }`。
    */
-  | { readonly op: 'refreshPerson'; readonly record: XUserRecord };
+  | { readonly op: 'refreshPerson'; readonly record: XUserRecord }
+  /** ⭐ 他的推文(人卡用)—— 返回 `{ total, rows }`,按作者数字 id 查 */
+  | { readonly op: 'personTweets'; readonly restId: string; readonly limit: number }
+  /** ⭐ 运营设置(人可设定的变量,含默认值合并)—— 返回 `{ settings, problems }` */
+  | { readonly op: 'opsSettings' }
+  /** ⭐ 改一个设置(带校验) */
+  | { readonly op: 'setOpsSetting'; readonly key: string; readonly value: number }
+  /** ⭐ 现在能不能取关(每日上限 + 最小间隔)—— dayStartIso 由 renderer 按本地时区给 */
+  | { readonly op: 'unfollowGate'; readonly dayStartIso: string }
+  /** ⭐ 记一条动作(只追加)*/
+  | {
+      readonly op: 'logAction';
+      readonly entry: {
+        readonly action: 'unfollow'; readonly targetRestId: string; readonly targetHandle: string;
+        readonly decidedBy: 'human' | 'ai'; readonly result: 'ok' | 'failed';
+        readonly reason?: string; readonly detail?: string;
+      };
+    };
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:

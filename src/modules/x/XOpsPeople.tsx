@@ -19,6 +19,9 @@
  * ⭐ 关联(2026-10-08):用户「点击选定用户时，右边的x view跳转到这个人的主页」。
  * ⭐⭐ 核对(2026-10-09):跳转时**顺手读这一页**(主页加载本来就会请求 UserByScreenName),
  * 有变化直接更新库并在这一行提示。一次只核对一个;连点时只核对最后点的那个。
+ * ⭐⭐ 采他的帖子和回复(2026-10-09):人卡按钮,主页帖子 + 回复各 2 页(用户同意的默认值)。
+ * ⭐⭐ 取关(2026-10-10):用户取消了「不由程序点按钮」的红线,「取关的动作放在运营面板上,直接取关和更新」。
+ * 保护:每日上限 + 最小间隔(用户可设)、异常即停(要人点「恢复」)、每次留动作记录、取关后立刻核对。
  * ⚠️ 操作台采集中不跳(跳走会打断采集),并说出来;已经在他主页就不重载。
  */
 
@@ -31,10 +34,14 @@ import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
 import { auditUserPayload, type XUserRecord } from './x-user-audit';
 import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
+import { dispatchPayloads } from './x-payload-dispatch';
+import { summarizeAudits } from './x-timeline-audit';
+import { X_SCRIPTS } from './x-dom-scripts';
+import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
 import {
-  DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput,
+  DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup,
   type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort,
-  type PersonDetail, type PersonRow,
+  type PersonDetail, type PersonRow, type PersonTweet,
 } from './x-people-query';
 
 const PAGE = 200;
@@ -92,6 +99,15 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
       else setErr(r.reason);
     });
   }, []);
+  /**
+   * ⭐ 当前筛选的最新值 —— 核对是异步的,回来时要按**那一刻**的分组判断要不要移出列表。
+   * (用 ref:runVerify 是 useCallback,直接读 filter 会拿到旧值)
+   */
+  const filterRef = useRef(filter);
+  filterRef.current = filter;
+  /** ⭐ 核对后移出当前分组的人 —— 告诉人他去哪了(用户:「要做及时的调整才对吧」) */
+  const [moved, setMoved] = useState<string | null>(null);
+
   /** ⭐ 每个人最近一次核对的结果 —— 显示在列表那一行 */
   const [verify, setVerify] = useState<Record<string, { kind: 'running' | 'same' | 'changed' | 'new' | 'miss'; text: string; at: number }>>({});
   const verifying = useRef(false);
@@ -156,6 +172,18 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             const d = r.value as { isNew: boolean; changes: string[] };
             patchRow(rec);
             setCardRev((v) => v + 1);
+            /**
+             * ⭐⭐ 关系变了、已不属于当前这组 → 立刻移出列表、总数减一,并说清楚去了哪
+             * (2026-10-09 截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」里)。
+             */
+            const g = filterRef.current.group;
+            const iF = rec.following ?? p.i_follow;
+            const fM = rec.followedBy ?? p.follows_me;
+            if (!inGroup(g, iF, fM)) {
+              setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
+              setTotal((t) => (t === null ? t : t - 1));
+              setMoved(`@${p.handle} 关系变为「${relationLabel({ i_follow: iF, follows_me: fM })}」,已移出「${PEOPLE_GROUPS.find((x) => x.id === g)?.label}」`);
+            }
             if (d.changes.length > 0 || d.isNew) loadOverview();
             result = d.isNew ? { kind: 'new', text: '库里没有,已补进来' }
               : d.changes.length > 0 ? { kind: 'changed', text: `有变化:${d.changes.join(';')}(已更新)` }
@@ -174,8 +202,11 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   /** ⭐ 一次只核对一个;核对中又点了别人,只记住**最后点的那个** */
   const openInX = useCallback((p: PersonRow): void => {
     const last = verify[p.rest_id];
-    /** 15 秒内刚核对过同一个人就不重来(双击也会先触发两次单击) */
-    if (last && last.kind !== 'miss' && Date.now() - last.at < 15_000) return;
+    /**
+     * 3 秒内刚核对过同一个人就不重来 —— 只为挡双击(双击会先触发两次单击)。
+     * ⚠️ 原先 15 秒:人在 X 页面上刚取关、马上再点他想更新时会被挡掉(2026-10-09)。
+     */
+    if (last && last.kind !== 'miss' && Date.now() - last.at < 3_000) return;
     if (verifying.current) { pending.current = p; return; }
     verifying.current = true;
     void (async () => {
@@ -188,6 +219,153 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
       verifying.current = false;
     })();
   }, [runVerify, verify]);
+
+  /**
+   * ⭐⭐ 采他的帖子和回复 —— 主页帖子、回复各 2 页(用户 2026-10-09 同意的默认值)。
+   * 采到的推文走 saveTweets(作者顺带进人表);同一个「忙」规矩:操作台采集中、正在核对时都不采。
+   * ⚠️ 回复页接口叫什么以真机为准(X 改过名);对不上时采集层会如实报「没有一条是目标页面的数据」。
+   */
+  const [collect, setCollect] = useState<Record<string, { running: boolean; text: string }>>({});
+  const COLLECT_BUSY = '运营正在采他的推文';
+  const collectTweets = useCallback(async (p: PersonRow): Promise<void> => {
+    if (wcId == null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: 'X 网页没开,没法采' } })); return; }
+    const busy = getXHostBusy(wcId);
+    if (busy !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${busy},先等它结束` } })); return; }
+    setXHostBusy(wcId, COLLECT_BUSY);
+    const parts: string[] = [];
+    try {
+      const tabs = [
+        { name: X_PAGE_NAME.profile, label: '帖子', want: ['UserOriginalsTimeline', 'UserTweets'] },
+        { name: X_PAGE_NAME.withReplies, label: '回复', want: ['UserTweetsAndReplies'] },
+      ];
+      for (const tab of tabs) {
+        setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `正在采${tab.label}…${parts.length ? `(${parts.join(';')})` : ''}` } }));
+        const h = await window.electronAPI!.webDomInvoke({
+          op: 'harvest', pageRef: { wcId },
+          plan: {
+            gotoPage: { name: tab.name, params: { handle: p.handle } },
+            pageUrlIncludes: tab.want, wantPages: 2, maxRounds: 8, maxMs: 30_000,
+            noisyUrlSubstrings: X_NOISY_URLS,
+          },
+        });
+        if (h.status === 'failed') { parts.push(`${tab.label}没采到:${h.reason ?? '原因未知'}`); continue; }
+        const rep = h.value as { items?: Array<{ url: string; text: string }>; problems?: string[] };
+        const d = dispatchPayloads((rep.items ?? []).map((it) => ({ url: it.url, text: it.text })));
+        const records = (summarizeAudits(d.tweets).items ?? []).map((t) => t.record).filter((r) => r.id !== '');
+        if (records.length === 0) {
+          parts.push(`${tab.label} 0 条${rep.problems?.[0] ? `(${rep.problems[0]})` : ''}`);
+          continue;
+        }
+        const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
+        if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); continue; }
+        const v = sv.value as { inserted: number; updated: number };
+        parts.push(`${tab.label} ${records.length} 条(新 ${v.inserted})`);
+      }
+    } catch (e) {
+      parts.push(`出错:${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setXHostBusy(wcId, null);
+    }
+    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `采完:${parts.join(';')}` } }));
+    setCardRev((v) => v + 1);
+    loadOverview();
+  }, [wcId, loadOverview]);
+
+  /** ⭐ 运营设置(人可设定的变量)*/
+  const [settings, setSettings] = useState<OpsSettings | null>(null);
+  const [gate, setGate] = useState<UnfollowGate | null>(null);
+  const loadGate = useCallback(() => {
+    void xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() }).then((r) => {
+      if (r.status === 'ok') setGate(r.value as UnfollowGate);
+    });
+  }, []);
+  useEffect(() => {
+    void xDataCall({ op: 'opsSettings' }).then((r) => {
+      if (r.status === 'ok') setSettings((r.value as { settings: OpsSettings }).settings);
+      else setErr(r.reason);
+    });
+    loadGate();
+  }, [loadGate]);
+  const saveSetting = async (key: string, value: number): Promise<void> => {
+    const r = await xDataCall({ op: 'setOpsSetting', key, value });
+    if (r.status === 'failed') { setErr(r.reason); return; }
+    setSettings((s) => (s ? { ...s, [key]: value } : s));
+    loadGate();
+  };
+
+  /**
+   * ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续。
+   * (红线取消后挡封号风险的就剩这些;X 弹验证 / 改版时连着硬点只会更糟)
+   */
+  const [unfollowPaused, setUnfollowPaused] = useState<string | null>(null);
+  const [unfollowing, setUnfollowing] = useState<string | null>(null);
+  const UNFOLLOW_BUSY = '运营正在取关';
+  const STATE_TEXT: Record<string, string> = {
+    'not-following': '本来就没关注他', 'no-button': '页面上找不到他的关注按钮', 'no-confirm': '确认框没出来',
+    'no-switch': '点了确认,按钮没变回 Follow', 'bad-id': '数字 id 不对', error: '脚本出错',
+  };
+
+  const unfollow = useCallback(async (p: PersonRow): Promise<void> => {
+    if (unfollowPaused !== null) { setFollowNote(`取关已暂停:${unfollowPaused} —— 看过原因后点「恢复」`); return; }
+    if (wcId == null) { setFollowNote('X 网页没开,没法取关'); return; }
+    const busy = getXHostBusy(wcId);
+    if (busy !== null) { setFollowNote(`${busy},先等它结束`); return; }
+    /** ① 闸门:每日上限 + 最小间隔(主进程按库里最新的数判) */
+    const g = await xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() });
+    if (g.status === 'failed') { setErr(g.reason); return; }
+    const gv = g.value as UnfollowGate;
+    setGate(gv);
+    if (!gv.allowed) { setFollowNote(`没取关:${gv.reason}`); return; }
+
+    setUnfollowing(p.rest_id);
+    setXHostBusy(wcId, UNFOLLOW_BUSY);
+    let result: { done: boolean; state: string; why?: string } = { done: false, state: 'error' };
+    try {
+      /** ② 去他的主页(取关按钮在那)*/
+      const go = await window.electronAPI!.webDomInvoke({
+        op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: p.handle },
+      });
+      if (go.status === 'failed') {
+        result = { done: false, state: 'error', why: `没去到他的主页:${go.reason ?? ''}` };
+      } else {
+        /** ③ 在页面上点:Following → 确认 Unfollow → 等按钮变回 Follow */
+        const r = await window.electronAPI!.webDomInvoke({
+          op: 'run', pageRef: { wcId }, scriptId: X_SCRIPTS.unfollow, params: { restId: p.rest_id },
+        });
+        result = r.status === 'failed'
+          ? { done: false, state: 'error', why: r.reason ?? '' }
+          : (r.value as { done: boolean; state: string; why?: string });
+      }
+    } catch (e) {
+      result = { done: false, state: 'error', why: e instanceof Error ? e.message : String(e) };
+    } finally {
+      setXHostBusy(wcId, null);
+      setUnfollowing(null);
+    }
+
+    /** ④ 留动作记录 —— 成功失败都记(只追加) */
+    const detail = result.done ? undefined : `${STATE_TEXT[result.state] ?? result.state}${result.why ? `:${result.why}` : ''}`;
+    await xDataCall({
+      op: 'logAction',
+      entry: {
+        action: 'unfollow', targetRestId: p.rest_id, targetHandle: p.handle, decidedBy: 'human',
+        result: result.done ? 'ok' : 'failed', detail,
+      },
+    });
+    loadGate();
+
+    if (result.done) {
+      setFollowNote(null);
+      /** ⑤ 取关后立刻核对 —— 读回他的主页,确认关系真变了再更新库(并按分组移出列表) */
+      await runVerify(p);
+    } else if (result.state === 'not-following') {
+      /** 本来就没关注:不算异常,核对一下把库里的「我关注」纠正过来 */
+      setFollowNote(`@${p.handle} 本来就没关注,已重新核对`);
+      await runVerify(p);
+    } else {
+      setUnfollowPaused(`@${p.handle} ${detail}`);
+    }
+  }, [unfollowPaused, wcId, loadGate, runVerify]);
 
   /** 单击:选中 + X 网页跟着跳 —— **不开人卡** */
   const selectPerson = (p: PersonRow): void => {
@@ -256,6 +434,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   }, []);
 
   const key = JSON.stringify(filter);
+  /** 换了分组/筛选,「已移出」那句就不相干了 */
+  useEffect(() => { setMoved(null); }, [key]);
   useEffect(() => {
     const t = setTimeout(() => void load(JSON.parse(key) as PeopleFilter, 0), 250);
     return () => clearTimeout(t);
@@ -384,7 +564,38 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                 {catalog.map((c) => <option key={c.tag} value={c.tag}>{`${c.count} 人`}</option>)}
               </datalist>
             </div>
+            {settings && (
+              <div style={S.settingsBar}>
+                <span>取关:今日 {gate ? `${gate.todayCount}` : '…'}</span>
+                {SETTING_DEFS.map((d) => (
+                  <label key={d.key} style={S.check} title={`${d.min}–${d.max}${d.unit}`}>
+                    {d.label}
+                    <input
+                      type="number" min={d.min} max={d.max} defaultValue={settings[d.key]}
+                      style={{ ...S.input, flex: '0 0 64px' }}
+                      onBlur={(e) => {
+                        const v = Number(e.target.value);
+                        if (v !== settings[d.key]) void saveSetting(d.key, v);
+                      }}
+                    />
+                    {d.unit}
+                  </label>
+                ))}
+              </div>
+            )}
+            {unfollowPaused !== null && (
+              <div style={S.error}>
+                ⏸ 取关已暂停:{unfollowPaused}(X 改版、弹验证或限流时连着硬点只会更糟)
+                <button type="button" style={S.linkBtn} onClick={() => { setUnfollowPaused(null); setFollowNote(null); }}>恢复</button>
+              </div>
+            )}
             {followNote !== null && <div style={S.muted}>⚠️ {followNote}</div>}
+            {moved !== null && (
+              <div style={S.undo}>
+                {moved}
+                <button type="button" style={S.linkBtn} onClick={() => setMoved(null)} title="知道了">✕</button>
+              </div>
+            )}
             {undo && (
               <div style={S.undo}>
                 已{undo.excluded ? '排除' : '取消排除'} {undo.p.display_name ?? undo.p.handle}(@{undo.p.handle})
@@ -447,6 +658,10 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             restId={cardId!}
             wcId={wcId}
             onOpenInX={(person) => openInX(person)}
+            onCollect={(person) => void collectTweets(person)}
+            onUnfollow={(person) => void unfollow(person)}
+            unfollowing={unfollowing === cardId}
+            collectState={collect[cardId!]}
             rev={cardRev}
             onEditTags={(p) => setTagging(p)}
             onToggleExclude={(p) => {
@@ -480,6 +695,15 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
           >
             打标签…
           </button>
+          {menu.p.i_follow === true && (
+            <button
+              type="button" style={S.menuItem}
+              disabled={unfollowing !== null}
+              onClick={() => { const m = menu; setMenu(null); void unfollow(m.p); }}
+            >
+              取关
+            </button>
+          )}
         </div>
       )}
 
@@ -501,7 +725,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
 
 /** ⭐ 人卡 —— 事实(采来的)与推断(AI 猜的)分开;缺的就是采集入口 */
 function PersonCard(
-  { restId, wcId, onBack, onClose, onToggleExclude, onOpenInX, onEditTags, rev }: {
+  { restId, wcId, onBack, onClose, onToggleExclude, onOpenInX, onEditTags, rev, onCollect, collectState, onUnfollow, unfollowing }: {
     restId: string; wcId: number | null; onBack?: () => void; onClose: () => void;
     onToggleExclude: (p: PersonRow) => void;
     onEditTags: (p: PersonRow) => void;
@@ -509,6 +733,10 @@ function PersonCard(
     rev: number;
     /** ⭐ 与「点人跳主页」同一个函数 —— 忙不跳、一次只核对一个的规矩只有一份 */
     onOpenInX: (p: PersonRow) => void;
+    onCollect: (p: PersonRow) => void;
+    onUnfollow: (p: PersonRow) => void;
+    unfollowing: boolean;
+    collectState?: { running: boolean; text: string };
   },
 ): ReactElement {
   const [p, setP] = useState<PersonDetail | null | undefined>(undefined);
@@ -519,6 +747,15 @@ function PersonCard(
     void xDataCall({ op: 'personDetail', restId }).then((r) => {
       if (r.status === 'ok') { setP(r.value as PersonDetail | null); setErr(null); }
       else setErr(r.reason);
+    });
+  }, [restId, rev]);
+
+  /** ⭐ 他的推文 —— 按数字 id 查,最新 20 条 */
+  const [tw, setTw] = useState<{ total: number; rows: PersonTweet[] } | null>(null);
+  useEffect(() => {
+    setTw(null);
+    void xDataCall({ op: 'personTweets', restId, limit: 20 }).then((r) => {
+      if (r.status === 'ok') setTw(r.value as { total: number; rows: PersonTweet[] });
     });
   }, [restId, rev]);
 
@@ -563,6 +800,11 @@ function PersonCard(
             <button type="button" style={S.btn} onClick={() => onToggleExclude(p)}>
               {p.excluded === true ? '取消排除' : '排除'}
             </button>
+            {p.i_follow === true && (
+              <button type="button" style={S.btn} disabled={unfollowing} onClick={() => onUnfollow(p)}>
+                {unfollowing ? '取关中…' : '取关'}
+              </button>
+            )}
           </div>
 
           <div style={S.line}>
@@ -595,8 +837,30 @@ function PersonCard(
             <button type="button" style={S.btn} disabled title="第 4 块">分析他(还没做)</button>
           </Section>
 
-          <Section title="他的推文" note="还没采集">
-            <button type="button" style={S.btn} disabled title="第 4 块">采他的推文(还没做)</button>
+          <Section
+            title="他的推文"
+            note={tw === null ? '读取中…' : tw.total === 0 ? '还没采集' : `库里 ${tw.total} 条,显示最新 ${tw.rows.length} 条`}
+          >
+            <div style={S.line}>
+              <button
+                type="button" style={S.btn}
+                disabled={collectState?.running === true || wcId == null}
+                onClick={() => onCollect(p)}
+                title={wcId == null ? 'X 网页没开' : '主页帖子 + 回复各采 2 页'}
+              >
+                {collectState?.running ? '采集中…' : '采他的帖子和回复'}
+              </button>
+              {collectState && <span style={S.muted}>{collectState.text}</span>}
+            </div>
+            {tw?.rows.map((t) => (
+              <div key={t.tweet_id} style={S.tweetRow}>
+                <div style={S.muted}>
+                  {t.created_at ? new Date(t.created_at).toLocaleString() : '时间未知'}
+                  {t.in_reply_to_user && <> · 回复 @{t.in_reply_to_user}</>}
+                </div>
+                <div style={S.tweetText}>{t.text || '(没有正文)'}</div>
+              </div>
+            ))}
           </Section>
 
           <Section title="我们的互动" note="还没采集">
@@ -812,6 +1076,9 @@ const S: Record<string, CSSProperties> = {
   factVal: { color: 'var(--text-primary, #ddd)', wordBreak: 'break-all' },
   /** 核对有变化 / 没读到 —— 要让人注意,用正文色,不只靠颜色(前面有 ⚠ / ? 图标) */
   verifyWarn: { fontSize: 11, color: 'var(--text-primary, #ddd)' },
+  tweetRow: { padding: '6px 0', borderTop: '1px solid var(--border-color, #2a2a2a)' },
+  tweetText: { fontSize: 12, lineHeight: 1.6, color: 'var(--text-primary, #ddd)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' },
+  settingsBar: { display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', fontSize: 12, color: 'var(--text-secondary, #aaa)' },
   undo: {
     display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 8px', borderRadius: 4,
     color: 'var(--text-primary, #ddd)', background: 'var(--accent-bg, rgba(138,180,248,0.15))',

@@ -264,3 +264,37 @@ export function relationLabel(p: { readonly i_follow?: boolean; readonly follows
   if (p.follows_me === true) return '他关注·我没回关';
   return '无关注关系';
 }
+
+/**
+ * ⭐ 他的推文(人卡用,2026-10-09)—— 按**作者数字 id** 查(身份是 rest_id,不按 handle)。
+ * ⚠️ 时间转字符串(DateTime 过不了 IPC);最新在前。
+ */
+export type PersonTweet = {
+  readonly tweet_id: string;
+  readonly text?: string;
+  readonly created_at?: string;
+  readonly in_reply_to_user?: string;
+  readonly tweet_url?: string;
+  readonly source?: string;
+};
+
+export const PERSON_TWEETS_SQL = `
+  SELECT count() AS n FROM x_tweet WHERE author_rest_id = $rest_id GROUP ALL;
+  SELECT tweet_id, text, in_reply_to_user, tweet_url, source,
+    (IF created_at != NONE THEN <string> created_at ELSE NONE END) AS created_at
+    FROM x_tweet WHERE author_rest_id = $rest_id ORDER BY created_at DESC LIMIT $limit;`;
+
+/**
+ * ⭐ 这个人(按当前两个标记)属不属于某个关系分组 —— 与 PEOPLE_GROUPS 的 SQL 口径一致。
+ * 核对出关系变化后,列表据此判断「要不要移出当前这组」(2026-10-09 用户:「要做及时的调整才对吧」)。
+ */
+export function inGroup(group: PeopleGroup, iFollow?: boolean, followsMe?: boolean): boolean {
+  switch (group) {
+    case 'all': return true;
+    case 'mutual': return iFollow === true && followsMe === true;
+    case 'iWait': return iFollow === true && followsMe !== true;
+    case 'theyWait': return followsMe === true && iFollow !== true;
+    case 'none': return iFollow === false && followsMe === false;
+    case 'unknown': return iFollow !== true && followsMe !== true && (iFollow === undefined || followsMe === undefined);
+  }
+}

@@ -7,7 +7,7 @@
 import { getXDB } from '@storage/surreal/client';
 import {
   buildOverviewQuery, buildPeopleQuery, parseOverview, parsePeopleResult, PERSON_DETAIL_SQL, SET_EXCLUDED_SQL,
-  SET_TAGS_SQL, TAG_ROWS_SQL, normalizeTags, tagCatalog,
+  SET_TAGS_SQL, TAG_ROWS_SQL, normalizeTags, tagCatalog, PERSON_TWEETS_SQL, type PersonTweet,
   type PeopleFilter, type PeopleOverview, type PersonDetail, type PersonRow,
 } from './x-people-query';
 
@@ -61,4 +61,12 @@ export async function setTags(restId: string, raw: readonly string[]): Promise<s
 export async function readTagCatalog(): Promise<Array<{ tag: string; count: number }>> {
   const [rows] = await getXDB().query<[Array<{ tags?: string[] }>]>(TAG_ROWS_SQL);
   return tagCatalog(rows ?? []);
+}
+
+/** ⭐ 他的推文 —— 总数 + 最新 limit 条 */
+export async function readPersonTweets(restId: string, limit: number): Promise<{ total: number; rows: PersonTweet[] }> {
+  const [c, rows] = await getXDB().query<[Array<{ n: number }>, PersonTweet[]]>(
+    PERSON_TWEETS_SQL, { rest_id: restId, limit },
+  );
+  return { total: c?.[0]?.n ?? 0, rows: rows ?? [] };
 }

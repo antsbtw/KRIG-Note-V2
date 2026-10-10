@@ -31,6 +31,13 @@ export const X_SCRIPTS = {
    */
   navProbe: 'x.navBackProbe' as ScriptId,
   /**
+   * ⭐⭐ 在**他的主页**上取关(2026-10-10,用户取消了「不由程序点按钮」的红线)。
+   * 模拟人的操作:点 Following → 确认框点 Unfollow → 等按钮变回 Follow 才算成。
+   * ⚠️ 按钮按**他的数字 id** 定位(`<id>-unfollow`),不会点到页面上别人的按钮。
+   * ⚠️ 依赖 X 的页面标记,真机才验得出;哪一步卡住就如实报哪一步。
+   */
+  unfollow: 'x.unfollowOnProfile' as ScriptId,
+  /**
    * ⭐⭐⭐ **滚不动时跳到最后一张卡片** —— 虚拟列表的抢救动作。
    *
    * ── 用户 2026-09-19 原话 ──
@@ -315,7 +322,54 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
 };
 
 /** ⭐ 注册表 —— 由 `main.ts` 在启动时 push 给底座 */
+/**
+ * ⭐ 取关脚本 —— 参数(数字 id)走 JSON 绑定,且脚本里再校验只能是数字。
+ * 返回 state:unfollowed / not-following / no-button / no-confirm / no-switch / bad-id / error
+ */
+const buildUnfollowScript = (params: Readonly<Record<string, unknown>>): string => {
+  const id = JSON.stringify(String(params.restId ?? ''));
+  return [
+    '(function () {',
+    '  return new Promise(function (resolve) {',
+    '    try {',
+    '      var id = ' + id + ';',
+    "      if (!/^\\d+$/.test(id)) { resolve({ done: false, state: 'bad-id' }); return; }",
+    // ⚠️ 选择器里同时有单双引号 —— 用反引号包这一行(本行没有 ${ 也没有反斜杠,原样输出)
+    `      var q = function (suffix) { return document.querySelector('[data-testid="' + id + suffix + '"]'); };`,
+    '      var waitFor = function (get, ms, then) {',
+    '        var t0 = Date.now();',
+    '        var tick = function () {',
+    '          var el = get();',
+    '          if (el) { then(el); return; }',
+    '          if (Date.now() - t0 > ms) { then(null); return; }',
+    '          setTimeout(tick, 200);',
+    '        };',
+    '        tick();',
+    '      };',
+    "      waitFor(function () { return q('-unfollow') || q('-follow'); }, 6000, function (btn) {",
+    "        if (!btn) { resolve({ done: false, state: 'no-button' }); return; }",
+    "        if (btn.getAttribute('data-testid') === id + '-follow') { resolve({ done: false, state: 'not-following' }); return; }",
+    '        btn.click();',
+    `        waitFor(function () { return document.querySelector('[data-testid="confirmationSheetConfirm"]'); }, 5000, function (ok) {`,
+    "          if (!ok) { resolve({ done: false, state: 'no-confirm' }); return; }",
+    '          ok.click();',
+    "          waitFor(function () { return q('-follow'); }, 5000, function (after) {",
+    "            resolve(after ? { done: true, state: 'unfollowed' } : { done: false, state: 'no-switch' });",
+    '          });',
+    '        });',
+    '      });',
+    "    } catch (e) { resolve({ done: false, state: 'error', why: String(e) }); }",
+    '  });',
+    '})();',
+  ].join('\n');
+};
+
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_SCRIPTS.unfollow,
+    purpose: 'X:在他的主页上取关(点 Following → 确认 Unfollow → 等按钮变回 Follow)',
+    build: buildUnfollowScript,
+  },
   {
     id: X_SCRIPTS.expandAll,
     purpose: 'X:点开当前页所有折叠的推文(Show more)并回读展开后的全文',
