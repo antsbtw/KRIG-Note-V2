@@ -12,11 +12,14 @@ import { ipcMain } from 'electron';
 import {
   listAllRecipes, upsertRecipe, deleteRecipe,
 } from '@platform/main/db/search-recipe-repo';
+import { recipeNameForQuery } from './x-recipe-query';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { saveTweets } from './x-tweet-repo';
-import { saveUsers } from './x-user-repo';
+import { saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
+import { queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, setExcluded, setTags } from './x-people-repo';
+import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 
@@ -111,6 +114,38 @@ export function registerXDataIpc(): void {
             kind: 'tweets', source: p.ctx?.source || 'unknown', given: p.records.length,
             inserted: r.inserted, updated: r.updated, failed: r.failed.length, wsId: p.ctx?.wsId,
           });
+
+          /**
+           * ⭐⭐ 作者顺带进人表(2026-10-08)—— 「互不关注 = 配方找到的人」的来源。
+           * ⚠️ 推文已经存好了;这一步失败**不让存推文报失败**,但留痕 + 记账(对账会现形)。
+           * 配方名:推文上记的是查询串,在这里对回配方名;对不上就不记(不猜)。
+           */
+          try {
+            const recipes = p.ctx?.searchRecipe ? await listAllRecipes() : [];
+            const recipeName = recipeNameForQuery(p.ctx?.searchRecipe, recipes);
+            const a = await saveTweetAuthors(p.records, recipeName);
+            traceRecorder.lifecycle({
+              layer: 'web.net',
+              event: a.failed.length > 0 ? 'x-save-authors-incomplete' : 'x-save-authors-ok',
+              pageId: 'x-data',
+              detail: {
+                inserted: a.inserted, updated: a.updated, skippedNoRestId: a.skippedNoRestId,
+                failed: a.failed.length, firstFailure: a.failed[0]?.why ?? '(none)',
+                recipe: recipeName ?? '(没对上配方)',
+              },
+            });
+            await logCollect({
+              kind: 'users', source: 'tweet-authors', given: a.inserted + a.updated + a.failed.length,
+              inserted: a.inserted, updated: a.updated, failed: a.failed.length, wsId: p.ctx?.wsId,
+            });
+          } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            console.error(`[x.data] 推文作者没写进人表:${why}`);
+            traceRecorder.lifecycle({
+              layer: 'web.net', event: 'x-save-authors-incomplete', pageId: 'x-data',
+              detail: { why },
+            });
+          }
           return { status: 'ok', value: r };
         }
 
@@ -203,6 +238,120 @@ export function registerXDataIpc(): void {
         /** ⭐⭐ 运营 → 状态(2026-10-07)—— 只读 */
         case 'opsStatus':
           return { status: 'ok', value: await readOpsStatus() };
+
+        /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
+        case 'peopleOverview':
+          return { status: 'ok', value: await readPeopleOverview() };
+
+        case 'queryPeople': {
+          /** ⚠️ limit 要有上界:几千行连头像一起过 IPC 再全渲染,面板会卡 */
+          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 500) {
+            return failed('[x.data] queryPeople 的 limit 要在 1–500 之间');
+          }
+          if (!Number.isInteger(p.start) || p.start < 0) {
+            return failed('[x.data] queryPeople 的 start 要是非负整数');
+          }
+          return { status: 'ok', value: await queryPeople(p.filter, p.limit, p.start) };
+        }
+
+        case 'personDetail':
+          if (typeof p.restId !== 'string' || p.restId === '') {
+            return failed('[x.data] personDetail 缺 restId —— 人的身份是数字 id');
+          }
+          return { status: 'ok', value: await readPerson(p.restId) };
+
+        case 'setExcluded':
+          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.excluded !== 'boolean') {
+            return failed('[x.data] setExcluded 要 restId(数字 id)和 excluded(true/false)');
+          }
+          await setExcluded(p.restId, p.excluded);
+          /** ⭐ 人的决定也留痕 —— 以后回头看「我排除过谁、何时」不用猜 */
+          console.log(`[x.people] ${p.excluded ? '排除' : '取消排除'} ${p.restId}`);
+          return { status: 'ok', value: { restId: p.restId, excluded: p.excluded } };
+
+        case 'setTags': {
+          if (typeof p.restId !== 'string' || p.restId === '' || !Array.isArray(p.tags)
+            || p.tags.some((t) => typeof t !== 'string')) {
+            return failed('[x.data] setTags 要 restId(数字 id)和 tags(字符串数组)');
+          }
+          const tags = await setTags(p.restId, p.tags);
+          console.log(`[x.people] 标签 ${p.restId} → ${tags.length > 0 ? tags.join('、') : '(清空)'}`);
+          return { status: 'ok', value: tags };
+        }
+
+        case 'tagCatalog':
+          return { status: 'ok', value: await readTagCatalog() };
+
+        /** ⭐ 运营设置 / 取关闸门 / 动作记录(2026-10-10) */
+        case 'opsSettings':
+          return { status: 'ok', value: await readSettings() };
+
+        case 'setOpsSetting':
+          await writeSetting(p.key, p.value);
+          console.log(`[x.ops] 设置 ${p.key} = ${p.value}`);
+          return { status: 'ok', value: { key: p.key, value: p.value } };
+
+        case 'unfollowGate':
+          if (typeof p.dayStartIso !== 'string' || Number.isNaN(Date.parse(p.dayStartIso))) {
+            return failed('[x.data] unfollowGate 要 dayStartIso(本地今天的开始)');
+          }
+          return { status: 'ok', value: await readUnfollowGate(p.dayStartIso) };
+
+        case 'logAction': {
+          const e = p.entry;
+          if (!e || e.action !== 'unfollow' || !e.targetRestId || !e.targetHandle
+            || (e.decidedBy !== 'human' && e.decidedBy !== 'ai') || (e.result !== 'ok' && e.result !== 'failed')) {
+            return failed('[x.data] logAction 的记录不完整');
+          }
+          await appendAction(e);
+          /** ⭐ 动作也打到主进程日志 —— 人看的那块屏(feedback-log-where-the-human-looks) */
+          console.log(`[x.ops] ${e.decidedBy === 'human' ? '人' : 'AI'} ${e.action} @${e.targetHandle} → ${e.result}${e.detail ? `(${e.detail})` : ''}`);
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: `x-action-${e.result}`, pageId: 'x-data',
+            detail: { action: e.action, target: e.targetHandle, restId: e.targetRestId, by: e.decidedBy, detail: e.detail ?? '' },
+          });
+          return { status: 'ok', value: { logged: true } };
+        }
+
+        case 'logPersonProgress':
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-progress', pageId: 'x-data', detail: { ...p.entry } });
+          return { status: 'ok', value: { logged: true } };
+
+        case 'logPersonCollect': {
+          const e = p.entry;
+          console.log(`[x.people] 采 @${e.handle} ${e.tab}(${e.range}):${e.pages} 页 ${e.records} 条(新 ${e.inserted})—— ${e.stopReason || '(无停因)'}`);
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-collect', pageId: 'x-data', detail: { ...e } });
+          return { status: 'ok', value: { logged: true } };
+        }
+
+        case 'friendCircle':
+          if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] friendCircle 缺 restId');
+          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) return failed('[x.data] friendCircle 的 limit 要在 1–200 之间');
+          return { status: 'ok', value: await readFriendCircle(p.restId, p.limit) };
+
+        case 'personTweets':
+          if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] personTweets 缺 restId');
+          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) {
+            return failed('[x.data] personTweets 的 limit 要在 1–200 之间');
+          }
+          return { status: 'ok', value: await readPersonTweets(p.restId, p.limit) };
+
+        case 'refreshPerson': {
+          const rec = p.record;
+          if (!rec || typeof rec.restId !== 'string' || rec.restId === '' || typeof rec.handle !== 'string') {
+            return failed('[x.data] refreshPerson 要一条带数字 id 的用户记录');
+          }
+          const d = await refreshPerson(rec);
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: 'x-person-refresh', pageId: 'x-data',
+            detail: { restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes },
+          });
+          /** ⭐ 新人记账 —— 否则状态页对账差出一个 */
+          if (d.isNew) {
+            await logCollect({ kind: 'users', source: 'profile-refresh', given: 1, inserted: 1, updated: 0, failed: 0 });
+          }
+          return { status: 'ok', value: d };
+        }
 
         default:
           /** ⚠️ 不认识的 op 要**明说**,不静默回 ok */

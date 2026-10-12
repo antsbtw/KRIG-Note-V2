@@ -125,7 +125,8 @@ describe('一个入口:采到人就存', () => {
     /** ⚠️ 契约有、handler 没有 = 点了静默回「不认识的 op」 */
     expect(TYPES).toMatch(/op: 'saveUsers'/);
     expect(IPC).toMatch(/case 'saveUsers':/);
-    expect(IPC).toContain("import { saveUsers } from './x-user-repo'");
+    /** ⚠️ 同一行还会 import 别的(saveTweetAuthors)—— 钉「saveUsers 从 repo 来」,不钉整行字面 */
+    expect(IPC).toMatch(/import \{[^}]*\bsaveUsers\b[^}]*\} from '\.\/x-user-repo'/);
   });
 
   it('⭐⭐ 落库结果落盘 —— 不然「报了 N 条库里 0 行」只能去猜', () => {

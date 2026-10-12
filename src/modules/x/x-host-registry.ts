@@ -73,3 +73,27 @@ export function subscribeXHost(cb: Listener): () => void {
   listeners.add(cb);
   return () => listeners.delete(cb);
 }
+
+/**
+ * ⭐⭐ X 网页「正忙」—— 2026-10-08 运营的人页加了「点人 → X 网页跳到他主页」。
+ *
+ * ⚠️ 操作台正在用这个 webview 采集时,跳走会**打断采集**(载荷监听挂在当前页上)。
+ * 所以采集方登记「忙」,想导航的一方先问一句;忙就不跳,并且**说出来**为什么没跳。
+ * 按 wcId 记 —— 忙的是那个 webview,不是哪个 ws。
+ */
+const busyByWc = new Map<number, string>();
+
+export function setXHostBusy(wcId: number, reason: string | null): void {
+  if (reason === null) {
+    if (!busyByWc.delete(wcId)) return;
+  } else {
+    if (busyByWc.get(wcId) === reason) return;
+    busyByWc.set(wcId, reason);
+  }
+  notify();
+}
+
+/** 返回忙的原因;不忙返回 null */
+export function getXHostBusy(wcId: number): string | null {
+  return busyByWc.get(wcId) ?? null;
+}

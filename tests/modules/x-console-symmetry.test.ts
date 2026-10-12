@@ -83,6 +83,8 @@ describe('对称性:底座侧（identify 这条反向通路）', () => {
     'x.home': 'https://x.com/home',
     'x.profile': 'https://x.com/elonmusk',
     'x.withReplies': 'https://x.com/elonmusk/with_replies',
+    /** ⭐ 转发标签页(2026-10-10)—— 地址取自用户截图 */
+    'x.reposts': 'https://x.com/whyyoutouzhele/reposts',
     'x.articles': 'https://x.com/elonmusk/articles',
     'x.status': 'https://x.com/i/status/2105861183614169438',
     'x.search': 'https://x.com/search?q=%22VPN%22&f=live',

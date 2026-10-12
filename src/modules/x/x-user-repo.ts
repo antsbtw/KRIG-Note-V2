@@ -50,6 +50,8 @@
 import { getXDB } from '@storage/surreal/client';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { XUserRecord } from './x-user-audit';
+import { authorsFromTweets, buildAuthorUpsert, type TweetAuthorSource } from './x-tweet-authors';
+import { buildPersonRefresh, diffPerson, type PersonBefore } from './x-person-refresh';
 
 /**
  * ⭐⭐ **采集字段** —— 重采可以覆盖(都来自载荷)。
@@ -75,6 +77,10 @@ export const USER_BUSINESS_FIELDS = [
   'blocked', 'blocked_at', 'blocked_reason',
   'watched', 'watched_at', 'watch_source', 'watch_depth',
   'is_self', 'note', 'x_blocking',
+  /** ⭐ 排除(不在分析范围,schema 1.2.21)—— 人 > AI > 算法,采集绝不能碰 */
+  'excluded', 'excluded_source', 'excluded_at', 'excluded_reason',
+  /** ⭐ 自由标签(schema 1.2.22)—— 只有人打,采集绝不能碰 */
+  'tags',
 ] as const;
 
 /** ⭐ 落库时调用方要补的「空」—— 解析器不知道自己在哪采的 */
@@ -295,4 +301,53 @@ export async function saveUsers(
   );
 
   return { inserted, updated, failed, skippedNoHandle, skippedNoRestId };
+}
+
+/**
+ * ⭐⭐ 推文作者顺带写进人表(2026-10-08)—— SQL 在 `x-tweet-authors.ts`(纯,脚本共用)。
+ * 用户:「人的信息另外在采推文时顺带更新」;配方找到的人 = 「互不关注」那一格的来源。
+ * ⚠️ 只写有值的字段、不碰人工字段与名单字段 —— 见 buildAuthorUpsert。
+ */
+export async function saveTweetAuthors(
+  rows: readonly TweetAuthorSource[], recipeName: string | undefined,
+): Promise<{ inserted: number; updated: number; skippedNoRestId: number; failed: Array<{ restId: string; why: string }> }> {
+  /** ⭐ 实时采集:观察时间就是现在(推文刚采到)—— 永远比库里新 */
+  const now = new Date().toISOString();
+  const { authors, skippedNoRestId } = authorsFromTweets(rows, now);
+  const db = getXDB();
+  let inserted = 0;
+  let updated = 0;
+  const failed: Array<{ restId: string; why: string }> = [];
+  for (const a of authors) {
+    try {
+      const q = buildAuthorUpsert(a, recipeName);
+      /** RETURN BEFORE:新建时 before 为空 → 新人 */
+      const [before] = await db.query<[Array<Record<string, unknown> | null>]>(q.sql, q.vars);
+      const b = before?.[0];
+      if (b === undefined || b === null) inserted += 1; else updated += 1;
+    } catch (e) {
+      failed.push({ restId: a.restId, why: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  console.log(
+    `[x.user-repo] 推文作者 ${authors.length} 人${recipeName ? `(配方 ${recipeName})` : '(没对上配方)'}`
+    + ` → 新 ${inserted} / 更新 ${updated}`
+    + (skippedNoRestId > 0 ? ` / 无数字 id 挡下 ${skippedNoRestId}` : '')
+    + (failed.length > 0 ? ` / 失败 ${failed.length}:${failed[0].why}` : ''),
+  );
+  return { inserted, updated, skippedNoRestId, failed };
+}
+
+/**
+ * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— SQL 在 `x-person-refresh.ts`(纯)。
+ * 观察时间 = 现在(主页刚加载)。返回是不是新人、以及关系/改名/蓝V 的变化(给人看)。
+ */
+export async function refreshPerson(r: XUserRecord): Promise<{ isNew: boolean; stale: boolean; changes: string[] }> {
+  if (!r.restId) throw new Error('[x.user-repo] 核对:载荷里没有数字 id,不知道这是谁');
+  const obs = new Date().toISOString();
+  const q = buildPersonRefresh(r, obs);
+  const [before] = await getXDB().query<[PersonBefore[]]>(q.sql, q.vars);
+  const d = diffPerson(before?.[0], r, obs);
+  console.log(`[x.user-repo] 核对 @${r.handle}(${r.restId}):${d.isNew ? '新人' : d.changes.length > 0 ? d.changes.join(';') : '与库里一致'}`);
+  return d;
 }

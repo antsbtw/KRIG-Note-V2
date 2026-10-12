@@ -1766,6 +1766,184 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.25 —— 推文里的**互动对象**(2026-10-10,「他的朋友圈」的原料)
+ *
+ * 用户:「针对…posts/replies/reposts三个内容的采集，主要是观察这个用户主要和哪些用户互动，找到它的朋友圈。」
+ * 真机实测(10-10,李老师不是你老师):回复/提及原来只存 handle;**引用没存原作者;转发完全没记**
+ * (解析器把「他的转发」外层与「原推文」里层当成两条独立推文存了,关系丢了)。
+ *
+ * ⭐ 全部存**数字 id** —— 人的身份是 rest_id(1.2.20),存 handle 改名就断。
+ * ⭐ 朋友圈从推文**现算**(关系第二性、派生可重算),不另建关系表。
+ */
+const X_SCHEMA_1_2_25 = `
+DEFINE FIELD IF NOT EXISTS in_reply_to_user_id  ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mention_ids          ON x_tweet TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS quoted_author_id     ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retweet_of_id        ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retweet_of_author_id ON x_tweet TYPE option<string>;
+-- 朋友圈按「某人的全部推文」查
+DEFINE INDEX IF NOT EXISTS idx_tweet_author_rest_id ON x_tweet FIELDS author_rest_id;
+`;
+
+export async function x_migration_1_2_25(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_25);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_tweet');
+  for (const f of ['in_reply_to_user_id', 'mention_ids', 'quoted_author_id', 'retweet_of_id', 'retweet_of_author_id']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) throw new Error(`[x-schema 1.2.25] x_tweet.${f} 没建上 —— 整段 DDL 可能被拒收`);
+  }
+  console.log('[x-schema 1.2.25] x_tweet 互动对象字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.25', appliedAt = $now,
+      description = '推文互动对象(回复/提及/引用/转发,全用数字 id)—— 朋友圈的原料'`,
+    { rid: new RecordId('schema_version', '1.2.25'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.24 —— 运营设置 + 动作记录(2026-10-10)
+ *
+ * 用户 10-10 取消了「绝不由程序点按钮」的红线:「我的未来是要AI接管不少工作的」;
+ * 第一个程序动作是**取关**(用户:「取关的动作放在运营面板上,直接取关和更新」)。
+ * 用户:每日上限「这个作为变量，由我自己设定」。
+ *
+ * · x_setting:人可设定的变量(record id = 键,如 `unfollow.daily_cap`)。
+ * · x_action_log:**只追加**的动作记录 —— 谁决定(人/AI)、对谁、结果、何时。
+ *   「今天取关了几个」从这里数,不另存计数(派生可重算);
+ *   将来检验 AI 的判断也靠它。
+ */
+const X_SCHEMA_1_2_24 = `
+DEFINE TABLE IF NOT EXISTS x_setting SCHEMAFULL;
+-- ⚠️ 不叫 value:VALUE 是 SurrealQL 关键字(SELECT VALUE / RETURN VALUE),
+-- 2026-10-10 临时库实测「RETURN value」直接 parse error
+DEFINE FIELD IF NOT EXISTS setting_value ON x_setting TYPE any;
+DEFINE FIELD IF NOT EXISTS updated_at ON x_setting TYPE datetime;
+
+DEFINE TABLE IF NOT EXISTS x_action_log SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS at             ON x_action_log TYPE datetime;
+DEFINE FIELD IF NOT EXISTS action         ON x_action_log TYPE string ASSERT $value INSIDE ['unfollow'];
+DEFINE FIELD IF NOT EXISTS target_rest_id ON x_action_log TYPE string;
+DEFINE FIELD IF NOT EXISTS target_handle  ON x_action_log TYPE string;
+DEFINE FIELD IF NOT EXISTS decided_by     ON x_action_log TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS reason         ON x_action_log TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS result         ON x_action_log TYPE string ASSERT $value INSIDE ['ok', 'failed'];
+DEFINE FIELD IF NOT EXISTS detail         ON x_action_log TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id          ON x_action_log TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_action_log_at ON x_action_log FIELDS action, at;
+`;
+
+export async function x_migration_1_2_24(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_24);
+  const [s, a] = await db.query<[{ fields?: Record<string, unknown> }, { fields?: Record<string, unknown> }]>(
+    'INFO FOR TABLE x_setting; INFO FOR TABLE x_action_log;',
+  );
+  for (const f of ['setting_value', 'updated_at']) {
+    if (!(f in (s?.fields ?? {}))) throw new Error(`[x-schema 1.2.24] x_setting.${f} 没建上`);
+  }
+  for (const f of ['at', 'action', 'target_rest_id', 'target_handle', 'decided_by', 'result']) {
+    if (!(f in (a?.fields ?? {}))) throw new Error(`[x-schema 1.2.24] x_action_log.${f} 没建上`);
+  }
+  console.log('[x-schema 1.2.24] 运营设置与动作记录表已建');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.24', appliedAt = $now,
+      description = '运营设置 x_setting + 只追加的动作记录 x_action_log(取关)'`,
+    { rid: new RecordId('schema_version', '1.2.24'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.23 —— 人是**被哪个配方找到的**(2026-10-08)
+ *
+ * 用户:「还缺少一种类型，就是我既没有关注他，他也没有关注我。是通过配方找到的用户。」
+ * 「建议这样的人，在搜索下来时就添加标签--哪个配方的收集下来的。」
+ *
+ * ⭐ 与人手打的 tags **分开存**:tags 只代表人的判断;配方来源是系统记录的事实,
+ * 不该因为人编辑标签而被误删。显示上挨着(「配方:xxx」),标签关键词过滤时一起搜。
+ * ⭐ 只加不减(同一个人可能被几个配方先后找到)。是**采集字段**,不是人工字段。
+ */
+const X_SCHEMA_1_2_23 = `
+DEFINE FIELD IF NOT EXISTS found_via_recipes ON x_author TYPE option<array<string>>;
+`;
+
+export async function x_migration_1_2_23(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_23);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  if (!('found_via_recipes' in (info?.[0]?.fields ?? {}))) {
+    throw new Error('[x-schema 1.2.23] x_author.found_via_recipes 没建上 —— 整段 DDL 可能被拒收');
+  }
+  console.log('[x-schema 1.2.23] x_author 配方来源字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.23', appliedAt = $now,
+      description = '人被哪个配方找到 found_via_recipes(只加不减)'`,
+    { rid: new RecordId('schema_version', '1.2.23'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.22 —— 人的**自由标签**(2026-10-08)
+ *
+ * 用户:「打标签由我用户自由的标注，最后根据关键词过滤标签就好了」
+ * 「因为我觉得现在写死过滤字段有问题，不足以表达我需要的东西。」
+ * 「部分是精确字段，部分是标签…对于部分标签定义准确的，可以慢慢固定为精确字段。」
+ *
+ * ⭐ 事实(蓝V / 粉丝数…)是采来的 → 精确字段;「这个人对我是什么」是人的判断 → 标签。
+ * 标签只有人能打,没有 AI / 算法来源,所以不需要优先级规则(与 excluded 不同)。
+ * ⚠️ 人工字段 —— 进 USER_BUSINESS_FIELDS,采集绝不能碰。
+ * ⚠️ 「有哪些标签、各几人」不单独存,每次从人身上统计(派生可重算,改名删除只改一处)。
+ */
+const X_SCHEMA_1_2_22 = `
+DEFINE FIELD IF NOT EXISTS tags ON x_author TYPE option<array<string>>;
+DEFINE INDEX IF NOT EXISTS idx_author_tags ON x_author FIELDS tags;
+`;
+
+export async function x_migration_1_2_22(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_22);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  if (!('tags' in (info?.[0]?.fields ?? {}))) {
+    throw new Error('[x-schema 1.2.22] x_author.tags 没建上 —— 整段 DDL 可能被拒收');
+  }
+  console.log('[x-schema 1.2.22] x_author 标签字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.22', appliedAt = $now,
+      description = '人的自由标签 tags(人打的,关键词过滤)'`,
+    { rid: new RecordId('schema_version', '1.2.22'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.21 —— 「排除」:不在分析范围的人(2026-10-08)
+ *
+ * 用户:「先加一个排除吧--我收工先排除一部分，因为才几千人。我看到不愿意再需要分析的用户，就右键排除如何？」
+ * 起因:Musk / Trump / SpaceX 这类对业务没意义的号混在列表里(「我关注·他没回关」581 人里粉丝 ≥10 万的有 74 个)。
+ *
+ * ⭐ 与「大陆背景」同一套覆盖规则(用户 2026-10-08 定):**人 > AI > 算法**,
+ * 人定了另外两种就不能覆盖。所以除了值,还要存**来源**;人「取消排除」也存成 source = human、值 false。
+ * ⚠️ 这四个都是**人工字段** —— 进 USER_BUSINESS_FIELDS,采集一个都不许碰。
+ */
+const X_SCHEMA_1_2_21 = `
+DEFINE FIELD IF NOT EXISTS excluded        ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS excluded_source ON x_author TYPE option<string>
+  ASSERT $value = NONE OR $value INSIDE ['human', 'ai', 'rule'];
+DEFINE FIELD IF NOT EXISTS excluded_at     ON x_author TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS excluded_reason ON x_author TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_author_excluded ON x_author FIELDS excluded;
+`;
+
+export async function x_migration_1_2_21(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_21);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['excluded', 'excluded_source', 'excluded_at', 'excluded_reason']) {
+    if (!(f in fields)) throw new Error(`[x-schema 1.2.21] x_author.${f} 没建上 —— 整段 DDL 可能被拒收`);
+  }
+  console.log('[x-schema 1.2.21] x_author 排除字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.21', appliedAt = $now,
+      description = '排除(不在分析范围):excluded / excluded_source / excluded_at / excluded_reason'`,
+    { rid: new RecordId('schema_version', '1.2.21'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐⭐ 1.2.20 —— `x_author` 的身份从 handle 改成数字 id(rest_id)(2026-10-07)
  *
  * handle 会变、rest_id 不变。用 handle 当 record id 的两个毛病(真库实测):
