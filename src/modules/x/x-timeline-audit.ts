@@ -109,6 +109,22 @@ export type TweetRecord = {
   readonly inReplyToStatusId: string;
   readonly inReplyToScreenName: string;
   readonly quotedStatusId: string;
+  /**
+   * ⭐⭐ 互动对象,全用**数字 id**(2026-10-10,「他的朋友圈」的原料)。
+   * 人的身份是 rest_id —— 存 handle 的话对方一改名关系就断。
+   * ⚠️ 载荷没带就是空串 / 空数组,不编。
+   */
+  readonly inReplyToUserId: string;
+  readonly mentionIds: readonly string[];
+  /** 引用了谁的推文(原作者) */
+  readonly quotedAuthorId: string;
+  /**
+   * ⭐ 这条是**转发** —— 转发了哪条、原作者是谁。
+   * ⚠️ 外层是「他的转发」、里层是原推文;原推文另作为一条推文存(作者=原作者),
+   * 这里把**两层的关系**记下来(第一版只存了两条推文,关系丢了)。
+   */
+  readonly retweetOfId: string;
+  readonly retweetOfAuthorId: string;
 
   // ── 【人】作者 ──
   readonly authorHandle: string;
@@ -299,6 +315,24 @@ export type TimelineAudit = {
  * 「X 的响应外层结构变过好几次,写死路径会在改版后**静默取不到**
  * (返回 undefined 而不报错)」。
  */
+/**
+ * ⭐ 取 `xxx_result.result` 里的推文,剥掉 X 的可见性包装
+ * (`TweetWithVisibilityResults` 把真推文放在 `.tweet` 里)。拿不到返回 undefined。
+ */
+function innerTweet(r: unknown): Record<string, unknown> | undefined {
+  if (!isObj(r)) return undefined;
+  const res = isObj(r.result) ? r.result : undefined;
+  if (!res) return undefined;
+  return isObj(res.tweet) && res.__typename === 'TweetWithVisibilityResults' ? res.tweet : res;
+}
+
+/** 推文作者的数字 id —— `core.user_results.result.rest_id`;拿不到是空串 */
+function authorIdOf(t: Record<string, unknown> | undefined): string {
+  if (!t || !isObj(t.core)) return '';
+  const ur = (t.core as Record<string, unknown>).user_results;
+  return isObj(ur) && isObj(ur.result) ? str(ur.result.rest_id) : '';
+}
+
 function collectBy(node: unknown, pred: (o: Record<string, unknown>) => boolean): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   const seen = new Set<unknown>();
@@ -692,6 +726,14 @@ export function auditTimelinePayload(text: string): TimelineAudit {
       ? ent.user_mentions as Record<string, unknown>[] : [])
       .map((m) => str(m.screen_name))
       .filter((m) => m.length > 0);
+    /** ⭐ 提及的**数字 id**(朋友圈按 id 认人)*/
+    const mentionIds = (Array.isArray(ent?.user_mentions)
+      ? ent.user_mentions as Record<string, unknown>[] : [])
+      .map((m) => str(m.id_str))
+      .filter((m) => m.length > 0);
+    /** ⭐ 引用原推 / 转发原推 —— 取出里层推文与它的作者 id(先剥可见性包装)*/
+    const quotedTweet = innerTweet(node.quoted_status_result);
+    const retweeted = innerTweet(legacy.retweeted_status_result);
 
     /**
      * ⭐⭐ **这条没拿全,以及为什么**(旧实现的 `incomplete`)。
@@ -741,6 +783,11 @@ export function auditTimelinePayload(text: string): TimelineAudit {
       inReplyToStatusId: str(legacy.in_reply_to_status_id_str),
       inReplyToScreenName: str(legacy.in_reply_to_screen_name),
       quotedStatusId: str(legacy.quoted_status_id_str),
+      inReplyToUserId: str(legacy.in_reply_to_user_id_str),
+      mentionIds,
+      quotedAuthorId: authorIdOf(quotedTweet),
+      retweetOfId: retweeted ? (str((retweeted.legacy as Record<string, unknown> | undefined)?.id_str) || str(retweeted.rest_id)) : '',
+      retweetOfAuthorId: authorIdOf(retweeted),
       authorHandle: handle,
       authorRestId: str(urr?.rest_id),
       authorName,

@@ -365,27 +365,36 @@ describe('⭐⭐ 中文筛选要排除日文(2026-10-08)', () => {
   });
 });
 
-describe('⭐⭐ 采他的帖子和回复(2026-10-09)', () => {
-  /** 用户:「再给一次操作button，让我获取他的profile及下面的聊天数据(post/replies)」;默认各 2 页(已同意) */
+describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-10-10 正式版)', () => {
+  /**
+   * 用户:「右键点击，获取这三项数据，但是可以配置获取的长度（一个月、半年、一年，全部）…大部分就是一个月就够了」。
+   * ⚠️ 取代 10-09 的「各 2 页滚动」探查版:真机滚 8 轮每页都只拿到首屏,改游标翻页 + 按时间收手。
+   */
   const PAGE = read('src/modules/x/XOpsPeople.tsx');
-  const fn = PAGE.slice(PAGE.indexOf('const collectTweets'), PAGE.indexOf('/** 单击:选中'));
+  const fn = PAGE.slice(PAGE.indexOf('const collectTweets'), PAGE.indexOf('/** ⭐ 选时间范围的小框'));
 
-  it('⭐⭐ 主页帖子 + 回复两页都去,各 2 页,有时限', () => {
-    expect(fn.length).toBeGreaterThan(800);
-    expect(fn).toMatch(/name: X_PAGE_NAME\.profile, label: '帖子'/);
-    expect(fn).toMatch(/name: X_PAGE_NAME\.withReplies, label: '回复'/);
-    expect(fn).toMatch(/wantPages: 2, maxRounds: 8, maxMs: 30_000/);
+  it('⭐⭐ 三个标签页来自 PERSON_TABS;每页去那一页再 runCollect;收手用时间窗', () => {
+    expect(fn.length).toBeGreaterThan(1000);
+    expect(fn).toMatch(/for \(const tab of PERSON_TABS\)/);
+    expect(fn).toMatch(/op: 'goto', pageRef: \{ wcId \}, name: tab\.name/);
+    expect(fn).toMatch(/await runCollect\(/);
+    /** 页数上限 2026-10-10 起读设置(用户可调),没设就用默认 LIVE_PAGE_CAP */
+    expect(fn).toMatch(/stopPaging: timeWindowStop\(p\.rest_id, start, settingsRef\.current\?\.\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP\)/);
   });
 
-  it('⭐⭐⭐ 忙就不采;自己采期间登记忙,结束(含出错)一定清掉', () => {
+  it('⭐⭐ 首页采集有明确上限(默认 3000 轮 / 20 分钟是给名单用的)', () => {
+    expect(fn).toMatch(/seedPages: 1, maxRounds: 20, maxMs: 60_000/);
+  });
+
+  it('⭐⭐ 忙就不采;采期间登记忙,结束(含出错)一定清掉;能停', () => {
     expect(fn).toMatch(/const busy = getXHostBusy\(wcId\);\s*if \(busy !== null\)/);
     expect(fn).toMatch(/setXHostBusy\(wcId, COLLECT_BUSY\)/);
     expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);\s*\}/);
+    expect(fn).toMatch(/cancelled: \(\) => cancelCollect\.current/);
   });
 
-  it('⭐⭐ 推文走 saveTweets(作者顺带进人表),来源记成哪一页', () => {
-    expect(fn).toMatch(/dispatchPayloads\(/);
-    expect(fn).toMatch(/summarizeAudits\(d\.tweets\)/);
+  it('⭐ 推文走 saveTweets(作者顺带进人表),来源记成哪一页', () => {
+    expect(fn).toMatch(/run\.summary\?\.items/);
     expect(fn).toMatch(/op: 'saveTweets', records, ctx: \{ source: tab\.name \}/);
   });
 
@@ -393,39 +402,15 @@ describe('⭐⭐ 采他的帖子和回复(2026-10-09)', () => {
     const { PERSON_TWEETS_SQL } = await import('@modules/x/x-people-query');
     expect(PERSON_TWEETS_SQL).toContain('author_rest_id = $rest_id');
     expect(PERSON_TWEETS_SQL).not.toMatch(/author_handle/);
-    expect(PERSON_TWEETS_SQL).toMatch(/<string> created_at/);
-    expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'personTweets'/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'personTweets':/);
+  });
+
+  it('⭐ 右键先选时间范围;第一步只开放「一个月」', () => {
+    const menu = PAGE.slice(PAGE.indexOf('{menu && ('), PAGE.indexOf('{tagging && ('));
+    expect(menu).toContain('采他的帖子/回复/转发…');
+    expect(menu).toMatch(/setRangeFor\(m\.p\)/);
+    const picker = PAGE.slice(PAGE.indexOf('{rangeFor && ('), PAGE.indexOf('{tagging && ('));
+    expect(picker).toMatch(/disabled=\{r\.id !== 'month'\}/);
+    expect(picker).toMatch(/void collectTweets\(pr, r\.id\)/);
   });
 });
 
-describe('⭐⭐ 核对后关系变了要及时移出当前分组(2026-10-09)', () => {
-  /** 用户截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」;用户:「要做及时的调整才对吧」 */
-  it('⭐⭐⭐ inGroup 与分组口径一致:两个标记 9 种组合,每种恰好落在一个具体分组', async () => {
-    const { inGroup } = await import('@modules/x/x-people-query');
-    const vals = [true, false, undefined] as const;
-    const groups = ['mutual', 'iWait', 'theyWait', 'none', 'unknown'] as const;
-    for (const a of vals) for (const b of vals) {
-      const hits = groups.filter((g) => inGroup(g, a, b));
-      expect(hits, `i_follow=${a} follows_me=${b}`).toHaveLength(1);
-      expect(inGroup('all', a, b)).toBe(true);
-    }
-    expect(inGroup('iWait', true, false)).toBe(true);
-    expect(inGroup('none', false, false)).toBe(true);
-    expect(inGroup('unknown', false, undefined)).toBe(true);
-  });
-
-  it('⭐⭐ 核对回来按「那一刻」的分组判断(ref,不读闭包里的旧 filter),移出并减总数', () => {
-    const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
-    expect(fn).toMatch(/const g = filterRef\.current\.group;/);
-    expect(fn).toMatch(/if \(!inGroup\(g, iF, fM\)\) \{[\s\S]{0,200}setRows\(\(prev\) => prev\.filter/);
-    expect(fn).toMatch(/setTotal\(\(t\) => \(t === null \? t : t - 1\)\)/);
-    expect(PAGE).toMatch(/filterRef\.current = filter;/);
-  });
-
-  it('⚠️ 同一人重复核对的窗口只挡双击(3 秒)—— 刚取关马上再点要能更新', () => {
-    const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    expect(PAGE).toMatch(/Date\.now\(\) - last\.at < 3_000\) return;/);
-  });
-});

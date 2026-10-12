@@ -41,6 +41,8 @@ import type { TweetRecord } from './x-timeline-audit';
 export const COLLECTED_FIELDS = [
   'text', 'lang', 'is_long_text', 'is_article', 'article_url',
   'conversation_id', 'tweet_url', 'in_reply_to', 'in_reply_to_user', 'quoted_status_id',
+  /** ⭐ 互动对象(数字 id,schema 1.2.25)—— 朋友圈的原料 */
+  'in_reply_to_user_id', 'mention_ids', 'quoted_author_id', 'retweet_of_id', 'retweet_of_author_id',
   'author_handle', 'author_rest_id', 'author_name_at_post', 'author_avatar', 'author_bio',
   'is_blue_verified', 'following', 'followed_by',
   'media', 'links', 'hashtags', 'mentions',
@@ -156,6 +158,12 @@ export async function saveTweets(
         in_reply_to: opt(r.inReplyToStatusId),
         in_reply_to_user: opt(r.inReplyToScreenName),
         quoted_status_id: opt(r.quotedStatusId),
+        in_reply_to_user_id: opt(r.inReplyToUserId),
+        /** ⚠️ 空数组也照写 —— 「采了,确实没提及谁」与「没采」要分开时看 fetched_at */
+        mention_ids: r.mentionIds,
+        quoted_author_id: opt(r.quotedAuthorId),
+        retweet_of_id: opt(r.retweetOfId),
+        retweet_of_author_id: opt(r.retweetOfAuthorId),
         author_handle: r.authorHandle,
         author_rest_id: opt(r.authorRestId),
         author_name_at_post: opt(r.authorName),
@@ -221,6 +229,9 @@ export async function saveTweets(
            conversation_id = $conversation_id, tweet_url = $tweet_url,
            in_reply_to = $in_reply_to, in_reply_to_user = $in_reply_to_user,
            quoted_status_id = $quoted_status_id,
+           in_reply_to_user_id = $in_reply_to_user_id, mention_ids = $mention_ids,
+           quoted_author_id = $quoted_author_id,
+           retweet_of_id = $retweet_of_id, retweet_of_author_id = $retweet_of_author_id,
            author_handle = $author_handle, author_rest_id = $author_rest_id,
            author_name_at_post = $author_name_at_post,
            author_avatar = $author_avatar, author_bio = $author_bio,

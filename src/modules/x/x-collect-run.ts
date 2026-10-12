@@ -17,6 +17,7 @@
 import {
   auditTimelinePayload, summarizeAudits, mergeExpandedText,
   type TimelineAudit, type TweetAudit,
+  type TweetRecord,
 } from './x-timeline-audit';
 import { judgeTweet, decideFetch, type FetchDepth, type TweetNeed } from './x-fetch-plan';
 import { carriesTweets, carriesUsers, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME } from './x-pages';
@@ -369,6 +370,12 @@ export type PagingState = {
   readonly uniqueUsers: number;
   /** 这一轮**新增**了几条(0 = 这一页全是见过的) */
   readonly freshThisRound: number;
+  /**
+   * ⭐ 这一轮翻回来的推文记录(2026-10-10 加)—— 业务按**时间**收手要看它
+   * (运营人卡「采一个月」:这一页他自己的推文都早于一个月前就停)。
+   * ⚠️ 只给这一轮的,不给累计的:累计里有首页的置顶推文,拿它判时间第一页就会停。
+   */
+  readonly roundRecords: readonly TweetRecord[];
   /** ⚠️ 连续多少轮没有新的 —— 业务要用它定自己的刹车 */
   readonly emptyRounds: number;
 };
@@ -795,6 +802,7 @@ async function pageUntilDone(
         uniqueUsers: [...seenKeys].filter((k) => k.startsWith('u:')).length,
         freshThisRound: fresh,
         emptyRounds,
+        roundRecords: got.flatMap((a) => a.items.map((i) => i.record)),
       });
       if (!d.go) {
         stopReason = d.why ?? '业务判定够了';

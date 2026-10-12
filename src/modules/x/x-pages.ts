@@ -248,6 +248,8 @@ export const X_PAGE_NAME = {
   profile: 'x.profile',
   /** ⭐ 个人主页的「回复」标签页 —— 运营人卡「采他的帖子和回复」去这一页 */
   withReplies: 'x.withReplies',
+  /** ⭐ 个人主页的「转发」标签页(2026-10-10)*/
+  reposts: 'x.reposts',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,
@@ -431,6 +433,8 @@ export const PAGE_PARAMS: Readonly<Record<string, readonly string[]>> = {
   'x.home': [],
   'x.profile': ['handle'],
   'x.withReplies': ['handle'],
+  /** 某人转发过的(X 新加的 Reposts 标签页,2026-10-10 用户截图里见到)*/
+  'x.reposts': ['handle'],
   'x.articles': ['handle'],
   'x.status': ['tweetId'],
   'x.article': ['articleId'],
@@ -525,6 +529,16 @@ const PAGES: Readonly<Record<string, (p: Readonly<Record<string, string>>) => Re
       url: `${BASE_URL}/${h}/with_replies`,
       arrival: byUrlAndTweets(`/${h}/with_replies`),
       describe: `@${h} 的推文与回复`,
+    };
+  },
+  /** 某人转发过的 —— ⚠️ 判据带 handle,否则别人的 reposts 也算到位(与 withReplies 同理) */
+  'x.reposts': (p) => {
+    const h = cleanHandle(p.handle ?? '');
+    if (!h) return null;
+    return {
+      url: `${BASE_URL}/${h}/reposts`,
+      arrival: byUrlAndTweets(`/${h}/reposts`),
+      describe: `@${h} 转发过的推文`,
     };
   },
 
@@ -796,6 +810,7 @@ const RESERVED_SEGMENTS: ReadonlySet<string> = new Set([
 /** `/<handle>/<sub>` 的子路径 → 语义名。⚠️ 与正向 PAGES 的键一一对应 */
 const SUB_PATH_NAME: Readonly<Record<string, string>> = {
   with_replies: 'x.withReplies',
+  reposts: 'x.reposts',
   articles: 'x.articles',
   followers: 'x.followers',
   verified_followers: 'x.verifiedFollowers',
@@ -846,7 +861,7 @@ function identify(url: string): { name: string; params: Record<string, string> }
   if (status) return { name: 'x.status', params: { tweetId: status[1] } };
 
   // ── /<handle>/<sub> ──
-  const sub = path.match(/^\/([^/]+)\/(with_replies|articles|followers|verified_followers|following)$/);
+  const sub = path.match(/^\/([^/]+)\/(with_replies|reposts|articles|followers|verified_followers|following)$/);
   if (sub) return { name: SUB_PATH_NAME[sub[2]], params: { handle: sub[1] } };
 
   // ── /<handle> ⚠️ 必须排除 X 自己的路由 ──

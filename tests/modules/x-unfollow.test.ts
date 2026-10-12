@@ -12,7 +12,7 @@ import {
 } from '@modules/x/x-ops-settings';
 
 const read = (p: string): string => readFileSync(join(process.cwd(), p), 'utf8');
-const S = { 'unfollow.daily_cap': 50, 'unfollow.min_gap_sec': 20 };
+const S = { 'unfollow.daily_cap': 50, 'unfollow.min_gap_sec': 20, 'collect.live_page_cap': 30 };
 
 describe('设置', () => {
   it('⭐ 默认:每日上限 50(用户定的)、最小间隔 20 秒;库里没有就用默认', () => {

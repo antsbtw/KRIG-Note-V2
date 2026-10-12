@@ -121,6 +121,18 @@ export type XDataInvoke =
   | { readonly op: 'refreshPerson'; readonly record: XUserRecord }
   /** ⭐ 他的推文(人卡用)—— 返回 `{ total, rows }`,按作者数字 id 查 */
   | { readonly op: 'personTweets'; readonly restId: string; readonly limit: number }
+  /** ⭐ 他的朋友圈(从推文现算)—— 返回 `{ tweets, people, rows }` */
+  | { readonly op: 'friendCircle'; readonly restId: string; readonly limit: number }
+  /** ⭐ 采一个人时的**进度**落留痕(翻到第几页 / 歇 / 限流等待)—— 运行中也看得见 */
+  | { readonly op: 'logPersonProgress'; readonly entry: { readonly handle: string; readonly tab: string; readonly attempt: number; readonly msg: string } }
+  /** ⭐ 采一个人某个标签页的结果落留痕(页数 / 条数 / 停因)*/
+  | {
+      readonly op: 'logPersonCollect';
+      readonly entry: {
+        readonly restId: string; readonly handle: string; readonly range: string; readonly tab: string;
+        readonly pages: number; readonly records: number; readonly inserted: number; readonly stopReason: string;
+      };
+    }
   /** ⭐ 运营设置(人可设定的变量,含默认值合并)—— 返回 `{ settings, problems }` */
   | { readonly op: 'opsSettings' }
   /** ⭐ 改一个设置(带校验) */

@@ -18,7 +18,7 @@ import { saveTweets } from './x-tweet-repo';
 import { saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
-import { queryPeople, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, setExcluded, setTags } from './x-people-repo';
+import { queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, setExcluded, setTags } from './x-people-repo';
 import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
@@ -312,6 +312,22 @@ export function registerXDataIpc(): void {
           });
           return { status: 'ok', value: { logged: true } };
         }
+
+        case 'logPersonProgress':
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-progress', pageId: 'x-data', detail: { ...p.entry } });
+          return { status: 'ok', value: { logged: true } };
+
+        case 'logPersonCollect': {
+          const e = p.entry;
+          console.log(`[x.people] 采 @${e.handle} ${e.tab}(${e.range}):${e.pages} 页 ${e.records} 条(新 ${e.inserted})—— ${e.stopReason || '(无停因)'}`);
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-collect', pageId: 'x-data', detail: { ...e } });
+          return { status: 'ok', value: { logged: true } };
+        }
+
+        case 'friendCircle':
+          if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] friendCircle 缺 restId');
+          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) return failed('[x.data] friendCircle 的 limit 要在 1–200 之间');
+          return { status: 'ok', value: await readFriendCircle(p.restId, p.limit) };
 
         case 'personTweets':
           if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] personTweets 缺 restId');

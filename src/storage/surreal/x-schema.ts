@@ -1766,6 +1766,40 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.25 —— 推文里的**互动对象**(2026-10-10,「他的朋友圈」的原料)
+ *
+ * 用户:「针对…posts/replies/reposts三个内容的采集，主要是观察这个用户主要和哪些用户互动，找到它的朋友圈。」
+ * 真机实测(10-10,李老师不是你老师):回复/提及原来只存 handle;**引用没存原作者;转发完全没记**
+ * (解析器把「他的转发」外层与「原推文」里层当成两条独立推文存了,关系丢了)。
+ *
+ * ⭐ 全部存**数字 id** —— 人的身份是 rest_id(1.2.20),存 handle 改名就断。
+ * ⭐ 朋友圈从推文**现算**(关系第二性、派生可重算),不另建关系表。
+ */
+const X_SCHEMA_1_2_25 = `
+DEFINE FIELD IF NOT EXISTS in_reply_to_user_id  ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mention_ids          ON x_tweet TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS quoted_author_id     ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retweet_of_id        ON x_tweet TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS retweet_of_author_id ON x_tweet TYPE option<string>;
+-- 朋友圈按「某人的全部推文」查
+DEFINE INDEX IF NOT EXISTS idx_tweet_author_rest_id ON x_tweet FIELDS author_rest_id;
+`;
+
+export async function x_migration_1_2_25(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_25);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_tweet');
+  for (const f of ['in_reply_to_user_id', 'mention_ids', 'quoted_author_id', 'retweet_of_id', 'retweet_of_author_id']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) throw new Error(`[x-schema 1.2.25] x_tweet.${f} 没建上 —— 整段 DDL 可能被拒收`);
+  }
+  console.log('[x-schema 1.2.25] x_tweet 互动对象字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.25', appliedAt = $now,
+      description = '推文互动对象(回复/提及/引用/转发,全用数字 id)—— 朋友圈的原料'`,
+    { rid: new RecordId('schema_version', '1.2.25'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.24 —— 运营设置 + 动作记录(2026-10-10)
  *
  * 用户 10-10 取消了「绝不由程序点按钮」的红线:「我的未来是要AI接管不少工作的」;

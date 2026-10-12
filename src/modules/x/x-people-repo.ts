@@ -5,6 +5,7 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
+import { computeCircle, looksChinese, type CirclePerson, type CircleTweet } from './x-friend-circle';
 import {
   buildOverviewQuery, buildPeopleQuery, parseOverview, parsePeopleResult, PERSON_DETAIL_SQL, SET_EXCLUDED_SQL,
   SET_TAGS_SQL, TAG_ROWS_SQL, normalizeTags, tagCatalog, PERSON_TWEETS_SQL, type PersonTweet,
@@ -69,4 +70,45 @@ export async function readPersonTweets(restId: string, limit: number): Promise<{
     PERSON_TWEETS_SQL, { rest_id: restId, limit },
   );
   return { total: c?.[0]?.n ?? 0, rows: rows ?? [] };
+}
+
+/**
+ * ⭐⭐ 他的朋友圈(2026-10-10)—— 从推文现算(规则在 `x-friend-circle.ts`,纯)。
+ * 返回前 limit 个人,带上人表里的资料;人表里没有的(只被提及过)用推文里见过的 handle 显示。
+ */
+
+export async function readFriendCircle(restId: string, limit: number): Promise<{
+  tweets: number; people: number; rows: CirclePerson[];
+}> {
+  const db = getXDB();
+  const [his, toHim] = await db.query<[CircleTweet[], CircleTweet[]]>(`
+    SELECT author_rest_id, in_reply_to_user_id, in_reply_to_user, mention_ids, mentions, quoted_author_id, retweet_of_author_id
+      FROM x_tweet WHERE author_rest_id = $id;
+    SELECT author_rest_id, author_handle, in_reply_to_user_id
+      FROM x_tweet WHERE in_reply_to_user_id = $id AND author_rest_id != $id;`, { id: restId });
+  const all = computeCircle(restId, his ?? [], toHim ?? []);
+  const top = all.slice(0, limit);
+  const [rows] = await db.query<[Array<Record<string, unknown>>]>(
+    `SELECT rest_id, handle, display_name, avatar, bio, is_blue_verified, i_follow, follows_me
+       FROM x_author WHERE rest_id IN $ids`, { ids: top.map((e) => e.id) },
+  );
+  const byId = new Map((rows ?? []).map((r) => [String(r.rest_id), r]));
+  return {
+    tweets: (his ?? []).length,
+    people: all.length,
+    rows: top.map((e) => {
+      const p = byId.get(e.id);
+      return {
+        ...e,
+        handle: (p?.handle as string | undefined) ?? e.handleSeen,
+        display_name: p?.display_name as string | undefined,
+        avatar: p?.avatar as string | undefined,
+        is_blue_verified: p?.is_blue_verified as boolean | undefined,
+        i_follow: p?.i_follow as boolean | undefined,
+        follows_me: p?.follows_me as boolean | undefined,
+        chinese: looksChinese(p?.display_name as string | undefined, p?.bio as string | undefined),
+        inTable: p !== undefined,
+      };
+    }),
+  };
 }

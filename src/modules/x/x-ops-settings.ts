@@ -24,6 +24,11 @@ export const SETTING_DEFS: readonly SettingDef[] = [
   { key: 'unfollow.daily_cap', label: '每日取关上限', default: 50, min: 0, max: 1000, unit: '个' },
   /** 我加的:两次取关的最小间隔(短时间大量取关是刷粉号的典型信号)—— 默认 20 秒,用户可改 */
   { key: 'unfollow.min_gap_sec', label: '两次取关最小间隔', default: 20, min: 5, max: 3600, unit: '秒' },
+  /**
+   * 当场采一个人的帖子/回复/转发时,每个标签页最多翻几页(2026-10-10)。
+   * ⚠️ 真机:一天发 40–55 条的号,30 页只够约两周;一个月要约 60 页。用户可调。
+   */
+  { key: 'collect.live_page_cap', label: '当场采每页最多翻', default: 30, min: 1, max: 200, unit: '页' },
 ];
 
 export type OpsSettings = Readonly<Record<string, number>>;

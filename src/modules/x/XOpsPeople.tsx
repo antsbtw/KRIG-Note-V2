@@ -34,8 +34,9 @@ import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
 import { auditUserPayload, type XUserRecord } from './x-user-audit';
 import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
-import { dispatchPayloads } from './x-payload-dispatch';
-import { summarizeAudits } from './x-timeline-audit';
+import { runCollect } from './x-collect-run';
+import type { CirclePerson } from './x-friend-circle';
+import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, timeWindowStop, type TimelineRange } from './x-person-timeline';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
 import {
@@ -221,58 +222,118 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   }, [runVerify, verify]);
 
   /**
-   * ⭐⭐ 采他的帖子和回复 —— 主页帖子、回复各 2 页(用户 2026-10-09 同意的默认值)。
-   * 采到的推文走 saveTweets(作者顺带进人表);同一个「忙」规矩:操作台采集中、正在核对时都不采。
-   * ⚠️ 回复页接口叫什么以真机为准(X 改过名);对不上时采集层会如实报「没有一条是目标页面的数据」。
+   * ⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-10-10 用户:「可以配置获取的长度（一个月、半年、一年，全部）」)。
+   * 每个标签页:去那一页 → runCollect(首页 + 游标翻页,随机停顿/限流退避都在里面)→ 存推文。
+   * ⭐ 收手:这一页**他自己**最新的推文早于起点(置顶只在首页,不参与判断)/ 当场采到页数上限。
+   * ⚠️ 2026-10-10 第一版只滚动 8 轮,每页都只拿到首屏 —— 滚动触发翻页不可靠,所以改游标翻页。
    */
   const [collect, setCollect] = useState<Record<string, { running: boolean; text: string }>>({});
   const COLLECT_BUSY = '运营正在采他的推文';
-  const collectTweets = useCallback(async (p: PersonRow): Promise<void> => {
+  const cancelCollect = useRef(false);
+  const collectTweets = useCallback(async (p: PersonRow, range: TimelineRange): Promise<void> => {
     if (wcId == null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: 'X 网页没开,没法采' } })); return; }
     const busy = getXHostBusy(wcId);
     if (busy !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${busy},先等它结束` } })); return; }
+    const start = rangeStart(range, new Date());
+    const label = TIMELINE_RANGES.find((r) => r.id === range)?.label ?? range;
     setXHostBusy(wcId, COLLECT_BUSY);
+    cancelCollect.current = false;
     const parts: string[] = [];
+    const say = (msg: string): void =>
+      setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `[${label}] ${parts.join(';')}${parts.length ? ';' : ''}${msg}` } }));
     try {
-      const tabs = [
-        { name: X_PAGE_NAME.profile, label: '帖子', want: ['UserOriginalsTimeline', 'UserTweets'] },
-        { name: X_PAGE_NAME.withReplies, label: '回复', want: ['UserTweetsAndReplies'] },
-      ];
-      for (const tab of tabs) {
-        setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `正在采${tab.label}…${parts.length ? `(${parts.join(';')})` : ''}` } }));
-        const h = await window.electronAPI!.webDomInvoke({
-          op: 'harvest', pageRef: { wcId },
-          plan: {
-            gotoPage: { name: tab.name, params: { handle: p.handle } },
-            pageUrlIncludes: tab.want, wantPages: 2, maxRounds: 8, maxMs: 30_000,
-            noisyUrlSubstrings: X_NOISY_URLS,
-          },
-        });
-        if (h.status === 'failed') { parts.push(`${tab.label}没采到:${h.reason ?? '原因未知'}`); continue; }
-        const rep = h.value as { items?: Array<{ url: string; text: string }>; problems?: string[] };
-        const d = dispatchPayloads((rep.items ?? []).map((it) => ({ url: it.url, text: it.text })));
-        const records = (summarizeAudits(d.tweets).items ?? []).map((t) => t.record).filter((r) => r.id !== '');
-        if (records.length === 0) {
-          parts.push(`${tab.label} 0 条${rep.problems?.[0] ? `(${rep.problems[0]})` : ''}`);
-          continue;
+      for (const tab of PERSON_TABS) {
+        if (cancelCollect.current) { parts.push(`${tab.label}:人点了停止`); break; }
+        /**
+         * ⭐ 最多两次:第一次翻页就 403(翻页模板没带鉴权头)时,重载这一页再试一次。
+         * ⚠️ 2026-10-12 真机:帖子页那条响应只被页面钩子收到、CDP 没收到 → 模板没有鉴权头 → 403,
+         * 只翻了 1 页就停。重载后两条通道重新收一遍,大概率拿到带头的那份。第一次采到的照样存。
+         */
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          say(`正在采${tab.label}…${attempt > 1 ? '(重载后第 2 次)' : ''}`);
+          const go = await window.electronAPI!.webDomInvoke({
+            op: 'goto', pageRef: { wcId }, name: tab.name, params: { handle: p.handle },
+          });
+          if (go.status === 'failed') { parts.push(`${tab.label}:没去到这一页(${go.reason ?? ''})`); break; }
+          const run = await runCollect({
+            harvest: async (plan) => {
+              const rr = await window.electronAPI!.webDomInvoke({ op: 'harvest', pageRef: { wcId }, plan });
+              if (rr.status !== 'ok' && rr.status !== 'degraded') return null;
+              return (rr as { value: unknown }).value as never;
+            },
+            runScript: async (scriptId, params) => {
+              const rr = await window.electronAPI!.webDomInvoke({
+                op: 'run', pageRef: { wcId }, scriptId, params: params as Record<string, string>,
+              });
+              if (rr.status !== 'ok' && rr.status !== 'degraded') {
+                throw new Error(`翻页脚本失败:${(rr as { reason?: string }).reason ?? ''}`);
+              }
+              return (rr as { value?: unknown }).value;
+            },
+            stopPaging: timeWindowStop(p.rest_id, start, settingsRef.current?.['collect.live_page_cap'] ?? LIVE_PAGE_CAP),
+            cancelled: () => cancelCollect.current,
+            onProgress: (m) => {
+              say(`${tab.label}:${m}`);
+              /**
+               * ⭐⭐ 进度也落留痕(2026-10-12:帖子页翻了 4 分钟没结果,留痕里一片空白 ——
+               * 分不清是「在正常翻页」还是「被限流在等 15 分钟」,只能让人去看屏幕)。
+               */
+              void xDataCall({ op: 'logPersonProgress', entry: { handle: p.handle, tab: tab.name, attempt, msg: m } });
+            },
+            wait: async (ms) => {
+              const until = Date.now() + ms;
+              while (Date.now() < until) {
+                if (cancelCollect.current) return;
+                await new Promise((r) => setTimeout(r, 1000));
+              }
+            },
+          /**
+           * ⚠️ 首页采集给**明确的上限**(默认是 3000 轮 / 20 分钟,那是给名单用的)。
+           * 首页来了就停(seedPages 1);之后全靠游标翻页。
+           */
+          }, { wantPages: 1, depth: 'expand-only', seedPages: 1, maxRounds: 20, maxMs: 60_000 });
+          const records = (run.summary?.items ?? []).map((t) => t.record).filter((r) => r.id !== '');
+          const pages = (run.paging?.rounds ?? 0) + 1;
+          const why = run.paging?.stopReason ?? '';
+          /** 第一轮翻页就被 403 拒 = 翻页模板没带鉴权头 → 值得重载再试 */
+          const authFail = /HTTP 403/.test(why) && (run.paging?.rounds ?? 0) <= 1;
+          let inserted = 0;
+          if (records.length > 0) {
+            const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
+            if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); break; }
+            inserted = (sv.value as { inserted: number }).inserted;
+          }
+          /**
+           * ⭐⭐ 每个标签页(每次尝试)的结果**落留痕**(2026-10-10:停因只显示在人卡上,关了就没,
+           * 事后分不清「第一页就按时间停」还是「根本没翻页」)。成功路径也要留痕。
+           */
+          void xDataCall({
+            op: 'logPersonCollect',
+            entry: { restId: p.rest_id, handle: p.handle, range, tab: tab.name, pages, records: records.length, inserted, stopReason: `${attempt > 1 ? '[第 2 次] ' : ''}${why}` },
+          });
+          if (authFail && attempt === 1 && !cancelCollect.current) continue;
+          parts.push(`${tab.label} ${pages} 页 ${records.length} 条(新 ${inserted})${attempt > 1 ? '[重载后]' : ''}${why ? ` —— ${why}` : ''}`);
+          break;
         }
-        const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
-        if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); continue; }
-        const v = sv.value as { inserted: number; updated: number };
-        parts.push(`${tab.label} ${records.length} 条(新 ${v.inserted})`);
       }
     } catch (e) {
       parts.push(`出错:${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setXHostBusy(wcId, null);
     }
-    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `采完:${parts.join(';')}` } }));
+    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `[${label}] 采完:${parts.join(';')}` } }));
     setCardRev((v) => v + 1);
     loadOverview();
   }, [wcId, loadOverview]);
 
+  /** ⭐ 选时间范围的小框 —— 第一步只开放「一个月」 */
+  const [rangeFor, setRangeFor] = useState<PersonRow | null>(null);
+
   /** ⭐ 运营设置(人可设定的变量)*/
   const [settings, setSettings] = useState<OpsSettings | null>(null);
+  /** 采集是 useCallback,用 ref 读最新设置 */
+  const settingsRef = useRef<OpsSettings | null>(null);
+  settingsRef.current = settings;
   const [gate, setGate] = useState<UnfollowGate | null>(null);
   const loadGate = useCallback(() => {
     void xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() }).then((r) => {
@@ -658,7 +719,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             restId={cardId!}
             wcId={wcId}
             onOpenInX={(person) => openInX(person)}
-            onCollect={(person) => void collectTweets(person)}
+            onCollect={(person) => void collectTweets(person, 'month')}
+            onCancelCollect={() => { cancelCollect.current = true; }}
             onUnfollow={(person) => void unfollow(person)}
             unfollowing={unfollowing === cardId}
             collectState={collect[cardId!]}
@@ -695,6 +757,14 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
           >
             打标签…
           </button>
+          {/* ⭐ 用户 10-10:「右键点击，获取这三项数据」—— 探查版先直接采(各 2 页),时间范围选择在正式版加 */}
+          <button
+            type="button" style={S.menuItem}
+            disabled={collect[menu.p.rest_id]?.running === true}
+            onClick={() => { const m = menu; setMenu(null); setRangeFor(m.p); }}
+          >
+            采他的帖子/回复/转发…
+          </button>
           {menu.p.i_follow === true && (
             <button
               type="button" style={S.menuItem}
@@ -704,6 +774,28 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
               取关
             </button>
           )}
+        </div>
+      )}
+
+      {rangeFor && (
+        <div style={S.backdrop} onClick={() => setRangeFor(null)}>
+          <div style={S.dialog} onClick={(e) => e.stopPropagation()}>
+            <div style={S.cardTitle}>采 @{rangeFor.handle} 的帖子、回复、转发</div>
+            <div style={S.muted}>时间范围(到了起点就停;置顶推文不算)</div>
+            {TIMELINE_RANGES.map((r) => (
+              <button
+                key={r.id}
+                type="button"
+                style={r.id === 'month' ? S.btnPrimary : { ...S.btn, opacity: 0.5 }}
+                disabled={r.id !== 'month'}
+                title={r.id === 'month' ? `当场采,每页最多翻 ${LIVE_PAGE_CAP} 页` : '第二步:后台策略(跨重启、按节奏慢慢跑)'}
+                onClick={() => { const pr = rangeFor; setRangeFor(null); openCard(pr); void collectTweets(pr, r.id); }}
+              >
+                {r.label}{r.id !== 'month' ? '(第二步:后台策略)' : ''}
+              </button>
+            ))}
+            <button type="button" style={S.btn} onClick={() => setRangeFor(null)}>取消</button>
+          </div>
         </div>
       )}
 
@@ -725,7 +817,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
 
 /** ⭐ 人卡 —— 事实(采来的)与推断(AI 猜的)分开;缺的就是采集入口 */
 function PersonCard(
-  { restId, wcId, onBack, onClose, onToggleExclude, onOpenInX, onEditTags, rev, onCollect, collectState, onUnfollow, unfollowing }: {
+  { restId, wcId, onBack, onClose, onToggleExclude, onOpenInX, onEditTags, rev, onCollect, collectState, onUnfollow, unfollowing, onCancelCollect }: {
     restId: string; wcId: number | null; onBack?: () => void; onClose: () => void;
     onToggleExclude: (p: PersonRow) => void;
     onEditTags: (p: PersonRow) => void;
@@ -734,6 +826,7 @@ function PersonCard(
     /** ⭐ 与「点人跳主页」同一个函数 —— 忙不跳、一次只核对一个的规矩只有一份 */
     onOpenInX: (p: PersonRow) => void;
     onCollect: (p: PersonRow) => void;
+    onCancelCollect: () => void;
     onUnfollow: (p: PersonRow) => void;
     unfollowing: boolean;
     collectState?: { running: boolean; text: string };
@@ -747,6 +840,15 @@ function PersonCard(
     void xDataCall({ op: 'personDetail', restId }).then((r) => {
       if (r.status === 'ok') { setP(r.value as PersonDetail | null); setErr(null); }
       else setErr(r.reason);
+    });
+  }, [restId, rev]);
+
+  /** ⭐ 他的朋友圈 —— 从推文现算,前 30 人 */
+  const [circle, setCircle] = useState<{ tweets: number; people: number; rows: CirclePerson[] } | null>(null);
+  useEffect(() => {
+    setCircle(null);
+    void xDataCall({ op: 'friendCircle', restId, limit: 30 }).then((r) => {
+      if (r.status === 'ok') setCircle(r.value as { tweets: number; people: number; rows: CirclePerson[] });
     });
   }, [restId, rev]);
 
@@ -846,10 +948,13 @@ function PersonCard(
                 type="button" style={S.btn}
                 disabled={collectState?.running === true || wcId == null}
                 onClick={() => onCollect(p)}
-                title={wcId == null ? 'X 网页没开' : '主页帖子 + 回复各采 2 页'}
+                title={wcId == null ? 'X 网页没开' : '采最近一个月的帖子 / 回复 / 转发'}
               >
-                {collectState?.running ? '采集中…' : '采他的帖子和回复'}
+                {collectState?.running ? '采集中…' : '采最近一个月'}
               </button>
+              {collectState?.running && (
+                <button type="button" style={S.btn} onClick={onCancelCollect}>停止</button>
+              )}
               {collectState && <span style={S.muted}>{collectState.text}</span>}
             </div>
             {tw?.rows.map((t) => (
@@ -859,6 +964,40 @@ function PersonCard(
                   {t.in_reply_to_user && <> · 回复 @{t.in_reply_to_user}</>}
                 </div>
                 <div style={S.tweetText}>{t.text || '(没有正文)'}</div>
+              </div>
+            ))}
+          </Section>
+
+          <Section
+            title="他的朋友圈"
+            note={circle === null ? '读取中…' : circle.tweets === 0 ? '还没采他的推文' : `基于他的 ${circle.tweets} 条推文 · 共 ${circle.people} 人`}
+          >
+            {circle && circle.rows.length > 0 && (
+              <div style={S.muted}>
+                其中你还没关注的蓝V中文:{circle.rows.filter((c) => c.i_follow !== true && c.is_blue_verified === true && c.chinese).length} 人(前 {circle.rows.length} 人里)
+              </div>
+            )}
+            {circle?.rows.map((c) => (
+              <div
+                key={c.id}
+                style={{ ...S.row, cursor: c.handle ? 'pointer' : 'default' }}
+                onClick={() => { if (c.handle) onOpenInX({ rest_id: c.id, handle: c.handle } as PersonRow); }}
+                title={c.handle ? '在 X 网页打开他的主页(顺手核对)' : '只知道数字 id'}
+              >
+                {c.avatar ? <img src={c.avatar} alt="" style={S.avatar} /> : <div style={S.avatar} />}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={S.line}>
+                    <strong style={S.name}>{c.display_name ?? (c.handle ? `@${c.handle}` : c.id)}</strong>
+                    {c.is_blue_verified === true && <span style={S.blue}>✓</span>}
+                    {c.handle && c.display_name && <span style={S.muted}>@{c.handle}</span>}
+                    {c.inTable ? <span style={S.tag}>{relationLabel(c)}</span> : <span style={S.muted}>(人表里还没有)</span>}
+                    {c.chinese && <span style={S.tag}>中文</span>}
+                  </div>
+                  <div style={S.muted}>
+                    {[c.reply && `回复 ${c.reply}`, c.theyReply && `被回复 ${c.theyReply}`, c.quote && `引用 ${c.quote}`,
+                      c.mention && `提及 ${c.mention}`, c.retweet && `转发 ${c.retweet}`].filter(Boolean).join(' · ')}
+                  </div>
+                </div>
               </div>
             ))}
           </Section>
