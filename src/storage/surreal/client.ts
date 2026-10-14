@@ -107,6 +107,16 @@ export function getXDB(): Surreal {
 }
 
 /**
+ * ⚠️ **仅测试用** —— 把 X 库连接指向一个测试起的 SurrealDB 实例,
+ * 让 repo 的真函数(走 getXDB)跑在测试库上验证真 SurrealDB 行为。
+ * ⭐ 生产代码**绝不调用**:它不建连接、不管生命周期,只替换指针。
+ * 传 null 还原(测试 afterAll 清场)。
+ */
+export function __setXDBForTest(conn: Surreal | null): void {
+  xdb = conn;
+}
+
+/**
  * 工作流库连接。⚠️ 未初始化直接 throw,不返回 null ——
  * 兜底会让「执行记录没写进去」变成静默失败,而那正是追溯能力的根。
  */

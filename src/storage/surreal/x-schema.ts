@@ -1766,6 +1766,76 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.26 —— 后台采集任务 `x_bg_job`(2026-10-13,「他的朋友圈」第二步)
+ *
+ * 用户 2026-10-10:「可以配置获取的长度(一个月、半年、一年，全部)，如果全部时可能比较长，
+ * 要跑上几天，就采用策略方式慢慢跑。」
+ *
+ * ⭐ 一行 = 一个人的一个范围任务。跟 `x_task` 分开:x_task 是「周期性重复的配方」(会一直跑),
+ * 本表是「一次性、有终点、会完成」的长活 —— 性质不同,硬塞会把两个概念搅在一起。
+ * ⭐ 断点也不复用 `x_collect_cursor`:那张表 scope 是「账号:名单」(followers/following 全局名单),
+ * 本表是「某人:某范围:某标签页」,语义不同,混用会互相覆盖。
+ *
+ * ── 为什么三个标签页(帖子/回复/转发)各存各的进度 ──
+ * 三个页翻页速度不同,某个页可能先到底(done)。三个全 done → 整个 job done。
+ *
+ * ⚠️ SurrealDB 铁律(记忆):option 字段写库传 undefined 不传 null;datetime 用 type::datetime;
+ * 写记录用 UPSERT type::record(...) 不用 UPSERT...WHERE;status/range 用 ASSERT INSIDE 枚举。
+ */
+const X_SCHEMA_1_2_26 = `
+DEFINE TABLE IF NOT EXISTS x_bg_job SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS rest_id   ON x_bg_job TYPE string ASSERT $value != '';
+-- 当时的 handle,只做显示(可能变);身份锚点永远是 rest_id
+DEFINE FIELD IF NOT EXISTS handle    ON x_bg_job TYPE string;
+-- ⭐ 归属哪个号 —— 闸门(同 ws 串行)+ 让路都按它
+DEFINE FIELD IF NOT EXISTS ws_id     ON x_bg_job TYPE string ASSERT $value != '';
+-- month 走当场采,不进后台;后台只接这三档
+DEFINE FIELD IF NOT EXISTS range     ON x_bg_job TYPE string ASSERT $value INSIDE ['halfYear', 'year', 'all'];
+-- queued 可跑 / running 正在跑 / paused 人工暂停 / done 采完 / failed 出错停了
+DEFINE FIELD IF NOT EXISTS status    ON x_bg_job TYPE string ASSERT $value INSIDE ['queued', 'running', 'paused', 'done', 'failed'];
+-- 三个标签页各自的断点游标 / 已采到的最旧时间(只做显示) / 是否到底
+DEFINE FIELD IF NOT EXISTS profile_cursor    ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS profile_oldest_at ON x_bg_job TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS profile_done      ON x_bg_job TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS replies_cursor    ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS replies_oldest_at ON x_bg_job TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS replies_done      ON x_bg_job TYPE bool DEFAULT false;
+DEFINE FIELD IF NOT EXISTS reposts_cursor    ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reposts_oldest_at ON x_bg_job TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS reposts_done      ON x_bg_job TYPE bool DEFAULT false;
+-- "跑了没成功" 和 "没跑" 要分得开
+DEFINE FIELD IF NOT EXISTS last_error     ON x_bg_job TYPE option<string>;
+-- 进度展示:累计翻了多少页、存了多少条
+DEFINE FIELD IF NOT EXISTS total_pages   ON x_bg_job TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS total_saved   ON x_bg_job TYPE int DEFAULT 0;
+DEFINE FIELD IF NOT EXISTS created_at    ON x_bg_job TYPE datetime;
+DEFINE FIELD IF NOT EXISTS updated_at    ON x_bg_job TYPE datetime;
+-- 上一段什么时候跑的 —— 节奏控制(距上段够间隔才跑下段)
+DEFINE FIELD IF NOT EXISTS last_segment_at ON x_bg_job TYPE option<datetime>;
+-- runner 按 (ws_id, status) 挑到期任务
+DEFINE INDEX IF NOT EXISTS idx_bg_job_ws_status ON x_bg_job FIELDS ws_id, status;
+-- 避免给同一个人同一范围重复建 job
+DEFINE INDEX IF NOT EXISTS idx_bg_job_rest_range ON x_bg_job FIELDS rest_id, range;
+`;
+
+export async function x_migration_1_2_26(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_26);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_bg_job');
+  for (const f of ['rest_id', 'ws_id', 'range', 'status', 'profile_cursor', 'profile_done',
+    'replies_cursor', 'reposts_cursor', 'total_pages', 'created_at', 'last_segment_at']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) {
+      throw new Error(`[x-schema 1.2.26] x_bg_job.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.26] 后台采集任务表 x_bg_job 已建');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.26', appliedAt = $now,
+      description = '后台采集任务 x_bg_job(朋友圈半年/一年/全部,断点存库跨重启)'`,
+    { rid: new RecordId('schema_version', '1.2.26'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.25 —— 推文里的**互动对象**(2026-10-10,「他的朋友圈」的原料)
  *
  * 用户:「针对…posts/replies/reposts三个内容的采集，主要是观察这个用户主要和哪些用户互动，找到它的朋友圈。」
