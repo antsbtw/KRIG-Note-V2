@@ -131,7 +131,11 @@ describe('⭐⭐ 接线:「停」必须停两件事', () => {
 
   it('⭐ 取消标记必须按 pageId 分', () => {
     /** ⚠️ 不分的话在 A 窗口点停会把 B 窗口的滚动也停掉 */
-    expect(ipc, '取消标记不是按 pageId 分的')
+    /** ⭐ 取消标记表 2026-10-13 随采集引擎搬进 web-collect-engine.ts(3a) */
+    const engine = readFileSync(
+      resolve(__dirname, '../../src/platform/main/web-capability/wiring/web-collect-engine.ts'), 'utf-8',
+    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(engine, '取消标记不是按 pageId 分的')
       .toMatch(/scrollCancelled\s*=\s*new Set<\s*PageId\s*>/);
   });
 });

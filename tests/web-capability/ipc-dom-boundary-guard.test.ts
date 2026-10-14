@@ -30,6 +30,13 @@ const strip = (s: string): string =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 const ipcDom = strip(readFileSync(IPC_DOM, 'utf-8'));
+/**
+ * ⭐ 采集引擎(会话表 / 两条腿 / resolve)2026-10-13 从 ipc-dom 原样搬到这里(后台策略 3a)。
+ * ⚠️ 钉在这些零件上的守卫跟着改读这个文件 —— 不改的话它们在 ipc-dom 里找不到、当场红;
+ * 而**更糟的是**有人为了变绿把断言删了。判据本身一条没放松。
+ */
+const ENGINE = join(ROOT, 'src/platform/main/web-capability/wiring/web-collect-engine.ts');
+const engine = strip(readFileSync(ENGINE, 'utf-8'));
 
 function listSources(dir: string): string[] {
   const out: string[] = [];
@@ -47,6 +54,8 @@ describe('⭐⭐ IPC 面:不许把 runDynamic 开给 renderer', () => {
   it('前提自检:确实读到了 ipc-dom.ts', () => {
     expect(ipcDom.length, '文件空了 —— 守卫在空转').toBeGreaterThan(500);
     expect(ipcDom, '不是那个文件').toContain('registerWebDomIpc');
+    expect(engine.length, 'web-collect-engine.ts 空了 —— 钉在引擎上的守卫在空转').toBeGreaterThan(500);
+    expect(engine, '不是那个文件').toContain('sessionsByPageId');
   });
 
   it('⭐⭐ handler 里零处 runDynamic', () => {
@@ -486,8 +495,7 @@ describe('⭐⭐ web.net 捕获 op:三条接线约束', () => {
      * ⚠️ 按 wcId 分的话,人点了「开始捕」、页面刷新一下就悄悄停了 ——
      * 而数字不动很难察觉是「停了」还是「没载荷」。
      */
-    const s = src();
-    expect(s, '会话表的键不是 pageId').toMatch(/sessionsByPageId\s*=\s*new Map<\s*PageId/);
+    expect(engine, '会话表的键不是 pageId').toMatch(/sessionsByPageId\s*=\s*new Map<\s*PageId/);
   });
 });
 
@@ -573,7 +581,8 @@ describe('⭐⭐ 捕获留痕:让验证不靠人截图', () => {
      * ⚠️ 只在停捕时写的话,人忘了点停(或直接关面板)
      * 这一轮**一个字都不会留下** —— 又回到只能靠截图。
      */
-    const s = src();
+    /** ⭐ `sessionFor` 搬进了采集引擎(3a)—— 读那个文件 */
+    const s = engine;
     expect(s, '没有首次捕获留痕 —— 人忘了点停这一轮就全没了')
       .toMatch(/capture-first-payload/);
     // ⭐ 且它必须接在会话上,不是写了个常量就算
