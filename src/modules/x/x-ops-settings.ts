@@ -29,6 +29,13 @@ export const SETTING_DEFS: readonly SettingDef[] = [
    * ⚠️ 真机:一天发 40–55 条的号,30 页只够约两周;一个月要约 60 页。用户可调。
    */
   { key: 'collect.live_page_cap', label: '当场采每页最多翻', default: 30, min: 1, max: 200, unit: '页' },
+  /**
+   * ⭐ 后台采集(半年/一年/全部)的节奏(2026-10-13,3b)。
+   * 一段翻几页 —— 太大则一段跑太久占你 webview,太小则进展慢。真机活跃号翻页快,默认保守 10。
+   */
+  { key: 'bg.pages_per_segment', label: '后台每段翻几页', default: 10, min: 1, max: 100, unit: '页' },
+  /** 两段之间至少隔多久 —— 太密=连珠炮请求是风控信号(记忆 project-x-cursor-paging) */
+  { key: 'bg.segment_gap_sec', label: '后台两段最小间隔', default: 120, min: 10, max: 3600, unit: '秒' },
 ];
 
 export type OpsSettings = Readonly<Record<string, number>>;

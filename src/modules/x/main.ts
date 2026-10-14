@@ -37,6 +37,7 @@
  * 判据:能力控制台能跑 `goto x.home → ready → scrollUntil`。
  */
 
+import { app } from 'electron';
 import {
   registerAnchorTable,
   registerPageTable,
@@ -46,6 +47,7 @@ import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
 import { registerXDataIpc } from './x-data-ipc';
+import { startBgRunner, stopBgRunner } from './x-bg-runner';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -85,6 +87,21 @@ export function registerXModule(): void {
    * (守卫 `x-module-detachable` 的改法原话:「X 自带视图/IPC/repo/schema」)。
    */
   registerXDataIpc();
+
+  /**
+   * ⭐⭐ 后台采集节奏控制器(「他的朋友圈」第二步,3b)。
+   *
+   * ⚠️ **X 自己启动、X 自己在 before-quit 停** —— 不劳宿主。
+   * 宿主 index.ts 一行不加:startBgRunner 写进 index.ts 会让宿主认识 X 内部,
+   * 删 X 时成孤儿、撞 x-module-detachable 守卫(拦「宿主→X」)。
+   * ⭐ X 依赖 electron(app.on)是正当的(x-data-ipc 已 import ipcMain 同理),
+   * 这是「X 依赖平台」不是「宿主依赖 X」。
+   * ⚠️ 常驻 timer 必须在 before-quit 停(记忆 project-graceful-shutdown):
+   * 这里挂自己的 before-quit 监听(Electron 允许多个),timer 本身也 unref()。
+   * ⚠️ 幂等(registered 挡在前面):多窗口/热重载不会挂两个监听、起两个 timer。
+   */
+  startBgRunner();
+  app.on('before-quit', stopBgRunner);
 }
 
 

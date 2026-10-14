@@ -284,8 +284,14 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
           const records = [...run.records];
           const pages = (run.paging?.rounds ?? 0) + 1;
           const why = run.paging?.stopReason ?? '';
-          /** 第一轮翻页就被 403 拒 = 翻页模板没带鉴权头 → 值得重载再试 */
-          const authFail = /HTTP 403/.test(why) && (run.paging?.rounds ?? 0) <= 1;
+          /**
+           * 第一轮翻页就被拒 = 翻页模板没带鉴权头 → 值得重载再试。
+           * ⚠️ 两种措辞都要认(2026-10-13):旧的「HTTP 403」+ 403 根治后的
+           * 「没带鉴权头」(种子一条带头的都没有时的失败语)——
+           * 只认 HTTP 403 的话,新措辞不触发重试,回复页种子没带头就只采 1 页就停
+           * (project-x-paging-403-root-cause 记过这笔连带账)。
+           */
+          const authFail = /HTTP 403|没带鉴权头/.test(why) && (run.paging?.rounds ?? 0) <= 1;
           let inserted = 0;
           if (records.length > 0) {
             const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
