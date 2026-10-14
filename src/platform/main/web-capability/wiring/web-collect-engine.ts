@@ -26,7 +26,8 @@ import { CaptureSession } from '../net/capture-session';
 import { HookSession } from '../hook/hook-session';
 import { toHookHost } from './electron-hook-host';
 import { startAcquire, finishAcquire } from '../acquire/acquire';
-import type { HarvestDeps } from '../harvest/types';
+import { harvestPage } from '../harvest/harvest';
+import type { HarvestDeps, HarvestPlan, HarvestReport } from '../harvest/types';
 import type { AcquireDeps } from '../acquire/types';
 import { toPageHost } from './electron-page-host';
 import { registerPageIdLookup, wireWebRequestSideOn } from './webrequest-side';
@@ -527,4 +528,42 @@ export function resolve(ref: PageRef): { wc: WebContents; pageId: PageId } | { e
     hooksByPageId.delete(facts.pageId);
   });
   return { wc, pageId: facts.pageId };
+}
+
+/**
+ * ⭐⭐ 三个对外入口(2026-10-13,3a)—— renderer 经 IPC(`ipc-dom.ts`)与主进程直接调用
+ * (X 的人卡采集 / 后台 runner)**走同一条路**,不各写一份。
+ *
+ * ⚠️ 都**不打留痕**(用户拍板:留痕由调用方打,见 `collect-trace.ts`);
+ * ⚠️ 都**不吞失败** —— 原样回 Result / 抛出,由调用方如实转述。
+ */
+
+/** 去语义页 —— ⚠️ 只收页面名,URL 由业务页表翻译(那道闸不能绕) */
+export function gotoOnPage(
+  pageId: PageId,
+  name: string,
+  params: Record<string, string> | undefined,
+  readyTimeoutMs?: number,
+): ReturnType<typeof controlEngine.goto> {
+  return controlEngine.goto(
+    pageId,
+    { kind: 'semantic', name, params },
+    { readyTimeoutMs },
+  );
+}
+
+/** 采这一页 —— ⚠️ 先清上一轮的每轮产出,否则旧全文会混进这一轮 */
+export function harvestOnPage(wc: WebContents, pageId: PageId, plan: HarvestPlan): Promise<HarvestReport> {
+  afterRoundResults.delete(pageId);
+  return harvestPage(makeHarvestDeps(wc, pageId), pageId, plan);
+}
+
+/** 跑一个预注册脚本(翻页 / 展开)—— ⚠️ 只认 id,收不了脚本文本 */
+export function runScriptOnPage(
+  wc: WebContents,
+  pageId: PageId,
+  scriptId: string,
+  params?: Parameters<typeof domRunner.run>[3],
+): ReturnType<typeof domRunner.run> {
+  return domRunner.run(wc, pageId, scriptId as ScriptId, params);
 }

@@ -41,7 +41,6 @@ import {
 import { HookSession } from '../hook/hook-session';
 import { toHookHost } from './electron-hook-host';
 import { startAcquire, peekAcquire, finishAcquire } from '../acquire/acquire';
-import { harvestPage } from '../harvest/harvest';
 import { toPageHost } from './electron-page-host';
 import { wireWebRequestSideOn } from './webrequest-side';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
@@ -50,8 +49,9 @@ import type { ScriptId } from '../dom/types';
 import {
   resolve, scrollCancelled, hooksByPageId,
   afterRoundResults, collectAfterRound, acquireStartedAt, sessionFor,
-  makeAcquireDeps, makeHarvestDeps,
+  makeAcquireDeps, gotoOnPage, harvestOnPage, runScriptOnPage,
 } from './web-collect-engine';
+import { traceGoto, traceHarvest } from './collect-trace';
 
 /**
  * ⭐ 失败一律**在主进程也打一行** —— 2026-10-01 加。
@@ -190,7 +190,7 @@ export function registerWebDomIpc(): void {
         switch (p.op) {
           case 'run':
             if (!p.scriptId) return failed('[web.dom ipc] run 缺 scriptId');
-            return toIpc(await domRunner.run(wc, pageId, p.scriptId as ScriptId, p.params));
+            return toIpc(await runScriptOnPage(wc, pageId, p.scriptId, p.params));
           /**
            * ── 控制(`web.page`)—— 2026-10-01 为 X Console 开放 ──
            *
@@ -201,30 +201,8 @@ export function registerWebDomIpc(): void {
            */
           case 'goto': {
             if (!p.name) return failed('[web.dom ipc] goto 缺语义页面名');
-            const r = await controlEngine.goto(
-              pageId,
-              { kind: 'semantic', name: p.name, params: p.params },
-              { readyTimeoutMs: p.readyTimeoutMs },
-            );
-            /**
-             * ⭐⭐ 导航结果落盘 —— 2026-10-02 补。
-             *
-             * ⚠️ 起因:载荷捕到 0 条时,我**读不到人到底去了哪一页**,
-             * 只能反过来问 —— 又回到「靠截图」(用户点破的那条)。
-             * ⭐ `landedUrl` 尤其要紧:它与 `requestedUrl` 不同就说明
-             * 站点自己接管了导航(X 常有),而那会改变后面该看什么。
-             */
-            traceRecorder.lifecycle({
-              layer: 'web.page',
-              event: r.status === 'ok' ? 'goto' : `goto-${r.status}`,
-              pageId: String(pageId),
-              detail: {
-                name: p.name,
-                params: p.params ?? {},
-                landedUrl: (r as { value?: { landedUrl?: string } }).value?.landedUrl,
-                reason: (r as { reason?: string }).reason,
-              },
-            });
+            const r = await gotoOnPage(pageId, p.name, p.params, p.readyTimeoutMs);
+            traceGoto(pageId, p.name, p.params, r);
             return toIpc(r);
           }
           case 'ready': {
@@ -464,70 +442,8 @@ export function registerWebDomIpc(): void {
            * 用户 2026-10-03:「我自己选定一个页面,点击开始采集,就采集」。
            */
           case 'harvest': {
-            afterRoundResults.delete(pageId);
-            const rep = await harvestPage(makeHarvestDeps(wc, pageId), pageId, p.plan ?? {});
-            traceRecorder.lifecycle({
-              layer: 'web.net',
-              event: rep.ok ? 'harvest-ok' : 'harvest-incomplete',
-              pageId: String(pageId),
-              detail: {
-                url: wc.getURL(),
-                total: rep.items.length,
-                pages: rep.pages,
-                rounds: rep.rounds,
-                scrolledPx: Math.round(rep.scrolledPx),
-                elapsedMs: rep.elapsedMs,
-                stopReason: rep.stopReason,
-                legs: rep.legs,
-                problems: rep.problems,
-                /**
-                 * ⭐⭐ **收到的是什么** —— 2026-10-04 补。
-                 *
-                 * ⚠️ 起因:配方搜索滚了 60 轮 39983px,却只有 **1 条**时间线载荷,
-                 * 而我**读不出那 40 条响应里都是些什么** —— 只能回头猜。
-                 * ⭐ 这正是 2026-10-02 补过的那条(「我知道捕到 37 条,
-                 * 却不知道捕到的是什么」),`harvest` 取代手动流程时**漏带了**。
-                 *
-                 * ⚠️ 只记**路径尾段 + 条数**,不记完整 URL(带长 queryId)、
-                 * 更不记正文(几十 KB 会把留痕写爆)。
-                 */
-                endpoints: (() => {
-                  const n = new Map<string, number>();
-                  for (const it of rep.items) {
-                    const tail = it.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)';
-                    n.set(tail, (n.get(tail) ?? 0) + 1);
-                  }
-                  return [...n.entries()]
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 20)
-                    .map(([tail, count]) => `${count}× ${tail}`);
-                })(),
-                /** ⭐ 展开的产出摘要 —— 「跑没跑」要分得清 */
-                expand: rep.afterRound.length > 0
-                  ? {
-                    轮数: rep.afterRound.length,
-                    点开了: rep.afterRound.reduce<number>(
-                      (n, x) => n + (((x as { expanded?: number }).expanded) ?? 0), 0,
-                    ),
-                  }
-                  : '(未启用)',
-                /** ⭐ 采到了什么 —— 全量按类型聚合,不截断 */
-                byKind: (() => {
-                  const g = new Map<string, number>();
-                  for (const x of rep.items) {
-                    const tail = x.url.split('?')[0].split('/').filter(Boolean).pop() ?? '(无)';
-                    const key = /\.(m4s|mp4|m3u8|ts)$/.test(tail)
-                      ? `(视频分片 *.${tail.split('.').pop()})` : tail;
-                    g.set(key, (g.get(key) ?? 0) + 1);
-                  }
-                  return Object.fromEntries([...g.entries()].sort((a, b) => b[1] - a[1]));
-                })(),
-              },
-            });
-            console.log(
-              `[web.harvest] ${rep.ok ? '✓' : '⚠'} pageId=${pageId} —— `
-              + `${rep.pages} 页 / ${rep.items.length} 条 / ${rep.rounds} 轮 / ${rep.stopReason}`,
-            );
+            const rep = await harvestOnPage(wc, pageId, p.plan ?? {});
+            traceHarvest(pageId, wc.getURL(), rep);
             /** ⚠️ 不完整回 degraded **不是 failed** —— 采了一半也是真的 */
             if (!rep.ok) {
               return { status: 'degraded', value: rep, missing: [...rep.problems] };

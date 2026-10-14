@@ -654,11 +654,25 @@ describe('⭐⭐⭐ 开始收之前先清空', () => {
  */
 describe('⭐⭐⭐ harvest 留痕要带「收到的是什么」', () => {
   it('⭐⭐⭐ 留痕里有端点清单,不只有条数', () => {
+    /**
+     * ⭐ 2026-10-13(3a):留痕从 case 里原样抽进 `collect-trace.ts` 的 `traceHarvest`,
+     * 让 renderer(经 IPC)与主进程直接调用(X 人卡 / 后台 runner)打**同一份**。
+     * ⚠️ 所以判据拆两段,缺一段都会让「端点清单」静默消失:
+     *   ① harvest 分支**真的调了** traceHarvest
+     *   ② traceHarvest 函数体里**真的有**端点清单
+     */
     const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
     const i = src.indexOf("case 'harvest':");
     expect(i, "harvest 分支不见了 —— 本条要重写").toBeGreaterThan(-1);
     const end = src.indexOf('case ', i + 10);
-    const body = src.slice(i, end > i ? end : undefined);
+    const branch = src.slice(i, end > i ? end : undefined);
+    expect(branch.length, '切片空了 —— 断言会恒真').toBeGreaterThan(40);
+    expect(branch, 'harvest 分支没打留痕 —— 采完不知道收到了什么').toMatch(/traceHarvest\s*\(/);
+
+    const trace = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/collect-trace.ts'), 'utf-8'));
+    const t = trace.indexOf('export function traceHarvest(');
+    expect(t, 'traceHarvest 不见了 —— 本条要重写').toBeGreaterThan(-1);
+    const body = trace.slice(t, trace.indexOf('\n}', t));
     expect(body.length, '切片空了 —— 断言会恒真').toBeGreaterThan(200);
 
     expect(
