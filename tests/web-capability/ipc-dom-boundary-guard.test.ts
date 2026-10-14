@@ -175,9 +175,10 @@ describe('⭐ IPC 面的失败语义:不许静默', () => {
   });
 
   it('⭐⭐ pageRef 解析不出来要失败,绝不兜底到别的页面', () => {
-    const i = ipcDom.indexOf('function resolve(');
+    /** ⭐ `resolve` 2026-10-13 搬进采集引擎(3a)—— 读那个文件 */
+    const i = engine.indexOf('function resolve(');
     expect(i, '没有 resolve').toBeGreaterThan(-1);
-    const body = ipcDom.slice(i, ipcDom.indexOf('\n}', i));
+    const body = engine.slice(i, engine.indexOf('\n}', i));
     expect(body.length, 'slice 空了').toBeGreaterThan(50);
     // 必须校验 wcId 合法性与 wc 存活
     expect(body, '没校验 wcId').toMatch(/Number\.isInteger/);
@@ -188,8 +189,9 @@ describe('⭐ IPC 面的失败语义:不许静默', () => {
   });
 
   it('⭐ register 与 bindPageHost 必须成对(漏一个就「调不动且不报错」)', () => {
-    expect(ipcDom, '没登记页面').toMatch(/pageRegistry\.register\s*\(/);
-    expect(ipcDom, '登记了页面但没绑 wc —— 引擎会说「页面已关闭」而其实是没接线')
+    /** ⭐ 登记/绑定在 `resolve` 里,随它搬进采集引擎(3a) */
+    expect(engine, '没登记页面').toMatch(/pageRegistry\.register\s*\(/);
+    expect(engine, '登记了页面但没绑 wc —— 引擎会说「页面已关闭」而其实是没接线')
       .toMatch(/bindPageHost\s*\(/);
   });
 });
@@ -482,7 +484,8 @@ describe('⭐⭐ web.net 捕获 op:三条接线约束', () => {
      * 而症状是**内存只涨不降**,没有任何报错指向这里。
      * ⭐ 判据切到 destroyed 回调里。
      */
-    const s = src();
+    /** ⭐ destroyed 回调在 `resolve` 里,随它搬进采集引擎(3a) */
+    const s = engine;
     const i = s.indexOf("wc.once('destroyed'");
     expect(i, 'destroyed 回调不见了').toBeGreaterThan(-1);
     const body = s.slice(i, i + 400);

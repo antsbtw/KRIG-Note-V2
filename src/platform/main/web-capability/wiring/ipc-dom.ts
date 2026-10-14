@@ -23,20 +23,19 @@
  * 3. ⭐ **失败如实回三态**,不静默吞 —— 这正是本层要替换掉的那个病。
  */
 
-import { app, ipcMain, webContents, type WebContents } from 'electron';
+import { app, ipcMain } from 'electron';
 import { mainBuildStamp } from './build-stamp';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type {
   WebDomInvoke,
-  WebDomPageRef,
   WebDomReadyCriterion,
   WebDomResult,
   WebDomScrollStop,
 } from '@shared/ipc/web-dom-types';
 import {
-  controlEngine, domRunner, pageRegistry, scriptRegistry, listPageNames,
+  controlEngine, domRunner, scriptRegistry, listPageNames,
   identifySemanticPage, netBus, bodyProvider, traceRecorder,
 } from './runtime';
 import { HookSession } from '../hook/hook-session';
@@ -47,64 +46,12 @@ import { toPageHost } from './electron-page-host';
 import { wireWebRequestSideOn } from './webrequest-side';
 import type { ReadyCriterion, ScrollStop } from '../page/control-types';
 import type { AnchorName } from '../dom/types';
-import { bindPageHost } from './page-hosts';
-import type { PageId } from '../page/types';
 import type { ScriptId } from '../dom/types';
 import {
-  readPartition,
-  pageIdByWcId, sessionsByPageId, scrollCancelled, hooksByPageId,
+  resolve, scrollCancelled, hooksByPageId,
   afterRoundResults, collectAfterRound, acquireStartedAt, sessionFor,
   makeAcquireDeps, makeHarvestDeps,
 } from './web-collect-engine';
-
-/**
- * 把 renderer 给的 `wcId` 解析成「真 webContents + 底座认识的 pageId」。
- *
- * ⚠️ 拿不到就**如实失败**,不兜底到别的页面 ——
- * 兜底会让「指认错了」表现成「操作没生效」,排查方向完全相反。
- */
-function resolve(ref: WebDomPageRef): { wc: WebContents; pageId: PageId } | { error: string } {
-  if (!ref || typeof ref.wcId !== 'number' || !Number.isInteger(ref.wcId)) {
-    return { error: `[web.dom ipc] pageRef.wcId 非法: ${String(ref?.wcId)}` };
-  }
-  const wc = webContents.fromId(ref.wcId);
-  if (!wc || wc.isDestroyed()) {
-    return { error: `[web.dom ipc] wc#${ref.wcId} 不存在或已销毁(页面关了?)` };
-  }
-
-  const cached = pageIdByWcId.get(ref.wcId);
-  if (cached) return { wc, pageId: cached };
-
-  /**
-   * ⭐ `register` 与 `bindPageHost` **必须成对** —— 只登记不绑定的话,
-   * 引擎拿不到 wc,会回一个诚实但误导的 Failed「没有对应的渲染目标(已关闭?)」,
-   * 看起来像页面关了,实际是没接线(见 `page-hosts.ts` 的告诫)。
-   */
-  const facts = pageRegistry.register({
-    window: 'main',
-    ws: 'renderer-dom',
-    slot: 'left',
-    partition: readPartition(wc),
-    owner: 'renderer-dom',
-    url: wc.getURL(),
-    state: 'complete',
-  });
-  bindPageHost(facts.pageId, wc);
-  pageIdByWcId.set(ref.wcId, facts.pageId);
-  wc.once('destroyed', () => {
-    pageIdByWcId.delete(ref.wcId);
-    /**
-     * ⚠️ 会话必须跟着清 —— 不清的话它会一直订阅一个死页面,
-     * 而症状是**内存只涨不降**,没有任何报错指向这里。
-     */
-    sessionsByPageId.get(facts.pageId)?.stop();
-    sessionsByPageId.delete(facts.pageId);
-    // ⚠️ 第二条腿也要清 —— 同样的理由:不清会一直持有死页面的引用
-    hooksByPageId.get(facts.pageId)?.stop();
-    hooksByPageId.delete(facts.pageId);
-  });
-  return { wc, pageId: facts.pageId };
-}
 
 /**
  * ⭐ 失败一律**在主进程也打一行** —— 2026-10-01 加。
