@@ -30,7 +30,7 @@ let dbDir: string | null = null;
 
 async function waitReady(): Promise<void> {
   const start = Date.now();
-  while (Date.now() - start < 15000) {
+  while (Date.now() - start < 25000) { // 全量高负载下 surreal 启动慢,15s 偶发超时(污染基线);< beforeAll 的 30000
     try { if ((await fetch(`http://127.0.0.1:${PORT}/health`)).ok) return; } catch { /* not ready */ }
     await new Promise((r) => setTimeout(r, 300));
   }
@@ -50,7 +50,7 @@ describe.skipIf(!BINARY)('x-bg-runner tickOnce —— 真库调度', () => {
     await x_migration_1_2_24(db); // x_setting(节奏设置读它,没有则用默认)
     await x_migration_1_2_26(db); // x_bg_job
     __setXDBForTest(db);
-  }, 30000);
+  }, 40000);
 
   afterAll(async () => {
     __setXDBForTest(null);

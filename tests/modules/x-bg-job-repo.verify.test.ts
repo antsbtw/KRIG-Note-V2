@@ -28,7 +28,7 @@ function findBinary(): string | null {
 }
 const BINARY = findBinary();
 const PORT = 8601; // 避开 app(8533) 与别的 verify 测试(8599)
-const READY_TIMEOUT = 15000;
+const READY_TIMEOUT = 25000; // 全量高负载下 surreal 启动慢,15s 偶发超时(污染基线);< beforeAll 的 30000
 
 let proc: ChildProcess | null = null;
 let db: Surreal | null = null;
@@ -57,7 +57,7 @@ describe.skipIf(!BINARY)('x_bg_job repo —— 真 SurrealDB 验证', () => {
     await db.use({ namespace: 'krig', database: 'bgjob_verify' });
     await x_migration_1_2_26(db);
     __setXDBForTest(db);
-  }, 30000);
+  }, 40000);
 
   afterAll(async () => {
     __setXDBForTest(null);
