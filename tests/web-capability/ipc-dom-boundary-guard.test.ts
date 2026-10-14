@@ -619,7 +619,8 @@ describe('⭐⭐ 捕获留痕:让验证不靠人截图', () => {
  */
 describe('⭐⭐⭐ 开始收之前先清空', () => {
   it('⭐⭐⭐ `startAll` 里**真的**调了 clearPayloads', () => {
-    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    /** ⭐ `makeAcquireDeps`(含 startAll)2026-10-13 搬进采集引擎(3a)—— 读那个文件 */
+    const src = engine;
     const i = src.indexOf('async startAll(');
     expect(i, 'startAll 不见了 —— 本条要重写').toBeGreaterThan(-1);
     /** ⚠️ 切到函数体结束(下一个顶层成员)为止,别把整文件圈进来 */
@@ -683,7 +684,8 @@ describe('⭐⭐⭐ harvest 留痕要带「收到的是什么」', () => {
  */
 describe('⭐⭐⭐ 噪音名单两条腿都要接', () => {
   it('⭐⭐⭐ `startAll` 把名单**同时给** CDP 腿和钩子腿', () => {
-    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    /** ⭐ `makeAcquireDeps`(含 startAll)2026-10-13 搬进采集引擎(3a)—— 读那个文件 */
+    const src = engine;
     const i = src.indexOf('async startAll(');
     expect(i, 'startAll 不见了 —— 本条要重写').toBeGreaterThan(-1);
     const end = src.indexOf('\n    },', i);
@@ -711,7 +713,8 @@ describe('⭐⭐⭐ 噪音名单两条腿都要接', () => {
    * 而且**一点症状都没有**(看起来仍在采,只是噪音照样进来)。
    */
   it('⚠️ 名单变了要重建钩子,不复用旧的', () => {
-    const src = strip(readFileSync(join(ROOT, 'src/platform/main/web-capability/wiring/ipc-dom.ts'), 'utf-8'));
+    /** ⭐ `makeAcquireDeps`(含 startAll)2026-10-13 搬进采集引擎(3a)—— 读那个文件 */
+    const src = engine;
     const i = src.indexOf('async startAll(');
     const body = src.slice(i, src.indexOf('\n    },', i));
     expect(
