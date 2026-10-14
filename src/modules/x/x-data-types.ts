@@ -125,6 +125,21 @@ export type XDataInvoke =
   | { readonly op: 'friendCircle'; readonly restId: string; readonly limit: number }
   /** ⭐ 采一个人时的**进度**落留痕(翻到第几页 / 歇 / 限流等待)—— 运行中也看得见 */
   | { readonly op: 'logPersonProgress'; readonly entry: { readonly handle: string; readonly tab: string; readonly attempt: number; readonly msg: string } }
+  /**
+   * ⭐⭐ 人卡采一个标签页 —— 采集在**主进程**跑(`x-person-collect.ts` → collectOnWebview,2026-10-13 3a)。
+   * 回 `CollectOnWebviewResult`(去没去到页 / 推文 / 翻页账);存库、采集记录、重试仍由 renderer 做。
+   */
+  | {
+      readonly op: 'collectPersonTab';
+      readonly wcId: number; readonly page: string; readonly handle: string; readonly restId: string;
+      /** 范围起点 ISO;不给 = 全部 */
+      readonly start?: string;
+      readonly pageCap: number; readonly attempt: number;
+    }
+  /** 正在跑的那次采集的最新一句进度(renderer 每秒问一次);没在跑回 null */
+  | { readonly op: 'personCollectProgress'; readonly wcId: number }
+  /** 人点了停止 —— 立标记,翻页每轮开头 / 歇着时每秒都会看 */
+  | { readonly op: 'cancelPersonCollect'; readonly wcId: number }
   /** ⭐ 采一个人某个标签页的结果落留痕(页数 / 条数 / 停因)*/
   | {
       readonly op: 'logPersonCollect';

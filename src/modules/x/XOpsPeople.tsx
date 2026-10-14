@@ -34,9 +34,9 @@ import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
 import { auditUserPayload, type XUserRecord } from './x-user-audit';
 import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
-import { runCollect } from './x-collect-run';
+import type { CollectOnWebviewResult } from './x-collect-on-webview';
 import type { CirclePerson } from './x-friend-circle';
-import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, timeWindowStop, type TimelineRange } from './x-person-timeline';
+import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, type TimelineRange } from './x-person-timeline';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
 import {
@@ -223,7 +223,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
 
   /**
    * ⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-10-10 用户:「可以配置获取的长度（一个月、半年、一年，全部）」)。
-   * 每个标签页:去那一页 → runCollect(首页 + 游标翻页,随机停顿/限流退避都在里面)→ 存推文。
+   * 每个标签页:去那一页 → runCollect(首页 + 游标翻页,随机停顿/限流退避都在里面;2026-10-13 起在主进程跑)→ 存推文。
    * ⭐ 收手:这一页**他自己**最新的推文早于起点(置顶只在首页,不参与判断)/ 当场采到页数上限。
    * ⚠️ 2026-10-10 第一版只滚动 8 轮,每页都只拿到首屏 —— 滚动触发翻页不可靠,所以改游标翻页。
    */
@@ -251,48 +251,37 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
          */
         for (let attempt = 1; attempt <= 2; attempt += 1) {
           say(`正在采${tab.label}…${attempt > 1 ? '(重载后第 2 次)' : ''}`);
-          const go = await window.electronAPI!.webDomInvoke({
-            op: 'goto', pageRef: { wcId }, name: tab.name, params: { handle: p.handle },
-          });
-          if (go.status === 'failed') { parts.push(`${tab.label}:没去到这一页(${go.reason ?? ''})`); break; }
-          const run = await runCollect({
-            harvest: async (plan) => {
-              const rr = await window.electronAPI!.webDomInvoke({ op: 'harvest', pageRef: { wcId }, plan });
-              if (rr.status !== 'ok' && rr.status !== 'degraded') return null;
-              return (rr as { value: unknown }).value as never;
-            },
-            runScript: async (scriptId, params) => {
-              const rr = await window.electronAPI!.webDomInvoke({
-                op: 'run', pageRef: { wcId }, scriptId, params: params as Record<string, string>,
-              });
-              if (rr.status !== 'ok' && rr.status !== 'degraded') {
-                throw new Error(`翻页脚本失败:${(rr as { reason?: string }).reason ?? ''}`);
-              }
-              return (rr as { value?: unknown }).value;
-            },
-            stopPaging: timeWindowStop(p.rest_id, start, settingsRef.current?.['collect.live_page_cap'] ?? LIVE_PAGE_CAP),
-            cancelled: () => cancelCollect.current,
-            onProgress: (m) => {
-              say(`${tab.label}:${m}`);
-              /**
-               * ⭐⭐ 进度也落留痕(2026-10-12:帖子页翻了 4 分钟没结果,留痕里一片空白 ——
-               * 分不清是「在正常翻页」还是「被限流在等 15 分钟」,只能让人去看屏幕)。
-               */
-              void xDataCall({ op: 'logPersonProgress', entry: { handle: p.handle, tab: tab.name, attempt, msg: m } });
-            },
-            wait: async (ms) => {
-              const until = Date.now() + ms;
-              while (Date.now() < until) {
-                if (cancelCollect.current) return;
-                await new Promise((r) => setTimeout(r, 1000));
-              }
-            },
           /**
-           * ⚠️ 首页采集给**明确的上限**(默认是 3000 轮 / 20 分钟,那是给名单用的)。
-           * 首页来了就停(seedPages 1);之后全靠游标翻页。
+           * ⭐⭐ 去那一页 + runCollect 在**主进程**跑(2026-10-13 后台策略 3a:`collectOnWebview`,
+           * 与后台 runner 共用一份)。进度每句都由主进程当场写 x-person-progress 留痕;
+           * 这里每秒问一次最新那句,只为界面上滚动显示。
            */
-          }, { wantPages: 1, depth: 'expand-only', seedPages: 1, maxRounds: 20, maxMs: 60_000 });
-          const records = (run.summary?.items ?? []).map((t) => t.record).filter((r) => r.id !== '');
+          let seenSeq = 0;
+          /** ⚠️ 采完后才回来的那次问询不许再改界面(会盖掉结果那句) */
+          let done = false;
+          const poll = setInterval(() => {
+            void xDataCall({ op: 'personCollectProgress', wcId }).then((r) => {
+              if (done) return;
+              const v = r.status === 'ok' ? r.value as { seq: number; msg?: string } | null : null;
+              if (v && v.seq !== seenSeq && v.msg) { seenSeq = v.seq; say(`${tab.label}:${v.msg}`); }
+            });
+          }, 1000);
+          let res;
+          try {
+            res = await xDataCall({
+              op: 'collectPersonTab', wcId, page: tab.name, handle: p.handle, restId: p.rest_id,
+              start: start?.toISOString(),
+              pageCap: settingsRef.current?.['collect.live_page_cap'] ?? LIVE_PAGE_CAP,
+              attempt,
+            });
+          } finally {
+            done = true;
+            clearInterval(poll);
+          }
+          if (res.status === 'failed') throw new Error(res.reason);
+          const run = res.value as CollectOnWebviewResult;
+          if (!run.reached) { parts.push(`${tab.label}:没去到这一页(${run.reason})`); break; }
+          const records = [...run.records];
           const pages = (run.paging?.rounds ?? 0) + 1;
           const why = run.paging?.stopReason ?? '';
           /** 第一轮翻页就被 403 拒 = 翻页模板没带鉴权头 → 值得重载再试 */
@@ -720,7 +709,11 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             wcId={wcId}
             onOpenInX={(person) => openInX(person)}
             onCollect={(person) => void collectTweets(person, 'month')}
-            onCancelCollect={() => { cancelCollect.current = true; }}
+            onCancelCollect={() => {
+              cancelCollect.current = true;
+              /** ⭐ 翻页在主进程跑 —— 光立 renderer 的标记停不住它 */
+              if (wcId != null) void xDataCall({ op: 'cancelPersonCollect', wcId });
+            }}
             onUnfollow={(person) => void unfollow(person)}
             unfollowing={unfollowing === cardId}
             collectState={collect[cardId!]}

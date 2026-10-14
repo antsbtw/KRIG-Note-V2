@@ -104,8 +104,15 @@ describe('⭐⭐ 第一次翻页就 403 → 重载这一页再试一次(2026-10-
 
 describe('⭐ 采集进度也落留痕(2026-10-12)', () => {
   it('每条进度消息(翻到第几页 / 歇 / 限流)都写 x-person-progress', () => {
-    const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    expect(PAGE).toMatch(/onProgress: \(m\) => \{[\s\S]{0,400}op: 'logPersonProgress'/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'logPersonProgress':[\s\S]{0,200}event: 'x-person-progress'/);
+    /**
+     * ⭐ 2026-10-13(3a)翻页搬到主进程:每句进度由主进程**当场**写留痕(不靠 renderer 问没问到)。
+     * 两处写同一个事件:主进程采集的 onProgress、以及 logPersonProgress op —— 都经 tracePersonProgress。
+     */
+    const MAIN = read('src/modules/x/x-person-collect.ts');
+    expect(MAIN).toMatch(/onProgress: \(m\) => \{[\s\S]{0,200}tracePersonProgress\(/);
+    const t = MAIN.slice(MAIN.indexOf('export function tracePersonProgress('), MAIN.indexOf('export async function collectPersonTab('));
+    expect(t.length, '切片空了 —— 断言会恒真').toBeGreaterThan(50);
+    expect(t).toMatch(/event: 'x-person-progress'/);
+    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'logPersonProgress':[\s\S]{0,200}tracePersonProgress\(p\.entry\)/);
   });
 });

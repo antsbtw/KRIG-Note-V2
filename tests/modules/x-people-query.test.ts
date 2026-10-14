@@ -372,29 +372,48 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
    */
   const PAGE = read('src/modules/x/XOpsPeople.tsx');
   const fn = PAGE.slice(PAGE.indexOf('const collectTweets'), PAGE.indexOf('/** ⭐ 选时间范围的小框'));
+  /**
+   * ⭐ 2026-10-13(后台策略 3a):「去那一页 → runCollect」搬到主进程 `x-collect-on-webview.ts`
+   * (与后台 runner 共用),人卡经 `collectPersonTab` 调它。判据不变,改钉**真在跑**的那份。
+   */
+  const CORE = read('src/modules/x/x-collect-on-webview.ts');
+  const MAIN = read('src/modules/x/x-person-collect.ts');
 
   it('⭐⭐ 三个标签页来自 PERSON_TABS;每页去那一页再 runCollect;收手用时间窗', () => {
     expect(fn.length).toBeGreaterThan(1000);
     expect(fn).toMatch(/for \(const tab of PERSON_TABS\)/);
-    expect(fn).toMatch(/op: 'goto', pageRef: \{ wcId \}, name: tab\.name/);
-    expect(fn).toMatch(/await runCollect\(/);
+    expect(fn).toMatch(/op: 'collectPersonTab', wcId, page: tab\.name, handle: p\.handle, restId: p\.rest_id/);
     /** 页数上限 2026-10-10 起读设置(用户可调),没设就用默认 LIVE_PAGE_CAP */
-    expect(fn).toMatch(/stopPaging: timeWindowStop\(p\.rest_id, start, settingsRef\.current\?\.\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP\)/);
+    expect(fn).toMatch(/pageCap: settingsRef\.current\?\.\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP/);
+    expect(fn, '没把范围起点交给主进程 —— 按时间收手会失效').toMatch(/start: start\?\.toISOString\(\)/);
+    /** 主进程那份:先去那一页(没到就不采),再 runCollect,收手用时间窗 */
+    const goAt = CORE.indexOf('ports.goto(input.page, { handle: input.handle })');
+    const runAt = CORE.indexOf('await runCollect(');
+    expect(goAt, '主进程没去那一页').toBeGreaterThan(-1);
+    expect(runAt, '主进程没跑 runCollect').toBeGreaterThan(goAt);
+    expect(CORE).toMatch(/stopPaging: timeWindowStop\(input\.restId, input\.start, input\.pageCap\)/);
+    expect(MAIN).toMatch(/start: input\.start \? new Date\(input\.start\) : undefined/);
   });
 
   it('⭐⭐ 首页采集有明确上限(默认 3000 轮 / 20 分钟是给名单用的)', () => {
-    expect(fn).toMatch(/seedPages: 1, maxRounds: 20, maxMs: 60_000/);
+    expect(CORE).toMatch(/seedPages: 1, maxRounds: 20, maxMs: 60_000/);
   });
 
   it('⭐⭐ 忙就不采;采期间登记忙,结束(含出错)一定清掉;能停', () => {
     expect(fn).toMatch(/const busy = getXHostBusy\(wcId\);\s*if \(busy !== null\)/);
     expect(fn).toMatch(/setXHostBusy\(wcId, COLLECT_BUSY\)/);
     expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);\s*\}/);
-    expect(fn).toMatch(/cancelled: \(\) => cancelCollect\.current/);
+    /** ⭐ 停:renderer 外层循环看 cancelCollect;翻页在主进程,停止按钮还要通知主进程 */
+    expect(fn).toMatch(/if \(cancelCollect\.current\) \{ parts\.push/);
+    const btn = PAGE.slice(PAGE.indexOf('onCancelCollect={'), PAGE.indexOf('onCancelCollect={') + 300);
+    expect(btn, '停止按钮没通知主进程 —— 翻页停不住').toMatch(/op: 'cancelPersonCollect', wcId/);
+    expect(MAIN, '主进程没把停止标记接给 runCollect').toMatch(/cancelled: \(\) => ctl\.cancelled/);
+    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'cancelPersonCollect':[\s\S]{0,120}cancelPersonCollect\(p\.wcId\)/);
   });
 
   it('⭐ 推文走 saveTweets(作者顺带进人表),来源记成哪一页', () => {
-    expect(fn).toMatch(/run\.summary\?\.items/);
+    expect(CORE).toMatch(/run\.summary\?\.items/);
+    expect(fn).toMatch(/const records = \[\.\.\.run\.records\]/);
     expect(fn).toMatch(/op: 'saveTweets', records, ctx: \{ source: tab\.name \}/);
   });
 

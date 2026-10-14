@@ -22,6 +22,7 @@ import { queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPers
 import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
+import { cancelPersonCollect, collectPersonTab, personCollectProgress, tracePersonProgress } from './x-person-collect';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
 
@@ -314,8 +315,28 @@ export function registerXDataIpc(): void {
         }
 
         case 'logPersonProgress':
-          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-progress', pageId: 'x-data', detail: { ...p.entry } });
+          /** ⭐ 与主进程采集时写的是同一份(`x-person-collect.ts`):event: 'x-person-progress' */
+          tracePersonProgress(p.entry);
           return { status: 'ok', value: { logged: true } };
+
+        case 'collectPersonTab': {
+          if (!Number.isInteger(p.wcId)) return failed('[x.data] collectPersonTab 缺 wcId');
+          if (typeof p.page !== 'string' || p.page === '' || typeof p.handle !== 'string' || p.handle === ''
+            || typeof p.restId !== 'string' || p.restId === '') {
+            return failed('[x.data] collectPersonTab 缺 page / handle / restId');
+          }
+          if (!Number.isInteger(p.pageCap) || p.pageCap <= 0) return failed('[x.data] collectPersonTab 的 pageCap 要是正整数');
+          return { status: 'ok', value: await collectPersonTab(p) };
+        }
+
+        case 'personCollectProgress':
+          return { status: 'ok', value: personCollectProgress(p.wcId) };
+
+        case 'cancelPersonCollect': {
+          const hit = cancelPersonCollect(p.wcId);
+          console.log(`[x.people] 停止采集 wc#${p.wcId}:${hit ? '已通知主进程' : '主进程这边没有在跑的(renderer 自己会停)'}`);
+          return { status: 'ok', value: { cancelled: hit } };
+        }
 
         case 'logPersonCollect': {
           const e = p.entry;
