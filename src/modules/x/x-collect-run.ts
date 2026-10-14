@@ -554,26 +554,49 @@ async function pageUntilDone(
       say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
     }
     /**
-     * ⭐ 游标取**最新那一份账**里的,不是第一页的。
-     * ⚠️ 推文账和用户账**都带游标** —— 只看推文账的话,
-     * followers 页永远拿不到游标、第一轮就停(实测过)。
+     * ⭐⭐⭐ **断点续采:第一轮且有断点 → 从断点续,不用首页游标** —— 2026-10-13 (3b)。
+     *
+     * ⚠️⚠️ 这是推文页续采的要害。否则:`all` 第一轮已含种子页(首页),
+     * 首页就带推文游标 → 下面的 `find` 命中首页游标 → 传入的 resumeCursor 被忽略,
+     * 后台分段每段都从头重采(KNOWN_DEBT,3a 钉过)。
+     * ⭐ 只在**第一轮**(round===0,此时尚未 +1)用断点;之后用翻回来的游标。
+     * ⚠️ 名单页不受影响:名单页的 resumeCursor 本就经 lastUserCursor 初始化(见上),
+     * 这里把「首轮优先 resumeCursor」显式提前,对名单页是等价强化、对推文页才是修复。
      */
-    const cursor = [...all].reverse()
-      .map((a) => a.cursor)
-      .find((c) => c !== undefined && c !== '')
-      /**
-       * ⭐⭐ 推文账里没有游标时,**问用户账要** ——
-       * followers 页的游标只在用户载荷里(实测:只看推文账则恒为 undefined,
-       * 第一轮就报「X 说到头了」,而 X 一直说还有)。
-       */
-      ?? lastUserCursor;
+    const resumeThisRound = round === 0 && resumeCursor !== undefined && resumeCursor !== '';
+    const cursor = resumeThisRound
+      ? resumeCursor
+      : (
+        /**
+         * ⭐ 游标取**最新那一份账**里的,不是第一页的。
+         * ⚠️ 推文账和用户账**都带游标** —— 只看推文账的话,
+         * followers 页永远拿不到游标、第一轮就停(实测过)。
+         */
+        [...all].reverse()
+          .map((a) => a.cursor)
+          .find((c) => c !== undefined && c !== '')
+        /**
+         * ⭐⭐ 推文账里没有游标时,**问用户账要** ——
+         * followers 页的游标只在用户载荷里(实测:只看推文账则恒为 undefined,
+         * 第一轮就报「X 说到头了」,而 X 一直说还有)。
+         */
+        ?? lastUserCursor
+      );
     if (cursor === undefined) {
       stopReason = '没有下一页游标（X 说到头了）';
+      /**
+       * ⭐ 没有下一页游标 = 真到头(X 不给了)—— 标 exhausted。2026-10-13 (3b)。
+       * ⚠️ 推文页靠这一条判到头(它没有用户账,`terminated` 那套名单判据够不着它);
+       * 不标的话返回 exhausted=false + 一个旧 nextCursor,后台会判成「还能续」无限翻。
+       */
+      terminated = true;
       say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
     }
     /** ⚠️ 同一个游标出现两次 = 翻不动了,**立刻停**,别空转 */
     if (seenCursors.has(cursor)) {
       stopReason = '游标不再变化（真的翻不动了）';
+      /** ⭐ 翻不动了同样是到头(X 拿同一页糊弄)—— 标 exhausted,别让后台续一个死游标 */
+      terminated = true;
       say(`翻页结束：${stopReason}（共 ${round} 轮）`); break;
     }
     seenCursors.add(cursor);
@@ -766,9 +789,18 @@ async function pageUntilDone(
      * ⭐ 一页只有 20-50 人,5319 人要翻上百轮;在第 2 轮停下,
      * 面板却报「真的翻不动了」—— 又一个「看着成功实际没有」。
      */
-    const ucs = dispatchPayloads(one.items).users
-      .map((a) => a.cursor)
-      .filter((c): c is string => c !== undefined && c !== '');
+    /**
+     * ⚠️⚠️ **推文账游标也要纳入** —— 2026-10-13 (3b)。
+     * 原先只取用户账(`.users`)的游标,于是推文页(帖子/回复/转发)翻完一轮
+     * `lastUserCursor` 从不更新 → 返回的 `nextCursor` 恒 undefined → 后台分段续不上
+     * (KNOWN_DEBT,3a 钉过)。
+     * ⭐ 合并推文账 + 用户账的下一页游标,仍沿用「挑没见过的」血泪逻辑
+     * (响应到达顺序 ≠ 分页顺序,见上)。名单页行为不变(它只有用户账游标)。
+     */
+    const ucs = [
+      ...got.map((a) => a.cursor),
+      ...dispatchPayloads(one.items).users.map((a) => a.cursor),
+    ].filter((c): c is string => c !== undefined && c !== '');
     /** ⭐ 优先挑**没用过的**;都用过了才退回最后一条(让「真不动了」仍能判出来) */
     const unseen = ucs.filter((c) => !seenCursors.has(c));
     const uc = unseen.length > 0 ? unseen[unseen.length - 1] : ucs[ucs.length - 1];

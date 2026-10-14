@@ -983,11 +983,17 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
     const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
     expect(r.paging?.stopReason).toContain('没有下一页游标');
     expect(r.paging?.rounds, '一轮都不该翻').toBe(0);
+    /** ⭐ 没有下一页游标 = 到头(3b):exhausted=true、不交游标,否则后台会续一个死游标 */
+    expect(r.exhausted, '没有下一页游标却没标到头').toBe(true);
+    expect(r.nextCursor, '到头了还交游标 → 后台会白续一趟').toBeUndefined();
   });
 
   it('⭐⭐⭐ 游标不再变化 → 停因说清楚', async () => {
     const r = await runCollect(deps([mk('1', 'same'), mk('2', 'same')]), { wantPages: 1, depth: 'as-is' });
     expect(r.paging?.stopReason).toContain('游标不再变化');
+    /** ⭐ 翻不动了同样是到头(3b):标 exhausted、不交死游标 */
+    expect(r.exhausted, '游标不变却没标到头').toBe(true);
+    expect(r.nextCursor, '翻不动了还交那个死游标 → 后台无限续').toBeUndefined();
   });
 
   it('⭐⭐ 业务判定停 → 带上业务给的理由', async () => {

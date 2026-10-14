@@ -146,26 +146,34 @@ describe('⭐⭐ 主进程 ports 走能力层的同一条路(源码守卫)', () 
 });
 
 /**
- * ⚠️⚠️ KNOWN_DEBT(2026-10-13,3a 发现,留给 3b)——「推文页的断点续采」在 runCollect 里**不生效**:
- *   · 翻页游标取 `推文账的游标 ?? lastUserCursor`,推文页首页就有推文游标 → 传入的 resumeCursor 被忽略
- *   · 返回的 nextCursor 是 lastUserCursor(只有名单页会更新)→ 推文页恒 undefined
- * 3a 只搬家、行为一字不改,所以这里**钉住现状**而不是修。
- * ⭐ 3b 修好 runCollect 后这两条会变红 —— 那时把它们改成正向断言(续得上 / 交得出游标),不要删。
+ * ⭐⭐ 推文页断点续采(2026-10-13,3b 修好)——
+ *   · 有 resumeCursor 时,**第一次翻页就从断点续**,不再用首页游标
+ *   · 翻到页数上限停下,**交得出 nextCursor**(下次从这续)
+ * 这是后台策略分段跑的地基:一段翻 N 页就停、存断点,下段从断点接着翻。
+ * ⚠️ 修在 runCollect(x-collect-run.ts),改动要害=「别碰坏名单页游标逻辑」(那段带血泪)。
  */
-describe('⚠️ KNOWN_DEBT:推文页断点续采在 runCollect 里不生效(3b 要修)', () => {
-  it('现状:推文页给了 resumeCursor,第一次翻页仍用首页的游标', async () => {
+describe('⭐⭐ 推文页断点续采(3b 修好)', () => {
+  it('⭐ 有 resumeCursor → 第一次翻页就用断点,不用首页游标', async () => {
     const { ports, log } = fakePorts();
     await collectOnWebview(ports, {
       page: 'x.profile', handle: 'abc', restId: '1', pageCap: 1, resumeCursor: 'RESUME',
     }, hooks());
-    expect(log.cursors[0]).toBe('c1');
+    expect(log.cursors[0], '没从断点续 —— 后台分段会从头重采').toBe('RESUME');
   });
 
-  it('现状:推文页翻到页数上限停下,nextCursor 交不出来', async () => {
+  it('⭐⭐ 推文页翻到页数上限停 → 交得出 nextCursor(下次续)', async () => {
     const { ports } = fakePorts();
     const r = await collectOnWebview(ports, { page: 'x.profile', handle: 'abc', restId: '1', pageCap: 2 }, hooks());
     if (!r.reached) throw new Error('应当去到了');
-    expect(r.nextCursor).toBeUndefined();
-    expect(r.exhausted).toBe(false);
+    expect(r.nextCursor, '上限停却交不出游标 —— 下段无从续起').toBeTruthy();
+    expect(r.exhausted, '上限停不是到头').toBe(false);
+  });
+
+  it('⚠️ 无 resumeCursor(正常首采)→ 行为不变:第一次翻页用首页游标', async () => {
+    const { ports, log } = fakePorts();
+    await collectOnWebview(ports, {
+      page: 'x.profile', handle: 'abc', restId: '1', pageCap: 1,
+    }, hooks());
+    expect(log.cursors[0], '首采不该受断点续采改动影响').toBe('c1');
   });
 });
