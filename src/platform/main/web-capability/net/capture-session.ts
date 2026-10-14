@@ -98,8 +98,6 @@ export class CaptureSession {
    * ⭐ 捕到第一条就记一次,之后不再重复(免得刷屏)。
    */
   private firstCaptureReported = false;
-  /** ⭐ GraphQL 请求头回查只报一次 —— 刷屏没意义 */
-  private headersReported = false;
 
   /**
    * ⭐⭐ 已经算过 `noBody` 的 requestId。
@@ -263,13 +261,23 @@ export class CaptureSession {
      * 两种情况当场分得开,不用再猜。
      * ⚠️ 只报**键数**不报值 —— 凭据不进日志。
      */
-    if (!this.headersReported && /\/i\/api\/graphql\//.test(record?.url ?? '')) {
-      this.headersReported = true;
+    /**
+     * ⭐⭐ 403 诊断(2026-10-13 根治后**降噪**):正常有头不吵,
+     * 只在回查**拿不到头**(0 个 / 没找到记录)时报 —— 那正是种子会 0 头 → 403 的苗头。
+     * 根因已清(见 `project-x-paging-403-root-cause`),留作哨兵。
+     * ⚠️ onSendHeaders 侧也只在没 authorization 时报,两条对照:
+     * 　· 那边报了没头、这边也报 → Electron 源头没给(SW/keepalive,靠 CDP 补头兜)
+     * 　· 那边没报(有头)、这边报没头 → 头在 bus 里被抹了(配对/合并 bug)
+     */
+    if (/\/i\/api\/graphql\//.test(record?.url ?? '')) {
       const n = Object.keys(record?.requestHeaders ?? {}).length;
-      console.log(
-        `[web.net] GraphQL 请求头回查:${n > 0 ? `✓ ${n} 个` : '✗ 一个都没有'}`
-        + `（requestId=${event.requestId}，记录${record ? '找到了' : '**没找到**'}）`,
-      );
+      if (n === 0) {
+        console.log(
+          `[web.net][403诊断] ⚠️ 回查拿不到请求头`
+          + `（requestId=${event.requestId}，记录${record ? '找到了但 0 个头' : '**没找到**'}`
+          + `，url=…${(record?.url ?? '').slice(-50)}）`,
+        );
+      }
     }
 
     /**

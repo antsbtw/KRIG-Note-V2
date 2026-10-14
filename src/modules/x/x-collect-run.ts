@@ -433,22 +433,31 @@ async function pageUntilDone(
     (it) => (carriesTweets(it.url) || carriesUsers(it.url)) && it.url.includes('variables='),
   );
   /**
-   * ⭐⭐⭐ **优先挑带着请求头的那一条** —— 2026-10-06,403 的第二刀。
+   * ⭐⭐⭐ **种子必须带着请求头,否则老实说没有** —— 2026-10-13,403 根治。
    *
-   * ⚠️⚠️ 请求头**只有 CDP 腿拿得到**(钩子腿跑在页面里,看不见真实请求头)。
-   * 同一条响应两条腿都会收到,而原先 `find` 取的是**第一条** ——
-   * 撞上钩子腿那份就拿到个**没有鉴权头的种子**,重发必然 403。
-   * ⭐ 先挑有头的;一条都没有才退而求其次(至少 URL 模板是对的)。
+   * ── ⚠️⚠️ 推翻旧注释:请求头来源搞反过 ──
+   * 旧注释写「请求头只有 CDP 腿拿得到,钩子腿看不见」—— **完全反了**(2026-10-13
+   * 真机日志证实)。真相:请求头**只有 webRequest 腿**(`onSendHeaders`)拿得到,
+   * CDP 腿登记的 record 从不带头。X 进页面时 `UserRepliesTimeline` 等有时是
+   * service worker / keepalive 发的 → 没有 `webContentsId` → webRequest 腿丢弃
+   * → 那条 record **永远 0 头** → 种子撞上它重发必 **403**。
+   * ⭐ 底层已修(`body-provider` 让 CDP 也补头),所以现在种子**应当**都有头;
+   *   但这里**不再兜底**:万一又出现无头种子,老实失败由上层重试/留痕接手,
+   *   绝不拿一个「必死」的种子去撞 —— 那是「退而求其次地保证 403」,
+   *   正是 `feedback-fail-loud-no-fallback` 禁的静默兜底。
    */
   const seed = seedCandidates.find(
     (it) => Object.keys(it.requestHeaders ?? {}).length > 0,
-  ) ?? seedCandidates[0];
+  );
   if (seed === undefined) {
-    say('没有可用来翻页的请求 —— 跳过主动翻页');
+    const why = seedCandidates.length > 0
+      ? `有 ${seedCandidates.length} 条翻页请求但都没带鉴权头 —— 不拿必 403 的种子去撞`
+      : '没有可用来翻页的请求';
+    say(`${why} —— 跳过主动翻页`);
     return {
       audits: all,
-      paging: { rounds: 0, stopReason: '没有可用来翻页的请求', freshTotal: 0, rounds_detail: [] },
-      /** ⚠️ 连请求模板都没有,谈不上续采 */
+      paging: { rounds: 0, stopReason: why, freshTotal: 0, rounds_detail: [] },
+      /** ⚠️ 没有带头的种子,谈不上续采 */
       nextCursor: undefined,
       exhausted: false,
     };

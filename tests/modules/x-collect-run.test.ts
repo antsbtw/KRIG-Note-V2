@@ -13,6 +13,32 @@ import { runCollect, type RunDeps, type RunHarvest } from '@modules/x/x-collect-
 const TIMELINE_URL = 'https://x.com/i/api/graphql/abc/UserTweetsTimeline';
 const ARTICLE_URL = 'https://x.com/i/api/graphql/abc/TweetResultByRestId';
 
+/**
+ * ⭐⭐ 一组「正常的鉴权请求头」—— 2026-10-13,403 根治后翻页种子的前提。
+ *
+ * ⚠️ 真实生产里,翻页种子必须带 `authorization` / `x-csrf-token`,否则原样重发必 403。
+ * 底层(webRequest / CDP 两腿)会自动填这些头,业务测试本不该操心 —— 但
+ * `runCollect` 的种子挑选现在**明确要求种子带头**(没头就老实 fail,不拿必死种子去撞,
+ * 见 x-collect-run.ts「种子必须带着请求头」)。所以验翻页逻辑的测试,种子就该带头。
+ * ⭐ 值是假的,只要「有键」即可 —— 种子挑选判的是 `Object.keys(requestHeaders).length > 0`。
+ */
+const SEED_HEADERS: Readonly<Record<string, string>> = {
+  authorization: 'Bearer TEST',
+  'x-csrf-token': 'test-csrf',
+};
+
+/**
+ * ⭐ 造一条「带头的种子 item」—— 代替散落各处的 `{ url, text }` 内联字面量。
+ * ⚠️ 一处定义、多处用:将来种子的前提再变(比如还要别的头),只改这里。
+ */
+function seedItem(
+  url: string,
+  text: string,
+  extra?: { status?: number },
+): { url: string; text: string; status?: number; requestHeaders: Readonly<Record<string, string>> } {
+  return { url, text, requestHeaders: SEED_HEADERS, ...(extra ?? {}) };
+}
+
 /** ⭐ 一条长文:列表页那份(无正文)/ 单篇页那份(有正文) */
 function articleTweet(id: string, withBody: boolean): unknown {
   const result: Record<string, unknown> = { title: `标题${id}` };
@@ -72,12 +98,12 @@ function makeDeps(opts: {
         if (opts.failArticles?.has(id)) return null;
         const body = !opts.emptyArticles?.has(id);
         return {
-          items: [{ url: ARTICLE_URL, text: singlePayload(articleTweet(id, body)) }],
+          items: [seedItem(ARTICLE_URL, singlePayload(articleTweet(id, body)))],
         } satisfies RunHarvest;
       }
       calls.push('list');
       return {
-        items: [{ url: TIMELINE_URL, text: timelinePayload(opts.listTweets) }],
+        items: [seedItem(TIMELINE_URL, timelinePayload(opts.listTweets))],
         rounds: 3, scrolledPx: 900, reachedBottom: true, stopReason: '已到底',
       } satisfies RunHarvest;
     },
@@ -272,7 +298,7 @@ describe('⭐⭐⭐ 成功判据只认目标那一条', () => {
           } satisfies RunHarvest;
         }
         return {
-          items: [{ url: TIMELINE_URL, text: timelinePayload([articleTweet('901', false)]) }],
+          items: [seedItem(TIMELINE_URL, timelinePayload([articleTweet('901', false)]))],
         } satisfies RunHarvest;
       },
     };
@@ -390,12 +416,12 @@ describe('⭐⭐⭐ 补的时候带出新的长文 → 同一轮里补上', () =
             // ⭐ 取第一篇时夹带出 902(没正文)
             if (id === '901') tweets.push(articleTweet('902', false));
             return {
-              items: [{ url: ARTICLE_URL, text: timelinePayload(tweets) }],
+              items: [seedItem(ARTICLE_URL, timelinePayload(tweets))],
             } satisfies RunHarvest;
           }
           calls.push('list');
           return {
-            items: [{ url: TIMELINE_URL, text: timelinePayload([articleTweet('901', false)]) }],
+            items: [seedItem(TIMELINE_URL, timelinePayload([articleTweet('901', false)]))],
           } satisfies RunHarvest;
         },
       },
@@ -485,7 +511,7 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
         if (plan.gotoPage) return { items: [] };
         const cur = pages[idx];
         return {
-          items: cur === null ? [] : [{ url: SEED, text: cur }],
+          items: cur === null ? [] : [seedItem(SEED, cur)],
         } satisfies RunHarvest;
       },
       async runScript(id, params) {
@@ -526,7 +552,7 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: SEED, text: page(1, 'c1') }] };
+        return { items: [seedItem(SEED, page(1, 'c1'))] };
       },
       async runScript() { throw new Error('页面没了'); },
     };
@@ -562,7 +588,7 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: SEED, text: samePage(n) }] };
+        return { items: [seedItem(SEED, samePage(n))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -594,7 +620,7 @@ describe('⭐⭐⭐ 拿游标主动翻页', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: SEED, text: pages[Math.min(n, pages.length - 1)] }] };
+        return { items: [seedItem(SEED, pages[Math.min(n, pages.length - 1)])] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -658,7 +684,7 @@ describe('⭐⭐⭐ 翻页停止只认「X 说了算」', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: SEED2, text: pages[Math.min(n, pages.length - 1)] }] };
+        return { items: [seedItem(SEED2, pages[Math.min(n, pages.length - 1)])] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -701,7 +727,7 @@ describe('⭐⭐⭐ 停不停由业务定,不由采集层定', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: S, text: mk(`t${n}`, `c${n}`) }] };
+        return { items: [seedItem(S, mk(`t${n}`, `c${n}`))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -738,7 +764,7 @@ describe('⭐⭐⭐ 停不停由业务定,不由采集层定', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: S, text: mk('same', `c${n}`) }] };
+        return { items: [seedItem(S, mk('same', `c${n}`))] };
       },
       async runScript() { n += 1; return { ok: true }; },
       stopPaging: (st) => {
@@ -757,7 +783,7 @@ describe('⭐⭐⭐ 停不停由业务定,不由采集层定', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         /** ⚠️ 游标**恒定** = X 翻不动了 —— 这条是采集层该管的 */
-        return { items: [{ url: S, text: mk(`t${n}`, 'same-cursor') }] };
+        return { items: [seedItem(S, mk(`t${n}`, 'same-cursor'))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -843,7 +869,7 @@ describe('⭐⭐⭐ 停止要停得住每一段', () => {
     const deps: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: S2, text: mkPage(`t${n}`, `c${n}`) }] };
+        return { items: [seedItem(S2, mkPage(`t${n}`, `c${n}`))] };
       },
       async runScript() { n += 1; if (n >= 3) stopped = true; return { ok: true }; },
       cancelled: () => stopped,
@@ -912,7 +938,7 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
     return {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: SE, text: pages[Math.min(n, pages.length - 1)] }] };
+        return { items: [seedItem(SE, pages[Math.min(n, pages.length - 1)])] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -929,7 +955,7 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         /** ⭐ 每次都给**不同 id**,但第二页起没有游标 */
-        return { items: [{ url: SE, text: mk(`t${n}`, n === 0 ? 'c1' : null) }] };
+        return { items: [seedItem(SE, mk(`t${n}`, n === 0 ? 'c1' : null))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -950,7 +976,7 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
     const d: RunDeps = {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: SE, text: mk(`t${n}`, null) }] };
+        return { items: [seedItem(SE, mk(`t${n}`, null))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -984,7 +1010,7 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         const pages = [mk('1', 'c1'), mk('2', 'c2'), mk('3', null)];
-        return { items: [{ url: SE, text: pages[Math.min(n, 2)] }] };
+        return { items: [seedItem(SE, pages[Math.min(n, 2)])] };
       },
       async runScript() { n += 1; return { ok: true }; },
     };
@@ -997,7 +1023,7 @@ describe('⭐⭐⭐ 翻页要报「停在哪道闸」', () => {
 
   it('⚠️ 不翻页时 paging 为 null —— 别报一个假的 0 轮', async () => {
     const d: RunDeps = {
-      async harvest() { return { items: [{ url: SE, text: mk('1', 'c1') }] }; },
+      async harvest() { return { items: [seedItem(SE, mk('1', 'c1'))] }; },
     };
     const r = await runCollect(d, { wantPages: 1, depth: 'as-is' });
     expect(r.paging, '没翻页却报了翻页的账').toBeNull();
@@ -1039,7 +1065,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
      * 把已经采回来的人**整个丢掉**,于是看起来「必须加个采人按钮」。
      */
     const r = await runCollect({
-      async harvest() { return { items: [{ url: FOLLOWERS, text: userPage([1, 2, 3]) }] }; },
+      async harvest() { return { items: [seedItem(FOLLOWERS, userPage([1, 2, 3]))] }; },
     }, { wantPages: 1, depth: 'as-is' });
 
     expect(r.audits).toHaveLength(0);
@@ -1052,8 +1078,8 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest() {
         return { items: [
-          { url: TIMELINE_URL, text: timelinePayload([foldedTweet('1')]) },
-          { url: FOLLOWERS, text: userPage([7]) },
+          seedItem(TIMELINE_URL, timelinePayload([foldedTweet('1')])),
+          seedItem(FOLLOWERS, userPage([7])),
         ] };
       },
     }, { wantPages: 1, depth: 'as-is' });
@@ -1075,7 +1101,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
         if (plan.gotoPage) return { items: [] };
         const page = n === 0 ? userPage([1, 2], 'c1')
           : n === 1 ? userPage([3, 4], 'c2') : userPage([5, 6]);
-        return { items: [{ url: FOLLOWERS, text: page }] };
+        return { items: [seedItem(FOLLOWERS, page)] };
       },
       async runScript() { n += 1; return { ok: true }; },
     }, { wantPages: 1, depth: 'as-is' });
@@ -1104,7 +1130,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
         /** ⭐ 每页都是**没见过的人** —— fresh 应当 > 0 */
         const page = n === 0 ? userPage([1, 2], 'c1')
           : n === 1 ? userPage([3, 4], 'c2') : userPage([5, 6]);
-        return { items: [{ url: FOLLOWERS, text: page }] };
+        return { items: [seedItem(FOLLOWERS, page)] };
       },
       async runScript() { n += 1; return { ok: true }; },
       stopPaging: (st) => {
@@ -1138,7 +1164,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         /** ⭐ 每一轮都回**同一批人**,但游标一直在变(真机就是这样) */
-        return { items: [{ url: FOLLOWERS, text: userPage([1, 2], `c${n}`) }] };
+        return { items: [seedItem(FOLLOWERS, userPage([1, 2], `c${n}`))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     }, { wantPages: 1, depth: 'as-is' });
@@ -1160,7 +1186,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: userPage([1, 2], `c${n}`) }] };
+        return { items: [seedItem(FOLLOWERS, userPage([1, 2], `c${n}`))] };
       },
       async runScript() { n += 1; return { ok: true }; },
     }, { wantPages: 1, depth: 'as-is' });
@@ -1250,15 +1276,15 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         n += 1;
-        if (n === 1) return { items: [{ url: FOLLOWERS, text: page([1, 2], 'c1') }] };
+        if (n === 1) return { items: [seedItem(FOLLOWERS, page([1, 2], 'c1'))] };
         /**
          * ⭐ 第 2 轮起**一次回两条**:一条是旧游标(c1,已经用过),
          * 一条是新的。闭眼取最后一条就会撞上 c1 → 停。
          */
         const fresh = `c${n}`;
         return { items: [
-          { url: FOLLOWERS, text: page([n * 10], fresh) },
-          { url: FOLLOWERS, text: page([n * 10 + 1], 'c1') },
+          seedItem(FOLLOWERS, page([n * 10], fresh)),
+          seedItem(FOLLOWERS, page([n * 10 + 1], 'c1')),
         ] };
       },
       async runScript() { return { ok: true }; },
@@ -1312,7 +1338,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
         n += 1;
         /** ⭐ 第 3 次 harvest 起 X 就说到头了,但**仍然附带游标** */
         const done = n >= 3;
-        return { items: [{ url: FOLLOWERS, text: page([n], `c${n}`, done) }] };
+        return { items: [seedItem(FOLLOWERS, page([n], `c${n}`, done))] };
       },
       async runScript() { return { ok: true }; },
     }, { wantPages: 100, depth: 'as-is' });
@@ -1363,14 +1389,14 @@ describe('一个入口:响应里有什么就产出什么', () => {
         if (pagingHarvests === 0) {
           pagingHarvests += 1;
           return {
-            items: [{ url: FOLLOWERS, text: page([1, 2, 3], 'c1') }],
+            items: [seedItem(FOLLOWERS, page([1, 2, 3], 'c1'))],
             reachedBottom: true,
             stopReason: '滚到底(连续 3 轮 scrollY 未变)',
           };
         }
         /** ⚠️ 走到这里就说明又去翻页了 —— 不该发生 */
         pagingHarvests += 1;
-        return { items: [{ url: FOLLOWERS, text: page([99], 'c2') }] };
+        return { items: [seedItem(FOLLOWERS, page([99], 'c2'))] };
       },
       async runScript() { return { ok: true }; },
     }, { wantPages: 100, depth: 'as-is' });
@@ -1421,7 +1447,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
         n += 1;
         /** ⭐ `reachedBottom: false` —— 滚动没到底 */
         return {
-          items: [{ url: FOLLOWERS, text: page([n], `c${n}`) }],
+          items: [seedItem(FOLLOWERS, page([n], `c${n}`))],
           reachedBottom: false,
         };
       },
@@ -1542,7 +1568,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest() {
         return {
-          items: [{ url: FOLLOWERS, text: '{}', status: 200 }],
+          items: [seedItem(FOLLOWERS, '{}', { status: 200 })],
           reachedBottom: true,
         };
       },
@@ -1580,7 +1606,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         n += 1;
-        return { items: [{ url: FOLLOWERS, text: page([n * 2, n * 2 + 1], `c${n}`) }] };
+        return { items: [seedItem(FOLLOWERS, page([n * 2, n * 2 + 1], `c${n}`))] };
       },
       async runScript() { return { ok: true }; },
       stopPaging: (st) => {
@@ -1616,7 +1642,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
         n += 1;
         return { items: [
           /** ⭐ 一条人流载荷 */
-          { url: FOLLOWERS, text: JSON.stringify({
+          seedItem(FOLLOWERS, JSON.stringify({
             data: { user: { result: { timeline: { timeline: { instructions: [{
               type: 'TimelineAddEntries',
               entries: [{
@@ -1628,9 +1654,9 @@ describe('一个入口:响应里有什么就产出什么', () => {
                 } } } },
               }, { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: `c${n}` } }],
             }] } } } } },
-          }) },
+          })),
           /** ⭐ 外加一条**推文**载荷 —— 它不该被算进人数 */
-          { url: TIMELINE_URL, text: timelinePayload([foldedTweet(`t${n}`)]) },
+          seedItem(TIMELINE_URL, timelinePayload([foldedTweet(`t${n}`)])),
         ] };
       },
       async runScript() { return { ok: true }; },
@@ -1677,7 +1703,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         harvests += 1;
-        return { items: [{ url: FOLLOWERS, text: page([1, 2], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1, 2], 'c0'))] };
       },
       /** ⭐ 脚本直接把这一页的 body 交回来 */
       async runScript() {
@@ -1718,7 +1744,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         n += 1;
-        return { items: [{ url: FOLLOWERS, text: page([n], `c${n}`) }] };
+        return { items: [seedItem(FOLLOWERS, page([n], `c${n}`))] };
       },
       /** ⚠️ 老构建的形状:只回 bytes,没有 body */
       async runScript() { return { ok: true, status: 200, bytes: 100 }; },
@@ -1733,7 +1759,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: JSON.stringify({
+        return { items: [seedItem(FOLLOWERS, JSON.stringify({
           data: { user: { result: { timeline: { timeline: { instructions: [{
             type: 'TimelineAddEntries',
             entries: [
@@ -1743,7 +1769,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
               { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: 'c1' } },
             ],
           }] } } } } },
-        }) }] };
+        }))] };
       },
       async runScript() { return { ok: false, status: 404, why: 'HTTP 404' }; },
     }, { wantPages: 100, depth: 'as-is' });
@@ -1802,8 +1828,8 @@ describe('一个入口:响应里有什么就产出什么', () => {
         if (plan.gotoPage) return { items: [] };
         /** ⭐ 种子一趟收到两条:一条还有游标,一条是别的端点给的「到头了」 */
         return { items: [
-          { url: FOLLOWERS, text: page([1, 2], 'c-alive', false) },
-          { url: FOLLOWERS, text: page([3], null, true) },
+          seedItem(FOLLOWERS, page([1, 2], 'c-alive', false)),
+          seedItem(FOLLOWERS, page([3], null, true)),
         ] };
       },
       async runScript() {
@@ -1847,11 +1873,11 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         n += 1;
-        if (n === 1) return { items: [{ url: FOLLOWERS, text: page([1], 'c-alive', false) }] };
+        if (n === 1) return { items: [seedItem(FOLLOWERS, page([1], 'c-alive', false))] };
         /** ⭐ 翻页回来的这一轮:一条还有游标,一条说到头 */
         return { items: [
-          { url: FOLLOWERS, text: page([n * 10], `c${n}`, false) },
-          { url: FOLLOWERS, text: page([n * 10 + 1], null, true) },
+          seedItem(FOLLOWERS, page([n * 10], `c${n}`, false)),
+          seedItem(FOLLOWERS, page([n * 10 + 1], null, true)),
         ] };
       },
       /** ⚠️ 不回 body —— 逼它走兜底那条路 */
@@ -1911,10 +1937,13 @@ describe('一个入口:响应里有什么就产出什么', () => {
 
   it('⭐⭐⭐ 种子要挑**带请求头**的那一条 —— 两条腿都会收到同一条响应', async () => {
     /**
-     * ⚠️⚠️ 403 的第二刀(2026-10-06):请求头**只有 CDP 腿拿得到**
-     * (钩子腿跑在页面里,看不见真实请求头)。
-     * 同一条响应两条腿都会收到,而原先 `find` 取**第一条** ——
-     * 撞上钩子腿那份就拿到个**没有鉴权头的种子**,重发必然 403。
+     * ⚠️⚠️ 403(2026-10-06 第二刀 / 2026-10-13 定根因):同一条响应两条腿都会收到,
+     * 其中**可能有一条没带请求头** —— 原先 `find` 取**第一条**,撞上没头那条就
+     * 拿到个**没有鉴权头的种子**,重发必然 403。
+     * ⭐ 所以种子挑选必须**挑带头的那条**,一条带头的都没有就老实失败(不兜底、不拿必死种子去撞)。
+     * ⚠️ 注:哪条腿带头 2026-10-13 真机查清了 —— 请求头**只有 webRequest 腿**(onSendHeaders)拿得到,
+     * CDP 腿从不带头;底层已让 CDP 也补头(body-provider),所以现在种子**应当**都有头。
+     * 本用例仍钉「挑带头那条」这条规则本身(两条腿形态不变)。
      */
     const page = (ids: number[], cursor: string): string => JSON.stringify({
       data: { user: { result: { timeline: { timeline: { instructions: [{
@@ -1937,9 +1966,9 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         return { items: [
-          /** ⚠️ 钩子腿那份排在前面,**没有请求头** */
+          /** ⚠️ 没有请求头的那份排在前面 —— ⭐ 故意不用 seedItem(它会补头),这是「无头对照条」 */
           { url: FOLLOWERS, text: page([1], 'c1') },
-          /** ⭐ CDP 腿那份带着头 */
+          /** ⭐ 带着头的那份排在后面 —— 种子挑选必须跳过前面那条、挑中这条 */
           {
             url: FOLLOWERS,
             text: page([2], 'c1'),
@@ -1955,6 +1984,43 @@ describe('一个入口:响应里有什么就产出什么', () => {
 
     const h = (sent as unknown as { headers?: Record<string, string> } | null)?.headers;
     expect(h?.authorization, '挑到了没有头的那条种子 → 必然 403').toBe('Bearer CDP');
+  });
+
+  it('⭐⭐⭐ 种子**一条带头的都没有** → 不翻页、不拿必死种子去撞、留痕说清原因', async () => {
+    /**
+     * ⭐⭐ 2026-10-13,403 根治的另一半:去掉那个「?? seedCandidates[0]」兜底。
+     *
+     * ⚠️⚠️ 旧代码:挑不到带头的种子就退用**第一条**(必然没头)——
+     * 等于「退而求其次地保证 403」,正是 `feedback-fail-loud-no-fallback` 禁的静默兜底。
+     * ⭐ 新约束:一条带头的都没有,就**老实不翻页**,停止原因写清「都没带鉴权头」,
+     * 由上层决定重试/留痕 —— 绝不拿一个必死的种子去撞出 403。
+     *
+     * ⚠️ 这条守卫是「必死兜底被加回来」的哨兵:谁把 `?? seedCandidates[0]` 加回去,这条会红。
+     */
+    const page = (cursor: string): string => JSON.stringify({
+      data: { user: { result: { timeline: { timeline: { instructions: [{
+        type: 'TimelineAddEntries',
+        entries: [
+          { entryId: 'user-1', content: { itemContent: { user_results: { result: {
+            rest_id: '901', core: { screen_name: 'a', name: 'A' }, legacy: {},
+          } } } } },
+          { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        ],
+      }] } } } } },
+    });
+    let scriptCalls = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        /** ⚠️ 有游标、是合法种子,但**一个请求头都没有** —— 故意不用 seedItem */
+        return { items: [{ url: FOLLOWERS, text: page('c1') }] };
+      },
+      async runScript() { scriptCalls += 1; return { ok: true, status: 200, body: page('c2') }; },
+    }, { wantPages: 5, depth: 'as-is' });
+
+    expect(scriptCalls, '没有带头的种子还去翻页 —— 那条必 403').toBe(0);
+    expect(r.paging?.stopReason, '停止原因没说清「都没带鉴权头」').toMatch(/没带鉴权头|没有可用来翻页/);
+    expect(r.exhausted, '没头 ≠ 到头了 —— 别把「跳过翻页」误报成「采完了」').toBe(false);
   });
 
   it('⭐⭐⭐ 被限流(429)要退避重试,不许把剩下的全丢了', async () => {
@@ -1986,7 +2052,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0'))] };
       },
       async runScript() {
         n += 1;
@@ -2026,7 +2092,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0'))] };
       },
       /** ⚠️ 一直 429 */
       async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
@@ -2055,7 +2121,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page('c0') }] };
+        return { items: [seedItem(FOLLOWERS, page('c0'))] };
       },
       async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
     }, { wantPages: 5, depth: 'as-is' });
@@ -2092,7 +2158,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0'))] };
       },
       async runScript() {
         n += 1;
@@ -2141,7 +2207,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0'))] };
       },
       async runScript() {
         n += 1;
@@ -2181,7 +2247,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
         /** ⭐ 种子给的是**第 1 页**的游标 */
-        return { items: [{ url: FOLLOWERS, text: page([1], 'SEED-PAGE-1') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'SEED-PAGE-1'))] };
       },
       async runScript(_id, params) {
         if (firstSent === undefined) {
@@ -2215,7 +2281,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0'))] };
       },
       async runScript() {
         n += 1;
@@ -2255,7 +2321,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     const r = await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0', false) }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0', false))] };
       },
       async runScript() {
         n += 1;
@@ -2296,7 +2362,7 @@ describe('一个入口:响应里有什么就产出什么', () => {
     await runCollect({
       async harvest(plan) {
         if (plan.gotoPage) return { items: [] };
-        return { items: [{ url: FOLLOWERS, text: page([1], 'c0') }] };
+        return { items: [seedItem(FOLLOWERS, page([1], 'c0'))] };
       },
       async runScript() { return { ok: false, status: 429, why: 'HTTP 429' }; },
       async wait(ms) { waits.push(ms); },

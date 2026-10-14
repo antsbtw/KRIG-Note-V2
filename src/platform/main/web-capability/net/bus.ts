@@ -372,6 +372,13 @@ export class NetworkEventBus {
       resourceType?: string;
       mimeType?: string;
       responseHeaders?: Record<string, string>;
+      /**
+       * ⭐⭐ CDP 看到的请求头 —— 2026-10-13,403 根治。
+       * ⚠️ **只在 webRequest 腿没记下头时才用**(见下方合并):webRequest 的
+       * `onSendHeaders` 是浏览器真正发出去的头,最准;CDP 这份是**兜底**,
+       * 专门救 service worker / keepalive 那类 webRequest 腿看不到的请求。
+       */
+      requestHeaders?: Record<string, string>;
       body: Uint8Array;
     },
   ): Result<NetworkRecord> {
@@ -401,6 +408,19 @@ export class NetworkEventBus {
 
     const bodyRef = target.bodyRef ?? this.mintBodyRef();
     this.storeBody(bodyRef, input.body);
+    /**
+     * ⭐⭐⭐ **请求头:webRequest 腿的优先,CDP 的只兜底** —— 2026-10-13,403 根治。
+     *
+     * ⚠️⚠️ 顺序不能反:`target.requestHeaders`(webRequest 的 `onSendHeaders`)
+     * 是浏览器真正发出去的头,最准。只有它**没有**(service worker / keepalive
+     * 那类 webRequest 腿看不到的请求)时,才退用 CDP 这份。
+     * ⭐ 这正是翻页种子「0 个头 → 403」的根治点:以前这类请求 record 永远 0 头,
+     * 种子撞上就 403;现在 CDP 把头补上,种子永远有头。
+     * ⚠️ 别写成 `input.requestHeaders ?? target.requestHeaders` —— 那会让 CDP
+     * (可能缺某些浏览器补的头)盖掉更准的 webRequest 头,是反的。
+     */
+    const hasWebRequestHeaders =
+      target.requestHeaders !== undefined && Object.keys(target.requestHeaders).length > 0;
     const next: NetworkRecord = {
       ...target,
       providerRequestId,
@@ -408,6 +428,7 @@ export class NetworkEventBus {
       bodyBytes: input.body.byteLength,
       mimeType: input.mimeType ?? target.mimeType,
       responseHeaders: input.responseHeaders ?? target.responseHeaders,
+      requestHeaders: hasWebRequestHeaders ? target.requestHeaders : input.requestHeaders,
     };
     this.requests.set(
       pageId,

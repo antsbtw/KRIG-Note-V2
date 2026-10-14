@@ -188,6 +188,34 @@ function recordHeaders(
   const pageId = pageOf(details.webContentsId);
   if (!pageId) return;
 
+  const headers = details.requestHeaders as Readonly<Record<string, string>> | undefined;
+  /**
+   * ⭐⭐ 403 诊断(2026-10-13,查第 N 轮)—— **在 Electron 给头的这一刻就报**。
+   *
+   * ⚠️ 为什么加在这里而不是只看回查:回查(capture-session.ts)报的是
+   * 「取到 body 时 record 里有没有头」,它分不出「Electron 压根没给」
+   * 和「给了但后面被抹了」。而这两种的修法完全不同:
+   * 　· Electron 没给 → 根因在捕获层(HTTP/2/缓存/SW 不触发 onSendHeaders),要换捕获方式
+   * 　· 给了但没了 → 根因在 bus 合并/配对,是代码 bug
+   * ⭐ 在源头报一次,两种情况当场分得开 —— 不用再猜(这个 bug 我已经猜错过一次)。
+   * ⚠️ 只报**键数 + 有没有鉴权头**,不报值 —— 凭据绝不进日志。
+   */
+  /**
+   * ⭐ 403 诊断(2026-10-13 根治后**降噪**):正常 19 个头不吵,
+   * 只在这条 GraphQL **一个鉴权头都没有**时报 —— 那才是 403 的苗头。
+   * 根因已清(见 `project-x-paging-403-root-cause`),这行留作以后再出 403 的哨兵。
+   */
+  if (/\/i\/api\/graphql\//.test(details.url)) {
+    const keys = headers ? Object.keys(headers) : [];
+    const low = keys.map((k) => k.toLowerCase());
+    if (!low.includes('authorization')) {
+      console.log(
+        `[web.net][403诊断] ⚠️ onSendHeaders 这条 GraphQL 没有 authorization`
+        + `（共 ${keys.length} 个头）reqId=${String(details.id)} ${details.method} …${details.url.slice(-60)}`,
+      );
+    }
+  }
+
   bus.recordRequestStart({
     requestId: String(details.id),
     pageId,
@@ -196,7 +224,7 @@ function recordHeaders(
     resourceType: details.resourceType?.toLowerCase(),
     startedAt: new Date(details.timestamp).toISOString(),
     /** ⭐ 这一趟的全部价值就在这一行 */
-    requestHeaders: details.requestHeaders as Readonly<Record<string, string>>,
+    requestHeaders: headers,
   });
 }
 

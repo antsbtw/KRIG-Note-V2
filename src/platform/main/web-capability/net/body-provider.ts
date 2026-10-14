@@ -85,6 +85,17 @@ type PendingRequest = {
   status?: number;
   mimeType?: string;
   responseHeaders?: Record<string, string>;
+  /**
+   * ⭐⭐ **CDP 看到的请求头** —— 2026-10-13,403 根治的一半。
+   *
+   * ⚠️ 请求头原本**只有 webRequest 腿**(`onSendHeaders`)拿得到,而 X 进页面时
+   * `UserRepliesTimeline` 等请求有时是 **service worker / fetch(keepalive)** 发的 ——
+   * 这类请求没有 `webContentsId`,webRequest 腿直接丢弃(铁律:不猜 pageId),
+   * 于是 bus 里那条 record **永远 0 个头** → 翻页种子撞上它就 **403**。
+   * ⭐ CDP 的 `requestWillBeSent` 里**本来就带着 `request.headers`**,
+   * 取出来当**兜底来源**:webRequest 有头时用它的(最准),没有时用 CDP 这份。
+   */
+  requestHeaders?: Record<string, string>;
 };
 
 /**
@@ -220,7 +231,9 @@ export class CdpBodyProvider {
       const providerRequestId = String(params.requestId);
       const httpMethod = String(request?.method ?? 'GET').toUpperCase();
       const resourceType = typeof params.type === 'string' ? params.type.toLowerCase() : undefined;
-      pending.set(providerRequestId, { url, method: httpMethod, resourceType });
+      /** ⭐ CDP 自带的请求头 —— webRequest 腿缺头时的兜底来源(见 PendingRequest.requestHeaders) */
+      const requestHeaders = toHeaderMap(request?.headers);
+      pending.set(providerRequestId, { url, method: httpMethod, resourceType, requestHeaders });
       this.bus.bindProviderRequest(pageId, providerRequestId, {
         url,
         method: httpMethod,
@@ -334,6 +347,8 @@ export class CdpBodyProvider {
       resourceType: pending.resourceType,
       mimeType: pending.mimeType,
       responseHeaders: pending.responseHeaders,
+      /** ⭐ CDP 看到的请求头 —— bus 只在 webRequest 腿没头时才采用(见 attachProviderBody) */
+      requestHeaders: pending.requestHeaders,
       // ⭐ **原样整条** —— 本层不动数据
       body,
     });

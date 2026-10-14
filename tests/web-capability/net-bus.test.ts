@@ -305,3 +305,53 @@ describe('⭐⭐⭐ 请求头要活到最后', () => {
     expect(got?.requestHeaders?.authorization).toBe('NEW');
   });
 });
+
+/**
+ * ⭐⭐⭐ CDP 补请求头 —— 2026-10-13,403 根治(service worker / keepalive 那类
+ * webRequest 腿看不到的请求,靠 CDP 兜底补头,否则种子 0 头必 403)。
+ */
+describe('⭐⭐⭐ attachProviderBody:CDP 的请求头只兜底,不盖 webRequest 的', () => {
+  const CDP_URL = 'https://x.com/i/api/graphql/qid/UserRepliesTimeline?variables=%7B%7D';
+  const startedAt = '2026-10-13T10:00:00.000Z';
+
+  /** CDP 登记一条请求 + attach body(配对靠 url/method/startedAt) */
+  function cdpAttach(
+    bus: NetworkEventBus, providerId: string, requestHeaders?: Record<string, string>,
+  ) {
+    bus.bindProviderRequest(A, providerId, { url: CDP_URL, method: 'GET', startedAt });
+    return bus.attachProviderBody(A, providerId, {
+      url: CDP_URL, method: 'GET',
+      requestHeaders,
+      body: new TextEncoder().encode('{"ok":1}'),
+    });
+  }
+
+  it('⭐⭐⭐ webRequest 腿**没头**(SW/keepalive)时,用 CDP 的头 —— 否则种子 0 头必 403', () => {
+    const bus = new NetworkEventBus();
+    /** webRequest 腿记了这条(但没带头 —— 这正是 SW/keepalive 请求的形态) */
+    bus.recordRequestStart(rec({ requestId: 'wr1', pageId: A, url: CDP_URL, startedAt }));
+    /** CDP 腿 attach body,带着它看到的请求头 */
+    const r = cdpAttach(bus, 'cdp1', { authorization: 'Bearer CDP', 'x-csrf-token': 'tokC' });
+    expect(r.status, 'CDP 配不上 webRequest 记录 → body 关联失败').toBe('ok');
+
+    const got = bus.list(A, {}).find((x) => x.url === CDP_URL);
+    expect(got?.requestHeaders?.authorization, 'webRequest 没头时没有退用 CDP 的头 → 种子仍 0 头 → 403')
+      .toBe('Bearer CDP');
+  });
+
+  it('⭐⭐⭐ webRequest 腿**有头**时,CDP 的**不许**盖掉它(webRequest 的最准)', () => {
+    const bus = new NetworkEventBus();
+    /** webRequest 腿记了真实的头(onSendHeaders) */
+    bus.recordRequestStart(rec({
+      requestId: 'wr2', pageId: A, url: CDP_URL, startedAt,
+      requestHeaders: { authorization: 'Bearer WEBREQ', 'x-csrf-token': 'tokW' },
+    }));
+    /** CDP 腿也带来一份(可能缺某些浏览器补的头)—— 不许盖 */
+    cdpAttach(bus, 'cdp2', { authorization: 'Bearer CDP' });
+
+    const got = bus.list(A, {}).find((x) => x.url === CDP_URL);
+    expect(got?.requestHeaders?.authorization, 'CDP 的头盖掉了更准的 webRequest 头 —— 方向反了')
+      .toBe('Bearer WEBREQ');
+    expect(got?.requestHeaders?.['x-csrf-token']).toBe('tokW');
+  });
+});
