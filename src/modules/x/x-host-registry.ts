@@ -97,3 +97,19 @@ export function setXHostBusy(wcId: number, reason: string | null): void {
 export function getXHostBusy(wcId: number): string | null {
   return busyByWc.get(wcId) ?? null;
 }
+
+/**
+ * ⭐⭐ 全部登记的快照 —— 给 `x-host-sync`(renderer→主进程同步)比对用。
+ *
+ * ⚠️⚠️ 为什么要同步(2026-10-14 第 4 步读代码发现):本表是**模块级 Map,每个进程各一份**。
+ * 登记只发生在 renderer(XWebView/人卡/操作台),而后台 runner 跑在**主进程**,
+ * 读到的是主进程那份 —— 恒空 → runner 把每个 ws 都当「没开 X 网页」跳过,
+ * 一页不采、不报错;「忙就让路」也恒不生效。runner 的测试在同一进程里直接 set,所以全绿。
+ */
+export function listXHostStates(): ReadonlyMap<string, XHostState> {
+  return new Map(stateByWs);
+}
+
+export function listXHostBusy(): ReadonlyMap<number, string> {
+  return new Map(busyByWc);
+}

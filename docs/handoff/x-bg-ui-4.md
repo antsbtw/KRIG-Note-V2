@@ -82,3 +82,38 @@
 - SurrealDB:option 传 undefined;datetime 用 type::datetime();UPSERT type::record()。
 - X 可装卸:别让宿主 index.ts 认识 X 内部(撞 x-module-detachable);X 自己 import electron 正当。
 - 调试用本机 Mac,Windows 是生产机不能停。
+
+---
+
+## ✅ 第 4 步结果(2026-10-14 ~ 10-16,执行对话)
+
+两个号「半年」全程真机跑完:
+- **whyyoutouzhele**:567 页 / 新增 8958 条;帖子 9075 · 回复 748 · 转发 155(半年内),5–9 月每月 1441–1807 条无缺口
+- **jam79922967**:116 页 / 新增 2760 条,**失败 0、重载 0**;三页停因都是「已采到 04-17 之前」
+
+真机验收清单 1–7 全过(启动 / Ctrl+C / 采一段存断点 / 重启续采 / 让路 / 暂停恢复 / 到底 done)。
+
+### 接的 UI / IPC
+- 人卡范围框「半年/一年/全部」→ `bgCreateJob`(不走 collectTweets);人卡「后台采集」区(在「他的推文」上面)describeProgress + 暂停/恢复/取消,5s 轮询
+- 运营顶栏 `BgIndicator`(XBgStatus.tsx):🟢 此刻在采谁·第几页 / 🟡 等待原因+倒计时 / ⚠️ X 网页没开 / 空闲。⚠️ 库里 status=running ≠ 此刻在跑,「此刻」只有 runner 知道(`bgStatus` op)
+- 建任务 / 恢复后 3 秒内 `kickBgRunner()`,不干等 120s
+- IPC:`syncHost/syncBusy/bgBusy/bgStatus/bgCreateJob/bgListJobs/bgPauseJob/bgResumeJob/bgCancelJob`(暂停/恢复先 readJob —— UPSERT 不存在的 id 会建残行)
+
+### ⚠️⚠️ 真机抓到并修掉的(全是「全绿但活代码不对」)
+1. **runner 永远看不见 X 网页**:x-host-registry 每进程一份,登记只在 renderer,runner 在主进程读到恒空 → 静默空转。runner 测试同进程 set,假绿。修:`x-host-sync.ts`(renderer 订阅登记表按 ws/wcId 差异同步给主进程)+ 主进程 webview destroyed 自清;人卡手动动作先问 `bgBusy`
+2. **断点在中间两跳丢了**:runSegment 给了 resumeCursor,但 runner 的 runOne 没传、collectPersonTab 不收不转 → 每段从第一页重翻 10 页(30 页游标反而新了 1 小时)。3b 只在 collectOnWebview 一层测了。修 + 行为测试(mock 下一层看游标到没到)
+3. **「采到」取了整段最新一条** → 永远显示今天。改为翻页前沿 = 最后一页他自己最新那条(`frontierAt`)
+4. **置顶条目每页都回来**:帖子页每次翻页都带回 `TimelinePinEntry`,**连同置顶内嵌引用的推**(置顶 08-27 → 引用 05-13 → 引用 05-12)→「每页最新」永远是它们 → 按时间**永远停不下来**(半年=全部;人卡「一个月」帖子页也从没按时间停过 —— 10-12「61 页撞上限」就是它)。修:解析时标 `TweetRecord.pinned`(整个置顶条目子树,只在内存不落库),newestOwn 排除。⚠️ 第一版只排置顶本身、还写了「置顶引用的不算」,真机证否
+5. **翻页种子偶发没鉴权头 = 两条腿赛跑**:「采够 1 页」不管哪条腿交的;钩子腿即时、CDP 要 loadingFinished→getResponseBody→配对,总慢一步;收尾 stopAll 一停,在路上的 CDP 那份就丢 → 只剩钩子那份(没头)。app 跑越久 CDP 越慢(余量 599→16→10ms),输掉就失败,重启恢复。修:`harvest` 收尾前等 `bodyProvider.inFlight(pageId)` 归零(上限 1.5s,CDP 空闲零等待),报告带 `cdpSettle`、留痕 `[web.harvest] 收尾等 CDP …`。**真机证实**:jam 转发页等了 55ms,CDP 种子在等待开始后约 31ms 入池 —— 不等就失败
+6. 合并统计 bug:钩子重复两份被错标 both(「both 却 0 头」),腿计数虚高、指错排查方向。修:只有 prev 来自 cdp 才标 both
+7. 后台也像人卡一样「第一轮没带头 → 重载重试一次」(用户 10-15 选 A),判据共用 `worthReloadRetry`
+
+### 推翻的旧认知(记忆里要改)
+- 10-13「403 根治」的 CDP 补头**对 SW/keepalive 请求不起作用**:CDP 的 body 要先配上 webRequest 记录才入池,而这类请求根本没有 webRequest 记录 → 补头那步轮不到它们
+- 「置顶只在首页」是错的
+
+### 没查完 / 待办
+- ⚠️ **app 跑久了会卡住**(用户 10-16 报;CPU/内存不高),原因不明
+- 每段都有 Cloudflare `cdn-cgi/challenge-platform/.../jsd/oneshot` 请求,成功段也有,目前无害
+- 「CDP 连 loadingFinished 都没到,钩子就先交了」这种更早的输法,现在的等待盖不住;真机两个号没观察到,出现时看是否有「收尾等 CDP」那行判断
+- 一次 app 启动窗口加载 `localhost:5173` 失败(ERR_FAILED),之后只恢复了一个窗口(ws-1 丢了)—— 与本步无关,偶发

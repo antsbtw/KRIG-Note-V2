@@ -148,6 +148,24 @@ export type XDataInvoke =
         readonly pages: number; readonly records: number; readonly inserted: number; readonly stopReason: string;
       };
     }
+  /**
+   * ⭐⭐ renderer → 主进程:把 X 网页登记(ws→wcId)与「忙」同步过去(`x-host-sync.ts`)。
+   * ⚠️ 登记表每进程一份,后台 runner 在主进程 —— 不同步它永远看不到 X 网页。
+   * wcId: null = 这个 ws 的 X 网页卸了。
+   */
+  | { readonly op: 'syncHost'; readonly wsId: string; readonly wcId: number | null }
+  | { readonly op: 'syncBusy'; readonly wcId: number; readonly reason: string | null }
+  /** ⭐ 后台此刻在不在用这个 webview 采(人手动操作前先问一句);回 `{ handle } | null` */
+  | { readonly op: 'bgBusy'; readonly wcId: number }
+  /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
+  | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string }
+  /** 列任务;给 restId 只列这个人的,给 wsId 只列这个号的 */
+  | { readonly op: 'bgListJobs'; readonly wsId?: string; readonly restId?: string }
+  /** ⭐ 此刻在不在跑(runner 内存态)+ 这个号各状态任务数;回 `BgStatusView` */
+  | { readonly op: 'bgStatus'; readonly wsId: string }
+  | { readonly op: 'bgPauseJob'; readonly id: string }
+  | { readonly op: 'bgResumeJob'; readonly id: string }
+  | { readonly op: 'bgCancelJob'; readonly id: string }
   /** ⭐ 运营设置(人可设定的变量,含默认值合并)—— 返回 `{ settings, problems }` */
   | { readonly op: 'opsSettings' }
   /** ⭐ 改一个设置(带校验) */

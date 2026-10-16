@@ -391,7 +391,11 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
     const runAt = CORE.indexOf('await runCollect(');
     expect(goAt, '主进程没去那一页').toBeGreaterThan(-1);
     expect(runAt, '主进程没跑 runCollect').toBeGreaterThan(goAt);
-    expect(CORE).toMatch(/stopPaging: timeWindowStop\(input\.restId, input\.start, input\.pageCap\)/);
+    // 2026-10-14:包一层记翻页前沿(后台进度「采到」),停止判据仍是同一个 timeWindowStop,且结果原样返回
+    expect(CORE).toMatch(/const stop = timeWindowStop\(input\.restId, input\.start, input\.pageCap\);/);
+    const stopCb = CORE.slice(CORE.indexOf('stopPaging: (st) => {'), CORE.indexOf('cancelled: hooks.cancelled'));
+    expect(stopCb.length).toBeGreaterThan(50);
+    expect(stopCb).toMatch(/return stop\(st\);\s*\},\s*$/);
     expect(MAIN).toMatch(/start: input\.start \? new Date\(input\.start\) : undefined/);
   });
 
@@ -423,13 +427,21 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
     expect(PERSON_TWEETS_SQL).not.toMatch(/author_handle/);
   });
 
-  it('⭐ 右键先选时间范围;第一步只开放「一个月」', () => {
+  it('⭐ 右键先选时间范围;一个月当场采,半年/一年/全部建后台任务(2026-10-14 第 4 步)', () => {
     const menu = PAGE.slice(PAGE.indexOf('{menu && ('), PAGE.indexOf('{tagging && ('));
     expect(menu).toContain('采他的帖子/回复/转发…');
     expect(menu).toMatch(/setRangeFor\(m\.p\)/);
     const picker = PAGE.slice(PAGE.indexOf('{rangeFor && ('), PAGE.indexOf('{tagging && ('));
-    expect(picker).toMatch(/disabled=\{r\.id !== 'month'\}/);
-    expect(picker).toMatch(/void collectTweets\(pr, r\.id\)/);
+    expect(picker.length).toBeGreaterThan(100);
+    // ⭐ 只有 month 走当场采;别的范围必须走后台(不许当场翻几天)
+    expect(picker).toMatch(/if \(r\.id === 'month'\) void collectTweets\(pr, r\.id\);\s*else void createBgJob\(pr, r\.id\);/);
+    expect(picker).not.toMatch(/disabled=/);
+    // ⭐ 建后台任务只调 bgCreateJob,不碰当场采集
+    const fn = PAGE.slice(PAGE.indexOf('const createBgJob = useCallback'), PAGE.indexOf('const [rangeFor, setRangeFor]'));
+    expect(fn.length).toBeGreaterThan(100);
+    expect(fn).toMatch(/op: 'bgCreateJob'/);
+    expect(fn).toMatch(/wsId: workspaceId/);
+    expect(fn).not.toMatch(/collectTweets|collectPersonTab/);
   });
 });
 

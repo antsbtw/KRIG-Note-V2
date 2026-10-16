@@ -170,5 +170,5 @@ export function describeProgress(job: BgJob): string {
     : job.status === 'failed' ? `❌ ${job.lastError ?? '失败'}`
     : job.status === 'paused' ? '⏸ 暂停'
     : job.status === 'running' ? '▶ 采集中' : '⏳ 排队';
-  return `${head}｜${one('帖子', job.profile)}／${one('回复', job.replies)}／${one('转发', job.reposts)}｜共 ${job.totalPages} 页 ${job.totalSaved} 条`;
+  return `${head}｜${one('帖子', job.profile)}／${one('回复', job.replies)}／${one('转发', job.reposts)}｜共 ${job.totalPages} 页 新增 ${job.totalSaved} 条`;
 }

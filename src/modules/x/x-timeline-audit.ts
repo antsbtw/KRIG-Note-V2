@@ -173,6 +173,17 @@ export type TweetRecord = {
   readonly liked?: boolean;
   readonly retweeted?: boolean;
   readonly bookmarked?: boolean;
+
+  /**
+   * ⭐⭐ 这条来自主页**置顶条目**(载荷里单独一条 `TimelinePinEntry` 指令)——
+   * 置顶本身**以及它内嵌引用的推文**都算。**只在内存里用,不落库**。
+   * ⚠️ 2026-10-15 真机:X 在帖子页**每一次翻页**都把置顶带回来,
+   * 于是「这一页他最新一条」永远是置顶 → 按时间停的判据永远不停(半年 = 全部),进度卡在置顶日期。
+   * ⚠️⚠️ 2026-10-16 真机补:只排除置顶本身不够 —— 置顶(08-27)引用了 05-13 那条、它又引用 05-12,
+   * 两条引用也跟着置顶**每页回来**,作者也是他 → 时间线翻过 05-13 后「最新」又卡在 05-13。
+   * 对「按时间停」来说,**整个置顶条目都不是时间线本身**。
+   */
+  readonly pinned?: true;
 };
 
 /**
@@ -576,6 +587,18 @@ export function auditTimelinePayload(text: string): TimelineAudit {
    * ⚠️ 照搬旧实现的判据(`extractTweetsFrom` 只认带 `legacy.id_str` 的),
    * 不自己发明 —— 发明的话会与采集侧的口径漂开。
    */
+  /**
+   * ⭐⭐ 置顶 = `{ type: 'TimelinePinEntry', entry: {...} }`(真实载荷对过,x-payload-survey 2026-09-02)。
+   * ⚠️ 取**整个置顶条目子树**里的推文(置顶 + 它内嵌引用的)—— 见 TweetRecord.pinned 的 10-16 补记。
+   * 判据与下面 tweetNodes 同一个(带 legacy.full_text 的对象),不另发明。
+   */
+  const pinnedIds = new Set(
+    collectBy(root, (o) => o.type === 'TimelinePinEntry' && isObj(o.entry))
+      .flatMap((o) => collectBy(o.entry, (n) => isObj(n.legacy) && typeof (n.legacy as Record<string, unknown>).full_text === 'string'))
+      .map((n) => str((n.legacy as Record<string, unknown>).id_str) || str(n.rest_id))
+      .filter((id) => id !== ''),
+  );
+
   const tweetNodes = collectBy(root, (o) => {
     const legacy = o.legacy;
     return isObj(legacy) && typeof legacy.full_text === 'string';
@@ -763,8 +786,10 @@ export function auditTimelinePayload(text: string): TimelineAudit {
      * **最长的那份**(只许变长,见 `project-x-upsert-overwrites-richer-text`)。
      * ⭐ 挂在 audit 条目上**而不是另开一条链路** —— 两条链路必漂。
      */
+    const recordId = str(legacy.id_str) || str(node.rest_id);
     const record: TweetRecord = {
-      id: str(legacy.id_str) || str(node.rest_id),
+      ...(pinnedIds.has(recordId) ? { pinned: true as const } : {}),
+      id: recordId,
       text: text2,
       lang: str(legacy.lang),
       isLongText: noteText.length > 0,

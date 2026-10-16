@@ -43,6 +43,12 @@ export async function collectPersonTab(input: {
   readonly pageCap: number;
   /** 第几次尝试(只用于留痕,与 renderer 旧版一致) */
   readonly attempt: number;
+  /**
+   * ⭐⭐ 后台断点:第一次翻页从这里续(不给 = 从首页游标翻)。
+   * ⚠️ 2026-10-14 真机:这里原来不收也不转 → 后台每段都从第一页重翻 10 页,
+   * 30 页后游标还停在原地(10-10),3b 只在 collectOnWebview 一层测了续采,中间这两跳丢了它。
+   */
+  readonly resumeCursor?: string;
 }): Promise<CollectOnWebviewResult> {
   if (live.has(input.wcId)) {
     throw new Error('这个 X 网页上已经有一次采集在跑 —— 先等它结束');
@@ -56,6 +62,7 @@ export async function collectPersonTab(input: {
       restId: input.restId,
       start: input.start ? new Date(input.start) : undefined,
       pageCap: input.pageCap,
+      resumeCursor: input.resumeCursor,
     }, {
       cancelled: () => ctl.cancelled,
       onProgress: (m) => {

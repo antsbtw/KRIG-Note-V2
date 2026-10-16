@@ -19,7 +19,7 @@
  */
 
 import { runCollect, type RunDeps } from './x-collect-run';
-import { timeWindowStop } from './x-person-timeline';
+import { newestOwn, timeWindowStop } from './x-person-timeline';
 import type { TweetRecord } from './x-timeline-audit';
 
 /** 对一个 webview 的三个真动作 —— 主进程里由 `x-collect-ports.ts` 接到能力层 */
@@ -66,6 +66,8 @@ export type CollectOnWebviewResult =
       readonly nextCursor?: string;
       /** X 说到头了 —— 后台 runner 用 */
       readonly exhausted: boolean;
+      /** 翻页前沿:最后一页里他自己最新那条的时间(没翻页时 undefined)—— 后台进度「采到」用 */
+      readonly frontierAt?: string;
     };
 
 /**
@@ -82,10 +84,35 @@ export async function collectOnWebview(
   const go = await ports.goto(input.page, { handle: input.handle });
   if (!go.ok) return { reached: false, reason: go.reason };
 
+  /**
+   * ⭐⭐ 翻页前沿 = 最后一页里**他自己**最新那条的时间(与停止判据同一口径)。
+   * ⚠️ 2026-10-14 真机:后台进度原来用「这一段所有推文里最新一条」→ 永远显示今天;
+   * 也不能用「最旧一条」—— 置顶 / 被他引用的旧推会把它拉到几年前(真库这一段混着 2022 的一条)。
+   */
+  const stop = timeWindowStop(input.restId, input.start, input.pageCap);
+  let frontierAt: string | undefined;
   const run = await runCollect({
     harvest: ports.harvest,
     runScript: ports.runScript,
-    stopPaging: timeWindowStop(input.restId, input.start, input.pageCap),
+    stopPaging: (st) => {
+      frontierAt = newestOwn(st.roundRecords, input.restId) ?? frontierAt;
+      /**
+       * ⭐⭐ 每页记一句「他自己几条 · 最新 · 最旧」—— 停止判据就是拿这一页的「最新」做决定的,
+       * 不记下来,停不下来/停早了都只能猜(2026-10-15 真机:半年采到 270 页,进度卡在 08-27 不动,
+       * 疑是置顶推文每页都回来 —— 没有这一行就证实不了)。
+       */
+      const own = st.roundRecords.filter((r) => r.authorRestId === input.restId && r.createdAt && r.pinned !== true)
+        .map((r) => ({ id: r.id, t: Date.parse(r.createdAt!) })).filter((x) => !Number.isNaN(x.t));
+      if (own.length > 0) {
+        const newest = own.reduce((a, b) => (b.t > a.t ? b : a));
+        const oldest = own.reduce((a, b) => (b.t < a.t ? b : a));
+        const d = (t: number): string => new Date(t).toISOString().slice(0, 16).replace('T', ' ');
+        hooks.onProgress?.(`第 ${st.round} 页:他自己 ${own.length} 条 · 最新 ${d(newest.t)}(${newest.id}) · 最旧 ${d(oldest.t)}`);
+      } else {
+        hooks.onProgress?.(`第 ${st.round} 页:没有他自己的推文(共 ${st.roundRecords.length} 条)`);
+      }
+      return stop(st);
+    },
     cancelled: hooks.cancelled,
     onProgress: hooks.onProgress,
     wait: hooks.wait,
@@ -97,5 +124,6 @@ export async function collectOnWebview(
     paging: run.paging ? { rounds: run.paging.rounds, stopReason: run.paging.stopReason } : null,
     nextCursor: run.nextCursor,
     exhausted: run.exhausted ?? false,
+    frontierAt,
   };
 }
