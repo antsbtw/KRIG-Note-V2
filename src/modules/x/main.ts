@@ -47,7 +47,8 @@ import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
 import { registerXDataIpc } from './x-data-ipc';
-import { startBgRunner, stopBgRunner } from './x-bg-runner';
+import { bgRunnerHealth, startBgRunner, stopBgRunner } from './x-bg-runner';
+import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -102,6 +103,8 @@ export function registerXModule(): void {
    */
   startBgRunner();
   app.on('before-quit', stopBgRunner);
+  /** ⭐ 后台采集状态进运行体检(黑匣子)—— X 自己登记,宿主不认识 X 内部 */
+  registerHealthProbe('x.bg', bgRunnerHealth);
 }
 
 

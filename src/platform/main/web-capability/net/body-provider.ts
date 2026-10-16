@@ -149,6 +149,27 @@ export class CdpBodyProvider {
    */
   private readonly inFlightByPage = new Map<PageId, number>();
 
+  /**
+   * ⭐ 体检用(黑匣子 2026-10-16):每个宿主的「发出了还没 loadingFinished」表 + debugger 本身。
+   * ⚠️ pending 只在 loadingFinished 时删 —— 失败 / 取消 / 永不结束的请求会一直留着,疑似越跑越大,要看数据。
+   */
+  private readonly pendingByHost = new Map<number, { pending: Map<string, PendingRequest>; dbg: DebuggerLike }>();
+
+  stats(): { hosts: number; pending: number; maxPendingPerHost: number; inFlight: number; messageListeners: number } {
+    let pending = 0;
+    let maxPendingPerHost = 0;
+    let messageListeners = 0;
+    for (const { pending: p, dbg } of this.pendingByHost.values()) {
+      pending += p.size;
+      if (p.size > maxPendingPerHost) maxPendingPerHost = p.size;
+      const lc = (dbg as unknown as { listenerCount?: (e: string) => number }).listenerCount;
+      if (typeof lc === 'function') messageListeners += lc.call(dbg, 'message');
+    }
+    let inFlight = 0;
+    for (const n of this.inFlightByPage.values()) inFlight += n;
+    return { hosts: this.pendingByHost.size, pending, maxPendingPerHost, inFlight, messageListeners };
+  }
+
   /** 这个页面 CDP 还有几条 body 在取回途中 */
   inFlight(pageId: PageId): number {
     return this.inFlightByPage.get(pageId) ?? 0;
@@ -201,6 +222,7 @@ export class CdpBodyProvider {
     });
 
     const pending = new Map<string, PendingRequest>();
+    this.pendingByHost.set(host.hostId, { pending, dbg });
 
     dbg.on('message', (...args: unknown[]) => {
       // Electron 的签名是 (event, method, params)
@@ -219,6 +241,7 @@ export class CdpBodyProvider {
     // 唯一的清理时机:页面销毁
     host.onDestroyed(() => {
       this.attachedHosts.delete(host.hostId);
+      this.pendingByHost.delete(host.hostId);
       this.bus.channelLost(pageId, '页面已销毁');
     });
 
