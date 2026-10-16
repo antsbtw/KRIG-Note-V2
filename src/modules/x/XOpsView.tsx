@@ -34,6 +34,7 @@ import type { ViewComponentProps } from '@slot/view-type-registry/view-definitio
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { XOpsStatus } from './XOpsStatus';
 import { XOpsPeople } from './XOpsPeople';
+import { BgIndicator } from './XBgStatus';
 
 /** ⚠️ 标签与 id 同在一处 —— 分开写两份必漂 */
 type OpsCategory = 'status' | 'people' | 'tweets';
@@ -73,6 +74,8 @@ export function XOpsView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         <span style={S.title}>📊 运营</span>
         {/* ⭐ 运营以本 ws 登录的号为中心 —— 号的读取还没接,先如实写 ws */}
         <span style={S.sub}>{workspaceId} · 登录号待接入</span>
+        {/* ⭐ 后台采集此刻在不在跑 —— 任何页都看得见(用户 10-14) */}
+        <BgIndicator wsId={workspaceId} />
         <span style={{ flex: 1 }} />
         <button
           type="button"

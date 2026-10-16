@@ -96,7 +96,10 @@ describe('⭐⭐ 第一次翻页就 403 → 重载这一页再试一次(2026-10-
   it('最多两次;只在「第一轮就 403」时重试;第一次采到的照样存', () => {
     expect(fn).toMatch(/for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/);
     // 2026-10-13 (3b):403 根治后失败语改成「没带鉴权头」(不含 HTTP 403),重试判断两种措辞都认
-    expect(fn).toMatch(/const authFail = \/HTTP 403\|没带鉴权头\/\.test\(why\) && \(run\.paging\?\.rounds \?\? 0\) <= 1;/);
+    // 2026-10-15:判据提成共用函数(后台 runner 也用,用户选 A),人卡调它;两种措辞 + 只在第一轮,由函数本身钉
+    expect(fn).toMatch(/const authFail = worthReloadRetry\(why, run\.paging\?\.rounds \?\? 0\);/);
+    const TL = readFileSync(join(process.cwd(), 'src/modules/x/x-person-timeline.ts'), 'utf8');
+    expect(TL).toMatch(/return \/HTTP 403\|没带鉴权头\/\.test\(stopReason\) && rounds <= 1;/);
     expect(fn).toMatch(/if \(authFail && attempt === 1 && !cancelCollect\.current\) continue;/);
     /** 存库在判断重试之前 —— 第一次的推文不丢 */
     expect(fn.indexOf("op: 'saveTweets'")).toBeLessThan(fn.indexOf('if (authFail && attempt === 1'));

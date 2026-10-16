@@ -45,6 +45,10 @@ export function traceGoto(
 
 /** harvest 结果落盘 + 终端一行 —— 每次 harvest 跑完都调 */
 export function traceHarvest(pageId: PageId, url: string, rep: HarvestReport): void {
+  if (rep.cdpSettle && rep.cdpSettle.waitedMs > 0) {
+    console.log(`[web.harvest] 收尾等 CDP 在途取回 ${rep.cdpSettle.waitedMs}ms`
+      + `${rep.cdpSettle.leftInFlight > 0 ? `,⚠️ 等满仍剩 ${rep.cdpSettle.leftInFlight} 条没到` : ',全部落地'}`);
+  }
   traceRecorder.lifecycle({
     layer: 'web.net',
     event: rep.ok ? 'harvest-ok' : 'harvest-incomplete',
@@ -58,6 +62,8 @@ export function traceHarvest(pageId: PageId, url: string, rep: HarvestReport): v
       elapsedMs: rep.elapsedMs,
       stopReason: rep.stopReason,
       legs: rep.legs,
+      /** ⭐ 收尾前等 CDP 在途取回:等了多久 / 还剩几条 —— 种子没头时先看这个 */
+      cdpSettle: rep.cdpSettle,
       problems: rep.problems,
       /**
        * ⭐⭐ **收到的是什么** —— 2026-10-04 补。

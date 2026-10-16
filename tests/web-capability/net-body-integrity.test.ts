@@ -199,3 +199,56 @@ describe('⭐⭐ 源码层面:本层不许出现「切数据」的动作', () =>
     expect(call, '传给总线的不是原始 body').toMatch(/\bbody,/);
   });
 });
+
+describe('⭐⭐ 在途取回计数(2026-10-16,收尾要等它归零)', () => {
+  /** 可控的 getResponseBody:手动放行 / 让它失败 */
+  function slowHost() {
+    const listeners: Array<(...a: unknown[]) => void> = [];
+    let release: (() => void) | null = null;
+    let fail: ((e: Error) => void) | null = null;
+    const host = {
+      hostId: 7,
+      debugger: {
+        isAttached: () => false,
+        attach: () => undefined,
+        sendCommand: (method: string) => (method === 'Network.getResponseBody'
+          ? new Promise((res, rej) => { release = () => res({ body: '{}', base64Encoded: false }); fail = rej; })
+          : Promise.resolve({})),
+        on: (ev: string, l: (...a: unknown[]) => void) => { if (ev === 'message') listeners.push(l); },
+      },
+      onDestroyed: () => undefined,
+    };
+    const emit = (id: string): void => {
+      for (const l of listeners) {
+        l({}, 'Network.requestWillBeSent', { requestId: id, request: { url: 'https://x.com/i/api/graphql/q/UserTweets?variables=1', method: 'GET' }, type: 'Fetch' });
+        l({}, 'Network.responseReceived', { requestId: id, response: { status: 200, mimeType: 'application/json', headers: {} } });
+        l({}, 'Network.loadingFinished', { requestId: id });
+      }
+    };
+    return { host, emit, release: () => release?.(), fail: () => fail?.(new Error('No resource with given identifier')) };
+  }
+
+  it('取回期间算在途;取完归零', async () => {
+    const provider = new CdpBodyProvider(new NetworkEventBus());
+    const h = slowHost();
+    provider.attach(h.host as never, PAGE);
+    h.emit('r1');
+    await settle();
+    expect(provider.inFlight(PAGE), '加载完了还在取 body —— 必须算在途').toBe(1);
+    h.release();
+    await settle();
+    expect(provider.inFlight(PAGE)).toBe(0);
+  });
+
+  it('⚠️ 取回失败也要归零(漏减 = 收尾每次白等满上限)', async () => {
+    const provider = new CdpBodyProvider(new NetworkEventBus());
+    const h = slowHost();
+    provider.attach(h.host as never, PAGE);
+    h.emit('r2');
+    await settle();
+    expect(provider.inFlight(PAGE)).toBe(1);
+    h.fail();
+    await settle();
+    expect(provider.inFlight(PAGE)).toBe(0);
+  });
+});

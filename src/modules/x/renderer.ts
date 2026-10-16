@@ -36,6 +36,7 @@ import { XWebView } from './XWebView';
 import { XWorkbenchView } from './XWorkbenchView';
 import { XOpsView } from './XOpsView';
 import { registerXCommands } from './x-commands';
+import { startXHostSync } from './x-host-sync';
 
 /** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
 export const X_WEB_VIEW_ID = 'x-web-view';
@@ -114,3 +115,9 @@ registerView({
     navSideDisabled: true,
   },
 });
+
+/**
+ * ⭐⭐ X 网页登记同步给主进程 —— 后台采集 runner 在主进程,靠它才知道哪个 ws 开着 X 网页、谁在忙。
+ * ⚠️ 登记表每进程一份;去掉这行 runner 恒「没开 X 网页」静默空转(2026-10-14 发现)。
+ */
+startXHostSync();

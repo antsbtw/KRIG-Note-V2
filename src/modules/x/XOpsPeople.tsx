@@ -36,8 +36,10 @@ import { auditUserPayload, type XUserRecord } from './x-user-audit';
 import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
 import type { CollectOnWebviewResult } from './x-collect-on-webview';
 import type { CirclePerson } from './x-friend-circle';
-import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, type TimelineRange } from './x-person-timeline';
+import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
 import { X_SCRIPTS } from './x-dom-scripts';
+import { describeProgress, type BgJob } from './x-bg-job';
+import { useBgStatus } from './XBgStatus';
 import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
 import {
   DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup,
@@ -50,6 +52,18 @@ const PAGE = 200;
 const WIDE = 760;
 
 const fmt = (n: number | undefined): string => (n === undefined ? '—' : n.toLocaleString());
+
+/**
+ * ⭐⭐ 后台此刻在不在用这个 X 网页采(2026-10-14 第 4 步)—— 人手动操作前先问主进程。
+ * ⚠️ 后台 runner 在主进程,它的「正在用」不在本进程的 x-host-registry 里;
+ * 不问就会和后台抢同一个 webview(跳走会打断后台那一段)。问不到也说出来,不当成「不忙」。
+ */
+async function bgBusyNote(wcId: number): Promise<string | null> {
+  const r = await xDataCall({ op: 'bgBusy', wcId });
+  if (r.status !== 'ok') return `问不到后台状态(${r.reason})`;
+  const v = r.value as { handle: string } | null;
+  return v ? `后台正在采 @${v.handle}(可在人卡暂停)` : null;
+}
 
 export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactElement {
   const [overview, setOverview] = useState<PeopleOverview | null>(null);
@@ -139,6 +153,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
     const busy = getXHostBusy(wcId);
     if (busy !== null && busy !== VERIFY_BUSY) { setFollowNote(`${busy},没跳转(跳走会打断采集)`); return; }
+    const bg = await bgBusyNote(wcId);
+    if (bg !== null) { setFollowNote(`${bg},没跳转(跳走会打断采集)`); return; }
     setFollowNote(null);
     setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
     setXHostBusy(wcId, VERIFY_BUSY);
@@ -234,6 +250,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     if (wcId == null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: 'X 网页没开,没法采' } })); return; }
     const busy = getXHostBusy(wcId);
     if (busy !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${busy},先等它结束` } })); return; }
+    const bg = await bgBusyNote(wcId);
+    if (bg !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${bg},先等这一段结束` } })); return; }
     const start = rangeStart(range, new Date());
     const label = TIMELINE_RANGES.find((r) => r.id === range)?.label ?? range;
     setXHostBusy(wcId, COLLECT_BUSY);
@@ -291,7 +309,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
            * 只认 HTTP 403 的话,新措辞不触发重试,回复页种子没带头就只采 1 页就停
            * (project-x-paging-403-root-cause 记过这笔连带账)。
            */
-          const authFail = /HTTP 403|没带鉴权头/.test(why) && (run.paging?.rounds ?? 0) <= 1;
+          const authFail = worthReloadRetry(why, run.paging?.rounds ?? 0);
           let inserted = 0;
           if (records.length > 0) {
             const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
@@ -322,6 +340,26 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   }, [wcId, loadOverview]);
 
   /** ⭐ 选时间范围的小框 —— 第一步只开放「一个月」 */
+  /**
+   * ⭐⭐ 半年 / 一年 / 全部 = 建后台任务(2026-10-14 第 4 步),**不走 collectTweets**(那是当场采)。
+   * 任务属于发起的号(本 view 的 ws);后台按节奏一段段采,跨重启接着采。
+   * ⚠️ 同一个人同一范围已有没完成的任务 → 不重建(repo 去重),明说「已经在后台了」。
+   */
+  const [bgMsg, setBgMsg] = useState<Record<string, string>>({});
+  const [bgRev, setBgRev] = useState(0);
+  const createBgJob = useCallback(async (p: PersonRow, range: TimelineRange): Promise<void> => {
+    const r = await xDataCall({ op: 'bgCreateJob', restId: p.rest_id, handle: p.handle, wsId: workspaceId, range });
+    const label = TIMELINE_RANGES.find((x) => x.id === range)?.label ?? range;
+    let text: string;
+    if (r.status !== 'ok') text = `没建成后台任务:${r.reason}`;
+    else {
+      const v = r.value as { created: boolean };
+      text = v.created ? `已排进后台(${label}),会按节奏慢慢采` : `「${label}」已经在后台了,没重复建`;
+      if (wcId == null) text += ' —— 这个号的 X 网页没开,开了才会采';
+    }
+    setBgMsg((m) => ({ ...m, [p.rest_id]: text }));
+    setBgRev((n) => n + 1);
+  }, [workspaceId, wcId]);
   const [rangeFor, setRangeFor] = useState<PersonRow | null>(null);
 
   /** ⭐ 运营设置(人可设定的变量)*/
@@ -366,6 +404,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     if (wcId == null) { setFollowNote('X 网页没开,没法取关'); return; }
     const busy = getXHostBusy(wcId);
     if (busy !== null) { setFollowNote(`${busy},先等它结束`); return; }
+    const bg = await bgBusyNote(wcId);
+    if (bg !== null) { setFollowNote(`${bg},先等这一段结束`); return; }
     /** ① 闸门:每日上限 + 最小间隔(主进程按库里最新的数判) */
     const g = await xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() });
     if (g.status === 'failed') { setErr(g.reason); return; }
@@ -723,6 +763,9 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             onUnfollow={(person) => void unfollow(person)}
             unfollowing={unfollowing === cardId}
             collectState={collect[cardId!]}
+            wsId={workspaceId}
+            bgMsg={bgMsg[cardId!]}
+            bgRev={bgRev}
             rev={cardRev}
             onEditTags={(p) => setTagging(p)}
             onToggleExclude={(p) => {
@@ -785,12 +828,15 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
               <button
                 key={r.id}
                 type="button"
-                style={r.id === 'month' ? S.btnPrimary : { ...S.btn, opacity: 0.5 }}
-                disabled={r.id !== 'month'}
-                title={r.id === 'month' ? `当场采,每页最多翻 ${LIVE_PAGE_CAP} 页` : '第二步:后台策略(跨重启、按节奏慢慢跑)'}
-                onClick={() => { const pr = rangeFor; setRangeFor(null); openCard(pr); void collectTweets(pr, r.id); }}
+                style={r.id === 'month' ? S.btnPrimary : S.btn}
+                title={r.id === 'month' ? `当场采,每页最多翻 ${LIVE_PAGE_CAP} 页` : '后台慢慢采:按节奏一段段翻,跨重启接着采,进度在人卡里看'}
+                onClick={() => {
+                  const pr = rangeFor; setRangeFor(null); openCard(pr);
+                  if (r.id === 'month') void collectTweets(pr, r.id);
+                  else void createBgJob(pr, r.id);
+                }}
               >
-                {r.label}{r.id !== 'month' ? '(第二步:后台策略)' : ''}
+                {r.label}{r.id !== 'month' ? '(后台慢慢采)' : '(当场采)'}
               </button>
             ))}
             <button type="button" style={S.btn} onClick={() => setRangeFor(null)}>取消</button>
@@ -816,8 +862,14 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
 
 /** ⭐ 人卡 —— 事实(采来的)与推断(AI 猜的)分开;缺的就是采集入口 */
 function PersonCard(
-  { restId, wcId, onBack, onClose, onToggleExclude, onOpenInX, onEditTags, rev, onCollect, collectState, onUnfollow, unfollowing, onCancelCollect }: {
-    restId: string; wcId: number | null; onBack?: () => void; onClose: () => void;
+  { restId, wcId, onBack, onClose, onToggleExclude, onOpenInX, onEditTags, rev, onCollect, collectState, onUnfollow, unfollowing, onCancelCollect, bgMsg, bgRev, wsId }: {
+    restId: string; wcId: number | null;
+    /** 发起的号(ws)—— 后台任务属于它 */
+    wsId: string; onBack?: () => void; onClose: () => void;
+    /** ⭐ 刚建后台任务的那句提示 */
+    bgMsg?: string;
+    /** 建了后台任务要立刻重读 —— 递增即重读 */
+    bgRev: number;
     onToggleExclude: (p: PersonRow) => void;
     onEditTags: (p: PersonRow) => void;
     /** 标签改了要重读 —— 递增即重读 */
@@ -937,6 +989,9 @@ function PersonCard(
             <Fact k="省份 / 内容定位" v="还没做" />
             <button type="button" style={S.btn} disabled title="第 4 块">分析他(还没做)</button>
           </Section>
+
+          {/* ⭐ 放在「他的推文」上面 —— 下面是 20 条推文,放后面要翻很远才看得到(用户 10-15 找不到) */}
+          <BgJobsSection restId={restId} wsId={wsId} msg={bgMsg} rev={bgRev} />
 
           <Section
             title="他的推文"
@@ -1130,6 +1185,81 @@ function TagDialog(
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * ⭐⭐ 人卡「后台采集」—— 这个人的后台任务 + 一句话进度 + 暂停/恢复/取消(2026-10-14 第 4 步)。
+ * ⚠️ X 没有推送通道:每 5 秒问一次(与采一个月的进度同套路);一段要几分钟,5 秒足够。
+ * ⚠️ 取消 = 删任务(断点是派生状态,已采的推文都在库里不受影响)。
+ */
+function BgJobsSection({ restId, wsId, msg, rev }: { restId: string; wsId: string; msg?: string; rev: number }): ReactElement {
+  /** ⭐ 此刻在不在跑 —— 与运营顶栏同一个 hook */
+  const { st } = useBgStatus(wsId);
+  const [jobs, setJobs] = useState<BgJob[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    const load = (): void => {
+      void xDataCall({ op: 'bgListJobs', restId }).then((r) => {
+        if (!alive) return;
+        if (r.status === 'ok') { setJobs(r.value as BgJob[]); setErr(null); } else setErr(r.reason);
+      });
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
+  }, [restId, rev, tick]);
+
+  const act = async (op: 'bgPauseJob' | 'bgResumeJob' | 'bgCancelJob', id: string): Promise<void> => {
+    const r = await xDataCall({ op, id });
+    if (r.status !== 'ok') setErr(r.reason);
+    setTick((n) => n + 1);
+  };
+
+  const rangeLabel = (id: string): string => TIMELINE_RANGES.find((x) => x.id === id)?.label ?? id;
+  return (
+    <Section title="后台采集" note={jobs === null ? '读取中…' : jobs.length === 0 ? '没有后台任务(右键「采他的帖子/回复/转发…」选半年/一年/全部)' : `${jobs.length} 个任务`}>
+      {msg && <div style={S.muted}>{msg}</div>}
+      {err && <div style={S.muted}>⚠️ {err}</div>}
+      {jobs?.map((j) => (
+        <div key={j.id} style={S.tweetRow}>
+          <div style={S.line}>
+            <strong>{rangeLabel(j.range)}</strong>
+            <span style={S.muted}>{j.lastSegmentAt ? `上一段 ${new Date(j.lastSegmentAt).toLocaleString()}` : '还没跑过一段'}</span>
+          </div>
+          <div style={S.tweetText}>{describeProgress(j)}</div>
+          {st?.live?.jobId === j.id && (
+            <div style={{ ...S.muted, color: '#4caf50' }}>
+              🟢 此刻正在采:{st.live.msg}{st.live.pageMsg ? ` · ${st.live.pageMsg}` : ''}
+            </div>
+          )}
+          {st?.live?.jobId !== j.id && (j.status === 'queued' || j.status === 'running') && (
+            <div style={S.muted}>
+              ⏳ 等待:{st?.live ? `这个号正在采 @${st.live.handle},同一个号一次只采一个` : (st?.waitNote ?? '还没轮到检查')}
+              {st?.nextTickAt != null && !st.live ? ` · 约 ${Math.max(0, Math.round((st.nextTickAt - st.now) / 1000))} 秒后再看` : ''}
+            </div>
+          )}
+          <div style={S.line}>
+            {(j.status === 'queued' || j.status === 'running') && (
+              <button type="button" style={S.btn} onClick={() => void act('bgPauseJob', j.id)}>暂停</button>
+            )}
+            {j.status === 'paused' && (
+              <button type="button" style={S.btn} onClick={() => void act('bgResumeJob', j.id)}>恢复</button>
+            )}
+            <button
+              type="button" style={S.btn}
+              title="删掉这个任务(已采的推文留在库里)"
+              onClick={() => void act('bgCancelJob', j.id)}
+            >
+              {j.status === 'done' || j.status === 'failed' ? '移除' : '取消'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </Section>
   );
 }
 

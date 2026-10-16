@@ -140,7 +140,7 @@ describe('describeProgress —— 一句话进度', () => {
     const s = describeProgress(j);
     expect(s).toMatch(/帖子 已到底/);
     expect(s).toMatch(/回复 采到 2026-05-01/);
-    expect(s).toMatch(/12 页 300 条/);
+    expect(s).toMatch(/12 页 新增 300 条/);
   });
   it('失败显示原因', () => {
     expect(describeProgress(job({ status: 'failed', lastError: 'HTTP 403' }))).toMatch(/403/);

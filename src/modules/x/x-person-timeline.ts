@@ -8,7 +8,10 @@
  *
  * ── ⚠️ 按时间停的两个坑(都是真机数据里看到的,10-10 李老师不是你老师)──
  * ① **置顶推文**:主页最早一条是 05-12、回复页最早是 2023 年,都是置顶 —— 拿「最早的一条」判,
- *    第一页就停。→ 只判**翻页回来的每一页**(置顶只在首页),不判首页。
+ *    第一页就停。→ 只判**翻页回来的每一页**,不判首页。
+ *    ⚠️⚠️ 更正(2026-10-15 真机,逐页留痕):「置顶只在首页」**是错的** —— 帖子页**每一次翻页**都带回置顶,
+ *    于是「这一页最新一条」永远是置顶(08-27),判据永不停:半年 = 全部、一个月只能撞页数上限
+ *    (10-12 那次「帖子 61 页撞上限」就是它)。→ 置顶按载荷结构认出(TweetRecord.pinned)并排除。
  * ② **转发旧推文**:原推可能很老,转发却是最近的 —— 原推作者不是他。→ 只看**他自己的**推文
  *    (转发外层那条作者是他,时间就是转发的时间)。
  * 判据:这一页**他自己最新的一条**都早于起点 → 整页都过了范围 → 停。
@@ -49,7 +52,8 @@ export function rangeStart(range: TimelineRange, now: Date): Date | undefined {
 
 /** 这一页**他自己**最新一条推文的时间(没有他自己的推文 → undefined) */
 export function newestOwn(records: readonly TweetRecord[], restId: string): string | undefined {
-  const own = records.filter((r) => r.authorRestId === restId && r.createdAt)
+  /** ⚠️ 置顶不算:它每页都回来,算进去「最新」永远是置顶(2026-10-15 真机,见 TweetRecord.pinned) */
+  const own = records.filter((r) => r.authorRestId === restId && r.createdAt && r.pinned !== true)
     .map((r) => Date.parse(r.createdAt!))
     .filter((t) => !Number.isNaN(t));
   return own.length > 0 ? new Date(Math.max(...own)).toISOString() : undefined;
@@ -72,4 +76,14 @@ export function timeWindowStop(
     }
     return { go: true };
   };
+}
+
+/**
+ * ⭐⭐ 「第一轮翻页就被拒 = 翻页模板没带鉴权头」→ 值得**重载这一页再试一次**。
+ * 人卡和后台 runner 共用这一份判据(2026-10-15 用户选 A:后台也像人卡一样重载重试一次)。
+ * ⚠️ 两种措辞都要认:旧的「HTTP 403」+ 403 根治后的「没带鉴权头」(project-x-paging-403-root-cause)。
+ * ⚠️ 只在**翻页不超过 1 轮**时重试:翻到一半才 403 / 限流不是模板问题,重载救不了,该停就停。
+ */
+export function worthReloadRetry(stopReason: string, rounds: number): boolean {
+  return /HTTP 403|没带鉴权头/.test(stopReason) && rounds <= 1;
 }

@@ -8,7 +8,7 @@
  * 业务判据(配方怎么翻译成查询)在 `x-recipe-query.ts`,不在这儿。
  */
 
-import { ipcMain } from 'electron';
+import { ipcMain, webContents } from 'electron';
 import {
   listAllRecipes, upsertRecipe, deleteRecipe,
 } from '@platform/main/db/search-recipe-repo';
@@ -22,6 +22,11 @@ import { queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPers
 import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
+import { clearXHostState, getXHostState, setXHostBusy, setXHostState } from './x-host-registry';
+import { bgRunnerStatus, bgRunningOn, kickBgRunner } from './x-bg-runner';
+import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
+import { isBgRange } from './x-bg-job';
+import type { TimelineRange } from './x-person-timeline';
 import { cancelPersonCollect, collectPersonTab, personCollectProgress, tracePersonProgress } from './x-person-collect';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
@@ -282,6 +287,95 @@ export function registerXDataIpc(): void {
 
         case 'tagCatalog':
           return { status: 'ok', value: await readTagCatalog() };
+
+        /**
+         * ⭐⭐⭐ renderer 的 X 网页登记同步进主进程(`x-host-sync.ts`)—— 后台 runner 靠它。
+         * ⚠️ webview 销毁时主进程自己清掉:窗口直接关掉时 renderer 来不及发「卸了」,
+         * 不清的话 runner 拿已销毁的 wcId 去采 → 没去到页 → 任务被标 failed。
+         */
+        case 'syncHost': {
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] syncHost 缺 wsId');
+          if (p.wcId === null) { clearXHostState(p.wsId); return { status: 'ok', value: { cleared: p.wsId } }; }
+          if (!Number.isInteger(p.wcId)) return failed('[x.data] syncHost 的 wcId 要是整数或 null');
+          const wc = webContents.fromId(p.wcId);
+          if (!wc || wc.isDestroyed()) return failed(`[x.data] syncHost:wc#${p.wcId} 不存在或已销毁`);
+          setXHostState(p.wsId, p.wcId, '');
+          const ws = p.wsId; const id = p.wcId;
+          wc.once('destroyed', () => {
+            /** ⚠️ 只清「还是这个 wc」的登记 —— 同 ws 可能已换成新 webview */
+            if (getXHostState(ws)?.wcId === id) clearXHostState(ws);
+            setXHostBusy(id, null);
+          });
+          console.log(`[x.host] ${p.wsId} 的 X 网页 = wc#${p.wcId}(后台采集可见)`);
+          return { status: 'ok', value: { wsId: p.wsId, wcId: p.wcId } };
+        }
+
+        case 'syncBusy':
+          if (!Number.isInteger(p.wcId)) return failed('[x.data] syncBusy 缺 wcId');
+          setXHostBusy(p.wcId, typeof p.reason === 'string' && p.reason !== '' ? p.reason : null);
+          return { status: 'ok', value: { wcId: p.wcId } };
+
+        case 'bgBusy':
+          if (!Number.isInteger(p.wcId)) return failed('[x.data] bgBusy 缺 wcId');
+          return { status: 'ok', value: bgRunningOn(p.wcId) };
+
+        /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 只做校验 + 调 repo */
+        case 'bgCreateJob': {
+          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.handle !== 'string' || p.handle === '') {
+            return failed('[x.data] bgCreateJob 要 restId(数字 id)和 handle');
+          }
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] bgCreateJob 缺 wsId —— 任务属于发起的号');
+          /** ⚠️ month 当场采,不进后台;别的字符串一律拒(别兜底成 all) */
+          if (!isBgRange(p.range as TimelineRange)) return failed(`[x.data] bgCreateJob 范围只接 halfYear/year/all,收到 ${String(p.range)}`);
+          const r = await createJob({ restId: p.restId, handle: p.handle, wsId: p.wsId, range: p.range as 'halfYear' | 'year' | 'all' });
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: 'x-bg-job-create', pageId: 'x-data',
+            detail: { id: r.id, created: r.created, handle: p.handle, range: p.range, wsId: p.wsId },
+          });
+          kickBgRunner();
+          return { status: 'ok', value: r };
+        }
+
+        /** ⭐⭐ 此刻状态(运营顶栏 / 人卡「在不在跑」)+ 这个号各状态任务数 */
+        case 'bgStatus': {
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] bgStatus 缺 wsId');
+          const jobs = await listJobs(p.wsId);
+          const counts: Record<string, number> = { queued: 0, running: 0, paused: 0, done: 0, failed: 0 };
+          for (const j of jobs) counts[j.status] = (counts[j.status] ?? 0) + 1;
+          return { status: 'ok', value: { ...bgRunnerStatus(p.wsId), counts, now: Date.now() } };
+        }
+
+        case 'bgListJobs': {
+          const jobs = await listJobs(typeof p.wsId === 'string' && p.wsId !== '' ? p.wsId : undefined);
+          const mine = typeof p.restId === 'string' && p.restId !== '' ? jobs.filter((j) => j.restId === p.restId) : jobs;
+          return { status: 'ok', value: mine };
+        }
+
+        case 'bgPauseJob':
+        case 'bgResumeJob': {
+          if (typeof p.id !== 'string' || p.id === '') return failed(`[x.data] ${p.op} 缺 id`);
+          /**
+           * ⚠️ 先读:UPSERT 对不存在的 id 会**建出一条残行**(只有 status),
+           * 而终态(done/failed)也不许被暂停/恢复改回去 —— 都要明说。
+           */
+          const job = await readJob(p.id);
+          if (!job) return failed(`[x.data] ${p.op}:任务 ${p.id} 不存在(可能已取消)`);
+          if (p.op === 'bgPauseJob') {
+            if (job.status !== 'queued' && job.status !== 'running') return failed(`[x.data] 任务是「${job.status}」,不能暂停`);
+            await setJobStatus(p.id, 'paused');
+          } else {
+            if (job.status !== 'paused') return failed(`[x.data] 任务是「${job.status}」,不是暂停状态`);
+            await setJobStatus(p.id, 'queued');
+            kickBgRunner();
+          }
+          return { status: 'ok', value: { id: p.id } };
+        }
+
+        case 'bgCancelJob': {
+          if (typeof p.id !== 'string' || p.id === '') return failed('[x.data] bgCancelJob 缺 id');
+          await deleteJob(p.id);
+          return { status: 'ok', value: { id: p.id } };
+        }
 
         /** ⭐ 运营设置 / 取关闸门 / 动作记录(2026-10-10) */
         case 'opsSettings':

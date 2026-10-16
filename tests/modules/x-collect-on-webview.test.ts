@@ -16,15 +16,19 @@ const SEED = 'https://x.com/i/api/graphql/qid/SearchTimeline?variables=%7B%22raw
 const HEADERS = { authorization: 'Bearer TEST', 'x-csrf-token': 'test-csrf' };
 
 /** 第 n 页:一条推 + 一个游标(cursor=null 表示没有下一页) */
-const page = (n: number, cursor: string | null): string => {
-  const entries: unknown[] = [{
-    entryId: `tweet-${n}`,
+const page = (n: number, cursor: string | null, dated = false): string => {
+  /** dated:第 n 页他自己的推文 = 10-(15-n) 日;第 1 页另带一条 2022 的旧推(置顶 / 被引用的旧推) */
+  const tw = (id: string, at?: string): unknown => ({
+    entryId: `tweet-${id}`,
     content: { itemContent: { tweet_results: { result: {
-      rest_id: `t${n}`,
-      legacy: { id_str: `t${n}`, full_text: `第${n}页` },
-      core: { user_results: { result: { legacy: { screen_name: 'a' } } } },
+      rest_id: id,
+      legacy: { id_str: id, full_text: `第${n}页`, ...(at ? { created_at: at } : {}) },
+      core: { user_results: { result: { rest_id: '1', legacy: { screen_name: 'a' } } } },
     } } } },
-  }];
+  });
+  const entries: unknown[] = dated
+    ? [tw(`t${n}`, `Wed Oct ${15 - n} 11:20:00 +0000 2026`), ...(n === 1 ? [tw('pin', 'Thu Oct 13 07:47:49 +0000 2022')] : [])]
+    : [tw(`t${n}`)];
   if (cursor !== null) entries.push({ entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } });
   return JSON.stringify({
     data: { search_by_raw_query: { search_timeline: { timeline: {
@@ -34,14 +38,14 @@ const page = (n: number, cursor: string | null): string => {
 };
 
 /** 假 ports:goto 可设成败;首页 + 每次 runScript 推进一页(无限页时游标永远在变) */
-function fakePorts(opts: { gotoFails?: string; pages?: number } = {}): {
+function fakePorts(opts: { gotoFails?: string; pages?: number; dated?: boolean } = {}): {
   ports: WebviewPorts;
   log: { gotos: Array<{ name: string; params: Record<string, string> }>; harvests: number; cursors: string[] };
 } {
   const log = { gotos: [] as Array<{ name: string; params: Record<string, string> }>, harvests: 0, cursors: [] as string[] };
   let idx = 1;
   const total = opts.pages ?? Number.POSITIVE_INFINITY;
-  const cur = (): string => page(idx, idx < total ? `c${idx}` : null);
+  const cur = (): string => page(idx, idx < total ? `c${idx}` : null, opts.dated === true);
   const ports: WebviewPorts = {
     async goto(name, params) {
       log.gotos.push({ name, params });
@@ -85,6 +89,15 @@ describe('⭐⭐ collectOnWebview 编排', () => {
     if (!r.reached) throw new Error('应当去到了');
     expect(r.records.map((x) => x.id).sort()).toEqual(['t1', 't2', 't3']);
     expect(r.paging?.rounds).toBe(2);
+  });
+
+  it('⭐⭐ 翻页前沿 = 最后一页他自己最新那条(不是这一段最新,也不被旧推拉回几年前)', async () => {
+    // 2026-10-14 真机:后台进度原来显示「采到 今天」;真库这一段混着 2022 的旧推
+    const { ports } = fakePorts({ pages: 4, dated: true });
+    const r = await collectOnWebview(ports, { page: 'x.profile', handle: 'abc', restId: '1', pageCap: 30 }, hooks());
+    if (!r.reached) throw new Error('应当去到了');
+    expect(r.records.some((x) => x.createdAt?.endsWith('2022')), '样本里要真有旧推,否则测不出被拉偏').toBe(true);
+    expect(r.frontierAt?.slice(0, 10)).toBe('2026-10-11');
   });
 
   it('⭐⭐ 页数上限由调用方给 —— 到了就停', async () => {
