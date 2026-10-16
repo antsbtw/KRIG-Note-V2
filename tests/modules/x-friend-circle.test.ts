@@ -64,13 +64,14 @@ describe('接线', () => {
     const fn = REPO.slice(REPO.indexOf('export async function readFriendCircle'));
     expect(fn).toMatch(/FROM x_tweet WHERE author_rest_id = \$id;/);
     expect(fn).toMatch(/WHERE in_reply_to_user_id = \$id AND author_rest_id != \$id/);
-    expect(fn).toMatch(/FROM x_author WHERE rest_id IN \$ids/);
+    /** ⭐ 1.2.27:关系按号 —— 从「人表 + 当前号的关系」查,并带上号 */
+    expect(fn).toMatch(/FROM \$\{PEOPLE_WITH_RELATION\} WHERE rest_id IN \$ids`, \{ ids: top\.map\(\(e\) => e\.id\), acct: account \}/);
   });
   it('⭐ friendCircle:契约 + handler;人卡调用;渲染端不引 main 侧的 repo', () => {
     expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'friendCircle'/);
     expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'friendCircle':/);
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    expect(PAGE).toMatch(/op: 'friendCircle', restId, limit: 30/);
+    expect(PAGE).toMatch(/op: 'friendCircle', wsId, restId, limit: 30/);
     expect(PAGE).not.toContain("from './x-people-repo'");
   });
 });

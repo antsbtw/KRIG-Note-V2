@@ -1035,6 +1035,8 @@ export function XConsole(
                              */
                             source: origin?.name ?? identified?.name ?? '',
                             searchRecipe: origin?.params.q,
+                            /** ⭐ 作者的关系是这个网页登录的号看到的 —— 主进程据此认号(1.2.27) */
+                            wcId: wcId ?? undefined,
                           },
                         });
                         setLog((l) => [{
@@ -1091,7 +1093,8 @@ export function XConsole(
                          */
                         const listSource = X_USER_LIST_PAGES[origin?.name ?? identified?.name ?? ''] ?? '';
                         const su = await xDataCall({
-                          op: 'saveUsers', records: users, ctx: { listSource },
+                          /** ⭐ wcId:名单里的关系是这个网页登录的号看到的(1.2.27) */
+                          op: 'saveUsers', records: users, ctx: { listSource, wcId: wcId ?? undefined },
                         });
                         setLog((l) => [{
                           at: new Date().toLocaleTimeString(), label: '落库（人）', result: su,

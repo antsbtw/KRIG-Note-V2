@@ -1766,6 +1766,115 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.28 —— 关系**变化**记录 `x_relation_change`(2026-10-16,蓝V互关 M0)
+ *
+ * 用户 10-16:「你的数据表写得不聪明了,增加一个表,记录关系的变化的,不久没有这个问题啦?」
+ * x_relation 只存「当前」(每个号对每个人一行);这里**只追加、只在关系变了时写**一条 ——
+ * 名单重采几千人没变就一条不写,记录量小,又能回答「他哪天回关/取关的」。
+ * ⭐ 这个号第一次记到某人也写一条(基线:from 为 NONE)。
+ * ⭐ 变化发生在 (prev_observed_at, observed_at] 之间 —— 我们只知道两次观察之间变了,不编精确时刻。
+ * ⚠️ 1.2.27 已在真库跑过,所以另起一版,不改 1.2.27。
+ */
+const X_SCHEMA_1_2_28 = `
+DEFINE TABLE IF NOT EXISTS x_relation_change SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account          ON x_relation_change TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person           ON x_relation_change TYPE string ASSERT $value != '';
+-- 变之前(NONE = 这个号以前没记过他)/ 变之后
+DEFINE FIELD IF NOT EXISTS from_i_follow    ON x_relation_change TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS from_follows_me  ON x_relation_change TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS to_i_follow      ON x_relation_change TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS to_follows_me    ON x_relation_change TYPE option<bool>;
+-- 看到新关系的时间 / 上一次看到旧关系的时间(变化在两者之间)
+DEFINE FIELD IF NOT EXISTS observed_at      ON x_relation_change TYPE datetime;
+DEFINE FIELD IF NOT EXISTS prev_observed_at ON x_relation_change TYPE option<datetime>;
+-- 从哪看到的:followers / following / tweet-authors / profile-refresh / migration
+DEFINE FIELD IF NOT EXISTS source           ON x_relation_change TYPE string;
+DEFINE INDEX IF NOT EXISTS idx_relchange_account_person ON x_relation_change FIELDS account, person;
+DEFINE INDEX IF NOT EXISTS idx_relchange_account_at     ON x_relation_change FIELDS account, observed_at;
+`;
+
+export async function x_migration_1_2_28(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_28);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_relation_change');
+  for (const f of ['account', 'person', 'from_i_follow', 'to_follows_me', 'observed_at', 'prev_observed_at', 'source']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) {
+      throw new Error(`[x-schema 1.2.28] x_relation_change.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.28] 关系变化表 x_relation_change 已建');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.28', appliedAt = $now,
+      description = '关系变化记录 x_relation_change(只在变了时追加)'`,
+    { rid: new RecordId('schema_version', '1.2.28'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.27 —— 关系**按号**存 `x_relation`(2026-10-16,蓝V互关模块 M0)
+ *
+ * 用户 10-16:「互相覆盖是很严重的问题哦,应该是分字段,判断起来简单吧?」
+ * 原来 `x_author.i_follow / follows_me` 全库一份:X 载荷里的这两个标记是**看的那个号**的视角,
+ * 两个号采集会互相改写对方的关系,而且不报错。
+ *
+ * ⭐ 一行 = 一个号 × 一个人,record id = [号的 rest_id, 人的 rest_id]。
+ * 号用**数字 id** 不用 handle —— antsBTW → otun_myvpn 改过名,用 handle 就断。
+ * ⭐ 不在人表上按号加列:加第三个号零改表(我的判断,设计文档 §4)。
+ * ⚠️ `x_author.i_follow / follows_me` 保留不删(旧数据由 scripts/x-migrate-relation-to-account.ts 迁过来),
+ *    但**再没有代码写它、读它** —— 守卫 tests/modules/x-relation-guard.test.ts 钉着。
+ *
+ * ── x_ws_account 改为按 ws 定位 ──
+ * 旧行是随机 id(1.0.8 用 CREATE),`UPSERT type::record('x_ws_account', ws_id)` 会撞 ws_id 的 UNIQUE 索引。
+ * 这里把旧行换成 id = ws_id(字段原样搬),之后读写都按 ws 定位,不用 WHERE。
+ */
+const X_SCHEMA_1_2_27 = `
+DEFINE TABLE IF NOT EXISTS x_relation SCHEMAFULL;
+-- 哪个号看到的(号的 rest_id)
+DEFINE FIELD IF NOT EXISTS account     ON x_relation TYPE string ASSERT $value != '';
+-- 对方(人的 rest_id)
+DEFINE FIELD IF NOT EXISTS person      ON x_relation TYPE string ASSERT $value != '';
+-- 我(这个号)关注他 / 他关注我(这个号)—— 不知道就是 NONE,不当 false
+DEFINE FIELD IF NOT EXISTS i_follow    ON x_relation TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS follows_me  ON x_relation TYPE option<bool>;
+-- 这两个标记是什么时候看到的 —— 旧观察不覆盖新观察(Laosun 事故)
+DEFINE FIELD IF NOT EXISTS observed_at ON x_relation TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_relation_account ON x_relation FIELDS account;
+`;
+
+export async function x_migration_1_2_27(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_27);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_relation');
+  for (const f of ['account', 'person', 'i_follow', 'follows_me', 'observed_at']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) {
+      throw new Error(`[x-schema 1.2.27] x_relation.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  /** x_ws_account 旧行换成 id = ws_id —— 先删再建(UNIQUE 索引不许两行同 ws_id 并存) */
+  const [old] = await db.query<[Array<{ id: RecordId; ws_id: string; handle: string; rest_id?: string; detected_at: unknown }>]>(
+    'SELECT * FROM x_ws_account',
+  );
+  let rekeyed = 0;
+  for (const r of old ?? []) {
+    if (String(r.id.id) === r.ws_id) continue;
+    await db.query(
+      `DELETE $old;
+       CREATE type::record('x_ws_account', $ws) SET ws_id = $ws, handle = $handle, rest_id = $rest_id, detected_at = $at;`,
+      { old: r.id, ws: r.ws_id, handle: r.handle, rest_id: r.rest_id ?? undefined, at: r.detected_at },
+    );
+    rekeyed += 1;
+  }
+  const [after] = await db.query<[Array<{ n: number }>]>('SELECT count() AS n FROM x_ws_account GROUP ALL');
+  if ((after?.[0]?.n ?? 0) !== (old ?? []).length) {
+    throw new Error(`[x-schema 1.2.27] x_ws_account 换 id 后行数不对:之前 ${(old ?? []).length},之后 ${after?.[0]?.n ?? 0}`);
+  }
+  console.log(`[x-schema 1.2.27] 关系表 x_relation 已建;x_ws_account 换成按 ws 定位 ${rekeyed} 行`);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.27', appliedAt = $now,
+      description = '关系按号存 x_relation(号 × 人);x_ws_account 按 ws 定位'`,
+    { rid: new RecordId('schema_version', '1.2.27'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.26 —— 后台采集任务 `x_bg_job`(2026-10-13,「他的朋友圈」第二步)
  *
  * 用户 2026-10-10:「可以配置获取的长度(一个月、半年、一年，全部)，如果全部时可能比较长，

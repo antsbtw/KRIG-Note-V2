@@ -56,6 +56,13 @@ export const X_SCRIPTS = {
    * 参数走 `JSON.stringify`,绝不拼进脚本文本。
    */
   fetchNextPage: 'x.fetchNextPage' as ScriptId,
+  /**
+   * ⭐⭐ **认号**(2026-10-16,蓝V互关 M0)—— 这个 X 网页此刻登录的是哪个号。
+   * 用户选 A:从页面认(左侧「个人资料」链接 + 账号切换按钮),不碰登录凭据。
+   * ⚠️ 只读不点;两处标记原样回报,判断在 `x-account.ts::parseWhoAmI`。
+   * ⚠️ data-testid 是 X 的页面结构,真机才验得出。
+   */
+  whoAmI: 'x.whoAmI' as ScriptId,
 } as const;
 
 /**
@@ -365,6 +372,21 @@ const buildUnfollowScript = (params: Readonly<Record<string, unknown>>): string 
 };
 
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_SCRIPTS.whoAmI,
+    purpose: 'X:读这个网页此刻登录的号(个人资料链接 href + 账号切换按钮文字),只读不点',
+    /** ⚠️ **无参数** —— 没有运行时值就没有拼串的机会(`inject-template-escape` 那道闸) */
+    build: () => [
+      '(function () {',
+      '  try {',
+      `    var a = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');`,
+      `    var b = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');`,
+      "    return { profileHref: a ? a.getAttribute('href') || undefined : undefined,",
+      "      switcherText: b ? (b.textContent || '').slice(0, 200) : undefined };",
+      '  } catch (e) { return { why: String(e) }; }',
+      '})();',
+    ].join('\n'),
+  },
   {
     id: X_SCRIPTS.unfollow,
     purpose: 'X:在他的主页上取关(点 Following → 确认 Unfollow → 等按钮变回 Follow)',

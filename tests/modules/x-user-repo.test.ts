@@ -192,10 +192,16 @@ describe('x_author 写库守卫', () => {
      * `followedBy`(他关注我)→ `follows_me`。
      * 搞反了「追踪名单」整个方向就反了,而数据里看不出来。
      */
+    /** ⭐ 1.2.27 起关系按号写 x_relation:名单与主页核对都经 RelationObservation(iFollow ← following) */
+    const save = SRC.slice(SRC.indexOf('export async function saveUsers'), SRC.indexOf('export async function saveTweetAuthors'));
+    expect(save.length).toBeGreaterThan(500);
+    expect(save).toMatch(/obs\.push\(\{ person: restId, iFollow: r\.following, followsMe: r\.followedBy, observedAt: now \}\)/);
+    const refresh = SRC.slice(SRC.indexOf('export async function refreshPerson'));
+    expect(refresh).toMatch(/iFollow: r\.following, followsMe: r\.followedBy/);
+    /** 人表那条 SET 里不许再有关系字段 */
     const vFrom = SRC.indexOf('const vars = {');
     const vars = SRC.slice(vFrom, SRC.indexOf('};', vFrom));
-    expect(vars).toMatch(/i_follow:\s*r\.following\b/);
-    expect(vars).toMatch(/follows_me:\s*r\.followedBy\b/);
+    expect(vars).not.toMatch(/i_follow|follows_me/);
   });
 
   it('⭐⭐ 失败不许静默 + 成功路径也要留痕', () => {

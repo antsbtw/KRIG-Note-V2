@@ -52,7 +52,11 @@ export type XDataInvoke =
   | {
       readonly op: 'saveTweets';
       readonly records: readonly TweetRecord[];
-      readonly ctx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string };
+      /**
+       * ⭐ wcId = 采集用的那个 X 网页 —— 推文作者的关系(关注/被关注)是**它登录的号**看到的,
+       * 主进程据此认号(1.2.27);不给就不写关系(如实报 skippedReason)。
+       */
+      readonly ctx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string; readonly wcId?: number };
     }
   /**
    * ⭐⭐⭐ **采到的 X 用户落库** —— 2026-10-05。
@@ -71,7 +75,8 @@ export type XDataInvoke =
   | {
       readonly op: 'saveUsers';
       readonly records: readonly XUserRecord[];
-      readonly ctx: { readonly listSource: string; readonly wsId?: string };
+      /** ⭐ wcId 同 saveTweets:名单里的关系是这个网页登录的号看到的 */
+      readonly ctx: { readonly listSource: string; readonly wsId?: string; readonly wcId?: number };
     }
   /**
    * ⭐⭐⭐ **断点续采:读上次停在哪** —— 2026-10-07。
@@ -101,13 +106,20 @@ export type XDataInvoke =
    * ⭐⭐ 运营 → 状态 的全部数字(2026-10-07)—— 返回 `OpsStatus`(x-ops-status.ts)。
    * 人数 / 推文数 / 各名单更新时间 / 近几天账本 / 还没采集的类别。
    */
-  | { readonly op: 'opsStatus' }
+  | { readonly op: 'opsStatus'; readonly wsId: string }
+  /**
+   * ⭐⭐ 认号(2026-10-16,1.2.27)—— 读这个 ws 的 X 网页登录的是谁;还没数字 id 时会开一次自己的主页。
+   * 返回 `IdentifyResult`(x-account-repo.ts)。
+   */
+  | { readonly op: 'identifyAccount'; readonly wsId: string }
+  /** ⭐ 这个 ws 记的登录号(只读库,不碰页面)—— 返回 `WsAccount | null` */
+  | { readonly op: 'wsAccount'; readonly wsId: string }
   /** ⭐ 运营 → 人:关系概览(每组人数 + 其中蓝V)—— 返回 `PeopleOverview` */
-  | { readonly op: 'peopleOverview' }
+  | { readonly op: 'peopleOverview'; readonly wsId: string }
   /** ⭐ 运营 → 人:列表 —— 返回 `{ total, rows }`;total 是命中总数,rows 最多 limit 条 */
-  | { readonly op: 'queryPeople'; readonly filter: PeopleFilter; readonly limit: number; readonly start: number }
+  | { readonly op: 'queryPeople'; readonly wsId: string; readonly filter: PeopleFilter; readonly limit: number; readonly start: number }
   /** ⭐ 运营 → 人卡:按数字 id 取一个人 —— 返回 `PersonDetail | null` */
-  | { readonly op: 'personDetail'; readonly restId: string }
+  | { readonly op: 'personDetail'; readonly wsId: string; readonly restId: string }
   /** ⭐ 排除 / 取消排除(人的决定,source = human)—— 返回 `{ restId, excluded }` */
   | { readonly op: 'setExcluded'; readonly restId: string; readonly excluded: boolean }
   /** ⭐ 写一个人的全部标签(整组替换)—— 返回清洗后的标签 */
@@ -118,11 +130,11 @@ export type XDataInvoke =
    * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— 载荷解析在 renderer 做(auditUserPayload),
    * 这里只写库。返回 `{ isNew, changes }`。
    */
-  | { readonly op: 'refreshPerson'; readonly record: XUserRecord }
+  | { readonly op: 'refreshPerson'; readonly record: XUserRecord; readonly wcId: number }
   /** ⭐ 他的推文(人卡用)—— 返回 `{ total, rows }`,按作者数字 id 查 */
   | { readonly op: 'personTweets'; readonly restId: string; readonly limit: number }
   /** ⭐ 他的朋友圈(从推文现算)—— 返回 `{ tweets, people, rows }` */
-  | { readonly op: 'friendCircle'; readonly restId: string; readonly limit: number }
+  | { readonly op: 'friendCircle'; readonly wsId: string; readonly restId: string; readonly limit: number }
   /** ⭐ 采一个人时的**进度**落留痕(翻到第几页 / 歇 / 限流等待)—— 运行中也看得见 */
   | { readonly op: 'logPersonProgress'; readonly entry: { readonly handle: string; readonly tab: string; readonly attempt: number; readonly msg: string } }
   /**

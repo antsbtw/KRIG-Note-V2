@@ -103,7 +103,8 @@ describe('接线', () => {
   it('⭐⭐⭐ 存推文后顺带写作者,对回配方名,并记账(否则对账差出这批新人)', () => {
     expect(body.length).toBeGreaterThan(500);
     expect(body).toMatch(/recipeNameForQuery\(p\.ctx\?\.searchRecipe, recipes\)/);
-    expect(body).toMatch(/await saveTweetAuthors\(p\.records, recipeName\)/);
+    /** ⭐ 1.2.27:作者的关系是采集网页登录的号看到的 —— 先认号,再按号写 */
+    expect(body).toMatch(/const account = await accountForWrite\(p\.ctx\?\.wcId\);\s*const a = await saveTweetAuthors\(p\.records, recipeName, account\)/);
     expect(body).toMatch(/kind: 'users', source: 'tweet-authors'/);
   });
 
@@ -127,8 +128,10 @@ describe('⭐⭐⭐ 旧的观察不许覆盖新的(2026-10-08 Laosun 那次)', (
    * 临时库验过:旧推文 vs 新名单 → 不动;新推文 vs 旧数据 → 更新;新人 → 写入;实时 → 更新。
    */
   it('采集字段都带「比库里新才写」的条件;fetched_at 是最后一个赋值', () => {
-    const q = buildAuthorUpsert({ restId: '1', handle: 'h', iFollow: false, followsMe: false, ...OBS }, 'R');
-    for (const col of ['handle', 'i_follow', 'follows_me', 'fetched_at']) {
+    const q = buildAuthorUpsert({ restId: '1', handle: 'h', isBlueVerified: true, iFollow: false, followsMe: false, ...OBS }, 'R');
+    /** ⭐ 1.2.27:关系不写人表(按号写 x_relation)—— 载荷带了也不出现 */
+    expect(q.sql).not.toMatch(/\bi_follow\b|\bfollows_me\b/);
+    for (const col of ['handle', 'is_blue_verified', 'fetched_at']) {
       expect(q.sql, `${col} 没带时间条件`).toMatch(new RegExp(`${col} = IF \\(fetched_at = NONE OR fetched_at <= type::datetime\\(\\$obs\\)\\) THEN`));
     }
     const sets = q.sql.slice(q.sql.indexOf(' SET ') + 5, q.sql.indexOf(' RETURN'));

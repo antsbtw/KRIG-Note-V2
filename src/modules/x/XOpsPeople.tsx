@@ -109,11 +109,11 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   const [followNote, setFollowNote] = useState<string | null>(null);
 
   const loadOverview = useCallback(() => {
-    void xDataCall({ op: 'peopleOverview' }).then((r) => {
+    void xDataCall({ op: 'peopleOverview', wsId: workspaceId }).then((r) => {
       if (r.status === 'ok') setOverview(r.value as PeopleOverview);
       else setErr(r.reason);
     });
-  }, []);
+  }, [workspaceId]);
   /**
    * ⭐ 当前筛选的最新值 —— 核对是异步的,回来时要按**那一刻**的分组判断要不要移出列表。
    * (用 ref:runVerify 是 useCallback,直接读 filter 会拿到旧值)
@@ -182,7 +182,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
           result = { kind: 'miss', text: items.length === 0
             ? `没读到(主页资料那条请求没来${why ? `:${why}` : ''})` : '没读到(载荷里找不到这个人)' };
         } else {
-          const r = await xDataCall({ op: 'refreshPerson', record: rec });
+          /** ⭐ wcId:主页资料里的关系是这个 X 网页登录的号看到的(1.2.27) */
+          const r = await xDataCall({ op: 'refreshPerson', record: rec, wcId });
           if (r.status === 'failed') {
             result = { kind: 'miss', text: `没写进库:${r.reason}` };
           } else {
@@ -312,7 +313,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
           const authFail = worthReloadRetry(why, run.paging?.rounds ?? 0);
           let inserted = 0;
           if (records.length > 0) {
-            const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
+            const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name, wcId: wcId ?? undefined } });
             if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); break; }
             inserted = (sv.value as { inserted: number }).inserted;
           }
@@ -519,7 +520,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   const load = useCallback(async (f: PeopleFilter, start: number) => {
     const my = ++seq.current;
     setBusy(true);
-    const r = await xDataCall({ op: 'queryPeople', filter: f, limit: PAGE, start });
+    const r = await xDataCall({ op: 'queryPeople', wsId: workspaceId, filter: f, limit: PAGE, start });
     if (my !== seq.current) return;
     setBusy(false);
     if (r.status === 'failed') { setErr(r.reason); return; }
@@ -527,7 +528,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     setErr(null);
     setTotal(v.total);
     setRows((prev) => (start === 0 ? v.rows : [...prev, ...v.rows]));
-  }, []);
+  }, [workspaceId]);
 
   const key = JSON.stringify(filter);
   /** 换了分组/筛选,「已移出」那句就不相干了 */
@@ -888,20 +889,20 @@ function PersonCard(
 
   useEffect(() => {
     setP(undefined);
-    void xDataCall({ op: 'personDetail', restId }).then((r) => {
+    void xDataCall({ op: 'personDetail', wsId, restId }).then((r) => {
       if (r.status === 'ok') { setP(r.value as PersonDetail | null); setErr(null); }
       else setErr(r.reason);
     });
-  }, [restId, rev]);
+  }, [restId, rev, wsId]);
 
   /** ⭐ 他的朋友圈 —— 从推文现算,前 30 人 */
   const [circle, setCircle] = useState<{ tweets: number; people: number; rows: CirclePerson[] } | null>(null);
   useEffect(() => {
     setCircle(null);
-    void xDataCall({ op: 'friendCircle', restId, limit: 30 }).then((r) => {
+    void xDataCall({ op: 'friendCircle', wsId, restId, limit: 30 }).then((r) => {
       if (r.status === 'ok') setCircle(r.value as { tweets: number; people: number; rows: CirclePerson[] });
     });
-  }, [restId, rev]);
+  }, [restId, rev, wsId]);
 
   /** ⭐ 他的推文 —— 按数字 id 查,最新 20 条 */
   const [tw, setTw] = useState<{ total: number; rows: PersonTweet[] } | null>(null);

@@ -32,7 +32,7 @@ const LIST_LABEL: Readonly<Record<string, string>> = {
   [X_PAGE_NAME.search]: '搜索',
 };
 
-export function XOpsStatus(): ReactElement {
+export function XOpsStatus({ wsId }: { wsId: string }): ReactElement {
   const [status, setStatus] = useState<OpsStatus | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -40,11 +40,11 @@ export function XOpsStatus(): ReactElement {
 
   const load = useCallback(async () => {
     setBusy(true);
-    const r = await xDataCall({ op: 'opsStatus' });
+    const r = await xDataCall({ op: 'opsStatus', wsId });
     setBusy(false);
     if (r.status === 'ok') { setStatus(r.value as OpsStatus); setErr(null); setLoadedAt(new Date()); }
     else setErr(r.reason);
-  }, []);
+  }, [wsId]);
 
   useEffect(() => { void load(); }, [load]);
 

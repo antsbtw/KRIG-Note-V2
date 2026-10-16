@@ -43,9 +43,16 @@ describe('buildPersonRefresh', () => {
   });
 
   it('⭐⭐ 只写有值的字段:空字符串与没给的不写', () => {
-    const q = buildPersonRefresh(rec({ following: true }), NOW);
-    expect(q.sql).toContain('i_follow = IF');
-    expect(q.sql).not.toMatch(/display_name|bio|follows_me|followers_count/);
+    const q = buildPersonRefresh(rec({ isBlueVerified: true }), NOW);
+    expect(q.sql).toContain('is_blue_verified = IF');
+    expect(q.sql).not.toMatch(/display_name|bio|followers_count/);
+  });
+
+  it('⭐⭐⭐ 关系不写人表(1.2.27):载荷带了关系也不出现在人表 SQL 里 —— 它按号写 x_relation', () => {
+    const q = buildPersonRefresh(rec({ following: true, followedBy: false }), NOW);
+    expect(q.sql).not.toMatch(/\bi_follow\b|\bfollows_me\b/);
+    expect(PERSON_REFRESH_FIELDS).not.toContain('i_follow');
+    expect(PERSON_REFRESH_FIELDS).not.toContain('follows_me');
   });
 
   it('⭐⭐⭐ 旧观察不覆盖新的:都带时间条件;fetched_at 只赋值一次且最后;曾用名在改 handle 之前', () => {
@@ -60,17 +67,26 @@ describe('buildPersonRefresh', () => {
 });
 
 describe('diffPerson', () => {
-  it('关系变化、改名、蓝V 变化要报出来;一致就是空', () => {
-    const before = { handle: 'guy', i_follow: true, follows_me: false, is_blue_verified: true, fetched_at: '2026-10-07T00:00:00Z' };
-    expect(diffPerson(before, rec({ following: true, followedBy: true }), NOW).changes).toEqual(['关系 我关注·他没回关 → 互关']);
-    expect(diffPerson(before, rec({ handle: 'New' }), NOW).changes).toEqual(['改名 @guy → @new']);
-    expect(diffPerson(before, rec({ isBlueVerified: false }), NOW).changes).toEqual(['不再是蓝V']);
-    expect(diffPerson(before, rec({ following: true }), NOW).changes).toEqual([]);
+  it('关系变化(按号)、改名、蓝V 变化要报出来;一致就是空', () => {
+    const before = { handle: 'guy', is_blue_verified: true, fetched_at: '2026-10-07T00:00:00Z' };
+    const rel = { before: { i_follow: true, follows_me: false } };
+    expect(diffPerson(before, rec({ following: true, followedBy: true }), NOW, rel).changes).toEqual(['关系 我关注·他没回关 → 互关']);
+    expect(diffPerson(before, rec({ handle: 'New' }), NOW, rel).changes).toEqual(['改名 @guy → @new']);
+    expect(diffPerson(before, rec({ isBlueVerified: false }), NOW, rel).changes).toEqual(['不再是蓝V']);
+    expect(diffPerson(before, rec({ following: true }), NOW, rel).changes).toEqual([]);
     expect(diffPerson(null, rec({}), NOW).isNew).toBe(true);
   });
 
+  it('⭐⭐ 这次关系没写(认不出号)→ 不许报关系变化:「没写」不能说成「变了」', () => {
+    const before = { handle: 'guy', fetched_at: '2026-10-07T00:00:00Z' };
+    expect(diffPerson(before, rec({ following: false, followedBy: false }), NOW).changes).toEqual([]);
+    /** 这个号以前没记过他(before:null)→ 从「关系不明」变成看到的关系 */
+    expect(diffPerson(before, rec({ following: true, followedBy: true }), NOW, { before: null }).changes)
+      .toEqual(['关系 关系不明 → 互关']);
+  });
+
   it('⭐⭐⭐ 观察比库里旧(SQL 没写)就不许报变化 —— 临时库实测第一版报了假变化', () => {
-    const before = { handle: 'guy', i_follow: true, follows_me: true, fetched_at: '2026-10-09T02:00:00Z' };
+    const before = { handle: 'guy', fetched_at: '2026-10-09T02:00:00Z' };
     const d = diffPerson(before, rec({ following: false, followedBy: false }), '2026-10-01T00:00:00Z');
     expect(d).toEqual({ isNew: false, stale: true, changes: [] });
   });

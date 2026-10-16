@@ -167,6 +167,6 @@ describe('账本接线', () => {
 
   it('⭐ 状态页走 opsStatus,且「状态」类真的渲染它', () => {
     expect(read('src/modules/x/XOpsStatus.tsx')).toMatch(/op: 'opsStatus'/);
-    expect(read('src/modules/x/XOpsView.tsx')).toMatch(/category === 'status' && <XOpsStatus \/>/);
+    expect(read('src/modules/x/XOpsView.tsx')).toMatch(/category === 'status' && <XOpsStatus key=\{accountKey\} wsId=\{workspaceId\} \/>/);
   });
 });

@@ -24,12 +24,25 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 import { clearXHostState, getXHostState, setXHostBusy, setXHostState } from './x-host-registry';
 import { bgRunnerStatus, bgRunningOn, kickBgRunner } from './x-bg-runner';
+import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
 import { isBgRange } from './x-bg-job';
 import type { TimelineRange } from './x-person-timeline';
 import { cancelPersonCollect, collectPersonTab, personCollectProgress, tracePersonProgress } from './x-person-collect';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
+
+/**
+ * ⭐⭐ 读关系要知道看哪个号(1.2.27)—— 这个 ws 记的登录号的数字 id。
+ * ⚠️ 没认出来就**明说**,不退回「全库那份」(那正是互相覆盖的老问题)。
+ */
+async function accountOfWs(wsId: unknown): Promise<{ restId: string } | { reason: string }> {
+  if (typeof wsId !== 'string' || wsId === '') return { reason: '[x.data] 缺 wsId —— 关系按号存,不知道看哪个号' };
+  const a = await readWsAccount(wsId);
+  if (!a) return { reason: `${wsId} 还没认出登录的是哪个号 —— 打开 X 网页,在运营面板点「认号」` };
+  if (!a.restId) return { reason: `${wsId} 登录的是 @${a.handle},但数字 id 还没拿到 —— 在运营面板点「认号」` };
+  return { restId: a.restId };
+}
 
 /**
  * ⭐⭐ 落库后记账本(x_collect_log)—— 增长曲线 / 名单更新时间 / 对账全靠它。
@@ -129,7 +142,8 @@ export function registerXDataIpc(): void {
           try {
             const recipes = p.ctx?.searchRecipe ? await listAllRecipes() : [];
             const recipeName = recipeNameForQuery(p.ctx?.searchRecipe, recipes);
-            const a = await saveTweetAuthors(p.records, recipeName);
+            const account = await accountForWrite(p.ctx?.wcId);
+            const a = await saveTweetAuthors(p.records, recipeName, account);
             traceRecorder.lifecycle({
               layer: 'web.net',
               event: a.failed.length > 0 ? 'x-save-authors-incomplete' : 'x-save-authors-ok',
@@ -138,6 +152,8 @@ export function registerXDataIpc(): void {
                 inserted: a.inserted, updated: a.updated, skippedNoRestId: a.skippedNoRestId,
                 failed: a.failed.length, firstFailure: a.failed[0]?.why ?? '(none)',
                 recipe: recipeName ?? '(没对上配方)',
+                relationAccount: a.relation.account ?? '(无)', relationWritten: a.relation.written, relationChanged: a.relation.changed,
+                relationSkipped: a.relation.skippedReason ?? '(none)', relationFailed: a.relation.failed,
               },
             });
             await logCollect({
@@ -176,7 +192,7 @@ export function registerXDataIpc(): void {
           if (typeof p.ctx?.listSource !== 'string' || p.ctx.listSource.trim() === '') {
             return failed('[x.data] saveUsers 必须给 listSource（它会进 list_memberships，空值会永久留在每个人档案里）');
           }
-          const r = await saveUsers(p.records, p.ctx);
+          const r = await saveUsers(p.records, p.ctx, await accountForWrite(p.ctx.wcId));
           /**
            * ⭐⭐⭐ **落库结果落盘** —— 同 `saveTweets` 那条教训:
            * `console.log` 只在启动 app 的终端里,留痕文件里一个字都没有,
@@ -198,6 +214,9 @@ export function registerXDataIpc(): void {
               failed: r.failed.length,
               firstFailure: r.failed[0]?.why ?? '(none)',
               listSource: p.ctx.listSource,
+              /** ⭐ 关系按号写(1.2.27)—— 没写的原因必须看得见 */
+              relationAccount: r.relation.account ?? '(无)', relationWritten: r.relation.written, relationChanged: r.relation.changed,
+              relationSkipped: r.relation.skippedReason ?? '(none)', relationFailed: r.relation.failed,
             },
           });
           await logCollect({
@@ -242,12 +261,33 @@ export function registerXDataIpc(): void {
           return { status: 'ok', value: { deleted: p.recipeId } };
 
         /** ⭐⭐ 运营 → 状态(2026-10-07)—— 只读 */
-        case 'opsStatus':
-          return { status: 'ok', value: await readOpsStatus() };
+        case 'opsStatus': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readOpsStatus(acc.restId) };
+        }
+
+        /** ⭐⭐ 认号(1.2.27)—— 结果三态原样回去,pending/failed 的原因给人看 */
+        case 'identifyAccount': {
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] identifyAccount 缺 wsId');
+          const r = await identifyAccount(p.wsId);
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: `x-account-identify-${r.status}`, pageId: 'x-data',
+            detail: { wsId: p.wsId, ...(r.status === 'ok' ? { handle: r.account.handle, restId: r.account.restId } : { reason: r.reason }) },
+          });
+          return { status: 'ok', value: r };
+        }
+
+        case 'wsAccount':
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] wsAccount 缺 wsId');
+          return { status: 'ok', value: await readWsAccount(p.wsId) };
 
         /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
-        case 'peopleOverview':
-          return { status: 'ok', value: await readPeopleOverview() };
+        case 'peopleOverview': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readPeopleOverview(acc.restId) };
+        }
 
         case 'queryPeople': {
           /** ⚠️ limit 要有上界:几千行连头像一起过 IPC 再全渲染,面板会卡 */
@@ -257,14 +297,19 @@ export function registerXDataIpc(): void {
           if (!Number.isInteger(p.start) || p.start < 0) {
             return failed('[x.data] queryPeople 的 start 要是非负整数');
           }
-          return { status: 'ok', value: await queryPeople(p.filter, p.limit, p.start) };
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await queryPeople(acc.restId, p.filter, p.limit, p.start) };
         }
 
-        case 'personDetail':
+        case 'personDetail': {
           if (typeof p.restId !== 'string' || p.restId === '') {
             return failed('[x.data] personDetail 缺 restId —— 人的身份是数字 id');
           }
-          return { status: 'ok', value: await readPerson(p.restId) };
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readPerson(acc.restId, p.restId) };
+        }
 
         case 'setExcluded':
           if (typeof p.restId !== 'string' || p.restId === '' || typeof p.excluded !== 'boolean') {
@@ -439,10 +484,13 @@ export function registerXDataIpc(): void {
           return { status: 'ok', value: { logged: true } };
         }
 
-        case 'friendCircle':
+        case 'friendCircle': {
           if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] friendCircle 缺 restId');
           if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) return failed('[x.data] friendCircle 的 limit 要在 1–200 之间');
-          return { status: 'ok', value: await readFriendCircle(p.restId, p.limit) };
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readFriendCircle(acc.restId, p.restId, p.limit) };
+        }
 
         case 'personTweets':
           if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] personTweets 缺 restId');
@@ -456,10 +504,13 @@ export function registerXDataIpc(): void {
           if (!rec || typeof rec.restId !== 'string' || rec.restId === '' || typeof rec.handle !== 'string') {
             return failed('[x.data] refreshPerson 要一条带数字 id 的用户记录');
           }
-          const d = await refreshPerson(rec);
+          const d = await refreshPerson(rec, await accountForWrite(p.wcId));
           traceRecorder.lifecycle({
             layer: 'web.net', event: 'x-person-refresh', pageId: 'x-data',
-            detail: { restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes },
+            detail: {
+              restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes,
+              relationAccount: d.relation.account ?? '(无)', relationSkipped: d.relation.skippedReason ?? '(none)',
+            },
           });
           /** ⭐ 新人记账 —— 否则状态页对账差出一个 */
           if (d.isNew) {

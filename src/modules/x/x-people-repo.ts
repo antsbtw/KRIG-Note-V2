@@ -2,9 +2,11 @@
  * ⭐ 运营 → 「人」的读库(仅 main 进程)—— SQL 与解析在 `x-people-query.ts`(纯函数)
  *
  * 除了「排除」(人的决定,1.2.21)之外都是只读。
+ * ⭐ 读关系的函数都要 `account`(号的数字 id)—— 关系按号存(1.2.27)。
  */
 
 import { getXDB } from '@storage/surreal/client';
+import { PEOPLE_WITH_RELATION } from './x-account';
 import { computeCircle, looksChinese, type CirclePerson, type CircleTweet } from './x-friend-circle';
 import {
   buildOverviewQuery, buildPeopleQuery, parseOverview, parsePeopleResult, PERSON_DETAIL_SQL, SET_EXCLUDED_SQL,
@@ -12,20 +14,22 @@ import {
   type PeopleFilter, type PeopleOverview, type PersonDetail, type PersonRow,
 } from './x-people-query';
 
-export async function readPeopleOverview(): Promise<PeopleOverview> {
-  return parseOverview(await getXDB().query<unknown[]>(buildOverviewQuery()));
+export async function readPeopleOverview(account: string): Promise<PeopleOverview> {
+  const q = buildOverviewQuery(account);
+  return parseOverview(await getXDB().query<unknown[]>(q.sql, q.vars));
 }
 
 export async function queryPeople(
-  f: PeopleFilter, limit: number, start: number,
+  account: string, f: PeopleFilter, limit: number, start: number,
 ): Promise<{ readonly total: number; readonly rows: PersonRow[] }> {
-  const q = buildPeopleQuery(f, limit, start);
+  const q = buildPeopleQuery(account, f, limit, start);
   return parsePeopleResult(await getXDB().query<unknown[]>(q.sql, q.vars));
 }
 
 /** ⚠️ 查不到返回 null —— 调用方要说「这个人不在库里」,不显示一张空卡 */
-export async function readPerson(restId: string): Promise<PersonDetail | null> {
-  const [rows] = await getXDB().query<[PersonDetail[]]>(PERSON_DETAIL_SQL, { rest_id: restId });
+export async function readPerson(account: string, restId: string): Promise<PersonDetail | null> {
+  if (account === '') throw new Error('[x.people] 没有号的数字 id,不知道看哪个号的关系');
+  const [rows] = await getXDB().query<[PersonDetail[]]>(PERSON_DETAIL_SQL, { rest_id: restId, acct: account });
   return rows?.[0] ?? null;
 }
 
@@ -77,7 +81,7 @@ export async function readPersonTweets(restId: string, limit: number): Promise<{
  * 返回前 limit 个人,带上人表里的资料;人表里没有的(只被提及过)用推文里见过的 handle 显示。
  */
 
-export async function readFriendCircle(restId: string, limit: number): Promise<{
+export async function readFriendCircle(account: string, restId: string, limit: number): Promise<{
   tweets: number; people: number; rows: CirclePerson[];
 }> {
   const db = getXDB();
@@ -90,7 +94,7 @@ export async function readFriendCircle(restId: string, limit: number): Promise<{
   const top = all.slice(0, limit);
   const [rows] = await db.query<[Array<Record<string, unknown>>]>(
     `SELECT rest_id, handle, display_name, avatar, bio, is_blue_verified, i_follow, follows_me
-       FROM x_author WHERE rest_id IN $ids`, { ids: top.map((e) => e.id) },
+       FROM ${PEOPLE_WITH_RELATION} WHERE rest_id IN $ids`, { ids: top.map((e) => e.id), acct: account },
   );
   const byId = new Map((rows ?? []).map((r) => [String(r.rest_id), r]));
   return {

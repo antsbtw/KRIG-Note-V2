@@ -51,7 +51,11 @@ import { getXDB } from '@storage/surreal/client';
 import { normalizeHandle } from '@shared/types/x-timeline-types';
 import type { XUserRecord } from './x-user-audit';
 import { authorsFromTweets, buildAuthorUpsert, type TweetAuthorSource } from './x-tweet-authors';
-import { buildPersonRefresh, diffPerson, type PersonBefore } from './x-person-refresh';
+import { buildPersonRefresh, diffPerson, type PersonBefore, type RelationBefore } from './x-person-refresh';
+import {
+  buildRelationChange, buildRelationUpsert, type AccountDecision, type RelationObservation,
+  type RelationRowBefore, type RelationWriteReport,
+} from './x-account';
 
 /**
  * ⭐⭐ **采集字段** —— 重采可以覆盖(都来自载荷)。
@@ -62,7 +66,10 @@ export const USER_COLLECTED_FIELDS = [
   'handle', 'rest_id', 'display_name', 'avatar', 'bio', 'location',
   'followers_count', 'following_count', 'tweet_count', 'media_count',
   'website', 'is_blue_verified', 'is_verified', 'is_protected',
-  'i_follow', 'follows_me',
+  /**
+   * ⚠️ i_follow / follows_me **不在这里了**(2026-10-16,schema 1.2.27):
+   * 关系是「哪个号看到的」,按号存进 x_relation(`writeRelations`)。
+   */
   'account_created_at', 'list_source', 'list_seq', 'list_seen_at',
   'list_memberships', 'handle_history', 'fetched_at',
 ] as const;
@@ -114,7 +121,52 @@ export type SaveUsersResult = {
    * ⚠️ 同样不混进 `failed`:不是写库出错,是载荷没给 id。
    */
   readonly skippedNoRestId: number;
+  /** ⭐ 关系写没写(按号,1.2.27)—— skippedReason 有值 = 这批人的关系**没进库** */
+  readonly relation: RelationWriteReport;
 };
+
+/**
+ * ⭐⭐ 按号写一批关系(2026-10-16,schema 1.2.27)。
+ * ⚠️ 号认不出 / 对不上 → 一条都不写,原因原样报出(不猜号、不写到别的号名下)。
+ * 一条坏只赔一条,但失败要数出来。
+ */
+export async function writeRelations(
+  account: AccountDecision, obs: readonly RelationObservation[],
+  /** 这批关系从哪看到的(followers / following / tweet-authors / profile-refresh …)—— 进变化记录 */
+  source: string,
+): Promise<{ readonly report: RelationWriteReport; readonly before: ReadonlyMap<string, RelationBefore> }> {
+  const before = new Map<string, RelationBefore>();
+  if (account.kind !== 'ok') {
+    if (obs.length > 0) console.warn(`[x.relation] ${obs.length} 人的关系没写:${account.reason}`);
+    return { report: { written: 0, changed: 0, skippedReason: account.reason, failed: 0 }, before };
+  }
+  const db = getXDB();
+  let written = 0;
+  let changed = 0;
+  const failures: string[] = [];
+  for (const o of obs) {
+    const q = buildRelationUpsert(account.restId, o);
+    if (q === null) continue;
+    try {
+      const [b] = await db.query<[Array<RelationRowBefore>]>(q.sql, q.vars);
+      /** RETURN BEFORE 新建时是空 → 这个号以前没记过他(null 就是这个意思,不是写库值) */
+      const got = b?.[0];
+      const prev: RelationRowBefore = got === undefined ? null : got;
+      before.set(o.person, prev);
+      written += 1;
+      /** ⭐ 关系变了才追加一条变化(1.2.28);当前关系已写好,变化记录失败也要数出来 */
+      const c = buildRelationChange(account.restId, prev, o, source);
+      if (c !== null) { await db.query(c.sql, c.vars); changed += 1; }
+    } catch (e) {
+      failures.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  return { report: { account: account.restId, written, changed, failed: failures.length, firstFailure: failures[0] }, before };
+}
+
+const relationLog = (r: RelationWriteReport): string =>
+  r.skippedReason !== undefined ? ` / ⚠️ 关系没写:${r.skippedReason}`
+    : ` / 关系 ${r.written}(号 ${r.account},变化 ${r.changed})${r.failed > 0 ? ` 失败 ${r.failed}:${r.firstFailure}` : ''}`;
 
 /** ⚠️ 空串当成「没有」—— option<T> 要传 undefined,不是 null 也不是 '' */
 const opt = (v: string | undefined): string | undefined =>
@@ -167,6 +219,7 @@ function mergeMemberships(old: unknown, listSource: string): string[] {
 export async function saveUsers(
   records: readonly XUserRecord[],
   ctx: UserCollectContext,
+  account: AccountDecision,
 ): Promise<SaveUsersResult> {
   const db = getXDB();
   const now = new Date().toISOString();
@@ -175,6 +228,7 @@ export async function saveUsers(
   let skippedNoHandle = 0;
   let skippedNoRestId = 0;
   const failed: Array<{ handle: string; why: string }> = [];
+  const obs: RelationObservation[] = [];
 
   for (const r of records) {
     /**
@@ -223,14 +277,6 @@ export async function saveUsers(
         /** ⚠️ 与蓝V**不是一回事** —— 两个都存,别合并 */
         is_verified: r.isVerified,
         is_protected: r.isProtected,
-        /**
-         * ⭐ X 的原词映射到表里的旧名:
-         * `following`(我关注他)→ `i_follow`
-         * `followedBy`(他关注我)→ `follows_me`
-         * ⚠️ 别对调 —— 这两个字段是「追踪名单」的判据,搞反了方向全反。
-         */
-        i_follow: r.following,
-        follows_me: r.followedBy,
         account_created_at: toDatetime(r.createdAt),
         list_source: ctx.listSource,
         /** ⭐ 名次只在**同一次采集内**可比(schema 1.2.4 原话) */
@@ -266,7 +312,6 @@ export async function saveUsers(
            website = $website,
            is_blue_verified = $is_blue_verified,
            is_verified = $is_verified, is_protected = $is_protected,
-           i_follow = $i_follow, follows_me = $follows_me,
            -- datetime 字段必须 cast:直传 ISO 字符串会被库拒收
            -- (option 的要先判 NONE,否则 type::datetime(NONE) 自己就抛)
            account_created_at = IF $account_created_at != NONE
@@ -279,6 +324,11 @@ export async function saveUsers(
         vars,
       );
       if (exists) updated += 1; else inserted += 1;
+      /**
+       * ⭐ X 的原词 → 关系表:`following`(我关注他)→ i_follow,`followedBy`(他关注我)→ follows_me。
+       * ⚠️ 别对调 —— 搞反了方向全反。人没写进去就不写他的关系(在 try 里)。
+       */
+      obs.push({ person: restId, iFollow: r.following, followsMe: r.followedBy, observedAt: now });
     } catch (e) {
       /** ⚠️ 一条坏只赔一条 —— 不让整批作废,但也**绝不静默** */
       failed.push({ handle, why: e instanceof Error ? e.message : String(e) });
@@ -292,15 +342,17 @@ export async function saveUsers(
    * ⭐ **成功路径也要留痕**,否则下次验证又要靠人截图。
    * ⚠️ 失败原因只记**第一条**(整批同因时 N 条一模一样,记全了是噪音)。
    */
+  const relation = (await writeRelations(account, obs, ctx.listSource)).report;
   console.log(
     `[x.user-repo] 落库 ${records.length} 人(${ctx.listSource})`
     + ` → 新 ${inserted} / 更新 ${updated}`
     + (skippedNoHandle > 0 ? ` / 无 handle 挡下 ${skippedNoHandle}` : '')
     + (skippedNoRestId > 0 ? ` / 无数字 id 挡下 ${skippedNoRestId}` : '')
-    + (failed.length > 0 ? ` / 失败 ${failed.length}：${failed[0].why}` : ''),
+    + (failed.length > 0 ? ` / 失败 ${failed.length}：${failed[0].why}` : '')
+    + relationLog(relation),
   );
 
-  return { inserted, updated, failed, skippedNoHandle, skippedNoRestId };
+  return { inserted, updated, failed, skippedNoHandle, skippedNoRestId, relation };
 }
 
 /**
@@ -309,8 +361,8 @@ export async function saveUsers(
  * ⚠️ 只写有值的字段、不碰人工字段与名单字段 —— 见 buildAuthorUpsert。
  */
 export async function saveTweetAuthors(
-  rows: readonly TweetAuthorSource[], recipeName: string | undefined,
-): Promise<{ inserted: number; updated: number; skippedNoRestId: number; failed: Array<{ restId: string; why: string }> }> {
+  rows: readonly TweetAuthorSource[], recipeName: string | undefined, account: AccountDecision,
+): Promise<{ inserted: number; updated: number; skippedNoRestId: number; failed: Array<{ restId: string; why: string }>; relation: RelationWriteReport }> {
   /** ⭐ 实时采集:观察时间就是现在(推文刚采到)—— 永远比库里新 */
   const now = new Date().toISOString();
   const { authors, skippedNoRestId } = authorsFromTweets(rows, now);
@@ -318,6 +370,7 @@ export async function saveTweetAuthors(
   let inserted = 0;
   let updated = 0;
   const failed: Array<{ restId: string; why: string }> = [];
+  const obs: RelationObservation[] = [];
   for (const a of authors) {
     try {
       const q = buildAuthorUpsert(a, recipeName);
@@ -325,29 +378,44 @@ export async function saveTweetAuthors(
       const [before] = await db.query<[Array<Record<string, unknown> | null>]>(q.sql, q.vars);
       const b = before?.[0];
       if (b === undefined || b === null) inserted += 1; else updated += 1;
+      obs.push({ person: a.restId, iFollow: a.iFollow, followsMe: a.followsMe, observedAt: a.observedAt });
     } catch (e) {
       failed.push({ restId: a.restId, why: e instanceof Error ? e.message : String(e) });
     }
   }
+  const relation = (await writeRelations(account, obs, 'tweet-authors')).report;
   console.log(
     `[x.user-repo] 推文作者 ${authors.length} 人${recipeName ? `(配方 ${recipeName})` : '(没对上配方)'}`
     + ` → 新 ${inserted} / 更新 ${updated}`
     + (skippedNoRestId > 0 ? ` / 无数字 id 挡下 ${skippedNoRestId}` : '')
-    + (failed.length > 0 ? ` / 失败 ${failed.length}:${failed[0].why}` : ''),
+    + (failed.length > 0 ? ` / 失败 ${failed.length}:${failed[0].why}` : '')
+    + relationLog(relation),
   );
-  return { inserted, updated, skippedNoRestId, failed };
+  return { inserted, updated, skippedNoRestId, failed, relation };
 }
 
 /**
  * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— SQL 在 `x-person-refresh.ts`(纯)。
  * 观察时间 = 现在(主页刚加载)。返回是不是新人、以及关系/改名/蓝V 的变化(给人看)。
  */
-export async function refreshPerson(r: XUserRecord): Promise<{ isNew: boolean; stale: boolean; changes: string[] }> {
+export async function refreshPerson(
+  r: XUserRecord, account: AccountDecision,
+): Promise<{ isNew: boolean; stale: boolean; changes: string[]; relation: RelationWriteReport }> {
   if (!r.restId) throw new Error('[x.user-repo] 核对:载荷里没有数字 id,不知道这是谁');
   const obs = new Date().toISOString();
   const q = buildPersonRefresh(r, obs);
   const [before] = await getXDB().query<[PersonBefore[]]>(q.sql, q.vars);
-  const d = diffPerson(before?.[0], r, obs);
-  console.log(`[x.user-repo] 核对 @${r.handle}(${r.restId}):${d.isNew ? '新人' : d.changes.length > 0 ? d.changes.join(';') : '与库里一致'}`);
-  return d;
+  /** ⭐ 关系按号写;旧关系从 RETURN BEFORE 拿,算「关系变化」用 */
+  const { report: relation, before: relBefore } = await writeRelations(account, [
+    { person: r.restId, iFollow: r.following, followsMe: r.followedBy, observedAt: obs },
+  ], 'profile-refresh');
+  /**
+   * 关系没写(认不出号)→ 不拿关系算变化:那会把「没写」报成「变了」。
+   * 写了但这个号以前没记过他 → before 为 null(「关系不明」→ 看到的关系)。
+   */
+  const relArg = relation.skippedReason !== undefined ? undefined
+    : { before: relBefore.has(r.restId) ? (relBefore.get(r.restId) as RelationBefore) : null };
+  const d = diffPerson(before?.[0], r, obs, relArg);
+  console.log(`[x.user-repo] 核对 @${r.handle}(${r.restId}):${d.isNew ? '新人' : d.changes.length > 0 ? d.changes.join(';') : '与库里一致'}${relationLog(relation)}`);
+  return { ...d, relation };
 }
