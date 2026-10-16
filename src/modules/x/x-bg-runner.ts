@@ -230,6 +230,18 @@ export async function tickOnce(
   }
 }
 
+/**
+ * ⭐ 体检探针(黑匣子 2026-10-16):后台此刻在采谁 / 各号在等什么 / 下次醒来还有几秒。
+ * 卡死复盘时看「卡住那一刻后台在干什么」。纯读内存态。
+ */
+export function bgRunnerHealth(): Record<string, unknown> {
+  return {
+    running: [...liveByWs.entries()].map(([ws, l]) => ({ ws, handle: l.handle, range: l.range, sinceSec: Math.round((Date.now() - l.startedAt) / 1000), msg: l.msg.slice(0, 80) })),
+    waiting: Object.fromEntries(waitNoteByWs),
+    nextTickInSec: nextTickAt === null ? null : Math.round((nextTickAt - Date.now()) / 1000),
+  };
+}
+
 /** 真正跑一段 + 存回库 —— tickOnce 的默认 drive(生产用) */
 async function driveSegment(_wsId: string, wcId: number, job: BgJob): Promise<void> {
   const now = new Date();

@@ -82,6 +82,19 @@ export class NetworkEventBus {
   /** bodyRef 的插入序,用于老化(Map 迭代序即插入序) */
   private readonly providerBindings = new Map<string, ProviderBinding>();
 
+  /**
+   * ⭐ 体检用的规模统计(黑匣子 2026-10-16)—— 「越跑越慢」先看哪张表在长。纯读、O(页数)。
+   */
+  stats(): { pages: number; requests: number; maxPerPage: number; bodies: number; bindings: number } {
+    let requests = 0;
+    let maxPerPage = 0;
+    for (const list of this.requests.values()) {
+      requests += list.length;
+      if (list.length > maxPerPage) maxPerPage = list.length;
+    }
+    return { pages: this.requests.size, requests, maxPerPage, bodies: this.bodiesByRef.size, bindings: this.providerBindings.size };
+  }
+
   constructor(private readonly now: () => number = Date.now) {}
 
   // ── 订阅 ──

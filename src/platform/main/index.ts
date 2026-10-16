@@ -18,6 +18,7 @@
  * 不是 app.setName()。dev 必须 patch Info.plist 才能改首项。
  */
 
+import { startHealthMonitor, stopHealthMonitor } from './diagnostics/health/health-monitor';
 import { app, BrowserWindow, protocol } from 'electron';
 
 // ── stdout/stderr EPIPE 防护(进程退出边界,非业务兜底)──
@@ -240,6 +241,12 @@ app.whenReady().then(async () => {
   // ⭐ 步 3:启动 web.net 健康巡检(60s 一轮,只在健康状态翻转时发声,不刷屏)。
   // 停止调用在下面的 before-quit —— 常驻 timer 必须有停止调用(记忆 project-graceful-shutdown)。
 
+  /**
+   * ⭐⭐ 运行黑匣子(2026-10-16):每 30s 体检 + 看门狗线程判主进程卡住 + 无响应/崩溃事件,
+   * 持久写 krig-data/health/。用户:「在卡死后有记录…这样你就可以复盘哪里卡死了」。只记不弹。
+   * 停止调用在 before-quit(常驻 timer + worker 铁律)。
+   */
+  startHealthMonitor();
   startHealthWatch();
   // ⭐ 诊断留痕的老化 —— 停止调用在下面的 before-quit(常驻 timer 铁律)
   startTraceSweep();
@@ -374,6 +381,7 @@ app.on('before-quit', (event) => {
   // 且退出途中继续跑配方毫无意义(日志刷 `no active X webContents, skip`)。
   // ⭐ 步 3:停 web.net 健康巡检(与上面同理:活着的 setInterval 会吊住事件循环)
   stopHealthWatch();
+  stopHealthMonitor();
   stopTraceSweep();
   stopTraceLifecycle();
   if (reconciled) {

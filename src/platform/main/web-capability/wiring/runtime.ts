@@ -8,6 +8,7 @@
 import { PageRegistry } from '../page';
 import { NetworkEventBus, CdpBodyProvider } from '../net';
 import { TraceRecorder, HealthProbe, NetMonitor } from '../trace';
+import { registerHealthProbe } from '../../diagnostics/health/health-monitor';
 import { ScriptRegistry, registerAIScripts, registerLocateScripts, registerRendererScripts } from '../dom';
 import { ElectronDomRunner } from './electron-dom';
 import { FsTraceSink } from './fs-trace-sink';
@@ -92,6 +93,12 @@ export const traceSink = new FsTraceSink(traceRoot());
 
 export const traceRecorder = new TraceRecorder({ sink: traceSink });
 export const healthProbe = new HealthProbe();
+
+/**
+ * ⭐ 把网络层的规模放进运行体检(黑匣子 2026-10-16)—— 「越跑越慢」先看总线 / CDP 待办表 / 监听器有没有一直涨。
+ * ⚠️ 推模式:能力层自己登记,体检那边不认识能力层内部。
+ */
+registerHealthProbe('web.net', () => ({ bus: netBus.stats(), cdp: bodyProvider.stats() }));
 
 /** ⭐ 预注册脚本表 —— 业务方只能按 id 取用,拼不出坏脚本 */
 export const scriptRegistry = new ScriptRegistry();
