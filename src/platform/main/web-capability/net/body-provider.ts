@@ -142,6 +142,17 @@ export class CdpBodyProvider {
   readonly providerId = 'cdp';
   /** 已经装过的宿主 —— 每个宿主只装一次(V1 字面) */
   private readonly attachedHosts = new Set<number>();
+  /**
+   * ⭐⭐ 每个页面「已加载完成、正在取回 body」的请求数 —— 2026-10-16。
+   * 采集收尾前要等它归零:钩子腿在页面里即时拿到响应,CDP 要 loadingFinished → getResponseBody
+   * → 配对,总慢一步。收尾时 CDP 那份还在路上,就只剩钩子那份(**没有请求头**)→ 翻页种子没头。
+   */
+  private readonly inFlightByPage = new Map<PageId, number>();
+
+  /** 这个页面 CDP 还有几条 body 在取回途中 */
+  inFlight(pageId: PageId): number {
+    return this.inFlightByPage.get(pageId) ?? 0;
+  }
 
   constructor(
     private readonly bus: NetworkEventBus,
@@ -264,7 +275,13 @@ export class CdpBodyProvider {
       pending.delete(providerRequestId);
       if (!shouldCaptureBody(existing, policy)) return;
 
-      void this.fetchAndAttachBody(pageId, dbg, providerRequestId, existing, policy);
+      this.inFlightByPage.set(pageId, this.inFlight(pageId) + 1);
+      void this.fetchAndAttachBody(pageId, dbg, providerRequestId, existing, policy)
+        .finally(() => {
+          /** ⚠️ 成功、失败、抛错都要减 —— 漏减会让收尾每次白等满上限 */
+          const n = this.inFlight(pageId) - 1;
+          if (n <= 0) this.inFlightByPage.delete(pageId); else this.inFlightByPage.set(pageId, n);
+        });
       return;
     }
   }

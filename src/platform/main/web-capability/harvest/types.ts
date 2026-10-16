@@ -97,6 +97,11 @@ export type HarvestReport = {
     readonly cdp: number; readonly hook: number; readonly both: number;
     readonly hookInjected: boolean; readonly cdpAttached: boolean;
   };
+  /**
+   * ⭐ 收尾前等 CDP 在途取回落地:等了多久、等完还剩几条(>0 = 等满上限还没到,如实说)。
+   * 没走到收尾(比如导航失败)时没有这一项。
+   */
+  readonly cdpSettle?: { readonly waitedMs: number; readonly leftInFlight: number };
 };
 
 /** 本层依赖的最小操作集 —— ⭐ 由 wiring 注入,本层零 Electron */
@@ -110,6 +115,10 @@ export interface HarvestDeps {
    * 「采够页数就停」靠它:每轮问一次够了没。
    */
   peekAcquire(pageId: PageId): readonly AcquiredItem[];
+  /**
+   * ⭐⭐ CDP 还有几条 body 在取回途中 —— 收尾前等它归零(2026-10-16,种子没头的根因:两条腿赛跑)。
+   */
+  cdpInFlight(pageId: PageId): number;
   finishAcquire(pageId: PageId, startedAt?: number): {
     ok: boolean; problems: readonly string[]; items: readonly AcquiredItem[];
     elapsedMs: number;

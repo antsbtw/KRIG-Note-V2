@@ -254,7 +254,11 @@ export function mergedItems(pageId: PageId, limit: number): MergedItem[] {
     const k = dedupKey(x.url, x.status, x.text);
     const prev = byKey.get(k);
     if (prev) {
-      byKey.set(k, { ...prev, from: 'both' });
+      /**
+       * ⚠️ 只有之前那份**来自 CDP** 才算互证 —— 2026-10-16 真机:钩子把同一条收到两次时,
+       * 第二次撞上第一次(hook)被错标成 both,于是出现「both 却 0 个头」,腿计数也虚高。
+       */
+      if (prev.from === 'cdp') byKey.set(k, { ...prev, from: 'both' });
       continue;
     }
     byKey.set(k, {
@@ -418,6 +422,7 @@ export function makeHarvestDeps(wc: WebContents, pid: PageId): HarvestDeps {
   return {
     startAcquire: (pageId, noisy) => startAcquire(acq, pageId, noisy),
     peekAcquire: (pageId) => mergedItems(pageId, Number.MAX_SAFE_INTEGER),
+    cdpInFlight: (pageId) => bodyProvider.inFlight(pageId),
     finishAcquire: (pageId, startedAt) => finishAcquire(acq, pageId, startedAt),
 
     reload: () => { wc.reload(); },

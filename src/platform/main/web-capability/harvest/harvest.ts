@@ -26,6 +26,10 @@ import type { AcquiredItem } from '../acquire/types';
 import type { HarvestDeps, HarvestPlan, HarvestReport } from './types';
 
 /** 装腿之后等多久再重载 —— 让钩子注入生效 */
+/** 收尾前等 CDP 在途取回的上限 / 轮询间隔(见 ⑤′) */
+export const CDP_SETTLE_MAX_MS = 1500;
+export const CDP_SETTLE_POLL_MS = 50;
+
 export const SETTLE_BEFORE_RELOAD_MS = 300;
 /** 重载之后等多久再开始滚 —— 让首屏请求发出去 */
 export const SETTLE_AFTER_RELOAD_MS = 1600;
@@ -180,6 +184,20 @@ export async function harvestPage(
     },
   });
 
+  /**
+   * ── ⑤′ 收尾前等 CDP 在途的 body 落地(2026-10-16)──
+   * ⚠️⚠️ 根因:「采够了」不管是哪条腿交的。钩子腿在页面里即时拿到响应,CDP 要
+   * loadingFinished → getResponseBody → 配对,总慢一步;收尾一停,在路上的那份就丢了,
+   * 只剩钩子那份 —— **没有请求头** → 翻页种子没头 → 后台那段失败。
+   * app 跑得越久 CDP 越慢,余量从 376ms 缩到 94ms(真机计时),输掉就失败。
+   * ⭐ 只等「已加载完、正在取回」的(CDP 空闲时零等待);有上限,等满还没到就如实带出去。
+   */
+  const settleStart = deps.now();
+  while (deps.cdpInFlight(pageId) > 0 && deps.now() - settleStart < CDP_SETTLE_MAX_MS) {
+    await deps.wait(CDP_SETTLE_POLL_MS);
+  }
+  const cdpSettle = { waitedMs: deps.now() - settleStart, leftInFlight: deps.cdpInFlight(pageId) };
+
   // ── ⑤ 停止采集,出报告 ──
   const acq = deps.finishAcquire(pageId, t0);
   const pages = countPages(acq.items, pageWant);
@@ -226,5 +244,6 @@ export async function harvestPage(
         : scroll.stopReason,
     elapsedMs: deps.now() - t0,
     legs: acq.legs,
+    cdpSettle,
   };
 }

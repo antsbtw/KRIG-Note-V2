@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { harvestPage } from '@platform/main/web-capability/harvest/harvest';
+import { harvestPage, CDP_SETTLE_MAX_MS, CDP_SETTLE_POLL_MS } from '@platform/main/web-capability/harvest/harvest';
 import type { HarvestDeps } from '@platform/main/web-capability/harvest/types';
 import type { AcquiredItem } from '@platform/main/web-capability/acquire/types';
 import type { PageId } from '@platform/main/web-capability/page/types';
@@ -38,11 +38,15 @@ function deps(plan: {
   stuckAtRound?: number;
   /** ⭐ 抢救脚本回不回 `jumped:true`(false = 一张卡片都没找到) */
   scriptReturnsJumped?: boolean;
+  /** ⭐ CDP 在途取回数,每问一次取下一个(取完重复最后一个);不给 = 恒 0(CDP 空闲) */
+  inFlightSeq?: number[];
 } = {}) {
   const pool: AcquiredItem[] = [...(plan.initial ?? [])];
   const order: string[] = [];
   let round = 0;
   let t = 0;
+  let inFlightCalls = 0;
+  let inFlightAtFinish: number | undefined;
   const d: HarvestDeps = {
     async startAcquire() {
       order.push('startAcquire');
@@ -53,8 +57,15 @@ function deps(plan: {
       };
     },
     peekAcquire: () => [...pool],
+    cdpInFlight: () => {
+      const seq = plan.inFlightSeq ?? [0];
+      const v = seq[Math.min(inFlightCalls, seq.length - 1)];
+      inFlightCalls += 1;
+      return v;
+    },
     finishAcquire: () => {
       order.push('finishAcquire');
+      inFlightAtFinish = (plan.inFlightSeq ?? [0])[Math.min(Math.max(inFlightCalls - 1, 0), (plan.inFlightSeq ?? [0]).length - 1)];
       return {
         ok: pool.length > 0,
         problems: pool.length === 0 ? ['一条响应都没有'] : [],
@@ -114,7 +125,7 @@ function deps(plan: {
     wait: async (ms) => { t += ms; },
     now: () => { t += 1; return t; },
   };
-  return { d, order, pool };
+  return { d, order, pool, atFinish: () => inFlightAtFinish };
 }
 
 describe('⭐⭐⭐ 编排顺序', () => {
@@ -416,5 +427,35 @@ describe('⭐⭐⭐ 滚不动要先抢救,别急着判到底', () => {
     const { d, order } = deps({ stuckAtRound: 1 });
     await harvestPage(d, 'p1' as never, { maxRounds: 2 });
     expect(order.filter((o) => o === 'runScript')).toHaveLength(0);
+  });
+});
+
+describe('⭐⭐⭐ 收尾前等 CDP 在途取回(2026-10-16,翻页种子没头的根因)', () => {
+  /**
+   * 真机计时:钩子腿即时交、CDP 要 loadingFinished → getResponseBody → 配对;
+   * 「采够了」一停,在路上的那份就丢了 → 只剩钩子那份(没请求头)→ 种子没头。
+   * 余量从 376ms 缩到 94ms(app 跑久了 CDP 变慢),输掉就失败。
+   */
+  it('⭐⭐ 还有在途的 → 等它归零才停(停的那刻已经没有在途的)', async () => {
+    const { d, order, atFinish } = deps({ perRound: [[item(PAGE_URL)]], inFlightSeq: [2, 2, 1, 0] });
+    const rep = await harvestPage(d, PAGE, { maxRounds: 1, wantPages: 1, pageUrlIncludes: ['/HomeTimeline'] });
+    expect(order).toContain('finishAcquire');
+    expect(atFinish(), '还有在途的就停了 —— CDP 那份会丢').toBe(0);
+    expect(rep.cdpSettle?.leftInFlight).toBe(0);
+    expect(rep.cdpSettle!.waitedMs).toBeGreaterThan(0);
+  });
+
+  it('⭐ CDP 空闲 → 不等(不拖慢人卡核对这类操作)', async () => {
+    const { d } = deps({ perRound: [[item(PAGE_URL)]] });
+    const rep = await harvestPage(d, PAGE, { maxRounds: 1, wantPages: 1, pageUrlIncludes: ['/HomeTimeline'] });
+    expect(rep.cdpSettle!.waitedMs).toBeLessThan(CDP_SETTLE_POLL_MS);
+  });
+
+  it('⚠️ 一直不归零 → 等满上限就停,并如实带出还剩几条(不无限等)', async () => {
+    const { d } = deps({ perRound: [[item(PAGE_URL)]], inFlightSeq: [1] });
+    const rep = await harvestPage(d, PAGE, { maxRounds: 1, wantPages: 1, pageUrlIncludes: ['/HomeTimeline'] });
+    expect(rep.cdpSettle!.leftInFlight).toBe(1);
+    expect(rep.cdpSettle!.waitedMs).toBeGreaterThanOrEqual(CDP_SETTLE_MAX_MS);
+    expect(rep.cdpSettle!.waitedMs).toBeLessThan(CDP_SETTLE_MAX_MS + CDP_SETTLE_POLL_MS * 3);
   });
 });
