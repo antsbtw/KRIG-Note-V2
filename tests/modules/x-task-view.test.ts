@@ -35,12 +35,31 @@ describe('任务 view', () => {
     expect(s3).not.toMatch(/<button/);
   });
 
-  it('⭐⭐ 2 求关:勾选 → 进关注队列(主进程按节奏关);队列可暂停 / 继续 / 清空', () => {
+  it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
-    expect(F).toMatch(/op: 'followQueueAdd', wsId, items/);
+    /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */
+    expect(F).not.toMatch(/op: 'followQueueAdd'/);
+    const start = F.slice(F.indexOf('const startAsk'), F.indexOf('const control'));
+    expect(start).toMatch(/setAsking\(list\)/);
+    expect(F).toMatch(/<AskRun wsId=\{wsId\} queue=\{asking\}/);
     expect(F).toMatch(/op: 'followQueueControl', wsId, action/);
     expect(F).toMatch(/op: 'blueMutualCandidates'/);
     expect(F).toMatch(/op: 'blueMutualFollowProgress'/);
+    const A = strip(read('src/modules/x/XTaskAsk.tsx'));
+    expect(A).toMatch(/op: 'askPrepare', wsId, restId: who\.restId, handle: who\.handle/);
+  });
+
+  it('⭐⭐ 放弃才排除 —— 只在「采到了、账对上、确实没求关」时;没采到不算到他头上', () => {
+    const P = strip(read('src/modules/x/x-ask-prepare.ts'));
+    const body = P.slice(P.indexOf('export async function prepareAsk'));
+    const at = body.indexOf('EXCLUDE_RULE_SQL');
+    expect(at).toBeGreaterThan(0);
+    const cond = body.slice(body.lastIndexOf('if (', at), at);
+    expect(cond).toMatch(/plan\.kind === 'skip'/);
+    expect(cond).toMatch(/plan\.recent\.length > 0/);
+    expect(cond).toMatch(/r\.ledgerProblem === undefined/);
+    /** 人 > AI > 算法:人 / AI 排除过的不改 */
+    expect(P).toMatch(/WHERE excluded_source = NONE OR excluded_source = 'rule'/);
   });
 
   it('⭐ 1 找人:走已验证的滚动截获,跑完扫一遍互关倾向再刷新(否则候选恒 0)', () => {

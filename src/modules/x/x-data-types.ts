@@ -146,6 +146,8 @@ export type XDataInvoke =
   | { readonly op: 'blueMutualFollowProgress'; readonly wsId: string }
   | { readonly op: 'followQueueAdd'; readonly wsId: string; readonly items: ReadonlyArray<{ readonly restId: string; readonly handle: string; readonly reason?: string }> }
   | { readonly op: 'followQueueStatus'; readonly wsId: string }
+  /** ⭐ 求关:准备一个人 —— 采他主页最新一页、选推文(或放弃)—— 返回 `AskPrepared`(2026-10-17) */
+  | { readonly op: 'askPrepare'; readonly wsId: string; readonly restId: string; readonly handle: string }
   | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。

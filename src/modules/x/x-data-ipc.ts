@@ -33,6 +33,7 @@ import { lookupSpot, pollSpot } from './x-spot-check';
 import { collectSearchByScroll } from './x-search-scroll';
 import { readBlueMutualOverview, readCandidates, readFollowProgress } from './x-task-blue-mutual';
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
+import { prepareAsk } from './x-ask-prepare';
 import { readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
@@ -380,6 +381,16 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (typeof p.wsId !== 'string' || !Array.isArray(p.items)) return failed('[x.data] followQueueAdd 要 wsId 和 items');
           const r = addToFollowQueue(p.wsId, p.items);
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-follow-queue-add', pageId: 'x-data', detail: { wsId: p.wsId, ...r } });
+          return { status: 'ok', value: r };
+        }
+
+        case 'askPrepare': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string') return failed('[x.data] askPrepare 要 restId / handle');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          const r = await prepareAsk(p.wsId, acc.restId, p.restId, p.handle);
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-prepare', pageId: 'x-data',
+            detail: { handle: p.handle, ok: r.ok, kind: r.ok ? r.plan.kind : undefined, why: r.ok ? r.plan.why : r.why } });
           return { status: 'ok', value: r };
         }
 

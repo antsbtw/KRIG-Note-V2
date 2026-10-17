@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState, useSyncExternalStore, type ReactEleme
 import { xDataCall } from './x-data-types';
 import { getXHostBusy, getXHostState, subscribeXHost } from './x-host-registry';
 import { X_PAGE_NAME } from './x-pages';
+import { AskRun, type AskWho } from './XTaskAsk';
 
 type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
 type Prog = { followedTotal: number; followedBack: number; revisit: Array<{ rest_id: string; handle: string; followedAt: string }>; revisitDays: number; today: number; cap: number };
@@ -27,6 +28,8 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   const [msg, setMsg] = useState<string | null>(null);
   /** ⭐ 点了谁(高亮)—— 与「勾选」分开:点 = 左边 X 网页跳到他主页;勾 = 选进这一批 */
   const [viewing, setViewing] = useState<string | null>(null);
+  /** ⭐ 正在求关的这一批(用户 10-17:点赞、留言求关、关注 —— 取代「勾了就直接关注」) */
+  const [asking, setAsking] = useState<AskWho[] | null>(null);
   const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
 
   const loadProg = useCallback(() => {
@@ -71,15 +74,16 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     setMsg(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
   };
   const toggle = (id: string): void => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const follow = async (): Promise<void> => {
-    const items = (cands ?? []).filter((c) => picked.has(c.rest_id))
-      .map((c) => ({ restId: c.rest_id, handle: c.handle, reason: `蓝V互关:${c.mutual_intent_evidence ?? ''}`.slice(0, 200) }));
-    const r = await xDataCall({ op: 'followQueueAdd', wsId, items });
-    if (r.status === 'failed') { setMsg(r.reason); return; }
-    const v = r.value as { added: number; skipped: number };
-    setMsg(`已加入关注队列 ${v.added} 人${v.skipped > 0 ? `(${v.skipped} 人已在队列里)` : ''},按节奏一个一个关`);
+  /**
+   * ⚠️ 10-17 撤掉「关注选中的 N 人」:只关注不求关 = 对方不回关(用户原话「莫名其妙关注,不求互关」)。
+   * 改成逐个人求关:看推文 → 选一条 → 点赞 / 留言 / 关注。
+   */
+  const startAsk = (): void => {
+    const list = (cands ?? []).filter((c) => picked.has(c.rest_id)).map((c) => ({ restId: c.rest_id, handle: c.handle, name: c.display_name }));
+    if (list.length === 0) return;
+    if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完`); return; }
+    setAsking(list);
     setPicked(new Set());
-    loadQ();
   };
   const control = async (action: 'pause' | 'resume' | 'clear'): Promise<void> => {
     await xDataCall({ op: 'followQueueControl', wsId, action });
@@ -111,6 +115,13 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
 
       {open && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {asking && (
+            <AskRun wsId={wsId} queue={asking} onEnd={(d) => {
+              setAsking(null);
+              setMsg(`这一批看完 ${d.length}/${asking.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+              loadCands();
+            }} />
+          )}
           <div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <strong style={{ fontSize: 12 }}>候选名单</strong>
@@ -119,7 +130,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
                 onClick={() => setPicked(new Set((cands ?? []).filter((c) => !queued.has(c.rest_id)).slice(0, prog ? Math.max(0, prog.cap - prog.today) : 10).map((c) => c.rest_id)))}
                 title="勾上今天还能关的数量">勾今天的量</button>
               <button type="button" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>全不选</button>
-              <button type="button" disabled={picked.size === 0} onClick={() => void follow()}>关注选中的 {picked.size} 人</button>
+              <button type="button" disabled={picked.size === 0 || asking !== null} onClick={startAsk}>开始求关({picked.size} 人)</button>
             </div>
             <div style={{ maxHeight: 320, overflow: 'auto', marginTop: 6, fontSize: 12 }}>
               {(cands ?? []).map((c) => (
