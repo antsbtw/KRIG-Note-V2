@@ -175,3 +175,20 @@ describe('接线', () => {
     expect(read('src/modules/x/x-run-report.ts')).toMatch(/L\.push\(\.\.\.ledgerSection\(run\.paging\?\.ledger\)\);/);
   });
 });
+
+describe('⭐⭐⭐ 操作台搜索页走滚动截获(2026-10-16 真机 30 页全对)', () => {
+  const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
+  it('搜索页 → searchScroll(不再走自己拿游标重放);页数上限 40;自己登记的忙不让路', () => {
+    const C = read('src/modules/x/XConsole.tsx');
+    const i = C.indexOf("if (origin?.name === X_PAGE_NAME.search && (origin.params.q ?? '') !== '') {");
+    expect(i).toBeGreaterThan(-1);
+    const branch = C.slice(i, C.indexOf('return;\n                      }', i));
+    expect(branch).toMatch(/op: 'searchScroll'/);
+    expect(branch).toMatch(/Math\.min\(Math\.max\(Number\(pagesWanted\) \|\| 10, 1\), 40\)/);
+    expect(branch).toMatch(/ownBusy: '操作台正在采集'/);
+    /** 分支在 runCollect 之前,且 return 掉 —— 不会两条路都跑 */
+    expect(i).toBeLessThan(C.indexOf('const run = await runCollect({'));
+    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/p\.wantPages > 40\) return failed/);
+    expect(read('src/modules/x/x-search-scroll.ts')).toMatch(/if \(busy !== null && busy !== input\.ownBusy\) return/);
+  });
+});

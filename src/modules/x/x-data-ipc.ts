@@ -30,6 +30,7 @@ import { bgRunnerStatus, bgRunningOn, kickBgRunner } from './x-bg-runner';
 import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
+import { collectSearchByScroll } from './x-search-scroll';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
 import { isBgRange } from './x-bg-job';
 import type { TimelineRange } from './x-person-timeline';
@@ -349,6 +350,21 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
 
         case 'tagCatalog':
           return { status: 'ok', value: await readTagCatalog() };
+
+        /** ⭐⭐⭐ 搜索滚动截获(2026-10-16)—— 配方名在这里对回(推文上记查询串,作者记配方名) */
+        case 'searchScroll': {
+          if (!Number.isInteger(p.wcId) || typeof p.q !== 'string' || p.q === '') return failed('[x.data] searchScroll 要 wcId 和 q');
+          if (!Number.isInteger(p.wantPages) || p.wantPages < 1 || p.wantPages > 40) return failed('[x.data] searchScroll 的 wantPages 要 1–40(防限流)');
+          const recipeName = recipeNameForQuery(p.q, await listAllRecipes());
+          const r = await collectSearchByScroll({
+            wcId: p.wcId, q: p.q, f: p.f, wantPages: p.wantPages, maxMs: p.maxMs, recipeName, ownBusy: p.ownBusy,
+          });
+          traceRecorder.lifecycle({
+            layer: 'web.net', event: r.ok ? 'x-search-scroll-ok' : 'x-search-scroll-failed', pageId: 'x-data',
+            detail: { q: p.q, why: r.why, totals: r.totals, rateLimited: r.rateLimited, report: r.reportFile },
+          });
+          return { status: 'ok', value: r };
+        }
 
         /** ⭐ 抽查(2026-10-16)—— 问有没有新请求 / 按 id 查库 */
         case 'spotCheckPoll':

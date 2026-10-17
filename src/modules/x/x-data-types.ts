@@ -139,6 +139,11 @@ export type XDataInvoke =
   | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
   /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */
   | { readonly op: 'tagCatalog' }
+  /**
+   * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。
+   * 返回 `SearchScrollReport`(x-search-scroll.ts)。wantPages ≤ 40(SearchTimeline ~50 次/15 分钟)。
+   */
+  | { readonly op: 'searchScroll'; readonly wcId: number; readonly q: string; readonly f?: 'latest' | 'top'; readonly wantPages: number; readonly maxMs: number; readonly ownBusy?: string }
   /** ⭐ 抽查(2026-10-16):有没有比 after 新的右键「查库」请求 —— 返回 `SpotRequest | null` */
   | { readonly op: 'spotCheckPoll'; readonly wsId: string; readonly after: number }
   /** ⭐ 抽查:按推文 id / 人的 handle 查库 —— 返回 `SpotResult` */

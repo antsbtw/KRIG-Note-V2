@@ -53,6 +53,7 @@ import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect, type RunResult } from './x-collect-run';
 import { buildRunReport, completenessLine } from './x-run-report';
+import { statsLine } from './x-batch-stats';
 import { recipeToQuery } from './x-recipe-query';
 import { setXHostBusy } from './x-host-registry';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
@@ -830,6 +831,40 @@ export function XConsole(
                       const origin = identified === null
                         ? null
                         : { name: identified.name, params: identified.params };
+
+                      /**
+                       * ⭐⭐⭐ **搜索页:让页面自己翻页、只截获**(2026-10-16)—— 用户:「配方搜索,然后把所有的推文
+                       * 采集下来,这是基本函数/功能,必须保证的哦。」社区:重放 SearchTimeline 需页面现场生成的
+                       * transaction-id,否则 404;真机滚动截获 30 页 600 条,对账 30/30、逐页账全对。
+                       * ⚠️ 页数上限 40(SearchTimeline ~50 次/15 分钟);每页都过逐页账、存库回读。
+                       */
+                      if (origin?.name === X_PAGE_NAME.search && (origin.params.q ?? '') !== '') {
+                        setStep('滚动截获:让页面自己翻页,每页对账、存库、回读…');
+                        const sr = await xDataCall({
+                          op: 'searchScroll', wcId: wcId!, q: origin.params.q ?? '',
+                          f: origin.params.f === 'top' ? 'top' : 'latest',
+                          wantPages: Math.min(Math.max(Number(pagesWanted) || 10, 1), 40),
+                          maxMs: 10 * 60_000,
+                          ownBusy: '操作台正在采集',
+                        });
+                        setLog((l) => [{ at: new Date().toLocaleTimeString(), label: '滚动截获', result: sr }, ...l].slice(0, 50));
+                        if (sr.status === 'failed') { setStep(`滚动截获失败:${sr.reason}`); return; }
+                        const v = sr.value as {
+                          ok: boolean; why?: string; rateLimited: boolean; reportFile?: string;
+                          totals?: { pages: number; xTweets: number; notParsed: number; notInDb: number; badPages: number };
+                          stats?: Parameters<typeof statsLine>[0];
+                        };
+                        if (!v.ok) { setStep(`滚动截获没跑:${v.why ?? '?'}`); return; }
+                        const t = v.totals;
+                        setStep(
+                          (t ? `${t.badPages === 0 ? '✓' : '⚠️'} ${t.pages} 页 · X 列 ${t.xTweets} · 解析缺 ${t.notParsed} · 入库缺 ${t.notInDb}`
+                            + (t.badPages > 0 ? ` · ${t.badPages} 页对不上` : ' · 每页都对上了') : '')
+                          + (v.rateLimited ? ' · ⚠️ 撞了 429' : '')
+                          + (v.stats ? ` ｜ 本批:${statsLine(v.stats)}` : '')
+                          + (v.reportFile ? ` ｜ 报告:${v.reportFile}` : ''),
+                        );
+                        return;
+                      }
 
                       /**
                        * ⭐⭐⭐ **开跑前读断点** —— 2026-10-07。
