@@ -139,6 +139,8 @@ export type XDataInvoke =
   | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
   /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */
   | { readonly op: 'tagCatalog' }
+  /** ⭐ 任务「蓝V互关」概况(三件事各做到哪了)—— 返回 `BlueMutualOverview` */
+  | { readonly op: 'blueMutualOverview'; readonly wsId: string }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。
    * 返回 `SearchScrollReport`(x-search-scroll.ts)。wantPages ≤ 40(SearchTimeline ~50 次/15 分钟)。

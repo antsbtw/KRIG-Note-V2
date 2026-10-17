@@ -1,0 +1,117 @@
+/**
+ * ⭐⭐ 任务「蓝V互关」(2026-10-16)—— 按设计文档的三件事展示,每件事「做到哪了 + 往下推一步」
+ *
+ * 用户 10-16 原需求:
+ *  1「从x上找到我尚未关注的蓝V」
+ *  2「对有蓝V有互关倾向的…进行互动求关」
+ *  3「对已经添加好友的蓝V分析互动情况…知道哪些还没有蓝V互动过」
+ * 用户 10-16:「围绕需要做的事情来展现或构建就好了」—— 细节(逐页账、候选名单)点进去再看。
+ *
+ * 1 找人 = 已验证的滚动截获(searchScroll,每页逐页账)+ 跑完自动扫一遍互关倾向(候选才算得出来)。
+ * 2 / 3 还没做:不放假按钮,如实写「下一步做」。
+ */
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
+import { xDataCall } from './x-data-types';
+import { getXHostState, subscribeXHost } from './x-host-registry';
+import { recipeToQuery } from './x-recipe-query';
+import { ledgerLine, type PageLedgerRow } from './x-page-ledger';
+import type { SearchRecipe } from '@shared/types/x-timeline-types';
+
+type Overview = {
+  lastFindAt?: string; found: number; foundBlue: number; foundBlueNotFollowed: number; candidates: number; mutualBlue: number;
+};
+type ScrollResult = {
+  ok: boolean; why?: string; rateLimited: boolean; reportFile?: string;
+  totals?: { pages: number; xTweets: number; notParsed: number; notInDb: number; badPages: number };
+  pages?: Array<PageLedgerRow & { newest?: string; oldest?: string }>;
+};
+
+const when = (s?: string): string => (s ? new Date(s).toLocaleString() : '还没找过');
+
+export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
+  const [ov, setOv] = useState<Overview | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pages, setPages] = useState(10);
+  const [finding, setFinding] = useState<string | null>(null);
+  const [last, setLast] = useState<ScrollResult | null>(null);
+  const [showLedger, setShowLedger] = useState(false);
+  const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
+
+  const load = useCallback(() => {
+    void xDataCall({ op: 'blueMutualOverview', wsId }).then((r) => {
+      if (r.status === 'ok') { setOv(r.value as Overview); setErr(null); } else setErr(r.reason);
+    });
+  }, [wsId]);
+  useEffect(() => { load(); }, [load]);
+
+  /** ⭐ 1 找人:配方「蓝V互关」→ 滚动截获(每页对账、存库回读)→ 扫一遍互关倾向 → 刷新数字 */
+  const findOnce = async (): Promise<void> => {
+    if (wcId === null) { setFinding('X 网页没开 —— 先在左栏打开 X'); return; }
+    setFinding('读配方…'); setLast(null);
+    const lr = await xDataCall({ op: 'list' });
+    const recipe = lr.status === 'ok' ? (lr.value as SearchRecipe[]).find((x) => x.name === '蓝V互关') : undefined;
+    if (!recipe) { setFinding('找不到配方「蓝V互关」—— 先建配方'); return; }
+    const q = recipeToQuery(recipe);
+    if (q.problems.length > 0) { setFinding(`配方有问题:${q.problems.join(';')}`); return; }
+    setFinding(`找人中:让页面自己翻页,最多 ${pages} 页,每页对账…(左边 X 网页别动)`);
+    const sr = await xDataCall({ op: 'searchScroll', wcId, q: q.q, f: q.resultType, wantPages: pages, maxMs: 10 * 60_000 });
+    if (sr.status === 'failed') { setFinding(`找人失败:${sr.reason}`); return; }
+    const v = sr.value as ScrollResult;
+    setLast(v);
+    if (!v.ok) { setFinding(`找人没跑:${v.why ?? '?'}`); return; }
+    setFinding('判断互关倾向中…');
+    await xDataCall({ op: 'scanMutualIntent' });
+    setFinding(null);
+    load();
+  };
+
+  const t = last?.totals;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div style={{ fontSize: 15, fontWeight: 600 }}>蓝V互关</div>
+      {err && <div style={{ color: '#f87171', fontSize: 12 }}>⚠️ {err}</div>}
+
+      <Step n={1} title="找我还没关注的蓝V">
+        <div>配方搜索 · 上次 {when(ov?.lastFindAt)} · 累计找到 {ov ? ov.foundBlue : '…'} 个蓝V,其中我没关注的 {ov ? ov.foundBlueNotFollowed : '…'} 个</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+          <label style={{ fontSize: 12 }}>页数
+            <input type="number" min={1} max={40} value={pages} disabled={finding !== null && !finding.startsWith('找人失败')}
+              onChange={(e) => setPages(Math.min(40, Math.max(1, Number(e.target.value) || 10)))}
+              style={{ width: 50, marginLeft: 4 }} />
+          </label>
+          <button type="button" disabled={finding !== null && !/失败|没跑|没开|找不到|有问题/.test(finding)} onClick={() => void findOnce()}>再找一轮</button>
+          {finding && <span style={{ fontSize: 12, opacity: 0.8 }}>{finding}</span>}
+        </div>
+        {last?.ok && t && (
+          <div style={{ fontSize: 12, marginTop: 6 }}>
+            {t.badPages === 0 ? '✓' : '⚠️'} 这一轮 {t.pages} 页 · X 列 {t.xTweets} 条 · 解析缺 {t.notParsed} · 入库缺 {t.notInDb}
+            {t.badPages > 0 ? ` · ${t.badPages} 页对不上` : ' · 每页都对上了'}{last.rateLimited ? ' · ⚠️ 撞了 429' : ''}
+            {' '}<button type="button" style={{ fontSize: 11 }} onClick={() => setShowLedger((s) => !s)}>{showLedger ? '收起逐页账' : '看逐页账'}</button>
+            {showLedger && (
+              <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{(last.pages ?? []).map((p) => ledgerLine(p)).join('\n')}</pre>
+            )}
+          </div>
+        )}
+      </Step>
+
+      <Step n={2} title="对有互关倾向的,互动求关">
+        <div>候选(蓝V · 我没关注 · 有互关倾向):{ov ? ov.candidates : '…'} 人</div>
+        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>候选名单、关注、回访 —— 下一步做</div>
+      </Step>
+
+      <Step n={3} title="已互关的蓝V,看互动情况">
+        <div>互关蓝V {ov ? ov.mutualBlue : '…'} 人 · 从没互动的:还没分析</div>
+        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>要先采「他对我」的互动 —— 以后做</div>
+      </Step>
+    </div>
+  );
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }): ReactElement {
+  return (
+    <div style={{ border: '1px solid var(--border-color, #333)', borderRadius: 6, padding: 10 }}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{n} {title}</div>
+      <div style={{ fontSize: 13 }}>{children}</div>
+    </div>
+  );
+}

@@ -31,6 +31,7 @@ import { accountForWrite, identifyAccount, readWsAccount } from './x-account-rep
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
 import { collectSearchByScroll } from './x-search-scroll';
+import { readBlueMutualOverview } from './x-task-blue-mutual';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
 import { isBgRange } from './x-bg-job';
 import type { TimelineRange } from './x-person-timeline';
@@ -350,6 +351,12 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
 
         case 'tagCatalog':
           return { status: 'ok', value: await readTagCatalog() };
+
+        case 'blueMutualOverview': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readBlueMutualOverview(acc.restId) };
+        }
 
         /** ⭐⭐⭐ 搜索滚动截获(2026-10-16)—— 配方名在这里对回(推文上记查询串,作者记配方名) */
         case 'searchScroll': {
