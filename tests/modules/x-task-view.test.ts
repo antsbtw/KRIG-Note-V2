@@ -26,14 +26,21 @@ describe('任务 view', () => {
     expect(V).not.toMatch(/slotBinding/);
   });
 
-  it('⭐ 三件事都在;还没做的(2 / 3)不放假按钮', () => {
+  it('⭐ 三件事都在;2 已接关注队列;还没做的 3 不放假按钮', () => {
     const B = strip(read('src/modules/x/XTaskBlueMutual.tsx'));
     for (const t of ['找我还没关注的蓝V', '对有互关倾向的,互动求关', '已互关的蓝V,看互动情况']) expect(B).toContain(t);
     const s2 = B.slice(B.indexOf('<Step n={2}'), B.indexOf('<Step n={3}'));
+    expect(s2).toMatch(/<FollowStep wsId=\{wsId\}/);
     const s3 = B.slice(B.indexOf('<Step n={3}'), B.indexOf('function Step'));
-    expect(s2.length).toBeGreaterThan(50);
-    expect(s2).not.toMatch(/<button/);
     expect(s3).not.toMatch(/<button/);
+  });
+
+  it('⭐⭐ 2 求关:勾选 → 进关注队列(主进程按节奏关);队列可暂停 / 继续 / 清空', () => {
+    const F = strip(read('src/modules/x/XTaskFollow.tsx'));
+    expect(F).toMatch(/op: 'followQueueAdd', wsId, items/);
+    expect(F).toMatch(/op: 'followQueueControl', wsId, action/);
+    expect(F).toMatch(/op: 'blueMutualCandidates'/);
+    expect(F).toMatch(/op: 'blueMutualFollowProgress'/);
   });
 
   it('⭐ 1 找人:走已验证的滚动截获,跑完扫一遍互关倾向再刷新(否则候选恒 0)', () => {

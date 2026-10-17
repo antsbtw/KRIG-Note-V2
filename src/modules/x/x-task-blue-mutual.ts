@@ -47,3 +47,60 @@ export async function readBlueMutualOverview(account: string): Promise<BlueMutua
     mutualBlue: mutual?.[0]?.n ?? 0,
   };
 }
+
+/** 候选的条件:配方找到的 · 蓝V · 我没关注 · 有互关倾向 · 没排除 */
+const CAND_WHERE = `array::len(array::intersect(found_via_recipes ?? [], $recipes)) > 0
+  AND is_blue_verified = true AND i_follow != true AND mutual_intent = true AND excluded != true`;
+
+export type Candidate = {
+  readonly rest_id: string; readonly handle: string; readonly display_name?: string; readonly avatar?: string;
+  readonly followers_count?: number; readonly follows_me?: boolean; readonly mutual_intent_evidence?: string;
+  readonly mutual_intent_source?: string;
+};
+
+/** ⭐ 2 求关:候选名单(粉丝多的在前) */
+export async function readCandidates(account: string, limit: number): Promise<Candidate[]> {
+  const [rows] = await getXDB().query<[Candidate[]]>(
+    `SELECT rest_id, handle, display_name, avatar, followers_count, follows_me, mutual_intent_evidence, mutual_intent_source
+       FROM ${PEOPLE_WITH_RELATION} WHERE ${CAND_WHERE} ORDER BY followers_count DESC LIMIT $limit`,
+    { acct: account, recipes: [...BLUE_MUTUAL_RECIPES], limit },
+  );
+  return rows ?? [];
+}
+
+export type FollowProgress = {
+  readonly followedTotal: number;
+  /** 关注过的人里现在回关了的 */
+  readonly followedBack: number;
+  /** 关注满 N 天还没回关的(回访名单) */
+  readonly revisit: ReadonlyArray<{ readonly rest_id: string; readonly handle: string; readonly followedAt: string }>;
+  readonly revisitDays: number;
+};
+
+/**
+ * ⭐ 2 求关的进度 + 回访名单:按动作记录(我们关注过谁、何时)对当前号的关系。
+ * ⚠️ 回访只列「我仍关注着、他还没回关」的 —— 已经取关的不算。
+ */
+export async function readFollowProgress(account: string, revisitDays: number): Promise<FollowProgress> {
+  const db = getXDB();
+  const [acts] = await db.query<[Array<{ rid: string; handle: string; at: string }>]>(
+    `SELECT target_rest_id AS rid, target_handle AS handle, <string> time::max(at) AS at FROM x_action_log
+       WHERE action = 'follow' AND result = 'ok' GROUP BY rid, handle`,
+  );
+  const list = acts ?? [];
+  if (list.length === 0) return { followedTotal: 0, followedBack: 0, revisit: [], revisitDays };
+  const [rel] = await db.query<[Array<{ rest_id: string; i_follow?: boolean; follows_me?: boolean }>]>(
+    `SELECT rest_id, i_follow, follows_me FROM ${PEOPLE_WITH_RELATION} WHERE rest_id IN $ids`,
+    { acct: account, ids: list.map((a) => a.rid) },
+  );
+  const byId = new Map((rel ?? []).map((r) => [r.rest_id, r]));
+  const cutoff = Date.now() - revisitDays * 86_400_000;
+  return {
+    followedTotal: list.length,
+    followedBack: list.filter((a) => byId.get(a.rid)?.follows_me === true).length,
+    revisit: list
+      .filter((a) => Date.parse(a.at) < cutoff && byId.get(a.rid)?.i_follow === true && byId.get(a.rid)?.follows_me !== true)
+      .map((a) => ({ rest_id: a.rid, handle: a.handle, followedAt: a.at })),
+    revisitDays,
+  };
+}

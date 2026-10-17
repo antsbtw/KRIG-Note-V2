@@ -31,7 +31,10 @@ import { accountForWrite, identifyAccount, readWsAccount } from './x-account-rep
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
 import { collectSearchByScroll } from './x-search-scroll';
-import { readBlueMutualOverview } from './x-task-blue-mutual';
+import { readBlueMutualOverview, readCandidates, readFollowProgress } from './x-task-blue-mutual';
+import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
+import { readFollowGate } from './x-ops-actions-repo';
+import { localDayStart } from './x-ops-settings';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
 import { isBgRange } from './x-bg-job';
 import type { TimelineRange } from './x-person-timeline';
@@ -357,6 +360,38 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if ('reason' in acc) return failed(acc.reason);
           return { status: 'ok', value: await readBlueMutualOverview(acc.restId) };
         }
+
+        case 'blueMutualCandidates': {
+          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 500) return failed('[x.data] limit 要 1–500');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readCandidates(acc.restId, p.limit) };
+        }
+
+        case 'blueMutualFollowProgress': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          const gate = await readFollowGate(localDayStart(new Date()).toISOString());
+          const prog = await readFollowProgress(acc.restId, gate.settings['follow.revisit_days']);
+          return { status: 'ok', value: { ...prog, today: gate.todayCount, cap: gate.cap } };
+        }
+
+        case 'followQueueAdd': {
+          if (typeof p.wsId !== 'string' || !Array.isArray(p.items)) return failed('[x.data] followQueueAdd 要 wsId 和 items');
+          const r = addToFollowQueue(p.wsId, p.items);
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-follow-queue-add', pageId: 'x-data', detail: { wsId: p.wsId, ...r } });
+          return { status: 'ok', value: r };
+        }
+
+        case 'followQueueStatus':
+          if (typeof p.wsId !== 'string') return failed('[x.data] followQueueStatus 要 wsId');
+          return { status: 'ok', value: followQueueStatus(p.wsId) };
+
+        case 'followQueueControl':
+          if (typeof p.wsId !== 'string' || !['pause', 'resume', 'clear'].includes(p.action)) return failed('[x.data] followQueueControl 参数不对');
+          controlFollowQueue(p.wsId, p.action);
+          console.log(`[x.follow] ${p.wsId} ${p.action}`);
+          return { status: 'ok', value: followQueueStatus(p.wsId) };
 
         /** ⭐⭐⭐ 搜索滚动截获(2026-10-16)—— 配方名在这里对回(推文上记查询串,作者记配方名) */
         case 'searchScroll': {

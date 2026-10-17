@@ -141,6 +141,12 @@ export type XDataInvoke =
   | { readonly op: 'tagCatalog' }
   /** ⭐ 任务「蓝V互关」概况(三件事各做到哪了)—— 返回 `BlueMutualOverview` */
   | { readonly op: 'blueMutualOverview'; readonly wsId: string }
+  /** ⭐ 2 求关:候选名单 / 关注进度+回访 / 关注队列(加入、状态、暂停继续清空)—— 2026-10-16 M4 */
+  | { readonly op: 'blueMutualCandidates'; readonly wsId: string; readonly limit: number }
+  | { readonly op: 'blueMutualFollowProgress'; readonly wsId: string }
+  | { readonly op: 'followQueueAdd'; readonly wsId: string; readonly items: ReadonlyArray<{ readonly restId: string; readonly handle: string; readonly reason?: string }> }
+  | { readonly op: 'followQueueStatus'; readonly wsId: string }
+  | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。
    * 返回 `SearchScrollReport`(x-search-scroll.ts)。wantPages ≤ 40(SearchTimeline ~50 次/15 分钟)。

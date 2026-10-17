@@ -1766,6 +1766,26 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐ 1.2.31 —— 动作记录放开「关注」(2026-10-16,蓝V互关 M4;改表用户 10-16 已确认)
+ * 原来 ASSERT 只认 unfollow。⚠️ 用 OVERWRITE 改断言(IF NOT EXISTS 不会改已有字段;临时库 3.0.4 验过)。
+ */
+const X_SCHEMA_1_2_31 = `
+DEFINE FIELD OVERWRITE action ON x_action_log TYPE string ASSERT $value INSIDE ['unfollow', 'follow'];
+DEFINE INDEX IF NOT EXISTS idx_action_log_target ON x_action_log FIELDS action, target_rest_id;
+`;
+
+export async function x_migration_1_2_31(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_31);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_action_log');
+  if (!String(info?.fields?.action ?? '').includes("'follow'")) throw new Error('[x-schema 1.2.31] x_action_log.action 没放开 follow');
+  console.log('[x-schema 1.2.31] 动作记录放开「关注」');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.31', appliedAt = $now, description = '动作记录放开「关注」'`,
+    { rid: new RecordId('schema_version', '1.2.31'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.30 —— 人的**互关倾向**(2026-10-16,蓝V互关 M2;改表用户 10-16 已确认)
  *
  * 用户:「对有蓝V有互关倾向的(比如写了蓝V互关/浇朋友等类似属于的Bio或者帖子),进行互动求关。」

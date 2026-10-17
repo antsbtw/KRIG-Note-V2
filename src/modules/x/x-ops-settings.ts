@@ -36,6 +36,16 @@ export const SETTING_DEFS: readonly SettingDef[] = [
   { key: 'bg.pages_per_segment', label: '后台每段翻几页', default: 10, min: 1, max: 100, unit: '页' },
   /** 两段之间至少隔多久 —— 太密=连珠炮请求是风控信号(记忆 project-x-cursor-paging) */
   { key: 'bg.segment_gap_sec', label: '后台两段最小间隔', default: 120, min: 10, max: 3600, unit: '秒' },
+  /**
+   * ⭐ 关注(2026-10-16,蓝V互关 M4)—— 用户:「勾一批,程序按节奏慢慢关」;上限/间隔同取关,是人可调的变量。
+   * 默认取保守(我的判断:X 对短时间大量关注比取关更敏感)。
+   */
+  { key: 'follow.daily_cap', label: '每日关注上限', default: 30, min: 0, max: 400, unit: '个' },
+  { key: 'follow.min_gap_sec', label: '两次关注最小间隔', default: 60, min: 10, max: 3600, unit: '秒' },
+  /** 每次间隔再随机多等 0~N 秒 —— 定值本身也是指纹 */
+  { key: 'follow.jitter_sec', label: '关注间隔随机加', default: 30, min: 0, max: 600, unit: '秒' },
+  /** 关注满几天还没回关 → 进回访名单(用户 10-16:「回访 N 天」「正确」) */
+  { key: 'follow.revisit_days', label: '关注后几天没回关算不回', default: 7, min: 1, max: 60, unit: '天' },
 ];
 
 export type OpsSettings = Readonly<Record<string, number>>;
@@ -68,6 +78,24 @@ export function validateSetting(key: string, value: unknown): string | null {
 /** ⭐ 本地「今天」的开始 —— 每日上限按人所在的时区算 */
 export function localDayStart(now: Date): Date {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+/**
+ * ⭐⭐ 现在能不能关注 —— 每日上限 + 最小间隔(与取关同口径;只算成功的)。
+ */
+export function followGate(s: OpsSettings, todayCount: number, lastAtIso: string | undefined, now: Date): UnfollowGate {
+  const cap = s['follow.daily_cap'];
+  const gap = s['follow.min_gap_sec'];
+  if (todayCount >= cap) {
+    return { allowed: false, reason: `今天已关注 ${todayCount} 个,到了上限 ${cap}(可在设置里改)`, todayCount, cap };
+  }
+  if (lastAtIso !== undefined) {
+    const since = (now.getTime() - Date.parse(lastAtIso)) / 1000;
+    if (since < gap) {
+      return { allowed: false, reason: `离上次关注才 ${Math.floor(since)} 秒,最小间隔 ${gap} 秒`, waitSec: Math.ceil(gap - since), todayCount, cap };
+    }
+  }
+  return { allowed: true, todayCount, cap };
 }
 
 export type UnfollowGate = {

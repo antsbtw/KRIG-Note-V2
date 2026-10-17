@@ -16,6 +16,7 @@ import { getXHostState, subscribeXHost } from './x-host-registry';
 import { recipeToQuery } from './x-recipe-query';
 import { ledgerLine, type PageLedgerRow } from './x-page-ledger';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
+import { FollowStep } from './XTaskFollow';
 
 type Overview = {
   lastFindAt?: string; found: number; foundBlue: number; foundBlueNotFollowed: number; candidates: number; mutualBlue: number;
@@ -95,8 +96,7 @@ export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
       </Step>
 
       <Step n={2} title="对有互关倾向的,互动求关">
-        <div>候选(蓝V · 我没关注 · 有互关倾向):{ov ? ov.candidates : '…'} 人</div>
-        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>候选名单、关注、回访 —— 下一步做</div>
+        <FollowStep wsId={wsId} candidates={ov?.candidates} />
       </Step>
 
       <Step n={3} title="已互关的蓝V,看互动情况">

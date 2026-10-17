@@ -38,6 +38,11 @@ export const X_SCRIPTS = {
    */
   unfollow: 'x.unfollowOnProfile' as ScriptId,
   /**
+   * ⭐⭐ 在**他的主页**上关注(2026-10-16,蓝V互关 M4)—— 取关的反向:点 `<id>-follow` → 等它变成 `<id>-unfollow` 才算成。
+   * ⚠️ 按他的数字 id 定位,不会点到页面上别人的按钮;本来就关注着 → 不点,如实回 already-following。
+   */
+  follow: 'x.followOnProfile' as ScriptId,
+  /**
    * ⭐⭐⭐ **滚不动时跳到最后一张卡片** —— 虚拟列表的抢救动作。
    *
    * ── 用户 2026-09-19 原话 ──
@@ -333,6 +338,32 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
   ].join('\n');
 };
 
+/**
+ * ⭐ 关注脚本正文 —— 返回 state:followed / already-following / no-button / no-switch / bad-id / error
+ */
+const FOLLOW_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var id = __ID__;
+      if (!/^\d+$/.test(id)) { resolve({ done: false, state: 'bad-id' }); return; }
+      var q = function (suffix) { return document.querySelector('[data-testid="' + id + suffix + '"]'); };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 200); };
+        tick();
+      };
+      waitFor(function () { return q('-follow') || q('-unfollow'); }, 6000, function (btn) {
+        if (!btn) { resolve({ done: false, state: 'no-button' }); return; }
+        if (btn.getAttribute('data-testid') === id + '-unfollow') { resolve({ done: false, state: 'already-following' }); return; }
+        btn.click();
+        waitFor(function () { return q('-unfollow'); }, 6000, function (after) {
+          resolve(after ? { done: true, state: 'followed' } : { done: false, state: 'no-switch' });
+        });
+      });
+    } catch (e) { resolve({ done: false, state: 'error', why: String(e) }); }
+  });
+})();`;
+
 /** ⭐ 抽查脚本正文 —— String.raw:反斜杠原样保留 */
 const SPOT_TARGET_SRC = String.raw`(function () {
   try {
@@ -405,6 +436,12 @@ const buildUnfollowScript = (params: Readonly<Record<string, unknown>>): string 
 };
 
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_SCRIPTS.follow,
+    purpose: 'X:在他的主页上关注(点 Follow → 等按钮变成 Following)',
+    /** ⚠️ 参数(数字 id)走 JSON 绑定,脚本里再校验只能是数字;正文 String.raw(防转义被吃) */
+    build: (params) => FOLLOW_SRC.replace('__ID__', JSON.stringify(String(params.restId ?? ''))),
+  },
   {
     id: X_SCRIPTS.spotTarget,
     purpose: 'X:右键那一点下面的推文 id / 人的 handle(抽查用,只读不点)',
