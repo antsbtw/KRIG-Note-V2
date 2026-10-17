@@ -34,6 +34,7 @@ import { collectSearchByScroll } from './x-search-scroll';
 import { readBlueMutualOverview, readCandidates, readFollowProgress } from './x-task-blue-mutual';
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
 import { prepareAsk } from './x-ask-prepare';
+import { runAsk } from './x-ask-run';
 import { readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
@@ -391,6 +392,17 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           const r = await prepareAsk(p.wsId, acc.restId, p.restId, p.handle);
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-prepare', pageId: 'x-data',
             detail: { handle: p.handle, ok: r.ok, kind: r.ok ? r.plan.kind : undefined, why: r.ok ? r.plan.why : r.why } });
+          return { status: 'ok', value: r };
+        }
+
+        case 'askRun': {
+          if (typeof p.reply !== 'string' || typeof p.tweetText !== 'string' || typeof p.handle !== 'string'
+            || !['tweet', 'bio-latest', 'other'].includes(p.pickKind)) return failed('[x.data] askRun 参数不全');
+          const r = await runAsk({ wsId: p.wsId, restId: p.restId, handle: p.handle, tweetId: p.tweetId,
+            tweetText: p.tweetText, pickKind: p.pickKind, reply: p.reply });
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-run', pageId: 'x-data',
+            detail: { handle: p.handle, tweetId: p.tweetId, ok: r.ok, blocked: r.blocked, liked: r.liked, replied: r.replied,
+              followed: r.followed, failedStep: r.failedStep, detail: r.detail } });
           return { status: 'ok', value: r };
         }
 

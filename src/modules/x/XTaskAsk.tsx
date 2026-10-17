@@ -6,18 +6,21 @@
  * 「如果没有求关,bio也没有求关,先放弃这个人。」
  *
  * 勾的这一批逐个人来:准备(主进程采他主页最新一页 + 选推文)→ 出卡 → 人看 / 换一条 / 改留言 / 跳过。
- * ⚠️ 第 1 阶段**不执行**三个动作(第 2 阶段接上);留言先给模板 —— 模板是我(Claude)定的占位,不是用户的写法,
- *    第 3 阶段换成 AI 学用户的求关回复。
+ * 第 2 阶段(10-17):「点赞 · 留言 · 关注」真执行(主进程 x-ask-run.ts,每步核对,哪步没成停在哪步)。
+ * ⭐ 留言框默认**空着**,由用户亲手写 —— 用户 10-17:「看来还是我自己先训练吧。前面是muse的自动回复,效果不好!」
+ *    (原来放的模板是我拟的,会带偏;写出去的留言进 x_ask,将来就是 AI 学的范例)
  */
 import { useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
+import type { AskRunResult, StepState } from './x-ask-run';
 
 export type AskWho = { readonly restId: string; readonly handle: string; readonly name?: string };
 
-/** ⚠️ 占位模板(Claude 10-17 拟的,不是用户的话)—— 第 3 阶段由 AI 按用户习惯给建议 */
-const DRAFT_TEMPLATE = '你好～看到你在找互关，已关注你啦，求回关 🙏';
+const STEP: Record<StepState, string> = { ok: '✓', already: '· 本来就是', unseen: '? 没看到', failed: '✗' };
+const stepLine = (r: AskRunResult): string =>
+  `点赞 ${r.liked ? STEP[r.liked] : '—'} · 留言 ${r.replied ? STEP[r.replied] : '—'} · 关注 ${r.followed ? STEP[r.followed] : '—'}`;
 
 type Done = { readonly who: AskWho; readonly outcome: string };
 
@@ -26,14 +29,16 @@ export function AskRun({ wsId, queue, onEnd }: { wsId: string; queue: readonly A
   const [prep, setPrep] = useState<AskPrepared | null>(null);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState<AskTweet | null>(null);
-  const [draft, setDraft] = useState(DRAFT_TEMPLATE);
+  const [draft, setDraft] = useState('');
+  const [acting, setActing] = useState(false);
+  const [result, setResult] = useState<AskRunResult | null>(null);
   const [done, setDone] = useState<Done[]>([]);
   const who = queue[i];
 
   useEffect(() => {
     if (!who) return;
     let alive = true;
-    setLoading(true); setPrep(null); setSel(null); setDraft(DRAFT_TEMPLATE);
+    setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null);
     void xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle }).then((r) => {
       if (!alive) return;
       setLoading(false);
@@ -54,6 +59,16 @@ export function AskRun({ wsId, queue, onEnd }: { wsId: string; queue: readonly A
   const plan = prep?.ok ? prep.plan : null;
   /** 换一条:相关的在前,再按时间 */
   const pool = plan ? [...plan.recent.filter((t) => t.related), ...plan.recent.filter((t) => !t.related)] : [];
+  const act = async (): Promise<void> => {
+    if (!plan || plan.kind === 'skip' || !sel) return;
+    setActing(true); setResult(null);
+    const r = await xDataCall({
+      op: 'askRun', wsId, restId: who.restId, handle: who.handle, tweetId: sel.id, tweetText: sel.text,
+      pickKind: sel.id === plan.tweet.id ? plan.kind : 'other', reply: draft,
+    });
+    setActing(false);
+    setResult(r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason });
+  };
   const cycle = (): void => {
     if (pool.length === 0) return;
     const at = pool.findIndex((t) => t.id === sel?.id);
@@ -93,16 +108,28 @@ export function AskRun({ wsId, queue, onEnd }: { wsId: string; queue: readonly A
             <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{sel.text}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" disabled={pool.length < 2} onClick={cycle}>换一条({pool.length} 条可选)</button>
-            <button type="button" onClick={() => next('跳过(人)')}>跳过此人</button>
+            <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={cycle}>换一条({pool.length} 条可选)</button>
+            <button type="button" disabled={acting} onClick={() => next('跳过(人)')}>跳过此人</button>
           </div>
-          <div style={{ opacity: 0.6 }}>留言(现在是模板;以后 AI 学你的求关回复给建议,你来改)</div>
-          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} style={{ width: '100%', boxSizing: 'border-box' }} />
+          <div style={{ opacity: 0.6 }}>留言(你亲手写;发出去的会记下来,以后 AI 照着学)</div>
+          <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} disabled={acting || result?.ok === true}
+            placeholder="写给他的求关留言" style={{ width: '100%', boxSizing: 'border-box' }} />
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button type="button" disabled title="下一步接上:点赞 → 留言 → 关注,每步核对">点赞 · 留言 · 关注</button>
-            <span style={{ opacity: 0.6 }}>(三个动作下一步接上)</span>
-            <button type="button" onClick={() => next(`看过,未执行 · 推文 ${sel.id}`)}>下一个</button>
+            <button type="button" disabled={acting || draft.trim() === '' || result?.ok === true} onClick={() => void act()}
+              title="左边 X 网页:去这条推文点赞 → 贴留言并发送 → 去他主页关注;每步核对,哪步没成停在哪步">
+              {acting ? '正在做…' : '点赞 · 留言 · 关注'}
+            </button>
+            <button type="button" disabled={acting}
+              onClick={() => next(result ? (result.ok ? `✓ 求关完成(${stepLine(result)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : `看过,未执行 · 推文 ${sel.id}`)}>
+              下一个
+            </button>
           </div>
+          {result && (
+            <div style={{ color: result.ok ? '#5fc98a' : '#f87171' }}>
+              {result.blocked ? `没动手:${result.blocked}` : `${result.ok ? '✓ 求关完成' : '✗ 停在这一步'} —— ${stepLine(result)}`}
+              {result.detail && <div>{result.detail}</div>}
+            </div>
+          )}
         </div>
       )}
     </div>

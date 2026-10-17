@@ -250,6 +250,8 @@ export const X_PAGE_NAME = {
   withReplies: 'x.withReplies',
   /** ⭐ 个人主页的「转发」标签页(2026-10-10)*/
   reposts: 'x.reposts',
+  /** ⭐ 单篇推文 —— 求关:去这条推文点赞 / 留言(2026-10-17) */
+  status: 'x.status',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,
@@ -419,6 +421,8 @@ export const X_NOISY_URLS: readonly string[] = [
 export const X_ANCHORS = {
   /** 一条推文的容器 */
   tweetArticle: 'x.tweetArticle' as AnchorName,
+  /** 单篇推文页上的回复框(求关留言往这里贴,2026-10-17) */
+  replyBox: 'x.replyBox' as AnchorName,
 } as const;
 
 /**

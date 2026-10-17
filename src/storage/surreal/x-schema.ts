@@ -1766,6 +1766,53 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.32 —— 求关:动作记录放开「点赞 / 留言」+ 求关记录表 x_ask(2026-10-17)
+ *
+ * 用户 10-17:「选择一条和互关相关的,点赞、留言求关、关注。三个动作。…这些动作完毕后,要记录关注时间,
+ *  定期检查对方是否回关,建立和对方互动的时间线。」「看来还是我自己先训练吧。」→ 计划(三个动作 + 留言进范例库)用户回「开始」。
+ * x_ask 一次求关一行(只追加):对方哪条推文 → 我留了什么 → 三个动作各自结果。
+ * ⭐ 它同时是**求关留言的范例库**:reply_source = 'human' 且 replied = 'ok' 的行 = 用户亲手写并发出去的
+ *   (记忆 project-x-ask-reply-corpus:账号上已有的回复是 Muse 自动回复,不算)。
+ */
+const X_SCHEMA_1_2_32 = `
+DEFINE FIELD OVERWRITE action ON x_action_log TYPE string ASSERT $value INSIDE ['unfollow', 'follow', 'like', 'reply'];
+
+DEFINE TABLE IF NOT EXISTS x_ask SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_ask TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person        ON x_ask TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person_handle ON x_ask TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_ask TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_ask TYPE string;
+DEFINE FIELD IF NOT EXISTS pick_kind     ON x_ask TYPE string ASSERT $value INSIDE ['tweet', 'bio-latest', 'other'];
+DEFINE FIELD IF NOT EXISTS reply_text    ON x_ask TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_source  ON x_ask TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reply_id      ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS liked         ON x_ask TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS replied       ON x_ask TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS followed      ON x_ask TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS failed_step   ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS failed_detail ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at            ON x_ask TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ask_person ON x_ask FIELDS account, person;
+DEFINE INDEX IF NOT EXISTS idx_ask_at     ON x_ask FIELDS at;
+`;
+
+export async function x_migration_1_2_32(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_32);
+  type Info = { fields?: Record<string, string> };
+  const [log, ask] = await db.query<[Info, Info]>('INFO FOR TABLE x_action_log; INFO FOR TABLE x_ask;');
+  if (!String(log?.fields?.action ?? '').includes("'reply'")) throw new Error('[x-schema 1.2.32] x_action_log.action 没放开 like / reply');
+  if (!('reply_text' in (ask?.fields ?? {}))) throw new Error('[x-schema 1.2.32] x_ask 没建起来');
+  console.log('[x-schema 1.2.32] 求关:动作记录放开点赞 / 留言,建 x_ask');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.32', appliedAt = $now, description = '求关:动作记录放开点赞 / 留言,建 x_ask'`,
+    { rid: new RecordId('schema_version', '1.2.32'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐ 1.2.31 —— 动作记录放开「关注」(2026-10-16,蓝V互关 M4;改表用户 10-16 已确认)
  * 原来 ASSERT 只认 unfollow。⚠️ 用 OVERWRITE 改断言(IF NOT EXISTS 不会改已有字段;临时库 3.0.4 验过)。
  */

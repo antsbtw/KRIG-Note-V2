@@ -43,6 +43,18 @@ export const X_SCRIPTS = {
    */
   follow: 'x.followOnProfile' as ScriptId,
   /**
+   * ⭐⭐ 求关三个动作之一:在**单篇推文页**给这条推文点赞(2026-10-17)。
+   * 按推文 id 找到它自己那张卡(时间链接指向 `/status/<id>`)→ 点 like → 等它变成 unlike 才算成。
+   */
+  likeTweet: 'x.likeTweetOnStatus' as ScriptId,
+  /** ⭐ 求关:单篇页的回复框在不在、里面有没有残留(只读不写)—— 有残留就不往里贴,免得把两段拼在一起发出去 */
+  replyBoxState: 'x.replyBoxState' as ScriptId,
+  /**
+   * ⭐⭐ 求关:点回复框旁的发送按钮 → 等我的回复**真的出现在页面上**(我的号发的、正文对得上)才算成,并读回它的 id。
+   * ⚠️ 只点**发送**;框里是什么由调用方先贴好并核对过(web.input 的 exact 校验)。
+   */
+  sendReply: 'x.sendReplyInline' as ScriptId,
+  /**
    * ⭐⭐⭐ **滚不动时跳到最后一张卡片** —— 虚拟列表的抢救动作。
    *
    * ── 用户 2026-09-19 原话 ──
@@ -364,6 +376,112 @@ const FOLLOW_SRC = String.raw`(function () {
   });
 })();`;
 
+/**
+ * ⭐ 点赞脚本正文(String.raw:反斜杠原样到浏览器)。__ID__ = 推文数字 id(JSON)。
+ * state:liked / already-liked / no-tweet / no-button / no-switch / bad-id / error
+ */
+const LIKE_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var id = __ID__;
+      if (!/^\d+$/.test(id)) { resolve({ state: 'bad-id' }); return; }
+      var own = new RegExp('/status/' + id + '(?:$|[/?#])');
+      var card = function () {
+        var arts = document.querySelectorAll('article[data-testid="tweet"]');
+        for (var i = 0; i < arts.length; i++) {
+          var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
+          for (var j = 0; j < ts.length; j++) {
+            var a = ts[j].closest('a');
+            if (a && own.test(a.getAttribute('href') || '')) return arts[i];
+          }
+        }
+        return null;
+      };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 200); };
+        tick();
+      };
+      waitFor(card, 10000, function (art) {
+        if (!art) { resolve({ state: 'no-tweet' }); return; }
+        if (art.querySelector('[data-testid="unlike"]')) { resolve({ state: 'already-liked' }); return; }
+        var btn = art.querySelector('[data-testid="like"]');
+        if (!btn) { resolve({ state: 'no-button' }); return; }
+        btn.click();
+        waitFor(function () { return art.querySelector('[data-testid="unlike"]'); }, 6000, function (after) {
+          resolve({ state: after ? 'liked' : 'no-switch' });
+        });
+      });
+    } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/** ⭐ 回复框现状(无参数,只读) */
+const REPLY_BOX_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    var t0 = Date.now();
+    var tick = function () {
+      var boxes = document.querySelectorAll('[data-testid="tweetTextarea_0"]');
+      if (boxes.length > 0) { resolve({ found: true, count: boxes.length, text: (boxes[0].textContent || '').trim() }); return; }
+      if (Date.now() - t0 > 8000) { resolve({ found: false }); return; }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+})();`;
+
+/**
+ * ⭐ 发送回复脚本正文。__NEEDLE__ = 回复正文里的字(只留字母 / 汉字 / 数字,前 16 个 —— X 把表情渲染成图片,
+ * textContent 里没有);__ME__ = 我的 handle(小写)。
+ * state:sent(带 replyId)/ unseen(框清空了但页面上没看到我的回复)/ no-button / disabled / not-sent / error
+ */
+const SEND_REPLY_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var needle = __NEEDLE__, me = __ME__;
+      var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}]/gu, ''); };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 250); };
+        tick();
+      };
+      var mine = function () {
+        var arts = document.querySelectorAll('article[data-testid="tweet"]');
+        for (var i = 0; i < arts.length; i++) {
+          var tx = arts[i].querySelector('[data-testid="tweetText"]');
+          if (!tx || norm(tx.textContent).indexOf(needle) === -1) continue;
+          var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
+          for (var j = 0; j < ts.length; j++) {
+            var a = ts[j].closest('a');
+            var m = a ? /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+            if (m && m[1].toLowerCase() === me) return m[2];
+          }
+        }
+        return null;
+      };
+      if (!needle || !me) { resolve({ state: 'error', why: 'no-needle-or-me' }); return; }
+      if (mine()) { resolve({ state: 'error', why: 'already-on-page' }); return; }
+      waitFor(function () {
+        var b = document.querySelector('[data-testid="tweetButtonInline"]');
+        return b && b.getAttribute('aria-disabled') !== 'true' && !b.disabled ? b : null;
+      }, 5000, function (btn) {
+        if (!btn) { resolve({ state: document.querySelector('[data-testid="tweetButtonInline"]') ? 'disabled' : 'no-button' }); return; }
+        btn.click();
+        waitFor(mine, 15000, function (rid) {
+          if (rid) { resolve({ state: 'sent', replyId: rid }); return; }
+          var box = document.querySelector('[data-testid="tweetTextarea_0"]');
+          resolve({ state: box && norm(box.textContent) !== '' ? 'not-sent' : 'unseen' });
+        });
+      });
+    } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/** 回复正文里拿来认「这是我刚发的那条」的字 —— 与脚本里 norm 同一规则 */
+export function replyNeedle(text: string): string {
+  return text.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 16);
+}
+
 /** ⭐ 抽查脚本正文 —— String.raw:反斜杠原样保留 */
 const SPOT_TARGET_SRC = String.raw`(function () {
   try {
@@ -436,6 +554,24 @@ const buildUnfollowScript = (params: Readonly<Record<string, unknown>>): string 
 };
 
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_SCRIPTS.likeTweet,
+    purpose: 'X:在单篇推文页给这条推文点赞(点 like → 等它变成 unlike)',
+    /** ⚠️ 字符串参数用**函数**替换:直接给替换串时 `$&` `$'` 会被 replace 当成特殊模式 */
+    build: (params) => LIKE_SRC.replace('__ID__', () => JSON.stringify(String(params.tweetId ?? ''))),
+  },
+  {
+    id: X_SCRIPTS.replyBoxState,
+    purpose: 'X:单篇页的回复框在不在、里面有没有残留(只读)',
+    build: () => REPLY_BOX_SRC,
+  },
+  {
+    id: X_SCRIPTS.sendReply,
+    purpose: 'X:点回复框的发送 → 等我的回复真的出现在页面上,读回它的 id',
+    build: (params) => SEND_REPLY_SRC
+      .replace('__NEEDLE__', () => JSON.stringify(String(params.needle ?? '')))
+      .replace('__ME__', () => JSON.stringify(String(params.me ?? '').toLowerCase())),
+  },
   {
     id: X_SCRIPTS.follow,
     purpose: 'X:在他的主页上关注(点 Follow → 等按钮变成 Following)',

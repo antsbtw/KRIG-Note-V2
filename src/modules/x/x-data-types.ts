@@ -148,6 +148,9 @@ export type XDataInvoke =
   | { readonly op: 'followQueueStatus'; readonly wsId: string }
   /** ⭐ 求关:准备一个人 —— 采他主页最新一页、选推文(或放弃)—— 返回 `AskPrepared`(2026-10-17) */
   | { readonly op: 'askPrepare'; readonly wsId: string; readonly restId: string; readonly handle: string }
+  /** ⭐⭐ 求关:三个动作(点赞 → 留言 → 关注),每步核对,哪步没成停在哪步 —— 返回 `AskRunResult`(2026-10-17) */
+  | { readonly op: 'askRun'; readonly wsId: string; readonly restId: string; readonly handle: string;
+      readonly tweetId: string; readonly tweetText: string; readonly pickKind: 'tweet' | 'bio-latest' | 'other'; readonly reply: string }
   | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。

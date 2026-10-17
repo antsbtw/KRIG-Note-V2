@@ -25,7 +25,7 @@ export async function writeSetting(key: string, value: unknown): Promise<void> {
 }
 
 export type ActionEntry = {
-  readonly action: 'unfollow' | 'follow';
+  readonly action: 'unfollow' | 'follow' | 'like' | 'reply';
   readonly targetRestId: string;
   readonly targetHandle: string;
   readonly decidedBy: 'human' | 'ai';
