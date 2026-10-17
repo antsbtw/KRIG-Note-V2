@@ -49,6 +49,14 @@ describe('任务 view', () => {
     expect(A).toMatch(/op: 'askPrepare', wsId, restId: who\.restId, handle: who\.handle/);
   });
 
+  it('⭐ 求关成了自动到下一个人(用户 10-17);没成才停在这张卡', () => {
+    const A = strip(read('src/modules/x/XTaskAsk.tsx'));
+    const act = A.slice(A.indexOf('const act = async'), A.indexOf('const cycle'));
+    expect(act.length).toBeGreaterThan(100);
+    expect(act).toMatch(/if \(v\.ok\) \{ next\(/);
+    expect(act.indexOf('if (v.ok)')).toBeLessThan(act.indexOf('setResult(v)'));
+  });
+
   it('⭐⭐ 放弃才排除 —— 只在「采到了、账对上、确实没求关」时;没采到不算到他头上', () => {
     const P = strip(read('src/modules/x/x-ask-prepare.ts'));
     const body = P.slice(P.indexOf('export async function prepareAsk'));

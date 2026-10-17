@@ -71,8 +71,11 @@ export function AskRun({ wsId, queue, onEnd, onActed }: {
       pickKind: sel.id === plan.tweet.id ? plan.kind : 'other', reply: draft,
     });
     setActing(false);
-    setResult(r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason });
+    const v: AskRunResult = r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason };
     onActed?.();
+    /** ⭐ 成了就直接到下一个人(用户 10-17:「执行成功后,自动到下一个人,不要再停留在原来的蓝V用户了」);没成留在这儿给人看 */
+    if (v.ok) { next(`✓ 求关完成(${stepLine(v)})`); return; }
+    setResult(v);
   };
   const cycle = (): void => {
     if (pool.length === 0) return;
@@ -86,6 +89,9 @@ export function AskRun({ wsId, queue, onEnd, onActed }: {
         <strong>求关 {i + 1}/{queue.length}:{who.name ?? who.handle} @{who.handle}</strong>
         <button type="button" style={{ fontSize: 11 }} onClick={() => onEnd(done)}>结束这一批</button>
       </div>
+      {done.length > 0 && (
+        <div style={{ marginTop: 4, opacity: 0.7 }}>上一个:@{done[done.length - 1].who.handle} {done[done.length - 1].outcome}</div>
+      )}
       {loading && <div style={{ marginTop: 6, opacity: 0.8 }}>正在采他主页最新的推文(左边会跳到他主页)…</div>}
       {prep && !prep.ok && (
         <div style={{ marginTop: 6 }}>
