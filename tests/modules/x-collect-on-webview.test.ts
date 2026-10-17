@@ -190,3 +190,46 @@ describe('⭐⭐ 推文页断点续采(3b 修好)', () => {
     expect(log.cursors[0], '首采不该受断点续采改动影响').toBe('c1');
   });
 });
+
+describe('⭐⭐⭐ 人卡 / 后台:一页一存、存完回读(2026-10-16 逐页账)', () => {
+  it('每页都交给 savePage;新增数累计;逐页账带出来', async () => {
+    const { ports } = fakePorts({ pages: 3 });
+    const saved: string[][] = [];
+    const r = await collectOnWebview(ports, { page: 'x.profile', handle: 'a', restId: '1', pageCap: 30 }, {
+      ...hooks(),
+      savePage: async (tweets) => { saved.push(tweets.map((t) => t.id)); return { inDb: tweets.map((t) => t.id), inserted: tweets.length }; },
+    });
+    if (!r.reached) throw new Error('应当到达');
+    expect(saved).toEqual([['t1'], ['t2'], ['t3']]);
+    expect(r.pageInserted).toBe(3);
+    expect(r.ledger.map((l) => l.page)).toEqual([0, 1, 2]);
+    expect(r.ledgerProblem).toBeUndefined();
+  });
+
+  it('⭐⭐ 回读少一条 → 重采一次仍少 → 停在这页,ledgerProblem 写「落库层」(后台据此判这一段失败)', async () => {
+    /** ⚠️ 按**游标**给页(同一个游标重采拿回同一页)—— fakePorts 每调一次就推进,会把「重采」变成「下一页」 */
+    let idx = 1;
+    const ports: WebviewPorts = {
+      async goto() { return { ok: true }; },
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        return { items: [{ url: SEED, text: page(idx, `c${idx}`), requestHeaders: HEADERS }] } satisfies RunHarvest;
+      },
+      async runScript(_id, params) { idx = Number(String(params.cursor).slice(1)) + 1; return { ok: true }; },
+    };
+    const r = await collectOnWebview(ports, { page: 'x.profile', handle: 'a', restId: '1', pageCap: 30 }, {
+      ...hooks(),
+      savePage: async (tweets) => ({ inDb: tweets.map((t) => t.id).filter((id) => id !== 't2'), inserted: 1 }),
+    });
+    if (!r.reached) throw new Error('应当到达');
+    expect(r.ledgerProblem).toContain('落库层');
+    expect(r.ledger.at(-1)?.notInDb).toEqual(['t2']);
+  });
+
+  it('后台:ledgerProblem → 这一段 failure(异常即停);新增算每页累计的', () => {
+    const src = readFileSync(join(process.cwd(), 'src/modules/x/x-bg-runner.ts'), 'utf8');
+    expect(src).toMatch(/if \(r\.ledgerProblem !== undefined\) \{\s*return \{[^}]*failure: r\.ledgerProblem \}/);
+    expect(src).toMatch(/saved \+= r\.pageInserted \+ sv\.inserted;/);
+    expect(readFileSync(join(process.cwd(), 'src/modules/x/x-person-collect.ts'), 'utf8')).toMatch(/savePage: \(tweets\) => saveTweetPage\(\{ tweets, source: input\.page, wcId: input\.wcId \}\)/);
+  });
+});

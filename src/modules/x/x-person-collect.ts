@@ -14,6 +14,7 @@
  */
 
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
+import { saveTweetPage } from './x-save-page';
 import { collectOnWebview, type CollectOnWebviewResult } from './x-collect-on-webview';
 import { webviewPorts } from './x-collect-ports';
 
@@ -70,6 +71,8 @@ export async function collectPersonTab(input: {
         ctl.seq += 1;
         tracePersonProgress({ handle: input.handle, tab: input.page, attempt: input.attempt, msg: m });
       },
+      /** ⭐⭐ 一页一存、存完回读(2026-10-16,逐页账)—— 与搜索 / 后台同一个函数 */
+      savePage: (tweets) => saveTweetPage({ tweets, source: input.page, wcId: input.wcId }),
       /** ⭐ 歇着时也每秒看一眼停止标记 —— 限流退避可能一等 15 分钟(与 renderer 旧版同) */
       wait: async (ms) => {
         const until = Date.now() + ms;

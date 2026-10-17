@@ -19,11 +19,8 @@ import { bgRunningOn } from './x-bg-runner';
 import { auditTimelinePayload, type TweetRecord } from './x-timeline-audit';
 import { ledgerFor, pageTimes, type RunHarvest } from './x-collect-run';
 import { pageProblem, type PageLedgerRow } from './x-page-ledger';
-import { saveTweets, existingTweetIds } from './x-tweet-repo';
-import { saveTweetAuthors } from './x-user-repo';
-import { accountForWrite } from './x-account-repo';
 import { summarizeBatch, type BatchStats } from './x-batch-stats';
-import { appendCollectLog } from './x-collect-log-repo';
+import { saveTweetPage } from './x-save-page';
 
 export type SearchScrollInput = {
   readonly wsId: string;
@@ -87,7 +84,6 @@ export async function collectSearchByScroll(input: SearchScrollInput): Promise<S
     const ok200 = searchPages.filter((it) => (it.status ?? 200) === 200)
       .sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));
 
-    const account = await accountForWrite(wcId);
     const all: TweetRecord[] = [];
     const pages: Array<PageLedgerRow & { newest?: string; oldest?: string }> = [];
     let prevNewest: number | undefined;
@@ -96,17 +92,10 @@ export async function collectSearchByScroll(input: SearchScrollInput): Promise<S
       const got = [auditTimelinePayload(ok200[i].text)];
       const row = await ledgerFor({
         harvest: async () => null,
-        savePage: async ({ tweets }) => {
-          const recs = tweets.filter((t) => t.id !== '');
-          const sv = await saveTweets(recs, { source: X_PAGE_NAME.search, searchRecipe: input.q, wsId: input.wsId });
-          const au = await saveTweetAuthors(tweets, input.recipeName, account);
-          /** ⭐ 记账本 —— 与 IPC saveTweets 同口径,否则状态页对账差出这批 */
-          await appendCollectLog({ kind: 'tweets', source: X_PAGE_NAME.search, given: recs.length,
-            inserted: sv.inserted, updated: sv.updated, failed: sv.failed.length, wsId: input.wsId });
-          await appendCollectLog({ kind: 'users', source: 'tweet-authors', given: au.inserted + au.updated + au.failed.length,
-            inserted: au.inserted, updated: au.updated, failed: au.failed.length, wsId: input.wsId });
-          return { inDb: await existingTweetIds(tweets.map((t) => t.id).filter((x) => x !== '')) };
-        },
+        /** ⭐ 存一页 + 记账本 + 回读 —— 与人卡 / 后台同一个函数(x-save-page.ts) */
+        savePage: async ({ tweets }) => saveTweetPage({
+          tweets, source: X_PAGE_NAME.search, searchRecipe: input.q, recipeName: input.recipeName, wsId: input.wsId, wcId,
+        }),
       }, i + 1, '滚动', one, got, prevNewest, undefined, false);
       const times = pageTimes(got);
       if (times.length > 0) prevNewest = Math.max(...times);

@@ -134,11 +134,22 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
           // 没去到页 = 这一段失败(不碰断点,等下个窗口重试或人看)
           return { pages, saved, exhausted: false, stopReason: r.reason, failure: r.reason } satisfies RunOneResult;
         }
+        /**
+         * ⭐⭐ 逐页账有一页对不上(重采后仍不对)= 这一段失败,停下等人看(异常即停,2026-10-16)。
+         * 已对上的页已经存了;断点不动,下次从对不上那页重采。
+         */
+        if (r.ledgerProblem !== undefined) {
+          return { pages, saved: saved + r.pageInserted, exhausted: false, stopReason: r.ledgerProblem, failure: r.ledgerProblem } satisfies RunOneResult;
+        }
         // 存库(主进程直接调 repo;source=页名,与人卡一致)
         if (r.records.length > 0) {
           try {
+            /**
+             * ⚠️ 每页已经先存过(逐页账,2026-10-16),这里整批再存一次(幂等,补齐长文正文等)——
+             * 「新增」要算每页累计的,否则这里恒为 0。
+             */
             const sv = await saveTweets([...r.records], { source: input.page });
-            saved += sv.inserted;
+            saved += r.pageInserted + sv.inserted;
           } catch (e) {
             // 采到了却存不进 = 这一段失败,断点不动(下次重采这一段,推文幂等)
             const why = `存库失败:${e instanceof Error ? e.message : String(e)}`;

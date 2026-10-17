@@ -314,11 +314,12 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
            * (project-x-paging-403-root-cause 记过这笔连带账)。
            */
           const authFail = worthReloadRetry(why, run.paging?.rounds ?? 0);
-          let inserted = 0;
+          /** ⚠️ 每页已在主进程先存过(逐页账,2026-10-16)—— 新增要加上每页累计的,否则下面整批再存恒为 0 */
+          let inserted = run.pageInserted ?? 0;
           if (records.length > 0) {
             const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name, wcId: wcId ?? undefined } });
             if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); break; }
-            inserted = (sv.value as { inserted: number }).inserted;
+            inserted += (sv.value as { inserted: number }).inserted;
           }
           /**
            * ⭐⭐ 每个标签页(每次尝试)的结果**落留痕**(2026-10-10:停因只显示在人卡上,关了就没,
