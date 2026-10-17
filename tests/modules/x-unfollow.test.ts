@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  SETTING_DEFS, mergeSettings, validateSetting, unfollowGate, localDayStart,
+  SETTING_DEFS, mergeSettings, validateSetting, unfollowGate, followGate, localDayStart,
 } from '@modules/x/x-ops-settings';
 
 const read = (p: string): string => readFileSync(join(process.cwd(), p), 'utf8');
@@ -18,6 +18,8 @@ const S = {
   'bg.pages_per_segment': 10, 'bg.segment_gap_sec': 120,
   // 2026-10-16 蓝V互关 M4:关注的节奏与回访天数
   'follow.daily_cap': 30, 'follow.min_gap_sec': 60, 'follow.jitter_sec': 30, 'follow.revisit_days': 7,
+  // 2026-10-17 求关:连续 15 个歇 15 分钟(用户选的);准备时采他主页 2 页
+  'follow.burst_size': 15, 'follow.burst_rest_min': 15, 'ask.collect_pages': 2,
 };
 
 describe('设置', () => {
@@ -37,6 +39,36 @@ describe('设置', () => {
     expect(validateSetting('unfollow.daily_cap', -1)).not.toBeNull();
     expect(validateSetting('unfollow.min_gap_sec', 1)).not.toBeNull();
     expect(validateSetting('nope', 1)).not.toBeNull();
+  });
+});
+
+describe('⭐⭐⭐ 关注闸门(10-17 改:没有「两次最小间隔」,连续满 15 个歇 15 分钟)', () => {
+  const now = new Date('2026-10-17T12:00:00Z');
+  /** 每隔 1 分钟关一个,最新那个在 ago 分钟前 */
+  const series = (n: number, ago: number): string[] =>
+    Array.from({ length: n }, (_, i) => new Date(now.getTime() - (ago + i) * 60_000).toISOString());
+
+  it('⭐ 用户 10-17:「x没有这个限制」—— 刚关完一个马上关下一个,放行', () => {
+    expect(followGate(S, 2, [new Date(now.getTime() - 47_000).toISOString()], now).allowed).toBe(true);
+    expect(followGate(S, 14, series(14, 0), now).allowed).toBe(true);
+  });
+
+  it('⭐⭐ 连续关满 15 个 → 歇 15 分钟,给出还要等几秒;提示说清是我们的设置', () => {
+    const g = followGate(S, 15, series(15, 2), now);
+    expect(g.allowed).toBe(false);
+    expect(g.waitSec).toBe(13 * 60);
+    expect(g.reason).toContain('连续关注 15 个');
+    expect(g.reason).toContain('我们的设置');
+  });
+
+  it('歇够了 → 连续数清零,放行;中间断过 15 分钟的不算连续', () => {
+    expect(followGate(S, 15, series(15, 15), now).allowed).toBe(true);
+    const broken = [...series(10, 0), ...series(5, 40)];
+    expect(followGate(S, 15, broken, now).allowed).toBe(true);
+  });
+
+  it('每日上限照旧', () => {
+    expect(followGate(S, 30, [], now)).toMatchObject({ allowed: false });
   });
 });
 

@@ -41,10 +41,25 @@ export const SETTING_DEFS: readonly SettingDef[] = [
    * 默认取保守(我的判断:X 对短时间大量关注比取关更敏感)。
    */
   { key: 'follow.daily_cap', label: '每日关注上限', default: 30, min: 0, max: 400, unit: '个' },
-  { key: 'follow.min_gap_sec', label: '两次关注最小间隔', default: 60, min: 10, max: 3600, unit: '秒' },
+  /**
+   * ⚠️ 只管**关注队列**(后台一个个关)的节奏;不是 X 的限制,求关卡(人一次点一个)不受它管。
+   * 用户 10-17:「这个提示不对的,x没有这个限制,只是15个关注后需要等待一段时间」—— 原来闸门拿它拦求关,提示还说得像平台限制。
+   */
+  { key: 'follow.min_gap_sec', label: '关注队列:两次关注的间隔', default: 60, min: 10, max: 3600, unit: '秒' },
   /** 每次间隔再随机多等 0~N 秒 —— 定值本身也是指纹 */
   { key: 'follow.jitter_sec', label: '关注间隔随机加', default: 30, min: 0, max: 600, unit: '秒' },
   /** 关注满几天还没回关 → 进回访名单(用户 10-16:「回访 N 天」「正确」) */
+  /**
+   * ⭐ 连续关注满 N 个 → 歇 M 分钟(用户 10-17:「只是15个关注后需要等待一段时间」;歇多久用户选了「15 分钟」)。
+   * 「连续」= 相邻两次成功关注隔不到 M 分钟;歇够 M 分钟,连续数自然清零。
+   */
+  { key: 'follow.burst_size', label: '连续关注几个后歇一会', default: 15, min: 1, max: 400, unit: '个' },
+  { key: 'follow.burst_rest_min', label: '连续关注满后歇多久', default: 15, min: 1, max: 1440, unit: '分钟' },
+  /**
+   * ⭐ 求关准备时采他主页几页(用户 10-17:「既然有这个机会刷用户的主页,就应该跳转时采集一次这个推友的两页或多页最新的推文」)。
+   * 选推文仍只看最近 10 条原创;多采的进库,是他的时间线。
+   */
+  { key: 'ask.collect_pages', label: '求关时采他主页几页', default: 2, min: 1, max: 10, unit: '页' },
   { key: 'follow.revisit_days', label: '关注后几天没回关算不回', default: 7, min: 1, max: 60, unit: '天' },
 ];
 
@@ -81,18 +96,25 @@ export function localDayStart(now: Date): Date {
 }
 
 /**
- * ⭐⭐ 现在能不能关注 —— 每日上限 + 最小间隔(与取关同口径;只算成功的)。
+ * ⭐⭐ 现在能不能关注 —— 每日上限 + 连续满 N 个歇 M 分钟(只算成功的)。
+ * @param recentDesc 最近几次成功关注的时间(新→旧,至少给 burst_size 条才判得出连续)
+ * ⚠️ 这两条都是**我们自己的设置**,提示里要说清「可在设置里改」,别说得像 X 的限制。
  */
-export function followGate(s: OpsSettings, todayCount: number, lastAtIso: string | undefined, now: Date): UnfollowGate {
+export function followGate(s: OpsSettings, todayCount: number, recentDesc: readonly string[], now: Date): UnfollowGate {
   const cap = s['follow.daily_cap'];
-  const gap = s['follow.min_gap_sec'];
   if (todayCount >= cap) {
-    return { allowed: false, reason: `今天已关注 ${todayCount} 个,到了上限 ${cap}(可在设置里改)`, todayCount, cap };
+    return { allowed: false, reason: `今天已关注 ${todayCount} 个,到了上限 ${cap}(我们的设置,可改)`, todayCount, cap };
   }
-  if (lastAtIso !== undefined) {
-    const since = (now.getTime() - Date.parse(lastAtIso)) / 1000;
-    if (since < gap) {
-      return { allowed: false, reason: `离上次关注才 ${Math.floor(since)} 秒,最小间隔 ${gap} 秒`, waitSec: Math.ceil(gap - since), todayCount, cap };
+  const size = s['follow.burst_size'];
+  const restMs = s['follow.burst_rest_min'] * 60_000;
+  const ts = recentDesc.map((x) => Date.parse(x)).filter((t) => Number.isFinite(t));
+  if (ts.length > 0 && now.getTime() - ts[0] < restMs) {
+    let streak = 1;
+    while (streak < ts.length && ts[streak - 1] - ts[streak] < restMs) streak += 1;
+    if (streak >= size) {
+      const waitSec = Math.ceil((ts[0] + restMs - now.getTime()) / 1000);
+      const until = new Date(ts[0] + restMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return { allowed: false, reason: `已连续关注 ${streak} 个,歇 ${s['follow.burst_rest_min']} 分钟(约 ${until} 可继续;我们的设置,可改)`, waitSec, todayCount, cap };
     }
   }
   return { allowed: true, todayCount, cap };

@@ -58,13 +58,14 @@ export async function readUnfollowGate(dayStartIso: string): Promise<UnfollowGat
   return unfollowGate(settings, today?.n ?? 0, last?.last, new Date());
 }
 
-/** ⭐ 现在能不能关注 —— 同取关:今天成功几次、最后一次何时 */
+/** ⭐ 现在能不能关注 —— 今天成功几次 + 最近 burst_size 次成功关注的时间(判「连续满 N 个歇一会」) */
 export async function readFollowGate(dayStartIso: string): Promise<UnfollowGate & { settings: OpsSettings }> {
   const { settings } = await readSettings();
-  const [[today], [last]] = await getXDB().query<[Array<{ n: number }>, Array<{ last?: string }>]>(`
+  /** ⚠️ 排序字段放进选择列(t),字符串另取一列(s)—— 不赌 `SELECT VALUE … ORDER BY` 的语法 */
+  const [[today], recent] = await getXDB().query<[Array<{ n: number }>, Array<{ s: string }>]>(`
     SELECT count() AS n FROM x_action_log
       WHERE action = 'follow' AND result = 'ok' AND at >= type::datetime($since) GROUP ALL;
-    SELECT <string> time::max(at) AS last FROM x_action_log
-      WHERE action = 'follow' AND result = 'ok' GROUP ALL;`, { since: dayStartIso });
-  return { ...followGate(settings, today?.n ?? 0, last?.last, new Date()), settings };
+    SELECT <string> at AS s, at AS t FROM x_action_log
+      WHERE action = 'follow' AND result = 'ok' ORDER BY t DESC LIMIT $n;`, { since: dayStartIso, n: settings['follow.burst_size'] });
+  return { ...followGate(settings, today?.n ?? 0, (recent ?? []).map((r) => r.s), new Date()), settings };
 }

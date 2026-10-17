@@ -1,6 +1,6 @@
 /**
  * ⭐⭐ 求关:准备一个人(2026-10-17)—— 主进程
- * 采他主页最新一页(人卡同一条路:一页一存、逐页账)→ 读 Bio / 名字 → 按规则选推文(x-ask-plan.ts)。
+ * 采他主页最新几页(设置 ask.collect_pages,默认 2;人卡同一条路:一页一存、逐页账)→ 读 Bio / 名字 → 按规则选推文(x-ask-plan.ts)。
  * 放弃的人记成「算法排除」(写明原因;人标过的不动)—— 不再出现在候选里。
  */
 import { getXDB } from '@storage/surreal/client';
@@ -11,6 +11,7 @@ import { X_PAGE_NAME } from './x-pages';
 import { readPerson } from './x-people-repo';
 import { pickAskTweet, type AskPlan } from './x-ask-plan';
 import { followQueueStatus } from './x-follow-queue';
+import { readSettings } from './x-ops-actions-repo';
 
 export type AskPrepared =
   | { readonly ok: false; readonly why: string }
@@ -29,7 +30,8 @@ export async function prepareAsk(wsId: string, account: string, restId: string, 
   if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
   if (followQueueStatus(wsId).current) return { ok: false, why: '关注队列正在动作' };
 
-  const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: 1, attempt: 1 });
+  const { settings } = await readSettings();
+  const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: settings['ask.collect_pages'], attempt: 1 });
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };
   const p = await readPerson(account, restId);
   const plan = pickAskTweet(r.records, { restId, handle, bio: p?.bio, name: p?.display_name });
