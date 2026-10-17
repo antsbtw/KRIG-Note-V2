@@ -116,7 +116,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
       {open && (
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {asking && (
-            <AskRun wsId={wsId} queue={asking} onEnd={(d) => {
+            <AskRun wsId={wsId} queue={asking} onActed={loadProg} onEnd={(d) => {
               setAsking(null);
               setMsg(`这一批看完 ${d.length}/${asking.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
               loadCands();

@@ -8,7 +8,7 @@
  * · 认不出 / 要等(X 网页没开、正忙)→ 如实写原因,给「认号」按钮重试
  * · 认出的号变了 → 通知父组件,让「状态」「人」按新号重查(关系按号存,1.2.27)
  */
-import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { getXHostState, subscribeXHost } from './x-host-registry';
 import type { WsAccount } from './x-account';
@@ -68,6 +68,17 @@ export function XAccountBadge({ wsId, onAccount }: {
     if (wcId !== null && note !== null && note.includes('网页没开') && !busy) void identify();
   }, [wcId]);
 
+  /**
+   * ⭐ 页面还没渲染好就认 → 「页面上找不到登录号」(2026-10-17 真机:X 网页刚建好、停在 x.com/home 还没画出侧栏,
+   * 1 秒内认号失败,警告一直挂着,而后面求关时认号是好的)。这种失败隔 3 秒再认,最多 5 次;人点「认号」重新计数。
+   */
+  const retries = useRef(0);
+  useEffect(() => {
+    if (note === null || !note.includes('找不到登录号') || busy || retries.current >= 5) return;
+    const t = setTimeout(() => { retries.current += 1; void identify(); }, 3000);
+    return () => clearTimeout(t);
+  }, [note, busy]);
+
   const label = acc === null ? '登录号未知'
     : acc.restId ? `@${acc.handle}` : `@${acc.handle}(数字 id 未知)`;
   return (
@@ -75,7 +86,7 @@ export function XAccountBadge({ wsId, onAccount }: {
       <span title={acc?.restId ? `数字 id ${acc.restId}${acc.detectedAt ? ` · 认于 ${acc.detectedAt}` : ''}` : undefined}>
         {wsId} · {label}
       </span>
-      <button type="button" disabled={busy} onClick={() => void identify()}
+      <button type="button" disabled={busy} onClick={() => { retries.current = 0; void identify(); }}
         title="读 X 网页此刻登录的号;还没数字 id 时会开一次你的主页"
         style={{ fontSize: 11, padding: '1px 6px', cursor: busy ? 'default' : 'pointer' }}>
         {busy ? '认号中…' : '认号'}

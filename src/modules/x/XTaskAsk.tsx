@@ -24,7 +24,11 @@ const stepLine = (r: AskRunResult): string =>
 
 type Done = { readonly who: AskWho; readonly outcome: string };
 
-export function AskRun({ wsId, queue, onEnd }: { wsId: string; queue: readonly AskWho[]; onEnd: (done: readonly Done[]) => void }): ReactElement {
+export function AskRun({ wsId, queue, onEnd, onActed }: {
+  wsId: string; queue: readonly AskWho[]; onEnd: (done: readonly Done[]) => void;
+  /** 动过手(不管成没成)→ 父组件刷新「今天已关注 / 累计」那一行 */
+  onActed?: () => void;
+}): ReactElement {
   const [i, setI] = useState(0);
   const [prep, setPrep] = useState<AskPrepared | null>(null);
   const [loading, setLoading] = useState(false);
@@ -68,6 +72,7 @@ export function AskRun({ wsId, queue, onEnd }: { wsId: string; queue: readonly A
     });
     setActing(false);
     setResult(r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason });
+    onActed?.();
   };
   const cycle = (): void => {
     if (pool.length === 0) return;
