@@ -61,3 +61,15 @@ describe('⭐⭐⭐ 去重看整段内容,不看前 256 字(2026-10-16 真机:�
     expect(eng.dedupKey(a.url, 200, a.text)).not.toBe(eng.dedupKey(b.url, 200, b.text));
   });
 });
+
+describe('⭐⭐⭐ 开始采集时两条腿的池子都清空(2026-10-16:钩子池残留上一跑的搜索结果)', () => {
+  it('startAll 里:CDP 清 clearPayloads、钩子清 clear,且都在开始收之前', async () => {
+    const src = (await import('node:fs')).readFileSync((await import('node:path')).join(process.cwd(), 'src/platform/main/web-capability/wiring/web-collect-engine.ts'), 'utf8');
+    const body = src.slice(src.indexOf('async startAll(pageId, noisy)'), src.indexOf('stopAll(pageId)'));
+    expect(body.length).toBeGreaterThan(200);
+    expect(body.indexOf('cap.clearPayloads()')).toBeGreaterThan(-1);
+    expect(body.indexOf('cap.clearPayloads()')).toBeLessThan(body.indexOf('cap.start()'));
+    expect(body.indexOf('hook.clear()')).toBeGreaterThan(-1);
+    expect(body.indexOf('hook.clear()')).toBeLessThan(body.indexOf('await hook.start()'));
+  });
+});

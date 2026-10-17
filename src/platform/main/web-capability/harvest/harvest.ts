@@ -217,6 +217,16 @@ export async function harvestPage(
    * ⭐⭐⭐ 对账:浏览器收到了、我们没采到 = 漏采(用户 10-16:「必须保证的哦」)。
    * ⚠️ 放第一条 —— 它说明下面的数字不是全部。
    */
+  /**
+   * ⭐⭐ 反方向也要报:采到的比浏览器**这一跑**收到的还多 = 混进了不属于这一跑的数据
+   * (2026-10-16 真机:钩子池残留上一跑的 2 页,「采到 3 页 / 浏览器收到 1 次」,0 轮就收工)。
+   */
+  if (completeness !== undefined && completeness.captured > completeness.seen) {
+    problems.unshift(
+      `⚠️ 采到 ${completeness.captured} 页,比浏览器这一跑收到的 ${completeness.seen} 次还多`
+      + ' —— 混进了不属于这一跑的数据(上一跑残留?),这一跑的结果不可信',
+    );
+  }
   if (completeness !== undefined && completeness.seen > completeness.captured) {
     problems.unshift(
       `⚠️ 漏采:浏览器收到目标数据 ${completeness.seen} 次,只采到 ${completeness.captured} 页`

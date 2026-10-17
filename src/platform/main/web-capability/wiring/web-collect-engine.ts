@@ -396,6 +396,13 @@ export function makeAcquireDeps(wc: WebContents, _pageId: PageId): AcquireDeps {
        * ⚠️ 钩子装失败**不中止** —— CDP 那条腿还活着,少一条腿是**降级不是失败**。
        * ⭐ 这正是「多条腿」的意义:单点故障不再是全局故障。
        */
+      /**
+       * ⭐⭐⭐ **钩子腿也要先清空**(2026-10-16 真机)—— 原先只清 CDP 腿(`cap.clearPayloads()`),
+       * 钩子池里还留着上一跑的响应:一次 `from:` 搜索「采到 3 页」,其中 2 页是 5 分钟前另一跑的搜索结果,
+       * 凑满了页数 → 0 轮就收工,真该采的没采;旧推文还被改记成这一跑的配方。
+       * 与 10-04「每一篇都把前面那些页当成自己的收获」同一类,当年只修了一条腿。
+       */
+      hook.clear();
       let hookInstalled = true;
       try {
         await hook.start();

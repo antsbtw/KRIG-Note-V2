@@ -122,4 +122,14 @@ describe('⭐⭐⭐ 对账:浏览器收到 vs 我们采到(用户 10-16:「这�
     expect(rep.completeness).toEqual({ seen: 2, captured: 2 });
     expect(rep.problems.some((p) => p.includes('漏采'))).toBe(false);
   });
+
+  it('⭐⭐ 采到的比浏览器这一跑收到的还多 → 报「混进了不属于这一跑的数据」(10-16:钩子池残留上一跑)', async () => {
+    const rep = await run({ 'GET /i/api/graphql/q/SearchTimeline 200': 1 }, [
+      'https://x.com/i/api/graphql/q/SearchTimeline?c=old1', 'https://x.com/i/api/graphql/q/SearchTimeline?c=old2',
+      'https://x.com/i/api/graphql/q/SearchTimeline?c=new',
+    ]);
+    expect(rep.completeness).toEqual({ seen: 1, captured: 3 });
+    expect(rep.ok).toBe(false);
+    expect(rep.problems[0]).toContain('混进了不属于这一跑的数据');
+  });
 });
