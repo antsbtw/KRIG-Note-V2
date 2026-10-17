@@ -54,6 +54,7 @@ import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect, type RunResult } from './x-collect-run';
 import { buildRunReport, completenessLine } from './x-run-report';
 import { statsLine } from './x-batch-stats';
+import { ledgerLine } from './x-page-ledger';
 import { recipeToQuery } from './x-recipe-query';
 import { setXHostBusy } from './x-host-registry';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
@@ -227,6 +228,11 @@ export function XConsole(
   /** ⭐ 采够几页就停 —— 用户 2026-10-03:「每次采集 10 页」 */
   const [pagesWanted, setPagesWanted] = useState('10');
   const [report, setReport] = useState<HarvestReport | null>(null);
+  /**
+   * ⭐ 滚动截获的结果(2026-10-16)—— 采完要**留在界面上**:原先进度行只在「采集中」显示,
+   * 搜索页走新分支后采完界面回到使用说明,用户:「没有采集信息?」
+   */
+  const [scrollDone, setScrollDone] = useState<{ head: string; lines: string[]; tail: string } | null>(null);
   /**
    * ⭐⭐ **完整性核对**结果 —— 用户 2026-10-02:
    * 「关键是**核对爬取的数据完整没有**。」
@@ -804,6 +810,7 @@ export function XConsole(
                   onClick={async () => {
                     setRunning(true);
                     setReport(null);
+                    setScrollDone(null);
                     setAudit(null);
                     setAuditFile(null);
                     setPlan(null);
@@ -853,16 +860,20 @@ export function XConsole(
                           ok: boolean; why?: string; rateLimited: boolean; reportFile?: string;
                           totals?: { pages: number; xTweets: number; notParsed: number; notInDb: number; badPages: number };
                           stats?: Parameters<typeof statsLine>[0];
+                          pages?: Array<Parameters<typeof ledgerLine>[0] & { newest?: string; oldest?: string }>;
                         };
-                        if (!v.ok) { setStep(`滚动截获没跑:${v.why ?? '?'}`); return; }
+                        if (!v.ok) {
+                          setScrollDone({ head: `⚠️ 滚动截获没跑:${v.why ?? '?'}`, lines: [], tail: '' });
+                          return;
+                        }
                         const t = v.totals;
-                        setStep(
-                          (t ? `${t.badPages === 0 ? '✓' : '⚠️'} ${t.pages} 页 · X 列 ${t.xTweets} · 解析缺 ${t.notParsed} · 入库缺 ${t.notInDb}`
-                            + (t.badPages > 0 ? ` · ${t.badPages} 页对不上` : ' · 每页都对上了') : '')
-                          + (v.rateLimited ? ' · ⚠️ 撞了 429' : '')
-                          + (v.stats ? ` ｜ 本批:${statsLine(v.stats)}` : '')
-                          + (v.reportFile ? ` ｜ 报告:${v.reportFile}` : ''),
-                        );
+                        setScrollDone({
+                          head: (t ? `${t.badPages === 0 ? '✓' : '⚠️'} 滚动截获 ${t.pages} 页 · X 列 ${t.xTweets} · 解析缺 ${t.notParsed} · 入库缺 ${t.notInDb}`
+                            + (t.badPages > 0 ? ` · ${t.badPages} 页对不上` : ' · 每页都对上了') : '滚动截获完成')
+                            + (v.rateLimited ? ' · ⚠️ 撞了 429' : ''),
+                          lines: (v.pages ?? []).map((p) => `${ledgerLine(p)}  ${p.newest ? new Date(p.newest).toLocaleTimeString() : ''} ~ ${p.oldest ? new Date(p.oldest).toLocaleTimeString() : ''}`),
+                          tail: (v.stats ? `本批:${statsLine(v.stats)}` : '') + (v.reportFile ? `\n报告:${v.reportFile}` : ''),
+                        });
                         return;
                       }
 
@@ -1523,7 +1534,16 @@ export function XConsole(
                   ))}
                 </div>
               )}
-              {!running && !report && (
+              {!running && scrollDone && (
+                <div style={S.diagnose}>
+                  <strong>{scrollDone.head}</strong>
+                  {scrollDone.lines.length > 0 && (
+                    <pre style={{ fontSize: 11, margin: '6px 0', whiteSpace: 'pre-wrap' }}>{scrollDone.lines.join('\n')}</pre>
+                  )}
+                  {scrollDone.tail !== '' && <div style={{ whiteSpace: 'pre-wrap', opacity: 0.85 }}>{scrollDone.tail}</div>}
+                </div>
+              )}
+              {!running && !report && !scrollDone && (
                 <div style={S.todo}>
                   ① 去「控制」那栏选好页面（或左栏自己导航到想采的页）<br />
                   ② 回来点「采这一页」—— 重载、滚动、展开折叠的推文、

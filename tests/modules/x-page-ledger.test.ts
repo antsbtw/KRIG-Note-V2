@@ -192,3 +192,13 @@ describe('⭐⭐⭐ 操作台搜索页走滚动截获(2026-10-16 真机 30 页�
     expect(read('src/modules/x/x-search-scroll.ts')).toMatch(/if \(busy !== null && busy !== input\.ownBusy\) return/);
   });
 });
+
+describe('操作台:滚动截获采完要留在界面上(10-16 用户:「没有采集信息?」)', () => {
+  const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
+  it('结果存进 scrollDone,并在「不在采集中」时显示;使用说明在有结果时不显示', () => {
+    const C = read('src/modules/x/XConsole.tsx');
+    expect(C).toMatch(/setScrollDone\(\{\s*head:/);
+    expect(C).toMatch(/\{!running && scrollDone && \(/);
+    expect(C).toMatch(/\{!running && !report && !scrollDone && \(/);
+  });
+});
