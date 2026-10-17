@@ -24,10 +24,15 @@ const stepLine = (r: AskRunResult): string =>
 
 type Done = { readonly who: AskWho; readonly outcome: string };
 
-export function AskRun({ wsId, queue, onEnd, onActed }: {
+export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   wsId: string; queue: readonly AskWho[]; onEnd: (done: readonly Done[]) => void;
   /** 动过手(不管成没成)→ 父组件刷新「今天已关注 / 累计」那一行 */
   onActed?: () => void;
+  /**
+   * ⭐ 每过完一个人(完成 / 放弃 / 跳过)→ 父组件刷新候选名单
+   * (用户 10-17:「对于放弃的蓝V就不要再放到列表了」—— 库里已排除,原来要等整批结束才刷新)
+   */
+  onPersonDone?: () => void;
 }): ReactElement {
   const [i, setI] = useState(0);
   const [prep, setPrep] = useState<AskPrepared | null>(null);
@@ -56,6 +61,7 @@ export function AskRun({ wsId, queue, onEnd, onActed }: {
   const next = (outcome: string): void => {
     const d = [...done, { who: who!, outcome }];
     setDone(d);
+    onPersonDone?.();
     if (i + 1 >= queue.length) onEnd(d); else setI(i + 1);
   };
 

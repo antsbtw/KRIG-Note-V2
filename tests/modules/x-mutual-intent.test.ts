@@ -11,6 +11,10 @@ import { USER_BUSINESS_FIELDS } from '@modules/x/x-user-repo';
 import { BLUE_MUTUAL_RECIPES } from '../../scripts/x-seed-blue-mutual-recipes';
 
 describe('detectMutualIntent', () => {
+  it('⭐ 「#浇蓝朋友」算(10-17 真机漏判 @azurecloud000)', () => {
+    expect(detectMutualIntent(undefined, [{ tweetId: '1', text: '还差100多，大的小的老的少的男的女的都来\n\n#浇蓝朋友' }]).hit).toBe(true);
+  });
+
   it('⭐ Bio 命中,依据是命中的那一句(不是整段 Bio)', () => {
     const h = detectMutualIntent('长期主义者 🌿｜终身学习者 📚\n互关交友，关注必回 🤝\n慢慢来', []);
     expect(h).toMatchObject({ hit: true, where: 'bio', phrase: '关注必回' });
