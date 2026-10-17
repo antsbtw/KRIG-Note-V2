@@ -190,3 +190,22 @@ M0 实施方式:单独分支 → 临时库用真库数据完整演练迁移 → 
 迁移脚本同时写基线(source = migration),重跑不重复记。
 
 **真机(10-16)**:认号通过,顶栏「ws-1 · @antsbtw」。⚠️ 现名是 **antsBTW**(otun_myvpn 是旧名)→ 迁移用 `--expect-handle=antsbtw`。
+
+---
+
+## 9. M1 + M2 实施记录(2026-10-16,分支 `feature/x-blue-mutual-m1m2`,未提交,待真机)
+
+**M1 配方**(用户:「配方搜索已经有了,关键就是配方了」):
+- 配方加「只看蓝V作者」开关 `blueOnly` → `filter:blue_verified`(⚠️ 语法未真机验);schema 1.2.29 `search_recipes.blue_only`
+- ⚠️ 顺手修老 bug:操作台「连回复一起」勾选框从来没存上(表没字段、repo 没映射)→ 1.2.29 补 `include_replies`
+- 配方 ↔ 库行的映射与 SQL 抽成纯模块 `search-recipe-row.ts`(repo 与脚本共用一份)
+- `scripts/x-seed-blue-mutual-recipes.ts` 建两条:「蓝V互关」(中文 8 个词组,只看蓝V,7 天)/「蓝V互关-英文」(follow back/F4F/IFB);同名已存在跳过
+
+**M2 互关倾向**(改表用户 10-16 已确认):
+- schema 1.2.30 `x_author.mutual_intent / _source(human|ai|rule) / _evidence / _at`,进 USER_BUSINESS_FIELDS(采集不碰)
+- 算法 `x-mutual-intent.ts`:词组扫 Bio + 他**自己发的**推文(转发不算);搜索词与判断词同一份
+  · 不认单字「回关」(回关小黑屋);推文里不认单独「互关」(仅允许互关好友评论);Bio 认;英文按词边界(IFB≠IFBB)
+  · 人 > AI > 算法:人/AI 定过不动;不再命中的(算法标的)清掉 → 可重算
+- 人页:「有互关倾向」筛选 + 「扫描互关倾向」按钮 + 行上显示依据和来源 + 右键「标为有/无互关倾向」(人的决定)
+
+**测试**:M1 纯 6 + 真库 2;M2 纯 12 + 真库 1(合进 x-relation.verify);注入 5 处全红。

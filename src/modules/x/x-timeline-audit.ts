@@ -886,9 +886,17 @@ export function auditTimelinePayload(text: string): TimelineAudit {
    * ⚠️ `project-x-cursor-paging`:「几页没新人」不能当到底,
    * 而 X 一直说 hasMore=true —— 游标在不在是硬证据。
    */
-  const cursors = collectBy(root, (o) =>
-    str(o.cursorType).toLowerCase() === 'bottom'
-    || (typeof o.value === 'string' && str(o.value).startsWith('DAAD')));
+  /**
+   * ⚠️⚠️ 2026-10-16 真机:搜索页 30 轮翻页,后 29 轮几乎每轮 0 条(偶尔冒 1 条刚发的)——
+   * 拿的是 **top** 游标(往新翻),不是 bottom(往旧翻)。原条件是「bottom **或** 值以 DAAD 开头」,
+   * 而搜索页 top / bottom 的值**都**以 DAAD 开头、top 排在前面 → cursors[0] 恒是 top。
+   * (此条件自 10-02 重建起就在;9-27 那次 894 条用的是重建前的旧代码。)
+   * ⭐ 先只认**明确标了 bottom** 的;一个都没有时才退回「DAAD 开头」,且排除标了 top 的。
+   */
+  const bottoms = collectBy(root, (o) => str(o.cursorType).toLowerCase() === 'bottom');
+  const cursors = bottoms.length > 0 ? bottoms : collectBy(root, (o) =>
+    str(o.cursorType).toLowerCase() !== 'top'
+    && typeof o.value === 'string' && str(o.value).startsWith('DAAD'));
   const cursor = cursors.length > 0 ? str(cursors[0].value) : '';
 
   if (items.length === 0) {

@@ -48,6 +48,8 @@ import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
 import { registerXDataIpc } from './x-data-ipc';
 import { bgRunnerHealth, startBgRunner, stopBgRunner } from './x-bg-runner';
+import { startDevInbox, stopDevInbox } from './x-dev-inbox';
+import { registerSpotCheckMenu } from './x-spot-check';
 import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
@@ -103,6 +105,11 @@ export function registerXModule(): void {
    */
   startBgRunner();
   app.on('before-quit', stopBgRunner);
+  /** ⭐ 开发测试收件箱(只在未打包时启用;2026-10-16 用户授权我自己跑测试)—— 同样自启、before-quit 自停 */
+  startDevInbox();
+  app.on('before-quit', stopDevInbox);
+  /** ⭐ 右键「查库」抽查(2026-10-16)—— 经平台的网页右键扩展口,删 X 目录这一项就没了 */
+  registerSpotCheckMenu();
   /** ⭐ 后台采集状态进运行体检(黑匣子)—— X 自己登记,宿主不认识 X 内部 */
   registerHealthProbe('x.bg', bgRunnerHealth);
 }

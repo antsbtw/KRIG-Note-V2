@@ -58,6 +58,9 @@ const fmt = (n: number | undefined): string => (n === undefined ? '—' : n.toLo
  * ⚠️ 后台 runner 在主进程,它的「正在用」不在本进程的 x-host-registry 里;
  * 不问就会和后台抢同一个 webview(跳走会打断后台那一段)。问不到也说出来,不当成「不忙」。
  */
+/** 互关倾向是谁定的 —— 人 > AI > 算法 */
+const INTENT_SOURCE: Readonly<Record<string, string>> = { human: '你标的', ai: 'AI', rule: '算法' };
+
 async function bgBusyNote(wcId: number): Promise<string | null> {
   const r = await xDataCall({ op: 'bgBusy', wcId });
   if (r.status !== 'ok') return `问不到后台状态(${r.reason})`;
@@ -571,6 +574,36 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     loadOverview();
   };
 
+  /**
+   * ⭐⭐ 互关倾向(1.2.30,蓝V互关 M2)。
+   * 用户 10-16:「对有蓝V有互关倾向的(比如写了蓝V互关/浇朋友等类似属于的Bio或者帖子),进行互动求关。」
+   * 扫描 = 算法层(可重算);右键标 = 人的决定(人 > AI > 算法,算法不能覆盖)。
+   */
+  const [intentNote, setIntentNote] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const scanIntent = async (): Promise<void> => {
+    setScanning(true); setIntentNote('扫描中…');
+    const r = await xDataCall({ op: 'scanMutualIntent' });
+    setScanning(false);
+    if (r.status === 'failed') { setIntentNote(`扫描出错:${r.reason}`); return; }
+    const v = r.value as { scanned: number; hits: number; set: number; cleared: number; skippedHigher: number; failed: number; firstFailure?: string };
+    setIntentNote(`扫了 ${v.scanned.toLocaleString()} 人:有倾向 ${v.hits}(新标 ${v.set})· 不再命中清掉 ${v.cleared} · 你定过的不动 ${v.skippedHigher}`
+      + (v.failed > 0 ? ` · ⚠️ 失败 ${v.failed}:${v.firstFailure}` : ''));
+    void load(filter, 0);
+  };
+  const markIntent = async (p: PersonRow, value: boolean): Promise<void> => {
+    const r = await xDataCall({ op: 'setMutualIntent', restId: p.rest_id, value });
+    if (r.status === 'failed') { setErr(r.reason); return; }
+    setErr(null);
+    /** 只看有倾向时标成「无」→ 离开列表;否则就地改这一行 */
+    if (filter.intentOnly && !value) {
+      setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
+      setTotal((t) => (t === null ? t : t - 1));
+    } else {
+      setRows((prev) => prev.map((x) => (x.rest_id === p.rest_id ? { ...x, mutual_intent: value, mutual_intent_source: 'human' } : x)));
+    }
+  };
+
   const pickGroup = (g: PeopleGroup): void =>
     setFilter((f) => ({ ...f, group: f.group === g ? 'all' : g }));
 
@@ -632,6 +665,14 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                 <input type="checkbox" checked={filter.cnText}
                   onChange={(e) => setFilter({ ...filter, cnText: e.target.checked })} /> 中文名或 bio(不含日文)
               </label>
+              <label style={S.check} title="Bio 或他自己的推文里有「互关必回 / 关注必回 / 有关必回 / 互粉…」;你右键标过的以你为准">
+                <input type="checkbox" checked={filter.intentOnly}
+                  onChange={(e) => setFilter({ ...filter, intentOnly: e.target.checked })} /> 有互关倾向
+              </label>
+              <button type="button" style={S.btn} disabled={scanning} onClick={() => void scanIntent()}
+                title="用词组扫一遍所有人的 Bio 和他自己的推文;你标过的不动,不再命中的(算法以前标的)清掉">
+                {scanning ? '扫描中…' : '扫描互关倾向'}
+              </button>
               <select
                 value={filter.scope} style={S.select}
                 onChange={(e) => { setUndo(null); setFilter({ ...filter, scope: e.target.value as PeopleScope }); }}
@@ -687,6 +728,12 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
               </div>
             )}
             {followNote !== null && <div style={S.muted}>⚠️ {followNote}</div>}
+            {intentNote !== null && (
+              <div style={S.muted}>
+                🤝 {intentNote}
+                <button type="button" style={S.linkBtn} onClick={() => setIntentNote(null)} title="知道了">✕</button>
+              </div>
+            )}
             {moved !== null && (
               <div style={S.undo}>
                 {moved}
@@ -729,8 +776,16 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                       <span style={S.muted}>粉丝 {fmt(p.followers_count)}</span>
                       {(p.tags ?? []).map((t) => <span key={t} style={S.userTag}>{t}</span>)}
                       {(p.found_via_recipes ?? []).map((r) => <span key={`r:${r}`} style={S.recipeTag}>配方:{r}</span>)}
+                      {p.mutual_intent !== undefined && p.mutual_intent !== null && (
+                        <span style={p.mutual_intent ? S.intentTag : S.muted} title={p.mutual_intent_evidence ?? ''}>
+                          {p.mutual_intent ? '🤝 互关倾向' : '无互关倾向'}({INTENT_SOURCE[p.mutual_intent_source ?? ''] ?? '?'})
+                        </span>
+                      )}
                     </div>
                     {p.bio && <div style={S.bio}>{p.bio}</div>}
+                    {p.mutual_intent === true && p.mutual_intent_evidence && (
+                      <div style={S.muted}>依据 · {p.mutual_intent_evidence}</div>
+                    )}
                     {verify[p.rest_id] && (
                       <div style={verify[p.rest_id].kind === 'changed' || verify[p.rest_id].kind === 'miss' ? S.verifyWarn : S.muted}>
                         {{ running: '⏳', same: '✓', changed: '⚠', new: '＋', miss: '?' }[verify[p.rest_id].kind]} {verify[p.rest_id].text}
@@ -807,6 +862,13 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             onClick={() => { const m = menu; setMenu(null); setRangeFor(m.p); }}
           >
             采他的帖子/回复/转发…
+          </button>
+          <button
+            type="button" style={S.menuItem}
+            onClick={() => { const m = menu; setMenu(null); void markIntent(m.p, m.p.mutual_intent !== true); }}
+            title="你的判断优先:标过之后,扫描不会再改他"
+          >
+            {menu.p.mutual_intent === true ? '标为无互关倾向' : '标为有互关倾向'}
           </button>
           {menu.p.i_follow === true && (
             <button
@@ -1372,6 +1434,10 @@ const S: Record<string, CSSProperties> = {
     color: 'var(--accent-text, #8ab4f8)', background: 'var(--accent-bg, rgba(138,180,248,0.15))',
   },
   /** ⭐ 配方来源 —— 系统记录的事实,与你手打的标签样子分开(虚线框、不填色) */
+  intentTag: {
+    fontSize: 11, padding: '0 6px', borderRadius: 8,
+    background: 'rgba(80, 200, 120, 0.15)', color: '#5fc98a', border: '1px solid rgba(80, 200, 120, 0.4)',
+  },
   recipeTag: {
     display: 'inline-flex', alignItems: 'center', fontSize: 11, borderRadius: 10, padding: '0 8px',
     color: 'var(--text-secondary, #aaa)', border: '1px dashed var(--border-color, #555)',

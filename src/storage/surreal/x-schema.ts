@@ -1766,6 +1766,62 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.30 —— 人的**互关倾向**(2026-10-16,蓝V互关 M2;改表用户 10-16 已确认)
+ *
+ * 用户:「对有蓝V有互关倾向的(比如写了蓝V互关/浇朋友等类似属于的Bio或者帖子),进行互动求关。」
+ * 写法同「排除」(1.2.21):单字段 + 来源,人 > AI > 算法(用户 10-08);依据原句必存。
+ * ⚠️ 这是人工/判断字段 —— 采集一个都不许碰(进 USER_BUSINESS_FIELDS)。
+ */
+const X_SCHEMA_1_2_30 = `
+DEFINE FIELD IF NOT EXISTS mutual_intent          ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS mutual_intent_source   ON x_author TYPE option<string>
+  ASSERT $value = NONE OR $value INSIDE ['human', 'ai', 'rule'];
+-- 命中的原句(「Bio:…」/「推文 <id>:…」)—— 事后说得清为何求关他
+DEFINE FIELD IF NOT EXISTS mutual_intent_evidence ON x_author TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mutual_intent_at       ON x_author TYPE option<datetime>;
+`;
+
+export async function x_migration_1_2_30(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_30);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  for (const f of ['mutual_intent', 'mutual_intent_source', 'mutual_intent_evidence', 'mutual_intent_at']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) throw new Error(`[x-schema 1.2.30] x_author.${f} 没建上`);
+  }
+  console.log('[x-schema 1.2.30] x_author 互关倾向字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.30', appliedAt = $now,
+      description = '人的互关倾向(人 > AI > 算法,存依据原句)'`,
+    { rid: new RecordId('schema_version', '1.2.30'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐ 1.2.29 —— 配方补两个开关(2026-10-16,蓝V互关 M1)
+ *
+ * · blue_only:只看蓝V作者(filter:blue_verified)—— 「蓝V互关」配方要用
+ * · include_replies:连回复一起(filter:replies)—— ⚠️ **老 bug**:操作台一直有这个勾选框,
+ *   但表里没这个字段、repo 也没存没读 → 勾了存完再打开就没了,不报错。这次一起补上。
+ */
+const X_SCHEMA_1_2_29 = `
+DEFINE FIELD IF NOT EXISTS blue_only       ON search_recipes TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS include_replies ON search_recipes TYPE option<bool>;
+`;
+
+export async function x_migration_1_2_29(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_29);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE search_recipes');
+  for (const f of ['blue_only', 'include_replies']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) throw new Error(`[x-schema 1.2.29] search_recipes.${f} 没建上`);
+  }
+  console.log('[x-schema 1.2.29] 配方加 blue_only / include_replies');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.29', appliedAt = $now,
+      description = '配方加 blue_only(只看蓝V)/ include_replies(补存老勾选框)'`,
+    { rid: new RecordId('schema_version', '1.2.29'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.28 —— 关系**变化**记录 `x_relation_change`(2026-10-16,蓝V互关 M0)
  *
  * 用户 10-16:「你的数据表写得不聪明了,增加一个表,记录关系的变化的,不久没有这个问题啦?」

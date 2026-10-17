@@ -52,7 +52,7 @@ import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect, type RunResult } from './x-collect-run';
-import { buildRunReport } from './x-run-report';
+import { buildRunReport, completenessLine } from './x-run-report';
 import { recipeToQuery } from './x-recipe-query';
 import { setXHostBusy } from './x-host-registry';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
@@ -976,6 +976,26 @@ export function XConsole(
                         cancelled: () => cancelRef.current,
                         onProgress: setStep,
                         /**
+                         * ⭐⭐⭐ 一页一存、存完回读(2026-10-16,逐页账)—— 用户:
+                         * 「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了」
+                         * ⚠️ 来源 / 配方 / 名单的取法与最后统一存库那里**同一套**(origin 优先,identified 兜底)。
+                         * 最后那次统一存库仍保留(补回来的长文正文要并进去),重复存是幂等的。
+                         */
+                        savePage: async ({ tweets, users }) => {
+                          const pageName = origin?.name ?? identified?.name ?? '';
+                          const listSource = X_USER_LIST_PAGES[pageName] ?? '';
+                          const sv = await xDataCall({
+                            op: 'savePageVerify',
+                            tweets: tweets.filter((t) => t.id !== ''),
+                            tweetCtx: { source: pageName, searchRecipe: origin?.params.q, wcId: wcId ?? undefined },
+                            /** ⚠️ 不是名单页就不存人(与最后统一存库同口径:人只从名单页存) */
+                            users: listSource !== '' ? users : [],
+                            userCtx: listSource !== '' ? { listSource, wcId: wcId ?? undefined } : undefined,
+                          });
+                          if (sv.status === 'failed') return { error: sv.reason };
+                          return { inDb: (sv.value as { inDb: string[] }).inDb };
+                        },
+                        /**
                          * ⭐⭐ **被限流时的等待** —— 2026-10-06。
                          * ⚠️ 等待期间**每秒看一次有没有人点停止** ——
                          * 退避可能几分钟,干等着不响应停止键最招人烦。
@@ -1003,6 +1023,10 @@ export function XConsole(
                        * 不是「哪个字段没解出来」。
                        */
                       if (run.rateLimit) setStep(run.rateLimit);
+                      /** ⭐⭐ 漏采要当场看得见(用户 10-16:「必须保证的哦」)—— 不等人去翻报告 */
+                      else if (run.harvest?.completeness && run.harvest.completeness.seen > run.harvest.completeness.captured) {
+                        setStep(completenessLine(run.harvest.completeness));
+                      }
                       if (run.harvest) setReport(run.harvest as HarvestReport);
                       setTotalResponses(run.totalResponses);
                       setPaging(run.paging);
@@ -1062,7 +1086,14 @@ export function XConsole(
                            * 而那条语句**不报错也不写**。
                            * ⭐ 现在以「失败条数」为准:有失败就直说,别只报好消息。
                            */
-                          const v = sv.value as { inserted: number; updated: number; failed: Array<{ why: string }> };
+                          const v = sv.value as { inserted: number; updated: number; failed: Array<{ why: string }>; statsLine?: string };
+                          /** ⭐ 本批统计(推文数 / 发推的人数 / 人的特征)—— 用户 10-16 要的,对漏采用 */
+                          /** ⚠️ 漏采警告并进同一行 —— 分开 setStep 的话后一句会盖掉前一句 */
+                          const leak = run.harvest?.completeness;
+                          if (v.statsLine) {
+                            setStep(`本批:${v.statsLine}`
+                              + (leak && leak.seen > leak.captured ? ` ｜ ${completenessLine(leak)}` : ''));
+                          }
                           if (v.failed.length > 0) {
                             setStep(`⚠️ ${v.failed.length} 条没入库：${v.failed[0]?.why ?? ''}`);
                           } else if (v.inserted + v.updated === 0 && records.length > 0) {
@@ -2089,6 +2120,14 @@ function RecipeEditor(
             onChange={(e) => set('includeReplies', e.target.checked)}
           />
           {' '}连回复一起（filter:replies）
+        </label>
+        <label style={{ fontSize: 11 }} title="蓝V互关配方用;语法未经真机验证,第一次搜要看结果是不是全是蓝V">
+          <input
+            type="checkbox"
+            checked={r.blueOnly ?? false}
+            onChange={(e) => set('blueOnly', e.target.checked)}
+          />
+          {' '}只看蓝V作者（filter:blue_verified）
         </label>
         <label style={{ fontSize: 11 }}>
           <input

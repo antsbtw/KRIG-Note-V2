@@ -278,3 +278,13 @@ export async function saveTweets(
 
   return { inserted, updated, failed };
 }
+
+/**
+ * ⭐ 回读:这些推文 id 里库里**查得到**哪些(2026-10-16,逐页账)。
+ * ⚠️ 不信存库返回的计数(`project-x-readback-lies` 那一族),按 id 直接问库。
+ */
+export async function existingTweetIds(ids: readonly string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const [rows] = await getXDB().query<[string[]]>('SELECT VALUE tweet_id FROM x_tweet WHERE tweet_id IN $ids', { ids: [...ids] });
+  return rows ?? [];
+}

@@ -38,6 +38,7 @@ import {
   type BrowserWindow,
   type ContextMenuParams,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 // shouldHandle 抽到 web-shared 共享(右键菜单 / 快捷键 / 弹窗导流 三处复用同一过滤)
@@ -45,13 +46,40 @@ import { shouldHandle } from '../web-shared/should-handle';
 // 网页剪藏(Defuddle → Note):右键「📥 提取到笔记」click 调用,抓页 → 推回 renderer。
 import { clipPageToRenderer } from '../content-extraction/handlers';
 
+/**
+ * ⭐ 扩展口(2026-10-16)—— 模块往网页右键菜单里加自己的项,**平台不认识任何站点**。
+ * 模块自己判断「这一页是不是我的站点」,不是就返回空数组。删掉模块 = 它的项跟着消失。
+ * ⚠️ 不另挂 guest 'context-menu' 监听:那样同一次右键会弹两个原生菜单。
+ * ⚠️ 某个扩展抛错只丢它自己的项,不毁整个菜单。
+ */
+export type WebContextMenuExtension = (guest: WebContents, params: ContextMenuParams) => MenuItemConstructorOptions[];
+const extensions: WebContextMenuExtension[] = [];
+
+export function registerWebContextMenuExtension(fn: WebContextMenuExtension): () => void {
+  extensions.push(fn);
+  return () => { const i = extensions.indexOf(fn); if (i >= 0) extensions.splice(i, 1); };
+}
+
 export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
   mainWindow.webContents.on('did-attach-webview', (_event, guest) => {
     guest.on('context-menu', (_e, params: ContextMenuParams) => {
-      // partition 过滤:只接管普通浏览 webview(非翻译、非 AI)。
-      if (!shouldHandle(guest)) return;
+      /** ⭐ 模块扩展的项 —— 见 registerWebContextMenuExtension */
+      const extItems: MenuItemConstructorOptions[] = [];
+      for (const ext of extensions) {
+        try { extItems.push(...ext(guest, params)); } catch (err) { console.warn('[web-context-menu] 扩展项出错,已跳过:', err); }
+      }
+      /**
+       * partition 过滤:普通浏览菜单只接管普通浏览 webview。
+       * ⭐ 被排除的(AI / X / 邮箱 …)若有模块给了扩展项,**只弹扩展项**(2026-10-16:X 原自带菜单随
+       * 重建删了,X 网页右键什么都没有;「查库」走扩展口)。扩展项为空就不弹 —— AI / 邮箱有自己的菜单,不会双菜单。
+       */
+      if (!shouldHandle(guest)) {
+        if (extItems.length > 0) Menu.buildFromTemplate(extItems).popup({ window: mainWindow });
+        return;
+      }
 
-      const template: MenuItemConstructorOptions[] = [];
+      const template: MenuItemConstructorOptions[] = [...extItems];
+      if (template.length > 0) template.push({ type: 'separator' });
 
       if (params.linkURL) {
         template.push({

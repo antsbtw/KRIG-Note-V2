@@ -35,6 +35,11 @@ function quote(w: string): string {
   if (!t) return '';
   /** ⚠️ 已经带引号或带操作符的原样放行 —— 别套两层 */
   if (/^".*"$/.test(t) || /[:()]/.test(t)) return t;
+  /**
+   * ⭐ 话题标签(`#蓝V互关`)原样放行 —— 加了引号 X 就按短语搜,不再按话题搜(2026-10-16)。
+   * 用户:「一般蓝V互关的特征是带了"#蓝V互关 #真诚交友"这样的特征,它给出一个搜索的标签。」
+   */
+  if (/^#\S+$/.test(t)) return t;
   return `"${t}"`;
 }
 
@@ -135,6 +140,8 @@ export function recipeToQuery(r: SearchRecipe, now: number = Date.now()): Recipe
    * 实测 2026-09-06:from: 裸查 12 条/回复 11,+filter:replies 22 条/回复 22。
    */
   if (r.includeReplies) { parts.push('filter:replies'); why.push('连回复一起'); }
+  /** ⭐ 只看蓝V作者(蓝V互关 M1)—— ⚠️ 语法未经真机验证,第一次搜要核对结果是否全是蓝V */
+  if (r.blueOnly) { parts.push('filter:blue_verified'); why.push('只看蓝V作者'); }
 
   // ── ③ 时间窗 ──
   const hours = typeof r.sinceHours === 'number' && r.sinceHours > 0 ? r.sinceHours : 24;

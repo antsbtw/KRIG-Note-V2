@@ -406,6 +406,13 @@ export const X_NOISY_URLS: readonly string[] = [
   'abs.twimg.com',        // 前端静态资源
   '/i/api/1.1/jot/',      // 埋点
   'promoted_content/log', // 广告埋点
+  /**
+   * ⭐ 2026-10-16 真机诊断(apiSeen):搜索页(只看蓝V)74 秒 44 次头像请求、8 次账号信息,
+   * 内容一模一样,把搜索结果挤出采集池 → 漏采 17/19 页。都不是推文/人的数据。
+   * ⚠️ `1.1/flow/timeline.json`(同期 25 次)**没加** —— 装的是什么还没看过,不凭猜当噪音。
+   */
+  'fleets/v1/avatar_content', // 头像外圈(Fleets)
+  '1.1/graphql/viewer_context.json', // 当前登录者的上下文
 ];
 
 /** 本模块用到的语义锚点名 —— 与锚点表同一份常量,不各写一份 */

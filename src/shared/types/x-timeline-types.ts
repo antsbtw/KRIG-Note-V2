@@ -30,6 +30,11 @@ export interface SearchRecipe {
    * 实测:from: 裸查 12 条/回复 11,+filter:replies 22 条/回复 22。
    */
   includeReplies?: boolean;
+  /**
+   * ⭐ 只看蓝V作者(2026-10-16,蓝V互关 M1)→ `filter:blue_verified`。
+   * ⚠️ 语法未经真机验证 —— 第一次搜要看结果是不是全是蓝V。
+   */
+  blueOnly?: boolean;
   intervalMinutes: number;
   lastRunAt?: string;            // ISO datetime
   /**

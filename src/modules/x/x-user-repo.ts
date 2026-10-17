@@ -88,6 +88,8 @@ export const USER_BUSINESS_FIELDS = [
   'excluded', 'excluded_source', 'excluded_at', 'excluded_reason',
   /** ⭐ 自由标签(schema 1.2.22)—— 只有人打,采集绝不能碰 */
   'tags',
+  /** ⭐ 互关倾向(schema 1.2.30)—— 人 > AI > 算法的判断,采集绝不能碰 */
+  'mutual_intent', 'mutual_intent_source', 'mutual_intent_evidence', 'mutual_intent_at',
 ] as const;
 
 /** ⭐ 落库时调用方要补的「空」—— 解析器不知道自己在哪采的 */
@@ -418,4 +420,11 @@ export async function refreshPerson(
   const d = diffPerson(before?.[0], r, obs, relArg);
   console.log(`[x.user-repo] 核对 @${r.handle}(${r.restId}):${d.isNew ? '新人' : d.changes.length > 0 ? d.changes.join(';') : '与库里一致'}${relationLog(relation)}`);
   return { ...d, relation };
+}
+
+/** ⭐ 回读:这些人(数字 id)里库里查得到哪些(2026-10-16,逐页账)—— 按 id 问库,不信计数 */
+export async function existingUserIds(ids: readonly string[]): Promise<string[]> {
+  if (ids.length === 0) return [];
+  const [rows] = await getXDB().query<[string[]]>('SELECT VALUE rest_id FROM x_author WHERE rest_id IN $ids', { ids: [...ids] });
+  return rows ?? [];
 }

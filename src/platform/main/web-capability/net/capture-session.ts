@@ -34,6 +34,7 @@
  */
 
 import type { PageId } from '../page/types';
+import { evictOver } from '../pool-evict';
 import type { NetworkEvent } from './types';
 import type { NetworkEventBus } from './bus';
 
@@ -82,6 +83,8 @@ export type CaptureStats = {
 
 export class CaptureSession {
   private payloads: CapturedPayload[] = [];
+  /** 池满时挤掉的**不重复**响应 —— 真丢的数据(重复的挤掉不算) */
+  private lostUnique = 0;
   private captured = 0;
   private noBody = 0;
   private bodyLost = 0;
@@ -288,7 +291,14 @@ export class CaptureSession {
       this.firstCaptureReported = true;
       this.onFirstCapture?.(record?.url ?? '', body.value.byteLength);
     }
-    // 老化:淘汰最老的
-    while (this.payloads.length > MAX_PAYLOADS) this.payloads.shift();
+    /**
+     * 老化:超了先挤重复的,没重复才挤最老的(2026-10-16:重复的头像请求把搜索结果挤掉过,见 pool-evict)。
+     * ⚠️ 挤掉不重复的 = 真丢数据,要说出来。
+     */
+    const lost = evictOver(this.payloads, MAX_PAYLOADS);
+    if (lost > 0) {
+      this.lostUnique += lost;
+      console.warn(`[web.net] ⚠️ 采集池满(${MAX_PAYLOADS}),挤掉了 ${lost} 条不重复的响应(本次累计 ${this.lostUnique})—— 这些数据丢了`);
+    }
   }
 }

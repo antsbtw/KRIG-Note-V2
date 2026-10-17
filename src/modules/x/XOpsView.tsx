@@ -36,6 +36,7 @@ import { XOpsStatus } from './XOpsStatus';
 import { XOpsPeople } from './XOpsPeople';
 import { BgIndicator } from './XBgStatus';
 import { XAccountBadge } from './XAccountBadge';
+import { XSpotCard } from './XSpotCard';
 import type { WsAccount } from './x-account';
 
 /** ⚠️ 标签与 id 同在一处 —— 分开写两份必漂 */
@@ -112,6 +113,8 @@ export function XOpsView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         ))}
       </div>
 
+      {/* ⭐ 右键「查库」抽查卡片(2026-10-16)—— 任何大类下都在最上面 */}
+      <XSpotCard wsId={workspaceId} />
       <div style={S.body}>
         {category === 'status' && <XOpsStatus key={accountKey} wsId={workspaceId} />}
         {category === 'people' && <XOpsPeople key={accountKey} workspaceId={workspaceId} />}

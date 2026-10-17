@@ -14,17 +14,22 @@ import {
 } from '@platform/main/db/search-recipe-repo';
 import { recipeNameForQuery } from './x-recipe-query';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
-import { saveTweets } from './x-tweet-repo';
-import { saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
+import { existingTweetIds, saveTweets } from './x-tweet-repo';
+import { existingUserIds, saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
 import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
 import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
-import { queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, setExcluded, setTags } from './x-people-repo';
+import {
+  queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, scanMutualIntent,
+  setExcluded, setMutualIntent, setTags,
+} from './x-people-repo';
 import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 import { clearXHostState, getXHostState, setXHostBusy, setXHostState } from './x-host-registry';
 import { bgRunnerStatus, bgRunningOn, kickBgRunner } from './x-bg-runner';
 import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
+import { statsLine, summarizeBatch } from './x-batch-stats';
+import { lookupSpot, pollSpot } from './x-spot-check';
 import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
 import { isBgRange } from './x-bg-job';
 import type { TimelineRange } from './x-person-timeline';
@@ -69,7 +74,12 @@ export function registerXDataIpc(): void {
   if (wired) return;
   wired = true;
 
-  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, async (_e, p: XDataInvoke): Promise<XDataResult> => {
+  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, (_e, p: XDataInvoke) => handle(p));
+}
+
+/** ⭐ 单入口 —— savePageVerify 复用 saveTweets / saveUsers 分支,不另写一份存库流程 */
+async function handle(p: XDataInvoke): Promise<XDataResult> {
+  {
     try {
       switch (p?.op) {
         case 'list':
@@ -107,6 +117,12 @@ export function registerXDataIpc(): void {
            */
           const r = await saveTweets(p.records, p.ctx);
           /**
+           * ⭐⭐ 这批的统计:推文数 / 发推的人数 / 人的特征(用户 10-16)—— 每批都有数可对,漏没漏采一眼看得出。
+           * 主进程终端也打一行(人看的那块屏)。
+           */
+          const stats = summarizeBatch(p.records);
+          console.log(`[x.data] 本批(${p.ctx?.source || '?'}):${statsLine(stats)}`);
+          /**
            * ⭐⭐⭐ **落库结果落盘** —— 2026-10-05 第三跑逼出来的。
            *
            * ⚠️⚠️ 三跑都是「面板报入库 N 条、库里 0 行」,而我**读不出为什么**:
@@ -127,6 +143,7 @@ export function registerXDataIpc(): void {
               /** ⚠️ 只记第一条原因 —— 整批同因时 N 条一模一样 */
               firstFailure: r.failed[0]?.why ?? '(none)',
               source: p.ctx?.source ?? '(empty)',
+              stats,
             },
           });
           await logCollect({
@@ -168,7 +185,7 @@ export function registerXDataIpc(): void {
               detail: { why },
             });
           }
-          return { status: 'ok', value: r };
+          return { status: 'ok', value: { ...r, stats, statsLine: statsLine(stats) } };
         }
 
         /**
@@ -332,6 +349,34 @@ export function registerXDataIpc(): void {
 
         case 'tagCatalog':
           return { status: 'ok', value: await readTagCatalog() };
+
+        /** ⭐ 抽查(2026-10-16)—— 问有没有新请求 / 按 id 查库 */
+        case 'spotCheckPoll':
+          if (typeof p.wsId !== 'string' || p.wsId === '' || !Number.isInteger(p.after)) return failed('[x.data] spotCheckPoll 要 wsId 和 after');
+          return { status: 'ok', value: pollSpot(p.wsId, p.after) };
+
+        case 'spotCheckLookup': {
+          if (typeof p.wsId !== 'string' || (p.kind !== 'tweet' && p.kind !== 'person')) return failed('[x.data] spotCheckLookup 要 wsId 和 kind');
+          if (p.kind === 'tweet' && !p.tweetId) return failed('[x.data] 查推文要 tweetId');
+          if (p.kind === 'person' && !p.handle) return failed('[x.data] 查人要 handle');
+          const acc = await readWsAccount(p.wsId);
+          return { status: 'ok', value: await lookupSpot(acc?.restId ?? '', { kind: p.kind, tweetId: p.tweetId, handle: p.handle }) };
+        }
+
+        /** ⭐⭐ 互关倾向(1.2.30,蓝V互关 M2)—— 扫描结果与人的决定都留痕 */
+        case 'scanMutualIntent': {
+          const r = await scanMutualIntent();
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-intent-scan', pageId: 'x-data', detail: { ...r } });
+          return { status: 'ok', value: r };
+        }
+
+        case 'setMutualIntent':
+          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.value !== 'boolean') {
+            return failed('[x.data] setMutualIntent 要 restId(数字 id)和 value(true/false)');
+          }
+          await setMutualIntent(p.restId, p.value);
+          console.log(`[x.people] 人标互关倾向 ${p.restId} → ${p.value ? '有' : '无'}`);
+          return { status: 'ok', value: { restId: p.restId, value: p.value } };
 
         /**
          * ⭐⭐⭐ renderer 的 X 网页登记同步进主进程(`x-host-sync.ts`)—— 后台 runner 靠它。
@@ -519,6 +564,30 @@ export function registerXDataIpc(): void {
           return { status: 'ok', value: d };
         }
 
+        /**
+         * ⭐⭐⭐ 一页一存、存完回读(2026-10-16,逐页账)。
+         * ⚠️ 存库**走同一条路**(递归调 saveTweets / saveUsers 分支):记账、留痕、按号写关系、本批统计都照旧,
+         * 不另写一份(另写就是「加字段要登记的第五处」)。回读按 id 问库,不信返回的计数。
+         */
+        case 'savePageVerify': {
+          const tweets = Array.isArray(p.tweets) ? p.tweets : [];
+          const users = Array.isArray(p.users) ? p.users : [];
+          if (tweets.length > 0) {
+            const r = await handle({ op: 'saveTweets', records: tweets, ctx: p.tweetCtx });
+            if (r.status === 'failed') return r;
+          }
+          if (users.length > 0) {
+            if (!p.userCtx) return failed('[x.data] savePageVerify 有人但没给 userCtx(listSource)');
+            const r = await handle({ op: 'saveUsers', records: users, ctx: p.userCtx });
+            if (r.status === 'failed') return r;
+          }
+          const inDb = [
+            ...await existingTweetIds(tweets.map((t) => t.id).filter((x) => x !== '')),
+            ...await existingUserIds(users.map((u) => u.restId).filter((x) => x !== '')),
+          ];
+          return { status: 'ok', value: { inDb } };
+        }
+
         default:
           /** ⚠️ 不认识的 op 要**明说**,不静默回 ok */
           return failed(`[x.recipe] 不认识的 op: ${String((p as { op?: string })?.op)}`);
@@ -527,5 +596,5 @@ export function registerXDataIpc(): void {
       /** ⚠️ 异常如实往上报 —— 吞掉的话界面会显示「保存成功」而库里没有 */
       return failed(`[x.recipe] ${e instanceof Error ? e.message : String(e)}`);
     }
-  });
+  }
 }

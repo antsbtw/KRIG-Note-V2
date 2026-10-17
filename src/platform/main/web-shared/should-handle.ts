@@ -17,7 +17,8 @@
  *  3. 排除 X webview —— X 与 AI / 普通浏览**同 ws 共用** `persist:webview-${ws}`(见
  *     capabilities/x-extraction/Host.tsx),partition 无法区分;改用 URL:
  *     `detectXServiceByUrl` 命中 x.com / twitter.com 则跳过(对齐 AI 的 URL 判定)。
- *     X 自带原生右键菜单(x/webview-hook.ts),不能让普通浏览的右键/快捷键/弹窗导流接管。
+ *     ⚠️ 原注释说「X 自带原生右键菜单(x/webview-hook.ts)」—— 那个文件随 X 重建(09-29)删了,
+     X 网页右键曾经什么都没有;现在 X 的项走右键菜单的扩展口(web-context-menu/handler.ts,2026-10-16)。
  *  4. 排除邮箱 webview —— 邮箱与 AI / X / 普通浏览**同 ws 共用** `persist:webview-${ws}`
  *     (见 capabilities/mail-service/Host.tsx),partition 无法区分;改用 URL:
  *     `detectMailServiceByUrl` 命中 mail.google.com / outlook / mail.qq.com / mail.163.com

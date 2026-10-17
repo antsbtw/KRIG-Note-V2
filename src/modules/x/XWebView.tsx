@@ -34,6 +34,8 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
 import type { HostHandle, HostProps } from '@capabilities/web-rendering';
 import { setXHostState, clearXHostState } from './x-host-registry';
+import { setSpot, type SpotReq } from './x-spot-store';
+import { xDataCall } from './x-data-types';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -93,6 +95,26 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
   }, [workspaceId]);
 
   useEffect(() => () => clearXHostState(workspaceId), [workspaceId]);
+
+  /**
+   * ⭐⭐ 抽查(2026-10-16):右键「查库」后,主进程存下请求;这里每秒问一次(X 无推送通道)。
+   * 拿到就交给运营面板;右栏不是运营就打开它(用户选 A:「没开就自动打开」)。
+   */
+  useEffect(() => {
+    let after = 0;
+    let alive = true;
+    const t = setInterval(() => {
+      void xDataCall({ op: 'spotCheckPoll', wsId: workspaceId, after }).then((r) => {
+        if (!alive || r.status !== 'ok' || r.value === null) return;
+        const req = r.value as SpotReq;
+        after = req.seq;
+        setSpot(workspaceId, req);
+        const bus = workspaceManager.getBus(workspaceId);
+        if (bus && workspaceManager.get(workspaceId)?.slotBinding.right !== X_OPS_VIEW_ID) bus.slot.openRight(X_OPS_VIEW_ID);
+      });
+    }, 1000);
+    return () => { alive = false; clearInterval(t); };
+  }, [workspaceId]);
 
   /**
    * ⊞ 右栏视图切换 —— ⭐ 复用**全局 SlotPicker**,不自造 toggle 逻辑

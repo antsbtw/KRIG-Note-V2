@@ -21,6 +21,7 @@
  */
 
 import { webContents, type WebContents } from 'electron';
+import { createHash } from 'node:crypto';
 import { controlEngine, domRunner, pageRegistry, netBus, bodyProvider, traceRecorder } from './runtime';
 import { CaptureSession } from '../net/capture-session';
 import { HookSession } from '../hook/hook-session';
@@ -89,12 +90,24 @@ export function dedupKey(url: string, status: number, text: string): string {
    * (CDP 数的是**原始字节**,钩子数的是 **UTF-8 解码后的字符**)。
    * 进了去重键就**永远配不上** → 同一条被算两次 → `both` 该有的互证也没了。
    *
-   * ⭐ 改用**内容前缀**:同一条响应两条腿拿到的文本是一样的,
-   * 而同一 URL 的不同轮次(翻页/轮询)内容必然不同 —— 两头都兜住。
-   * ⚠️ 只取前 256 字符:整段比对在几百 KB 的载荷上太贵,
-   * 而 JSON 的前 256 字符已经包含了游标/首条 id 这类区分度最高的东西。
+   * ⭐ 用**内容**:同一条响应两条腿拿到的文本是一样的,而同一 URL 的不同轮次(翻页/轮询)内容不同。
+   *
+   * ⚠️⚠️ 2026-10-16 改:原来只取**前 256 字符** —— X 搜索页浏览器收到 49 页 SearchTimeline,
+   * 合并后只剩 2 页(池子没满、取正文没失败,数据进来了却在这里被当成重复吞掉;对账当场报出)。
+   * 「JSON 前 256 字符已含游标/首条 id」这个假设对 SearchTimeline 不成立。
+   * ⭐ 改成**整段内容的指纹**(sha1);每条只算一次(按对象缓存),不随每轮重算。
    */
-  return `${url.split('?')[0]}|${status}|${text.slice(0, 256)}`;
+  return `${url.split('?')[0]}|${status}|${text.length}|${createHash('sha1').update(text).digest('hex')}`;
+}
+
+/** 每条只算一次指纹 —— mergedItems 每轮滚动都会被调,几百 KB 的载荷不能每轮重算 */
+const keyCache = new WeakMap<object, string>();
+function keyOf(x: { url: string; status?: number; text: string }): string {
+  const hit = keyCache.get(x);
+  if (hit !== undefined) return hit;
+  const k = dedupKey(x.url, x.status ?? 0, x.text);
+  keyCache.set(x, k);
+  return k;
 }
 
 /**
@@ -240,7 +253,7 @@ export function mergedItems(pageId: PageId, limit: number): MergedItem[] {
 
   // ① CDP 腿
   for (const x of sessionsByPageId.get(pageId)?.list(256) ?? []) {
-    const k = dedupKey(x.url, x.status ?? 0, x.text);
+    const k = keyOf(x);
     byKey.set(k, {
       url: x.url, method: x.method ?? 'GET', status: x.status ?? 0,
       text: x.text, byteLength: x.byteLength, at: x.at, from: 'cdp',
@@ -251,7 +264,7 @@ export function mergedItems(pageId: PageId, limit: number): MergedItem[] {
 
   // ② 钩子腿 —— ⭐ 已存在的标成 `both`(**那是互证成功的证据**)
   for (const x of hooksByPageId.get(pageId)?.list(256) ?? []) {
-    const k = dedupKey(x.url, x.status, x.text);
+    const k = keyOf(x);
     const prev = byKey.get(k);
     if (prev) {
       /**
@@ -423,6 +436,11 @@ export function makeHarvestDeps(wc: WebContents, pid: PageId): HarvestDeps {
     startAcquire: (pageId, noisy) => startAcquire(acq, pageId, noisy),
     peekAcquire: (pageId) => mergedItems(pageId, Number.MAX_SAFE_INTEGER),
     cdpInFlight: (pageId) => bodyProvider.inFlight(pageId),
+    apiSeen: (pageId) => bodyProvider.apiSeen(pageId),
+    rawHeld: (pageId) => ({
+      cdp: sessionsByPageId.get(pageId)?.stats().held ?? 0,
+      hook: hooksByPageId.get(pageId)?.stats().held ?? 0,
+    }),
     finishAcquire: (pageId, startedAt) => finishAcquire(acq, pageId, startedAt),
 
     reload: () => { wc.reload(); },

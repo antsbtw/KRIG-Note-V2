@@ -12,6 +12,7 @@
  */
 
 import type { PageId } from '../page/types';
+import { evictOver } from '../pool-evict';
 import type { HookHost, HookedResponse, HookStats } from './types';
 import { buildHookScript, HOOK_PROBE } from './hook-script';
 
@@ -174,7 +175,9 @@ export class HookSession {
 
     this.hooked += 1;
     this.held.push(rec);
-    while (this.held.length > MAX_HELD) this.held.shift();
+    /** 超了先挤重复的,没重复才挤最老的(2026-10-16,见 pool-evict);挤掉不重复的要说出来 */
+    const lost = evictOver(this.held, MAX_HELD);
+    if (lost > 0) console.warn(`[web.hook] ⚠️ 钩子池满(${MAX_HELD}),挤掉了 ${lost} 条不重复的响应 —— 这些数据丢了`);
 
     if (this.hooked === 1) this.onFirst?.(rec);
   }

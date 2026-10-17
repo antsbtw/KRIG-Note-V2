@@ -22,6 +22,25 @@
 
 import type { RunResult } from './x-collect-run';
 import { buildStamp, buildAgeMinutes } from './x-build-stamp';
+import { ledgerLine, pageProblem, type PageLedgerRow } from './x-page-ledger';
+
+/**
+ * ⭐⭐⭐ 逐页账一段(2026-10-16)—— 每页:X 列了什么 / 解析 / 入库 / 方向;最后一行合计。
+ * 用户:「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了」
+ */
+export function ledgerSection(ledger: readonly PageLedgerRow[] | undefined): string[] {
+  const L: string[] = ['── 逐页账(X 列的 / 解析 / 入库 / 方向)──'];
+  if (!ledger || ledger.length === 0) { L.push('(这一跑没有逐页账)'); return L; }
+  L.push('  页  来源  X给         解析     入库   结论');
+  for (const r of ledger) L.push(ledgerLine(r));
+  const x = ledger.reduce((n, r) => n + r.xTweets + r.xUsers, 0);
+  const lostParse = ledger.reduce((n, r) => n + r.notParsed.length, 0);
+  const lostDb = ledger.reduce((n, r) => n + (r.notInDb?.length ?? 0), 0);
+  const bad = ledger.filter((r) => pageProblem(r) !== undefined).length;
+  L.push(`合计:${ledger.length} 页 · X 列了 ${x} 条 · 解析缺 ${lostParse} · 入库缺 ${lostDb}`
+    + (bad === 0 ? ' · ✓ 每页都对上了' : ` · ⚠️ ${bad} 页对不上`));
+  return L;
+}
 
 /** ⭐ 一跑里**人能据以判断**的事实 —— 全部来自 `RunResult`,不另算 */
 export type RunReportInput = {
@@ -48,6 +67,15 @@ export function hitRoundCap(stopReason: string | undefined): boolean {
  * ⚠️ 每一行都要**自带判据**,不能只给数字 ——
  * 「翻页 16 轮」说明不了问题,「16 轮里 15 轮零新增、游标每轮都变」才说明。
  */
+/** 对账一行 —— 报告与操作台共用 */
+export function completenessLine(c: { readonly seen: number; readonly captured: number } | undefined): string {
+  if (c === undefined) return '(这一跑没有对账数据 —— 没装计数器或没给页面判据)';
+  if (c.seen > c.captured) {
+    return `⚠️⚠️ 漏采:浏览器收到目标数据 ${c.seen} 次,只采到 ${c.captured} 页 —— 少 ${c.seen - c.captured} 页,丢在采集层`;
+  }
+  return `✓ 浏览器收到 ${c.seen} 次,采到 ${c.captured} 页 —— 一页没漏`;
+}
+
 export function buildRunReport(input: RunReportInput): string {
   const { run, page, wantPages, at } = input;
   const L: string[] = [];
@@ -83,6 +111,14 @@ export function buildRunReport(input: RunReportInput): string {
     L.push('');
   }
 
+  /**
+   * ⭐⭐⭐ 对账 —— 用户 10-16:「配方搜索,然后把所有的推文采集下来,这是基本函数/功能,必须保证的哦。」
+   * 浏览器收到了、我们没采到 = 漏采,放在最前面:下面的数字都不是全部。
+   */
+  L.push('── 对账(浏览器收到 vs 我们采到)──');
+  L.push(completenessLine(h?.completeness));
+  L.push('');
+
   // ── ① 滚动 ──
   L.push('── 滚动 ──');
   if (h) {
@@ -104,6 +140,8 @@ export function buildRunReport(input: RunReportInput): string {
   L.push('');
 
   // ── ② 翻页 ──
+  L.push(...ledgerSection(run.paging?.ledger));
+  L.push('');
   L.push('── 翻页 ──');
   if (run.paging === null) {
     L.push('(这一跑没有主动翻页)');

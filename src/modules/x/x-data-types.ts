@@ -72,6 +72,19 @@ export type XDataInvoke =
    * 所以必须是**稳定的词**(followers / following / verifiedFollowers)——
    * 今天写 'followers' 明天写 '关注者' 会让同一个名单记成两个。
    */
+  /**
+   * ⭐⭐⭐ **一页一存、存完回读**(2026-10-16,逐页账)—— 走与 saveTweets / saveUsers **同一条**存库路径
+   * (记账、留痕、按号写关系都照旧),之后回读:返回库里**查得到**的 id(推文 tweet_id / 人 rest_id)。
+   * 用户:「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了」
+   */
+  | {
+      readonly op: 'savePageVerify';
+      readonly tweets: readonly TweetRecord[];
+      readonly tweetCtx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string; readonly wcId?: number };
+      readonly users: readonly XUserRecord[];
+      /** 名单页才有;推文页存作者走 tweetCtx */
+      readonly userCtx?: { readonly listSource: string; readonly wsId?: string; readonly wcId?: number };
+    }
   | {
       readonly op: 'saveUsers';
       readonly records: readonly XUserRecord[];
@@ -126,6 +139,14 @@ export type XDataInvoke =
   | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
   /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */
   | { readonly op: 'tagCatalog' }
+  /** ⭐ 抽查(2026-10-16):有没有比 after 新的右键「查库」请求 —— 返回 `SpotRequest | null` */
+  | { readonly op: 'spotCheckPoll'; readonly wsId: string; readonly after: number }
+  /** ⭐ 抽查:按推文 id / 人的 handle 查库 —— 返回 `SpotResult` */
+  | { readonly op: 'spotCheckLookup'; readonly wsId: string; readonly kind: 'tweet' | 'person'; readonly tweetId?: string; readonly handle?: string }
+  /** ⭐ 扫一遍互关倾向(算法层,1.2.30)—— 返回 `IntentScanReport` */
+  | { readonly op: 'scanMutualIntent' }
+  /** ⭐ 人标「有/无互关倾向」(source = human,算法不能覆盖) */
+  | { readonly op: 'setMutualIntent'; readonly restId: string; readonly value: boolean }
   /**
    * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— 载荷解析在 renderer 做(auditUserPayload),
    * 这里只写库。返回 `{ isNew, changes }`。

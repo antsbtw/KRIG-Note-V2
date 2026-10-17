@@ -148,6 +148,31 @@ export class CdpBodyProvider {
    * → 配对,总慢一步。收尾时 CDP 那份还在路上,就只剩钩子那份(**没有请求头**)→ 翻页种子没头。
    */
   private readonly inFlightByPage = new Map<PageId, number>();
+  /**
+   * ⭐ 诊断(2026-10-16):浏览器**实际发出**的接口请求,按「方法 路径 状态」计数 —— 与「收到的」对照找漏采。
+   * 起因:X 搜索页滚了 9.4 万像素,页面显示 100+ 人,却只收到 1 条时间线载荷 —— 要知道浏览器到底发了什么。
+   * 只记 `/api/` 路径;键很少(每页十几种),不会涨。
+   */
+  private readonly apiSeenByPage = new Map<PageId, Map<string, number>>();
+
+  /** 这一页至今看到的接口请求计数(拷贝)—— 采集前后各取一次,相减就是这一跑的 */
+  apiSeen(pageId: PageId): Record<string, number> {
+    return Object.fromEntries(this.apiSeenByPage.get(pageId) ?? []);
+  }
+
+  private noteApi(pageId: PageId, p: { url: string; method: string; status?: number }, tail: string): void {
+    let path: string;
+    try { path = new URL(p.url).pathname; } catch { return; }
+    if (!path.includes('/api/')) return;
+    /**
+     * ⚠️ 键里留**完整路径**(不含 query)—— harvest 要拿调用方给的页面判据(pageUrlIncludes)去匹配它做对账,
+     * 缩短了判据就对不上。键 = `方法 路径 状态[ 备注]`,路径里没有空格。
+     */
+    const key = `${p.method} ${path} ${p.status ?? '?'}${tail}`;
+    const m = this.apiSeenByPage.get(pageId) ?? new Map<string, number>();
+    m.set(key, (m.get(key) ?? 0) + 1);
+    this.apiSeenByPage.set(pageId, m);
+  }
 
   /**
    * ⭐ 体检用(黑匣子 2026-10-16):每个宿主的「发出了还没 loadingFinished」表 + debugger 本身。
@@ -296,7 +321,9 @@ export class CdpBodyProvider {
       const existing = pending.get(providerRequestId);
       if (!existing) return;
       pending.delete(providerRequestId);
-      if (!shouldCaptureBody(existing, policy)) return;
+      const take = shouldCaptureBody(existing, policy);
+      this.noteApi(pageId, existing, take ? '' : ' [策略不取]');
+      if (!take) return;
 
       this.inFlightByPage.set(pageId, this.inFlight(pageId) + 1);
       void this.fetchAndAttachBody(pageId, dbg, providerRequestId, existing, policy)
@@ -305,6 +332,16 @@ export class CdpBodyProvider {
           const n = this.inFlight(pageId) - 1;
           if (n <= 0) this.inFlightByPage.delete(pageId); else this.inFlightByPage.set(pageId, n);
         });
+      return;
+    }
+
+    /** ⭐ 诊断:失败的请求也要看得见(被取消 / 网络错)—— 否则「没发」和「发了没成」分不开 */
+    if (method === 'Network.loadingFailed') {
+      const providerRequestId = String(params.requestId ?? '');
+      const existing = pending.get(providerRequestId);
+      if (!existing) return;
+      pending.delete(providerRequestId);
+      this.noteApi(pageId, existing, ` [失败:${String(params.errorText ?? '?')}${params.canceled ? ' 取消' : ''}]`);
       return;
     }
   }

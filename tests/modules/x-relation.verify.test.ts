@@ -15,7 +15,8 @@ import { __setXDBForTest } from '@storage/surreal/client';
 import { runXMigrations } from '@storage/migrations/x-runner';
 import { x_migration_1_2_27 } from '@storage/surreal/x-schema';
 import { saveUsers, saveTweetAuthors, refreshPerson } from '@modules/x/x-user-repo';
-import { queryPeople, readPeopleOverview, readPerson } from '@modules/x/x-people-repo';
+import { queryPeople, readPeopleOverview, readPerson, scanMutualIntent, setMutualIntent } from '@modules/x/x-people-repo';
+import { lookupSpot } from '@modules/x/x-spot-check';
 import { readOpsStatus } from '@modules/x/x-collect-log-repo';
 import { DEFAULT_PEOPLE_FILTER } from '@modules/x/x-people-query';
 import type { AccountDecision } from '@modules/x/x-account';
@@ -179,6 +180,49 @@ describe.skipIf(!BINARY)('关系按号存 —— 真 SurrealDB 验证', () => {
     await saveUsers([user('20', { following: false, followedBy: false })], { listSource: 'followers' }, B);
     expect(await changes('2000')).toHaveLength(1);
     expect(await changes('1000')).toHaveLength(2);
+  });
+
+  it('⭐⭐ 互关倾向扫描(1.2.30):Bio/自己的推文命中;转发不算;人标的不覆盖;不再命中就清;采集不碰', async () => {
+    await saveUsers([
+      user('30', { bio: '互关必回' }), user('31', { bio: '写代码的' }), user('32', { bio: '写代码的' }), user('33', { bio: '有关必回' }),
+    ], { listSource: 'followers' }, A);
+    await db!.query(`
+      CREATE x_tweet SET tweet_id = 't31', author_rest_id = '31', author_handle = 'u31', text = '新号求互关,关注必回', source = 'x.profile', status = 'new', fetched_at = time::now(), metrics = {};
+      CREATE x_tweet SET tweet_id = 't32', author_rest_id = '32', author_handle = 'u32', text = '互关必回', retweet_of_id = 'zzz', source = 'x.reposts', status = 'new', fetched_at = time::now(), metrics = {};`);
+    await setMutualIntent('33', false);
+    const r = await scanMutualIntent();
+    expect(r.failed).toBe(0);
+    const p = async (id: string): Promise<Record<string, unknown>> =>
+      ((await db!.query<[Array<Record<string, unknown>>]>(`SELECT mutual_intent, mutual_intent_source, mutual_intent_evidence FROM type::record('x_author', $id)`, { id }))[0]?.[0]) ?? {};
+    expect(await p('30')).toMatchObject({ mutual_intent: true, mutual_intent_source: 'rule', mutual_intent_evidence: 'Bio:互关必回' });
+    expect(await p('31')).toMatchObject({ mutual_intent: true, mutual_intent_evidence: '推文 t31:新号求互关,关注必回' });
+    expect((await p('32')).mutual_intent, '转发的是别人的话,不能算他的倾向').toBeUndefined();
+    expect(await p('33'), '人标的「无」被算法改了').toMatchObject({ mutual_intent: false, mutual_intent_source: 'human' });
+
+    /** 重扫不变 → 不写;Bio 改了不再命中 → 算法标的清掉 */
+    const again = await scanMutualIntent();
+    expect(again.set).toBe(0);
+    await saveUsers([user('30', { bio: '写代码的' })], { listSource: 'followers' }, A);
+    expect((await p('30')).mutual_intent, '采集把判断字段冲了 / 不该在采集时清').toBe(true);
+    const third = await scanMutualIntent();
+    expect(third.cleared).toBe(1);
+    expect((await p('30')).mutual_intent).toBeUndefined();
+
+    /** 只看有倾向的筛选 */
+    const list = await queryPeople('1000', { ...DEFAULT_PEOPLE_FILTER, intentOnly: true }, 50, 0);
+    expect(list.rows.map((x) => x.rest_id)).toContain('31');
+    expect(list.rows.map((x) => x.rest_id)).not.toContain('33');
+  });
+
+  it('⭐⭐ 抽查查库:推文按 id / 人按 handle;查不到就是 found=false(漏采)', async () => {
+    await saveUsers([user('40', { following: true, followedBy: true })], { listSource: 'followers' }, A);
+    await db!.query("CREATE x_tweet SET tweet_id = 't40', author_rest_id = '40', author_handle = 'u40', text = '抽查用', source = 'x.search', status = 'new', fetched_at = time::now(), metrics = {};");
+    const hit = await lookupSpot('1000', { kind: 'tweet', tweetId: 't40' });
+    expect(hit).toMatchObject({ kind: 'tweet', found: true, tweet: { tweet_id: 't40', text: '抽查用' } });
+    expect(hit.found && hit.kind === 'tweet' && hit.author?.i_follow).toBe(true);
+    expect(await lookupSpot('1000', { kind: 'tweet', tweetId: 'nope' })).toEqual({ kind: 'tweet', found: false, tweetId: 'nope' });
+    expect(await lookupSpot('1000', { kind: 'person', handle: '@U40' })).toMatchObject({ kind: 'person', found: true });
+    expect(await lookupSpot('', { kind: 'person', handle: 'ghost' })).toEqual({ kind: 'person', found: false, handle: 'ghost' });
   });
 
   it('⭐ 迁移 1.2.27:x_ws_account 旧的随机 id 换成按 ws 定位,字段不丢,重跑不变', async () => {

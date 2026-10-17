@@ -63,6 +63,11 @@ export const X_SCRIPTS = {
    * ⚠️ data-testid 是 X 的页面结构,真机才验得出。
    */
   whoAmI: 'x.whoAmI' as ScriptId,
+  /**
+   * ⭐⭐ 抽查(2026-10-16):右键那一点下面是哪条推文 / 哪个人 —— 只读不点。
+   * 用户:「在左边x的原图增加关联方法,增加一个右键菜单,由用户抽查」
+   */
+  spotTarget: 'x.spotTarget' as ScriptId,
 } as const;
 
 /**
@@ -328,6 +333,34 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
   ].join('\n');
 };
 
+/** ⭐ 抽查脚本正文 —— String.raw:反斜杠原样保留 */
+const SPOT_TARGET_SRC = String.raw`(function () {
+  try {
+    var x = __X__, y = __Y__, kind = __KIND__;
+    if (!isFinite(x) || !isFinite(y)) return { why: 'bad-point' };
+    var el = document.elementFromPoint(x, y);
+    if (!el) return { why: 'no-element' };
+    if (kind === 'person') {
+      var cell = el.closest('[data-testid="UserCell"]');
+      if (!cell) return { why: 'no-user-cell' };
+      var links = cell.querySelectorAll('a[href^="/"]');
+      for (var i = 0; i < links.length; i++) {
+        var h = (links[i].getAttribute('href') || '').split('/')[1] || '';
+        if (/^[A-Za-z0-9_]{1,15}$/.test(h)) return { handle: h, text: (cell.textContent || '').slice(0, 120) };
+      }
+      return { why: 'no-handle' };
+    }
+    var art = el.closest('article[data-testid="tweet"]');
+    if (!art) return { why: 'no-tweet' };
+    var t = art.querySelector('a[href*="/status/"] time');
+    var a = t ? t.closest('a') : art.querySelector('a[href*="/status/"]');
+    var m = a ? /\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+    if (!m) return { why: 'no-status-link' };
+    var tx = art.querySelector('[data-testid="tweetText"]');
+    return { tweetId: m[2], handle: m[1], text: tx ? (tx.textContent || '').slice(0, 120) : '' };
+  } catch (e) { return { why: String(e) }; }
+})();`;
+
 /** ⭐ 注册表 —— 由 `main.ts` 在启动时 push 给底座 */
 /**
  * ⭐ 取关脚本 —— 参数(数字 id)走 JSON 绑定,且脚本里再校验只能是数字。
@@ -372,6 +405,18 @@ const buildUnfollowScript = (params: Readonly<Record<string, unknown>>): string 
 };
 
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_SCRIPTS.spotTarget,
+    purpose: 'X:右键那一点下面的推文 id / 人的 handle(抽查用,只读不点)',
+    /**
+     * ⚠️ 参数(坐标、要找推文还是人)走 JSON 绑定替换占位符;正文用 String.raw,反斜杠原样到浏览器
+     * (`project-x-inject-template-escape`:模板字面量会吃掉 `\/`)。守卫:x-spot-check.test 真编译一遍。
+     */
+    build: (params) => SPOT_TARGET_SRC
+      .replace('__X__', JSON.stringify(Number(params.x)))
+      .replace('__Y__', JSON.stringify(Number(params.y)))
+      .replace('__KIND__', JSON.stringify(String(params.kind ?? 'tweet'))),
+  },
   {
     id: X_SCRIPTS.whoAmI,
     purpose: 'X:读这个网页此刻登录的号(个人资料链接 href + 账号切换按钮文字),只读不点',

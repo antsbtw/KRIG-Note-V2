@@ -7,6 +7,10 @@
 
 import { getXDB } from '@storage/surreal/client';
 import { PEOPLE_WITH_RELATION } from './x-account';
+import {
+  CLEAR_INTENT_RULE_SQL, SET_INTENT_HUMAN_SQL, SET_INTENT_RULE_SQL, detectMutualIntent, evidenceText,
+  planIntentRuleWrite, type IntentNow, type IntentTweet,
+} from './x-mutual-intent';
 import { computeCircle, looksChinese, type CirclePerson, type CircleTweet } from './x-friend-circle';
 import {
   buildOverviewQuery, buildPeopleQuery, parseOverview, parsePeopleResult, PERSON_DETAIL_SQL, SET_EXCLUDED_SQL,
@@ -61,6 +65,68 @@ export async function setTags(restId: string, raw: readonly string[]): Promise<s
     throw new Error(`[x.people] 没写上:库里找不到数字 id ${restId} 这个人`);
   }
   return rows[0].tags;
+}
+
+/**
+ * ⭐⭐ 扫一遍互关倾向(算法层,1.2.30)—— Bio + 他**自己发的**推文(转发的是别人的话,不算)。
+ * 人 / AI 定过的不动;没变的不写;规则不再命中的(之前算法标的)清掉 —— 可重算。
+ */
+export type IntentScanReport = {
+  readonly scanned: number; readonly hits: number;
+  readonly set: number; readonly cleared: number; readonly same: number; readonly skippedHigher: number;
+  readonly failed: number; readonly firstFailure?: string;
+};
+
+export async function scanMutualIntent(): Promise<IntentScanReport> {
+  const db = getXDB();
+  const [people, tweets] = await db.query<[
+    Array<IntentNow & { rest_id: string; bio?: string; display_name?: string }>,
+    Array<{ author_rest_id: string; tweet_id: string; text?: string }>,
+  ]>(`
+    SELECT rest_id, bio, display_name, mutual_intent, mutual_intent_source, mutual_intent_evidence FROM x_author WHERE rest_id != NONE;
+    SELECT author_rest_id, tweet_id, text, created_at FROM x_tweet
+      WHERE author_rest_id != NONE AND retweet_of_id = NONE ORDER BY created_at DESC;`);
+  const byAuthor = new Map<string, IntentTweet[]>();
+  for (const t of tweets ?? []) {
+    if (!t.text) continue;
+    const list = byAuthor.get(t.author_rest_id) ?? [];
+    list.push({ tweetId: t.tweet_id, text: t.text });
+    byAuthor.set(t.author_rest_id, list);
+  }
+  let hits = 0; let set = 0; let cleared = 0; let same = 0; let skippedHigher = 0;
+  const failures: string[] = [];
+  for (const p of people ?? []) {
+    const h = detectMutualIntent(p.bio, byAuthor.get(p.rest_id) ?? [], p.display_name);
+    if (h.hit) hits += 1;
+    const plan = planIntentRuleWrite(p, h);
+    if (plan === 'same') { same += 1; continue; }
+    if (plan === 'skip-higher') { skippedHigher += 1; continue; }
+    if (plan === 'none') continue;
+    try {
+      const [rows] = await db.query<[unknown[]]>(
+        plan === 'set' ? SET_INTENT_RULE_SQL : CLEAR_INTENT_RULE_SQL,
+        plan === 'set' && h.hit ? { rest_id: p.rest_id, evidence: evidenceText(h) } : { rest_id: p.rest_id },
+      );
+      if (!rows || rows.length !== 1) throw new Error(`库里找不到 ${p.rest_id}`);
+      if (plan === 'set') set += 1; else cleared += 1;
+    } catch (e) {
+      failures.push(e instanceof Error ? e.message : String(e));
+    }
+  }
+  const r = { scanned: (people ?? []).length, hits, set, cleared, same, skippedHigher, failed: failures.length, firstFailure: failures[0] };
+  console.log(`[x.intent] 扫描 ${r.scanned} 人:命中 ${hits}(新写 ${set} / 不变 ${same})· 清掉 ${cleared} · 人或AI定过跳过 ${skippedHigher}`
+    + (failures.length > 0 ? ` · ⚠️ 失败 ${failures.length}:${failures[0]}` : ''));
+  return r;
+}
+
+/** ⭐ 人的决定(有/无)—— 存成 human,算法以后不能覆盖。⚠️ 人不存在时 UPDATE 返回空不报错 → 检查 */
+export async function setMutualIntent(restId: string, value: boolean): Promise<void> {
+  const [rows] = await getXDB().query<[Array<{ rest_id: string; mutual_intent: boolean }>]>(
+    SET_INTENT_HUMAN_SQL, { rest_id: restId, value },
+  );
+  if (!rows || rows.length !== 1 || rows[0].mutual_intent !== value) {
+    throw new Error(`[x.people] 没写上:库里找不到数字 id ${restId} 这个人`);
+  }
 }
 
 export async function readTagCatalog(): Promise<Array<{ tag: string; count: number }>> {

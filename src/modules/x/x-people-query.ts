@@ -107,11 +107,13 @@ export type PeopleFilter = {
   readonly text: string;
   /** 标签关键词 —— 有任何一个标签**包含**它就算命中(「客户」也命中「潜在客户」) */
   readonly tag: string;
+  /** ⭐ 只看有互关倾向的(1.2.30,蓝V互关 M2)—— 人/AI/算法任一定为「有」 */
+  readonly intentOnly: boolean;
   readonly sort: PeopleSort;
 };
 
 export const DEFAULT_PEOPLE_FILTER: PeopleFilter = {
-  scope: 'in', group: 'all', blueOnly: false, cnText: false, text: '', tag: '', sort: 'followersDesc',
+  scope: 'in', group: 'all', blueOnly: false, cnText: false, text: '', tag: '', intentOnly: false, sort: 'followersDesc',
 };
 
 /** 中文字符 —— 走参数,免得在 SQL 字符串里层层转义 */
@@ -145,10 +147,15 @@ export type PersonRow = {
   readonly tags?: readonly string[];
   /** 被哪些配方找到的(系统记录,与人手打的标签分开)*/
   readonly found_via_recipes?: readonly string[];
+  /** ⭐ 互关倾向(1.2.30):值 / 谁定的(human·ai·rule)/ 依据原句 */
+  readonly mutual_intent?: boolean;
+  readonly mutual_intent_source?: string;
+  readonly mutual_intent_evidence?: string;
 };
 
 const LIST_FIELDS = `rest_id, handle, display_name, avatar, bio, followers_count,
   is_blue_verified, i_follow, follows_me, excluded, tags, found_via_recipes,
+  mutual_intent, mutual_intent_source, mutual_intent_evidence,
   (IF account_created_at != NONE THEN <string> account_created_at ELSE NONE END) AS account_created_at`;
 
 export function buildPeopleQuery(
@@ -164,6 +171,7 @@ export function buildPeopleQuery(
   where.push(scope);
   if (g.where !== '') where.push(g.where);
   if (f.blueOnly) where.push('is_blue_verified = true');
+  if (f.intentOnly) where.push('mutual_intent = true');
   if (f.cnText) { where.push(CN_WHERE); vars.cn = CN_REGEX; vars.ja = JA_REGEX; }
   const text = f.text.trim().toLowerCase().replace(/^@/, '');
   if (text !== '') {
