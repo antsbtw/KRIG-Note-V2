@@ -8,8 +8,9 @@
  * · 认不出 / 要等(X 网页没开、正忙)→ 如实写原因,给「认号」按钮重试
  * · 认出的号变了 → 通知父组件,让「状态」「人」按新号重查(关系按号存,1.2.27)
  */
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
+import { getXHostState, subscribeXHost } from './x-host-registry';
 import type { WsAccount } from './x-account';
 
 type Identify =
@@ -57,6 +58,15 @@ export function XAccountBadge({ wsId, onAccount }: {
     return () => { alive = false; };
     // ⚠️ 只在换 ws 时自动认一次 —— identify 依赖 onAccount,放进依赖会每次渲染都认
   }, [wsId]);
+
+  /**
+   * ⭐ X 网页后登记好 → 再认一次(2026-10-16 真机:任务页一打开就认号,那一刻 X 网页还没登记,
+   * 顶栏一直挂着「X 网页没开,认不了号」,而 X 网页明明开着)。只在上次是「没开」失败时重试。
+   */
+  const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
+  useEffect(() => {
+    if (wcId !== null && note !== null && note.includes('网页没开') && !busy) void identify();
+  }, [wcId]);
 
   const label = acc === null ? '登录号未知'
     : acc.restId ? `@${acc.handle}` : `@${acc.handle}(数字 id 未知)`;

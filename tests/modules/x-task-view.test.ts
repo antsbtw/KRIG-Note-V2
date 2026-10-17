@@ -51,3 +51,26 @@ describe('任务 view', () => {
     expect(f.indexOf('load();')).toBeGreaterThan(f.indexOf("op: 'scanMutualIntent'"));
   });
 });
+
+describe('候选名单:点 = 跳主页,勾 = 选定(10-16 用户:「注意时点击,而不是勾选,勾选是选定」)', () => {
+  it('行不是 label(否则点哪都勾);勾选框只 toggle;名字区域 onClick 跳主页', () => {
+    const F = strip(read('src/modules/x/XTaskFollow.tsx'));
+    const list = F.slice(F.indexOf('(cands ?? []).map((c) => ('), F.indexOf('最近关注'));
+    expect(list.length).toBeGreaterThan(200);
+    expect(list).not.toMatch(/<label/);
+    expect(list).toMatch(/<input type="checkbox"[^>]*onChange=\{\(\) => toggle\(c\.rest_id\)\}/);
+    expect(list).toMatch(/onClick=\{\(\) => void openInX\(c\)\}/);
+  });
+  it('⭐ 正在关注某人 / 网页忙 → 不跳(跳走会打断关注)', () => {
+    const F = strip(read('src/modules/x/XTaskFollow.tsx'));
+    const fn = F.slice(F.indexOf('const openInX'), F.indexOf('const toggle'));
+    const guard = fn.indexOf('if (qs?.current)');
+    const go = fn.indexOf("op: 'goto'");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(go);
+  });
+  it('认号:X 网页后登记好会再认一次', () => {
+    const A = strip(read('src/modules/x/XAccountBadge.tsx'));
+    expect(A).toMatch(/if \(wcId !== null && note !== null && note\.includes\('网页没开'\) && !busy\) void identify\(\);/);
+  });
+});

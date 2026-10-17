@@ -5,8 +5,10 @@
  * 主页面只放进度;点「去求关」才展开候选名单 / 队列 / 回访(用户:「围绕需要做的事情来展现」)。
  * ⚠️ 关注在主进程按节奏跑(每日上限 / 间隔 / 随机加 —— 运营设置里可改),异常即停。
  */
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
+import { getXHostBusy, getXHostState, subscribeXHost } from './x-host-registry';
+import { X_PAGE_NAME } from './x-pages';
 
 type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
 type Prog = { followedTotal: number; followedBack: number; revisit: Array<{ rest_id: string; handle: string; followedAt: string }>; revisitDays: number; today: number; cap: number };
@@ -23,6 +25,9 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   const [cands, setCands] = useState<Cand[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [msg, setMsg] = useState<string | null>(null);
+  /** ⭐ 点了谁(高亮)—— 与「勾选」分开:点 = 左边 X 网页跳到他主页;勾 = 选进这一批 */
+  const [viewing, setViewing] = useState<string | null>(null);
+  const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
 
   const loadProg = useCallback(() => {
     void xDataCall({ op: 'blueMutualFollowProgress', wsId }).then((r) => { if (r.status === 'ok') setProg(r.value as Prog); });
@@ -49,6 +54,22 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   useEffect(() => { if (open && cands === null) loadCands(); }, [open, cands, loadCands]);
 
   const queued = new Set([...(qs?.next ?? []).map((i) => i.restId), qs?.current?.restId].filter(Boolean) as string[]);
+  /**
+   * ⭐ 点一个候选 → 左边 X 网页跳到他的主页(用户 10-16:「点击这个蓝V时,左边跳转到这个蓝V的profile。
+   * --注意时点击,而不是勾选,勾选是选定」)。
+   * ⚠️ 关注队列正在某人主页上点关注 / X 网页正被采集占着 → 不跳(跳走会打断),说清楚。
+   */
+  const openInX = async (c: Cand): Promise<void> => {
+    setViewing(c.rest_id);
+    if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
+    if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
+    const busy = getXHostBusy(wcId);
+    if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
+    const bg = await xDataCall({ op: 'bgBusy', wcId });
+    if (bg.status === 'ok' && bg.value) { setMsg('后台正在采,没跳转(跳走会打断)'); return; }
+    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: c.handle } });
+    setMsg(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
+  };
   const toggle = (id: string): void => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const follow = async (): Promise<void> => {
     const items = (cands ?? []).filter((c) => picked.has(c.rest_id))
@@ -102,16 +123,22 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
             </div>
             <div style={{ maxHeight: 320, overflow: 'auto', marginTop: 6, fontSize: 12 }}>
               {(cands ?? []).map((c) => (
-                <label key={c.rest_id} style={{ display: 'flex', gap: 6, padding: '3px 0', borderBottom: '1px solid var(--border-color, #2a2a2a)', opacity: queued.has(c.rest_id) ? 0.5 : 1 }}>
+                <div key={c.rest_id} style={{
+                  display: 'flex', gap: 6, padding: '3px 0', borderBottom: '1px solid var(--border-color, #2a2a2a)',
+                  opacity: queued.has(c.rest_id) ? 0.5 : 1,
+                  background: viewing === c.rest_id ? 'var(--accent-bg, rgba(45,74,107,0.5))' : undefined,
+                }}>
+                  {/* ⚠️ 勾选框只管「选进这一批」—— 不跳转 */}
                   <input type="checkbox" checked={picked.has(c.rest_id)} disabled={queued.has(c.rest_id)} onChange={() => toggle(c.rest_id)} />
-                  <span style={{ minWidth: 0 }}>
+                  {/* ⭐ 点名字 / 依据这一块 = 左边 X 网页跳到他主页 —— 不勾选 */}
+                  <span style={{ minWidth: 0, cursor: 'pointer', flex: 1 }} onClick={() => void openInX(c)} title="左边 X 网页跳到他的主页">
                     <strong>{c.display_name ?? c.handle}</strong> @{c.handle}
                     {c.followers_count !== undefined && <span style={{ opacity: 0.6 }}> · 粉丝 {c.followers_count}</span>}
                     {c.follows_me === true && <span style={{ color: '#5fc98a' }}> · 他已关注我</span>}
                     {queued.has(c.rest_id) && <span> · 在队列里</span>}
                     <div style={{ opacity: 0.7 }}>依据 · {c.mutual_intent_evidence ?? '—'}</div>
                   </span>
-                </label>
+                </div>
               ))}
             </div>
           </div>
