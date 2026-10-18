@@ -787,7 +787,7 @@ declare global {
         updates: Partial<
           Pick<
             ThoughtInfo,
-            'doc' | 'type' | 'resolved' | 'pinned' | 'color' | 'thumbnail' | 'serviceId'
+            'doc' | 'type' | 'resolved' | 'pinned' | 'color' | 'thumbnail' | 'serviceId' | 'sortOrder'
           >
         >,
       ): Promise<ThoughtInfo | null>;
@@ -846,6 +846,8 @@ declare global {
         prompt: string,
         /** 本活跃 ws 的 AI Host guest wc id(按 ws 定向注入,治多实例串扰)*/
         targetWcId?: number,
+        /** 可选图片 dataUrl(PDF 框选截图等);有图时 prompt 可为空 */
+        imageDataUrl?: string,
       ): Promise<{ success: boolean; error?: string }>;
       /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
       aiGetLatestResponse(): Promise<string | null>;

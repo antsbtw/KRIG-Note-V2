@@ -21,9 +21,26 @@ import {
 } from '@shared/ipc/thought-types';
 import { ThoughtCardEditor } from './ThoughtCardEditor';
 
+/** 同一标注下拖动排序(由 ThoughtPanel 判定能否拖、算顺序;卡片只负责挂事件 + 画提示线) */
+export interface ThoughtCardDrag {
+  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDragEnd: () => void;
+  onDragOver: (e: React.DragEvent<HTMLDivElement>) => void;
+  onDrop: (e: React.DragEvent<HTMLDivElement>) => void;
+  /** 放下位置提示线:插到本卡上方 / 下方 */
+  dropIndicator: 'before' | 'after' | null;
+  isDragging: boolean;
+}
+
 interface ThoughtCardProps {
   thought: ThoughtInfo;
   isActive: boolean;
+  /** 可拖动排序时才有(同一标注 ≥2 张卡) */
+  drag?: ThoughtCardDrag;
+  /** thought.activate 计数(仅 active 卡非 0);变了就重新展开 + 滚到可见 */
+  activateSeq: number;
+  /** 所挂 PDF/EPUB 标注的当前颜色 —— 来源条用它,与左边方框同色可对;缺省用类型色 */
+  anchorColor?: string;
   onActivate: (id: string) => void;
 }
 
@@ -154,7 +171,14 @@ function anchorBookPageLabel(t: ThoughtInfo): string | null {
   return `第 ${loc.pageNum} 页`;
 }
 
-export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps) {
+export function ThoughtCard({
+  thought,
+  isActive,
+  activateSeq,
+  anchorColor,
+  drag,
+  onActivate,
+}: ThoughtCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [showTypeMenu, setShowTypeMenu] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -163,12 +187,26 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
   // **deps 字面只 isActive** — 含 expanded 会让用户手动收起后立刻被 effect
   // 反弹回展开(active && !expanded → setExpanded(true)),用户无法 toggle 收起。
   // V1 src/plugins/thought/components/ThoughtCard.tsx:45 字面 deps:[isActive]。
+  // activateSeq:同一张卡再次被激活(双击同一个标注)时 isActive 不变,靠它重跑;
+  // 用户手动收起不改 seq,所以不会被反弹回展开。
+  //
+  // 滚动用 block:'start' + 等展开渲染完(2026-10-17 修):原 'nearest' 遇上展开后比面板
+  // 还高的卡片会**底部对齐**,用户只看到中下段、看不到问题和第一行;且滚动发生在
+  // setExpanded 之前,内容撑开后位置又偏。两帧 rAF ≈ 展开内容已布局。
   useEffect(() => {
-    if (isActive && !expanded) setExpanded(true);
-    if (isActive && cardRef.current) {
-      cardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-  }, [isActive]);
+    if (!isActive) return;
+    if (!expanded) setExpanded(true);
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, [isActive, activateSeq]);
 
   const meta = THOUGHT_TYPE_META[thought.type];
   const isAI = thought.type === 'ai-response';
@@ -189,11 +227,19 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
     'thought-card',
     isActive ? 'thought-card--active' : '',
     thought.resolved ? 'thought-card--resolved' : '',
+    drag?.isDragging ? 'thought-card--dragging' : '',
+    drag?.dropIndicator === 'before' ? 'thought-card--drop-before' : '',
+    drag?.dropIndicator === 'after' ? 'thought-card--drop-after' : '',
   ].filter(Boolean).join(' ');
 
-  const cardStyle = isActive
-    ? { borderColor: meta.color, borderWidth: 2 }
-    : undefined;
+  // 主题色:挂在 PDF/EPUB 标注上的卡片跟**方框颜色**走(2026-10-17 用户:「完全没有必要
+  // 保留问 AI 的紫色框,根据标注的颜色走就可以了」);其余来源用类型色。
+  const accent = anchorColor ?? meta.color;
+  // 挂在标注上的卡片常驻左色条 —— 收起时也能一眼对上左边哪个方框
+  const cardStyle: React.CSSProperties = {
+    ...(isActive ? { borderColor: accent, borderWidth: 2 } : {}),
+    ...(anchorColor ? { borderLeft: `4px solid ${anchorColor}` } : {}),
+  };
 
   const handleToggle = (): void => {
     setExpanded((p) => !p);
@@ -227,9 +273,22 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
   };
 
   return (
-    <div ref={cardRef} className={cardClass} style={cardStyle}>
-      {/* Header */}
-      <div className="thought-card__header" onClick={handleToggle}>
+    <div
+      ref={cardRef}
+      className={cardClass}
+      style={cardStyle}
+      onDragOver={drag?.onDragOver}
+      onDrop={drag?.onDrop}
+    >
+      {/* Header —— 同一标注 ≥2 张卡时可拖动排序(只头部可拖,正文是编辑器要能选字) */}
+      <div
+        className={'thought-card__header' + (drag ? ' thought-card__header--draggable' : '')}
+        onClick={handleToggle}
+        draggable={drag ? true : undefined}
+        onDragStart={drag?.onDragStart}
+        onDragEnd={drag?.onDragEnd}
+        title={drag ? '拖动可调整同一标注下的顺序' : undefined}
+      >
         <span className="thought-card__icon">{meta.icon}</span>
         <InlineSegments
           segments={titleSegments}
@@ -240,13 +299,13 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
         {isAI && thought.serviceId && (
           <span
             className="thought-card__service"
-            style={{ color: meta.color }}
+            style={{ color: accent }}
           >
             {thought.serviceId}
           </span>
         )}
         <span className="thought-card__time">{formatTime(thought.createdAt)}</span>
-        <span className="thought-card__chevron">{expanded ? '▾' : '▸'}</span>
+        <span className="thought-card__chevron">{expanded ? '▼' : '▶'}</span>
       </div>
 
       {expanded && (
@@ -258,7 +317,7 @@ export function ThoughtCard({ thought, isActive, onActivate }: ThoughtCardProps)
               className="thought-card__anchor"
               onClick={handleScrollToSource}
               title="点击跳转到原文位置"
-              style={{ borderLeftColor: meta.color }}
+              style={{ borderLeftColor: accent }}
             >
               {anchorPageLabel ? (
                 <span className="thought-card__anchor-text">📖 {anchorPageLabel}</span>

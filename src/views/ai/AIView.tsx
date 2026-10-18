@@ -87,7 +87,7 @@ export function AIView({ workspaceId, payload }: AIViewProps) {
 
   /**
    * 订阅跨槽消息 'ai.paste-and-send' — Note "🤖 问 AI" 触发 ask-ai.ts 发的:
-   * payload: { prompt: string, serviceId?: AIServiceId, emittedAt: number }
+   * payload: { prompt: string, serviceId?: AIServiceId, emittedAt: number, imageDataUrl?: string }
    *
    * 收到 → 调 host.pasteAndSend(prompt, serviceId) → 自动 paste + send。
    * Host 内部排队等 webview dom-ready,所以 ai.paste-and-send 早于 dom-ready 也可。
@@ -109,12 +109,14 @@ export function AIView({ workspaceId, payload }: AIViewProps) {
         prompt?: string;
         serviceId?: AIServiceId;
         emittedAt?: number;
+        imageDataUrl?: string;
       };
-      if (typeof p.prompt !== 'string' || !p.prompt) return;
+      const imageDataUrl = typeof p.imageDataUrl === 'string' && p.imageDataUrl ? p.imageDataUrl : undefined;
+      if (typeof p.prompt !== 'string' || (!p.prompt && !imageDataUrl)) return;
       const ts = typeof p.emittedAt === 'number' ? p.emittedAt : Date.now();
       if (ts <= lastHandledAtRef.current) return; // 已处理过(去重)
       lastHandledAtRef.current = ts;
-      void hostRef.current?.pasteAndSend(p.prompt, p.serviceId);
+      void hostRef.current?.pasteAndSend(p.prompt, p.serviceId, imageDataUrl);
     };
     // 1. last-known pull(若 emit 已在 mount 前发生)
     const last = bus.channels.getLastValue('ai.paste-and-send');

@@ -71,12 +71,20 @@ export function registerAIHandlers(): void {
 
   // #5 ai.paste-and-send — 问 AI 路径:paste + send 不等回复(用户在 AI Web 实时看)
   ipcMain.handle(IPC_CHANNELS.AI_PASTE_AND_SEND, async (_e, payload: unknown) => {
-    const p = payload as { serviceId?: unknown; prompt?: unknown; targetWcId?: unknown } | null;
-    if (!p || !isServiceId(p.serviceId) || typeof p.prompt !== 'string' || !p.prompt) {
+    const p = payload as
+      | { serviceId?: unknown; prompt?: unknown; targetWcId?: unknown; imageDataUrl?: unknown }
+      | null;
+    const imageDataUrl =
+      p && typeof p.imageDataUrl === 'string' && p.imageDataUrl ? p.imageDataUrl : undefined;
+    // 有图时 prompt 可为空(只发图);无图时 prompt 必填
+    if (!p || !isServiceId(p.serviceId) || typeof p.prompt !== 'string' || (!p.prompt && !imageDataUrl)) {
       return { success: false, error: 'invalid pasteAndSend payload' };
     }
     const targetWcId = typeof p.targetWcId === 'number' ? p.targetWcId : undefined;
-    return pasteAndSend(p.serviceId, p.prompt, targetWcId);
+    const result = await pasteAndSend(p.serviceId, p.prompt, targetWcId, imageDataUrl);
+    // 失败在 main 侧也打一行(renderer console 只在 DevTools 里,人不一定开着)
+    if (!result.success) console.error('[ai.paste-and-send] failed:', result.error);
+    return result;
   });
 
   // #6 ai.get-latest-response — 提取按钮用:从 SSE 缓存取最新回复 markdown

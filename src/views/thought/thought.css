@@ -101,6 +101,17 @@
   border-width: 2px;
 }
 
+/* 同一标注下拖动排序 */
+.thought-card--dragging {
+  opacity: 0.4;
+}
+.thought-card--drop-before {
+  box-shadow: 0 -3px 0 0 var(--krig-accent, #4a9eff);
+}
+.thought-card--drop-after {
+  box-shadow: 0 3px 0 0 var(--krig-accent, #4a9eff);
+}
+
 .thought-card--resolved {
   opacity: 0.55;
 }
@@ -110,8 +121,18 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  cursor: pointer;
+  /* 不能拖的卡用普通箭头 —— 手形只留给「能拖」(2026-10-17 用户:只有一个 card 不能拖动,
+   * 就不出现抓手)。点击展开仍有效,靠 hover 底色提示可点。 */
+  cursor: default;
   user-select: none;
+}
+
+/* 必须写在 .thought-card__header 之后:同优先级后者胜,写前面会被上面的 cursor 盖掉 */
+.thought-card__header--draggable {
+  cursor: grab;
+}
+.thought-card__header--draggable:active {
+  cursor: grabbing;
 }
 
 .thought-card__header:hover {
@@ -165,8 +186,11 @@
   flex: 0 0 auto;
 }
 
+/* 与正文 toggleList 箭头同字符(▶/▼)同字号(16px)—— pm-host.css .krig-toggle-list__arrow */
 .thought-card__chevron {
-  font-size: 11px;
+  font-size: 16px;
+  width: 20px;
+  text-align: center;
   color: var(--krig-fg-muted, #888);
   flex: 0 0 auto;
 }

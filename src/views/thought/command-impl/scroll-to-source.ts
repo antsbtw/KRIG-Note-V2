@@ -98,6 +98,8 @@ async function scrollToBookSource(
       pageNum: locator.pageNum,
       cfi: locator.cfi,
       thoughtId,
+      // PDF 标注层的 annotation id = bookAnchor.createdAt(不是 thoughtId)—— 闪烁按它匹配
+      annotationId: locator.createdAt !== undefined ? String(locator.createdAt) : undefined,
     });
   }
 }

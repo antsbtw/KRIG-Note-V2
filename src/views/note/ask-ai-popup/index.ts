@@ -33,6 +33,7 @@ function isOpenAskAIPopupArg(v: unknown): v is OpenAskAIPopupArg {
     typeof o.defaultServiceId === 'string' &&
     typeof o.thoughtId === 'string' &&
     (o.instanceId === undefined || typeof o.instanceId === 'string') &&
+    (o.imageDataUrl === undefined || typeof o.imageDataUrl === 'string') &&
     (o.onCancel === undefined || typeof o.onCancel === 'function')
   );
 }
@@ -55,6 +56,7 @@ export function registerAskAIPopup(): void {
     }
     setPendingAskAIContext({
       selectionMarkdown: arg.selectionMarkdown,
+      imageDataUrl: arg.imageDataUrl,
       defaultServiceId: arg.defaultServiceId,
       thoughtId: arg.thoughtId,
       instanceId: arg.instanceId,

@@ -875,8 +875,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiAsk(serviceId: string, prompt: string, options?: unknown, targetWcId?: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_ASK, { serviceId, prompt, options, targetWcId });
   },
-  aiPasteAndSend(serviceId: string, prompt: string, targetWcId?: number): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt, targetWcId });
+  aiPasteAndSend(serviceId: string, prompt: string, targetWcId?: number, imageDataUrl?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt, targetWcId, imageDataUrl });
   },
   aiGetLatestResponse(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE);

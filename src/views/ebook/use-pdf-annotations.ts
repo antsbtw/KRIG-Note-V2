@@ -28,6 +28,7 @@ import type {
 } from '@capabilities/ebook-rendering/types';
 import {
   THOUGHT_TYPE_META,
+  thoughtTypeByColor,
   type ThoughtType,
 } from '@shared/ipc/thought-types';
 
@@ -38,12 +39,9 @@ function colorOf(type: ThoughtType): string {
   return THOUGHT_TYPE_META[type].color;
 }
 
-/** color 反查 ThoughtType(legacy 数据反序列化用)— 找不到回退 'thought' */
+/** color 反查 ThoughtType(legacy 数据反序列化用)— 找不到回退 'thought'(仅影响方框显示色) */
 function thoughtTypeOf(color: string): ThoughtType {
-  for (const [t, meta] of Object.entries(THOUGHT_TYPE_META)) {
-    if (meta.color === color) return t as ThoughtType;
-  }
-  return 'thought';
+  return thoughtTypeByColor(color) ?? 'thought';
 }
 
 function toPageAnnotationFromLegacy(anchor: BookAnchor): PageAnnotation | null {
@@ -131,6 +129,26 @@ export function usePdfAnnotations(
       if (!bookId) return null;
       const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
 
+      // 先画方框、后截图落库(2026-10-17 用户:框选后 1s 以上才响应)。
+      // 原先「整页 2x 渲染截图 → JPEG 编码 → IPC 落库」串行跑完才 setAnnotations,
+      // 用户松手后要干等全程。现在乐观先显示,后台补;落库失败撤掉方框并报错(不静默)。
+      const createdAt = Date.now();
+      const id = String(createdAt);
+      setAnnotations((prev) => [
+        ...prev,
+        {
+          id,
+          markStyle: ann.markStyle,
+          thoughtType: ann.thoughtType,
+          pageNum,
+          rect: ann.rect,
+          textRects: ann.textRects,
+        },
+      ]);
+
+      // 让出一帧再截图:整页 2x 渲染在主线程同步跑几百 ms,不让它把方框那一帧堵在后面
+      await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+
       // 截屏(失败仍允许创建,thumbnail 留空)
       let thumbnail: string | undefined;
       try {
@@ -139,7 +157,6 @@ export function usePdfAnnotations(
         console.warn('[pdf-annotations] capturePageRect failed:', err);
       }
 
-      const createdAt = Date.now();
       const bookAnchor: BookAnchor = {
         pageNum,
         rect: ann.rect,
@@ -149,22 +166,17 @@ export function usePdfAnnotations(
         type: ann.markStyle,
         createdAt,
       };
-      await lib.addReadingThoughtBlock(bookId, {
-        type: 'image',
-        bookAnchor,
-        src: thumbnail,
-      });
-      setAnnotations((prev) => [
-        ...prev,
-        {
-          id: String(createdAt),
-          markStyle: ann.markStyle,
-          thoughtType: ann.thoughtType,
-          pageNum,
-          rect: ann.rect,
-          textRects: ann.textRects,
-        },
-      ]);
+      try {
+        await lib.addReadingThoughtBlock(bookId, {
+          type: 'image',
+          bookAnchor,
+          src: thumbnail,
+        });
+      } catch (err) {
+        console.error('[pdf-annotations] 标注落库失败,撤掉方框:', err);
+        setAnnotations((prev) => prev.filter((a) => a.id !== id));
+        return null;
+      }
       return { id: String(createdAt) };
     },
     [bookIdRef, hostRef],
@@ -220,11 +232,18 @@ export function usePdfAnnotations(
       const bookId = bookIdRef.current;
       if (!bookId) return;
       const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-      // id = bookAnchor.createdAt 字面串(legacy 删除 key)
-      await lib.removeReadingThoughtBlock(bookId, id);
+      // 先去掉方框、后台落库(同 create:写库 ≈1.7s,不让用户干等)。
+      // 失败不静默:报错 + 按库里真实数据重拉,方框会回来。
       setAnnotations((prev) => prev.filter((a) => a.id !== id));
+      try {
+        // id = bookAnchor.createdAt 字面串(legacy 删除 key)
+        await lib.removeReadingThoughtBlock(bookId, id);
+      } catch (err) {
+        console.error('[pdf-annotations] 删除标注落库失败,按库重拉:', err);
+        void refreshForBook(bookId);
+      }
     },
-    [bookIdRef],
+    [bookIdRef, refreshForBook],
   );
 
   return {

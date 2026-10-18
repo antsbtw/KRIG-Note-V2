@@ -21,7 +21,13 @@
 import type { AIServiceId } from '@shared/types/ai-service-types';
 import type { AIAskResult, AISSEStatus } from '@shared/ipc/ai-types';
 import { SSECaptureManager } from './interceptor';
-import { pasteTextToAI, clickSendButton } from './writer';
+import {
+  pasteTextToAI,
+  clickSendButton,
+  pasteImageToAI,
+  waitSendButtonEnabled,
+  clickEnabledSendButton,
+} from './writer';
 import { broadcastAIResponseReady, broadcastAIError } from './broadcast';
 import {
   resolveAIWebContents,
@@ -167,6 +173,8 @@ export async function pasteAndSend(
   serviceId: AIServiceId,
   prompt: string,
   targetWcId?: number,
+  /** 可选图片(PDF 框选截图等):先粘图、等上传完,再粘文字发送 */
+  imageDataUrl?: string,
 ): Promise<{ success: boolean; error?: string }> {
   try {
     // 等本 ws 的 AI Host webview 就绪(用户点"问 AI"后,AIView mount → webview navigate
@@ -179,15 +187,33 @@ export async function pasteAndSend(
 
     // SSE manager 已通过 subscribeAttachAIWebContents 自动 attach 到这个 wc
 
-    const pasted = await pasteTextToAI(webContents, serviceId, prompt);
-    if (!pasted) {
-      return { success: false, error: 'Failed to paste text into AI input box' };
+    if (imageDataUrl) {
+      const img = await pasteImageToAI(webContents, serviceId, imageDataUrl);
+      if (!img.landed) {
+        return { success: false, error: `图片没粘进 AI 输入框(${img.detail})` };
+      }
+      // 上传完之前发送按钮通常禁用;等它可用再继续(没等到就停,不发半截)
+      const ready = await waitSendButtonEnabled(webContents, serviceId, 30_000);
+      if (!ready) {
+        return { success: false, error: '图片已粘入,但 30s 内发送按钮一直不可用(上传未完成?),未发送' };
+      }
     }
 
-    // writer.pasteTextToAI 内已 sleep 400ms + verify content landed,这里只需短
-    // 暂 250ms 让 send button disabled 状态解除(React state propagation)。
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    await clickSendButton(webContents, serviceId);
+    if (prompt) {
+      const pasted = await pasteTextToAI(webContents, serviceId, prompt);
+      if (!pasted) {
+        return { success: false, error: 'Failed to paste text into AI input box' };
+      }
+      // writer.pasteTextToAI 内已 sleep 400ms + verify content landed,这里只需短
+      // 暂 250ms 让 send button disabled 状态解除(React state propagation)。
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const sent = await clickSendButton(webContents, serviceId);
+      if (!sent) return { success: false, error: 'Failed to click send button' };
+    } else {
+      // 只发图:输入框本来就空,不能用 clickSendButton 的「输入框清空」判据
+      const sent = await clickEnabledSendButton(webContents, serviceId);
+      if (!sent) return { success: false, error: 'Failed to click send button (image only)' };
+    }
     return { success: true };
   } catch (error) {
     return { success: false, error: String(error) };

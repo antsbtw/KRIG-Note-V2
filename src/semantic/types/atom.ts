@@ -191,6 +191,11 @@ export interface ThoughtPayload {
     | 'ai-response';
   resolved: boolean;
   pinned: boolean;
+  /**
+   * 同一标注下多张卡的手动顺序(用户拖动排列,2026-10-17)。缺省 = 按 createdAt。
+   * 只在同一标注组内比较;跨标注仍按页码 / 页内位置排。
+   */
+  sortOrder?: number;
   /** AI 服务标识('chatgpt'/'claude'/'gemini'),仅 type='ai-response' */
   serviceId?: string;
   /**

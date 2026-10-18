@@ -529,7 +529,10 @@ export function EBookView({ workspaceId, slot = 'left' }: EBookViewProps) {
     };
     el.addEventListener('dblclick', onDblClick);
     return () => el.removeEventListener('dblclick', onDblClick);
-  }, [activeBookIdRef, workspaceId]);
+    // ⚠️ deps 必须含 activeBookId(2026-10-17 修):bodyRef 那个 div 只在有书时才渲染
+    // (下方 `if (!activeBookId) return 空态`)。原 deps 恒不变 → 先以「无书」挂载、再异步
+    // 开书时,effect 只在 bodyRef=null 那一刻跑过 → 双击监听永远没挂上,双击标注没反应。
+  }, [activeBookIdRef, workspaceId, activeBookId]);
 
   // ── Toolbar callbacks ──
 
@@ -703,17 +706,35 @@ export function EBookView({ workspaceId, slot = 'left' }: EBookViewProps) {
     host.setKnownEpubAnnotationCfis(ann.annotations.map((a) => a.cfi));
   }, [ann.annotations]);
 
+  // 右键 🗑 删除标注 → 本栏 pdfAnn.remove(先去方框、后台落库)。
+  // 左右两栏都订阅同一 ws bus → 只认书对得上的那一栏,避免另一栏误删 / 重复删。
+  useEffect(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    return bus.channels.subscribe('ebook.remove-pdf-annotation', (payload: unknown) => {
+      const { bookId, annotationId } = (payload ?? {}) as {
+        bookId?: string;
+        annotationId?: string;
+      };
+      if (!bookId || !annotationId) return;
+      if (bookId !== activeBookIdRef.current) return;
+      void pdfAnn.remove(annotationId);
+    });
+  }, [workspaceId, pdfAnn, activeBookIdRef]);
+
   // thought-view Phase 4:订阅 'thought.scroll-to-book-source' channel
   // → ThoughtView 点 anchor 跳转到 ebook 当前 active book 的页/CFI(host.goToPage/goToCFI)
   useEffect(() => {
     const bus = workspaceManager.getBus(workspaceId);
     if (!bus) return;
     const unsub = bus.channels.subscribe('thought.scroll-to-book-source', (payload: unknown) => {
-      const { bookId, pageNum, cfi, thoughtId } = (payload ?? {}) as {
+      const { bookId, pageNum, cfi, annotationId } = (payload ?? {}) as {
         bookId?: string;
         pageNum?: number;
         cfi?: string;
         thoughtId?: string;
+        /** PDF 标注 id(= bookAnchor.createdAt 字符串);闪烁按它匹配,不能用 thoughtId */
+        annotationId?: string;
       };
       if (!bookId) return;
       /**
@@ -742,9 +763,11 @@ export function EBookView({ workspaceId, slot = 'left' }: EBookViewProps) {
         }
       };
       tryScroll(0);
-      if (thoughtId) {
+      // 2026-10-17 修:原先 flash(thoughtId),而标注层 ann.id = bookAnchor.createdAt,
+      // 两者永远不等 → 跳源后方框从不闪。改按 annotationId 匹配。
+      if (annotationId) {
         // 闪烁延后到第一波 retry 都试过(8*250=2000ms);annotations 此时大概率已就位
-        window.setTimeout(() => pdfAnn.flash(thoughtId), 2200);
+        window.setTimeout(() => pdfAnn.flash(annotationId), 2200);
       }
     });
     return unsub;

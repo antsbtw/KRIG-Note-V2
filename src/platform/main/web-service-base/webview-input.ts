@@ -17,7 +17,7 @@
  * 因此本文件的 locateSendButton 只「定位 / 校验存在」,不 click。
  */
 
-import { clipboard, type WebContents } from 'electron';
+import { clipboard, nativeImage, type WebContents } from 'electron';
 
 const IS_MAC = process.platform === 'darwin';
 const PASTE_MODIFIER: Array<'control' | 'meta'> = IS_MAC ? ['meta'] : ['control'];
@@ -100,7 +100,12 @@ export async function pasteTextToWebview(
   // 1. focus input
   const focused = await focusInputBox(webContents, inputSelector);
   if (!focused) {
-    console.warn('[webview-input] input element not found for selector:', inputSelector);
+    console.warn(
+      '[webview-input] input element not found for selector:',
+      inputSelector,
+      '· 页面上实际可编辑元素:',
+      await describeEditableCandidates(webContents),
+    );
     return false;
   }
 
@@ -271,6 +276,308 @@ async function isLanded(webContents: WebContents, verifyScript: string): Promise
     return Boolean(await webContents.executeJavaScript(verifyScript));
   } catch {
     return false;
+  }
+}
+
+/**
+ * 「附件预览出现」的信号计数脚本 —— pasteImageToWebview 判落地用。
+ *
+ * ⚠️ 这是**我的判断**(2026-10-17),未逐站实测:三家 AI 粘图后都会在输入区出一个
+ * 缩略图,但 DOM 各不相同,这里取几类通用信号求和,任一增加即视为落地:
+ *   - img[src^=blob:/data:](本地预览图的常见形态)
+ *   - class / data-testid 含 attachment / file-preview / thumbnail 的元素
+ *   - 输入区(输入框向上 6 层)内的 img 数 —— 2026-10-17 Claude 实测补:合成 paste 后
+ *     输入区 imgs=[],前三类信号在 Claude 上不一定会变
+ * 每次都把各信号计数打日志 —— 真机某家判不出时,按日志里的数换判据,别猜。
+ */
+function attachmentSignalScript(inputSelector: string): string {
+  return `
+  (function() {
+    var q = function(s) { try { return document.querySelectorAll(s).length; } catch(e) { return 0; } };
+    // 输入框向上 6 层祖先 = 输入区;其中的 img 数(Claude 上传缩略图不一定是 blob:/data:)
+    var selectors = ${JSON.stringify(inputSelector)}.split(',').map(function(s) { return s.trim(); });
+    var el = null;
+    for (var i = 0; i < selectors.length && !el; i++) { if (selectors[i]) el = document.querySelector(selectors[i]); }
+    var composerImg = 0;
+    if (el) {
+      var root = el;
+      for (var k = 0; k < 6 && root.parentElement; k++) root = root.parentElement;
+      composerImg = root.querySelectorAll('img').length;
+    }
+    return {
+      localImg: q('img[src^="blob:"], img[src^="data:"]'),
+      attachment: q('[class*="attachment" i], [data-testid*="attachment" i]'),
+      preview: q('[class*="file-preview" i], [class*="thumbnail" i], [data-testid*="file" i]'),
+      composerImg: composerImg,
+    };
+  })();
+`;
+}
+
+type AttachmentSignals = { localImg: number; attachment: number; preview: number; composerImg: number };
+
+async function readAttachmentSignals(
+  webContents: WebContents,
+  inputSelector: string,
+): Promise<AttachmentSignals | null> {
+  try {
+    return (await webContents.executeJavaScript(attachmentSignalScript(inputSelector))) as AttachmentSignals;
+  } catch {
+    return null;
+  }
+}
+
+function signalsGrew(before: AttachmentSignals, after: AttachmentSignals | null): boolean {
+  if (!after) return false;
+  return (
+    after.localImg > before.localImg ||
+    after.attachment > before.attachment ||
+    after.preview > before.preview ||
+    after.composerImg > before.composerImg
+  );
+}
+
+/** 轮询等附件信号增长(上传预览渲染需要时间) */
+async function waitAttachmentLanded(
+  webContents: WebContents,
+  inputSelector: string,
+  before: AttachmentSignals,
+  timeoutMs: number,
+): Promise<AttachmentSignals | null> {
+  const deadline = Date.now() + timeoutMs;
+  let last: AttachmentSignals | null = null;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    last = await readAttachmentSignals(webContents, inputSelector);
+    if (signalsGrew(before, last)) return last;
+  }
+  return null;
+}
+
+/**
+ * 把一张图片(dataUrl)「真粘贴」进 webContents 的某输入框 —— pasteTextToWebview 的图片版。
+ *
+ * 流程:
+ *   1. focusInputBox(找不到 → landed=false)
+ *   2. 记下附件信号基线
+ *   3. 主路径:guest 上下文合成 paste,DataTransfer 带一个 image File(与文字主路径同理)
+ *      —— ChatGPT 实测走这条落地
+ *   4. 没落地 → 次选:塞进页面的 <input type=file> + 派发 change(Claude 不吃合成 paste)
+ *   5. 仍没落地 → 兜底:clipboard.writeImage + OS Cmd+V(还原用户剪贴板文字)
+ *
+ * 只负责「图进了输入区」;上传是否完成由调用方等发送按钮可用来判(上传中按钮通常禁用)。
+ *
+ * @returns landed + 各信号计数(调用方打日志 / 拼错误信息用)
+ */
+export async function pasteImageToWebview(
+  webContents: WebContents,
+  inputSelector: string,
+  dataUrl: string,
+): Promise<{ landed: boolean; detail: string }> {
+  const m = /^data:([^;,]+);base64,(.*)$/.exec(dataUrl);
+  if (!m) return { landed: false, detail: 'imageDataUrl 不是 base64 dataUrl' };
+  const mime = m[1];
+  const base64 = m[2];
+  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
+
+  const focused = await focusInputBox(webContents, inputSelector);
+  if (!focused) {
+    const candidates = await describeEditableCandidates(webContents);
+    return { landed: false, detail: `输入框没找到: ${inputSelector} · 页面上实际可编辑元素: ${candidates}` };
+  }
+
+  const before = await readAttachmentSignals(webContents, inputSelector);
+  if (!before) return { landed: false, detail: '读不到附件信号基线(executeJavaScript 失败)' };
+
+  // 3. 主路径:合成 paste(atob 手工解码,不用 fetch(dataUrl) —— 站点 CSP 可能拦 data: fetch)
+  const synthScript = `
+    (function() {
+      var sel = ${JSON.stringify(inputSelector)};
+      var selectors = sel.split(',').map(function(s) { return s.trim(); });
+      var el = null;
+      for (var i = 0; i < selectors.length; i++) {
+        if (!selectors[i]) continue;
+        el = document.querySelector(selectors[i]);
+        if (el) break;
+      }
+      if (!el) return 'no-input';
+      try { el.focus(); } catch(e) {}
+      try {
+        var bin = atob(${JSON.stringify(base64)});
+        var bytes = new Uint8Array(bin.length);
+        for (var j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+        var file = new File([bytes], ${JSON.stringify(`krig-capture.${ext}`)}, { type: ${JSON.stringify(mime)} });
+        var dt = new DataTransfer();
+        dt.items.add(file);
+        var evt = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+        el.dispatchEvent(evt);
+        return 'dispatched';
+      } catch(e) {
+        return 'error: ' + String(e);
+      }
+    })();
+  `;
+  let synthResult = '';
+  try {
+    synthResult = String(await webContents.executeJavaScript(synthScript));
+  } catch (err) {
+    synthResult = `executeJavaScript failed: ${String(err)}`;
+  }
+  let after = await waitAttachmentLanded(webContents, inputSelector, before, 3000);
+  if (after) {
+    const detail = `synthetic paste · before=${JSON.stringify(before)} after=${JSON.stringify(after)}`;
+    console.log(`[webview-input] image landed via ${detail}`);
+    return { landed: true, detail };
+  }
+
+  // 4. 次选:塞进页面的 <input type=file>(2026-10-17 Claude 实测:合成 paste 不吃,
+  //    输入区旁有隐藏的 input[data-testid=file-upload])。input.files 赋 DataTransfer.files
+  //    + 派发 change,等价用户在文件选择框里选了这张图。优先取输入区内的,再退全页第一个收图的。
+  console.warn(`[webview-input] synthetic image paste did not land (${synthResult}), trying <input type=file>`);
+  const fileInputScript = `
+    (function() {
+      var selectors = ${JSON.stringify(inputSelector)}.split(',').map(function(s) { return s.trim(); });
+      var el = null;
+      for (var i = 0; i < selectors.length && !el; i++) { if (selectors[i]) el = document.querySelector(selectors[i]); }
+      var acceptsImage = function(inp) {
+        var a = (inp.getAttribute('accept') || '').toLowerCase();
+        return !a || a.indexOf('image') !== -1 || a.indexOf('.jpg') !== -1 || a.indexOf('.jpeg') !== -1 || a.indexOf('*') !== -1;
+      };
+      var pick = null;
+      if (el) {
+        var root = el;
+        for (var k = 0; k < 6 && root.parentElement; k++) root = root.parentElement;
+        var near = root.querySelectorAll('input[type="file"]');
+        for (var n = 0; n < near.length && !pick; n++) if (acceptsImage(near[n])) pick = near[n];
+      }
+      if (!pick) {
+        var all = document.querySelectorAll('input[type="file"]');
+        for (var m = 0; m < all.length && !pick; m++) if (acceptsImage(all[m])) pick = all[m];
+      }
+      if (!pick) return 'no-file-input';
+      try {
+        var bin = atob(${JSON.stringify(base64)});
+        var bytes = new Uint8Array(bin.length);
+        for (var j = 0; j < bin.length; j++) bytes[j] = bin.charCodeAt(j);
+        var file = new File([bytes], ${JSON.stringify(`krig-capture.${ext}`)}, { type: ${JSON.stringify(mime)} });
+        var dt = new DataTransfer();
+        dt.items.add(file);
+        pick.files = dt.files;
+        pick.dispatchEvent(new Event('input', { bubbles: true }));
+        pick.dispatchEvent(new Event('change', { bubbles: true }));
+        return 'set:' + (pick.getAttribute('data-testid') || pick.id || 'input[type=file]');
+      } catch(e) {
+        return 'error: ' + String(e);
+      }
+    })();
+  `;
+  let fileInputResult = '';
+  try {
+    fileInputResult = String(await webContents.executeJavaScript(fileInputScript));
+  } catch (err) {
+    fileInputResult = `executeJavaScript failed: ${String(err)}`;
+  }
+  if (fileInputResult.startsWith('set:')) {
+    after = await waitAttachmentLanded(webContents, inputSelector, before, 5000);
+    if (after) {
+      const detail = `file input (${fileInputResult}) · before=${JSON.stringify(before)} after=${JSON.stringify(after)}`;
+      console.log(`[webview-input] image landed via ${detail}`);
+      return { landed: true, detail };
+    }
+  }
+
+  // 5. 兜底:OS 级 Cmd+V(系统剪贴板放图片)
+  console.warn(`[webview-input] file input did not land (${fileInputResult}), falling back to OS Cmd+V`);
+  const originalText = clipboard.readText();
+  try {
+    await focusInputBox(webContents, inputSelector);
+    clipboard.writeImage(nativeImage.createFromDataURL(dataUrl));
+    webContents.sendInputEvent({ type: 'keyDown', keyCode: 'V', modifiers: PASTE_MODIFIER });
+    webContents.sendInputEvent({ type: 'char', keyCode: 'V', modifiers: PASTE_MODIFIER });
+    webContents.sendInputEvent({ type: 'keyUp', keyCode: 'V', modifiers: PASTE_MODIFIER });
+    after = await waitAttachmentLanded(webContents, inputSelector, before, 3000);
+  } finally {
+    setTimeout(() => {
+      try {
+        clipboard.writeText(originalText);
+      } catch { /* ignore */ }
+    }, 500);
+  }
+  const last = after ?? (await readAttachmentSignals(webContents, inputSelector));
+  const detail = `before=${JSON.stringify(before)} after=${JSON.stringify(last)} synth=${synthResult} fileInput=${fileInputResult}`;
+  if (after) {
+    console.log(`[webview-input] image landed via OS Cmd+V · ${detail}`);
+    return { landed: true, detail: `OS Cmd+V · ${detail}` };
+  }
+  const composer = await describeComposerArea(webContents, inputSelector);
+  console.error(`[webview-input] image paste did not land · ${detail} · composer: ${composer}`);
+  return { landed: false, detail: `${detail} · composer: ${composer}` };
+}
+
+/**
+ * 输入框 selector 没命中时,列出页面上实际存在的可编辑元素(tag/id/class/testid)+ 页面 URL。
+ *
+ * 站点改版换了输入框 DOM 是常态;报错里直接带上「现在实际是什么」,照着改 selector,不用猜。
+ */
+export async function describeEditableCandidates(webContents: WebContents): Promise<string> {
+  const script = `
+    (function() {
+      var els = document.querySelectorAll('textarea, [contenteditable="true"], input[type="text"]');
+      var out = [];
+      for (var i = 0; i < els.length && i < 8; i++) {
+        var el = els[i];
+        var cls = (typeof el.className === 'string' ? el.className : '').trim().split(/\\s+/).slice(0, 4).join('.');
+        out.push(el.tagName.toLowerCase()
+          + (el.id ? '#' + el.id : '')
+          + (cls ? '.' + cls : '')
+          + (el.getAttribute('data-testid') ? '[data-testid=' + el.getAttribute('data-testid') + ']' : '')
+          + (el.getAttribute('aria-label') ? '[aria-label=' + el.getAttribute('aria-label') + ']' : ''));
+      }
+      return 'url=' + location.href + ' readyState=' + document.readyState + ' n=' + els.length + ' [' + out.join(' | ') + ']';
+    })();
+  `;
+  try {
+    return String(await webContents.executeJavaScript(script));
+  } catch (err) {
+    return `(读取失败: ${String(err)})`;
+  }
+}
+
+/**
+ * 粘图判「没落地」时,描述输入框周围(向上 6 层祖先的子树)实际有什么:
+ * img(src 前缀)+ class/testid/aria-label 含 file/upload/attach/image/preview 的元素。
+ *
+ * 用途:某站点图其实进去了但附件信号没认出来时,照这份真实 DOM 改判据,不猜。
+ */
+async function describeComposerArea(webContents: WebContents, inputSelector: string): Promise<string> {
+  const script = `
+    (function() {
+      var selectors = ${JSON.stringify(inputSelector)}.split(',').map(function(s) { return s.trim(); });
+      var el = null;
+      for (var i = 0; i < selectors.length && !el; i++) { if (selectors[i]) el = document.querySelector(selectors[i]); }
+      if (!el) return 'no-input';
+      var root = el;
+      for (var k = 0; k < 6 && root.parentElement; k++) root = root.parentElement;
+      var imgs = [];
+      root.querySelectorAll('img').forEach(function(im) { if (imgs.length < 6) imgs.push((im.getAttribute('src') || '').slice(0, 40)); });
+      var hits = [];
+      var re = /file|upload|attach|image|preview|thumb/i;
+      root.querySelectorAll('*').forEach(function(n) {
+        if (hits.length >= 12) return;
+        var cls = typeof n.className === 'string' ? n.className : '';
+        var tid = n.getAttribute('data-testid') || '';
+        var al = n.getAttribute('aria-label') || '';
+        if (re.test(cls) || re.test(tid) || re.test(al)) {
+          hits.push(n.tagName.toLowerCase() + (tid ? '[testid=' + tid + ']' : '') + (al ? '[aria=' + al.slice(0, 30) + ']' : '') + (cls ? '.' + cls.trim().split(/\\s+/).slice(0, 3).join('.') : ''));
+        }
+      });
+      return 'rootTag=' + root.tagName.toLowerCase() + ' imgs=[' + imgs.join(' | ') + '] hits=[' + hits.join(' | ') + ']';
+    })();
+  `;
+  try {
+    return String(await webContents.executeJavaScript(script));
+  } catch (err) {
+    return `(读取失败: ${String(err)})`;
   }
 }
 

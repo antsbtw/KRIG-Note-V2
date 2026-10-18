@@ -154,7 +154,9 @@ const CHATGPT_PROFILE: AIServiceProfile = {
   newChatUrl: 'https://chatgpt.com/',
   urlPattern: '^https://chatgpt\\.com',
   selectors: {
-    inputBox: '#prompt-textarea',
+    // 2026-10-17 真机实测:ChatGPT 改版,输入框不再有 #prompt-textarea,实际是
+    // div.ProseMirror[contenteditable=true][aria-label="Ask ChatGPT"]。旧 id 留作次选(灰度期旧页面)。
+    inputBox: 'div.ProseMirror[contenteditable="true"], #prompt-textarea',
     sendButton: 'button[data-testid="send-button"], button[data-testid="composer-send-button"], button[aria-label*="Send" i]',
     messageList: '[class*="react-scroll-to-bottom"]',
     userMessage: '[data-message-author-role="user"]',

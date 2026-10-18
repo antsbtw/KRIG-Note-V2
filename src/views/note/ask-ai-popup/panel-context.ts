@@ -12,6 +12,11 @@ import type { AIServiceId } from '@shared/types/ai-service-types';
 export interface AskAIContext {
   /** 序列化后的选区 markdown(预览 + 拼 prompt) */
   selectionMarkdown: string;
+  /**
+   * 可选图片 dataUrl(PDF 框选标注的截图)。传了 → panel 显示缩略图,发送时随 prompt
+   * 一起粘进 AI;此时 selectionMarkdown 可为空串。
+   */
+  imageDataUrl?: string;
   /** 默认 AI 服务(AIView per-ws state,panel 可让用户改) */
   defaultServiceId: AIServiceId;
   /** 已 preCreatePlaceholder + addThoughtMark 后的 ai-response thought atom id */

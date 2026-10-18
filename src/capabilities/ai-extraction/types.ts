@@ -90,9 +90,11 @@ export interface AIHostHandle {
    *   多次调用以最后一次 prompt 为准。
    * - serviceId 不传时用当前显示的 serviceId(props 传入);若传则先切服务再发。
    *
+   * - imageDataUrl:可选图片(PDF 框选截图);先粘图等上传完再粘文字发送,有图时 prompt 可为空。
+   *
    * 返 Promise,resolve 时表示 paste+send 已派发(不等 AI 回复完成)。
    */
-  pasteAndSend(prompt: string, serviceId?: AIServiceId): Promise<void>;
+  pasteAndSend(prompt: string, serviceId?: AIServiceId, imageDataUrl?: string): Promise<void>;
 }
 
 export interface AIHostProps {
