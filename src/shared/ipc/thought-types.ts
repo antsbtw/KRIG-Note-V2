@@ -48,6 +48,17 @@ export const THOUGHT_TYPE_META: Record<
 };
 
 /**
+ * 颜色 → ThoughtType 反查(PDF/EPUB 标注只存 color,类型靠它反推)。
+ * 找不到返回 null —— 由调用方决定怎么处理(别在这里静默兜底成 'thought')。
+ */
+export function thoughtTypeByColor(color: string): ThoughtType | null {
+  for (const [t, meta] of Object.entries(THOUGHT_TYPE_META)) {
+    if (meta.color.toLowerCase() === color.toLowerCase()) return t as ThoughtType;
+  }
+  return null;
+}
+
+/**
  * 用户在 picker 中可选的 5 种 type(ai-response 不进 picker — AI 自动创建)。
  * 顺序即 picker 渲染顺序;UI 字面用 META[type] 取颜色/图标/标签。
  *
@@ -170,6 +181,8 @@ export interface ThoughtInfo {
   type: ThoughtType;
   resolved: boolean;
   pinned: boolean;
+  /** 同一标注下的手动顺序(拖动排列);缺省按 createdAt —— 见 ThoughtPayload.sortOrder */
+  sortOrder?: number;
   /** AI response 服务标识('chatgpt'/'claude'/'gemini'),仅 type='ai-response' 时填 */
   serviceId?: string;
   /**

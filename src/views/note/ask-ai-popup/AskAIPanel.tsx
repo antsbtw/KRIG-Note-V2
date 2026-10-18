@@ -124,7 +124,12 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
     }
     // 开右槽 + emit 跨槽消息(AIView 订阅 'ai.paste-and-send')
     bus.slot.openRight('ai-view');
-    bus.channels.emit('ai.paste-and-send', { prompt, serviceId, emittedAt: Date.now() });
+    bus.channels.emit('ai.paste-and-send', {
+      prompt,
+      serviceId,
+      imageDataUrl: ctx.imageDataUrl,
+      emittedAt: Date.now(),
+    });
     onClose();
   }
 
@@ -161,6 +166,14 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
           ×
         </button>
       </div>
+
+      {/* Preview(截图)— PDF 框选标注 */}
+      {ctx.imageDataUrl && (
+        <div className="krig-ask-ai-panel__preview">
+          <span className="krig-ask-ai-panel__preview-label">截图:</span>
+          <img className="krig-ask-ai-panel__preview-image" src={ctx.imageDataUrl} alt="截图" />
+        </div>
+      )}
 
       {/* Preview(选区 markdown) */}
       {preview && (
@@ -219,7 +232,7 @@ export function AskAIPanel({ onClose }: PopupCloseProps) {
           type="button"
           className="krig-ask-ai-panel__send"
           onClick={handleSend}
-          disabled={!ctx.selectionMarkdown.trim() && !instruction.trim()}
+          disabled={!ctx.selectionMarkdown.trim() && !instruction.trim() && !ctx.imageDataUrl}
         >
           发送 ▶
         </button>

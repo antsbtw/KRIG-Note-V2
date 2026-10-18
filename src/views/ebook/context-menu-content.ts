@@ -10,7 +10,7 @@
  *   💭 加思考       → lib.getReadingThoughtBlock(bookId, id) 拿 bookAnchor →
  *                    bookAnchor → BookLocator 转换 → thoughtApi.createThought(anchor=book) →
  *                    召唤右槽 thought-view + activate 新卡片
- *   🤖 问 AI        → 占位 stub(同 α-2)
+ *   🤖 问 AI        → 文字标注带文字 / 框选标注带截图 → AskAIPanel popup
  *   🎨 改颜色 ▸     → submenu render AnnotationTypeSubmenu(5 色 → lib.updateReadingThoughtBlockColor)
  *   📸 截图复制     → lib.getReadingThoughtBlock 拿 thumbnail → 剪贴板
  *   🗑 删除标注     → lib.removeReadingThoughtBlock(bookId, id)
@@ -32,6 +32,7 @@ import type {
   BookLocator,
 } from '@capabilities/thought/types';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
+import { thoughtTypeByColor } from '@shared/ipc/thought-types';
 import type { LearningApi } from '@capabilities/learning/types';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
@@ -222,8 +223,14 @@ export function registerContextMenu(): void {
       // 用户笔记起手 paragraph(总在最后,方便用户直接键入)
       docContent.push({ type: 'paragraph' });
 
+      // 卡片类型跟方框类型走(2026-10-17 用户选「卡片类型也跟方框走」):
+      // 橙框(重要)→ ⭐ 重要卡,绿框(待办)→ ☐ 待办卡。原先一律 'thought',与方框对不上。
+      const boxType = thoughtTypeByColor(bookAnchor.color);
+      if (!boxType) {
+        console.warn('[ebook-view.add-thought] 方框颜色不在类型表里,按「思考」建卡:', bookAnchor.color);
+      }
       const t = await thoughtApi.createThought({
-        type: 'thought',
+        type: boxType && boxType !== 'ai-response' ? boxType : 'thought',
         resolved: false,
         pinned: false,
         thumbnail: bookAnchor.thumbnail,
@@ -247,6 +254,7 @@ export function registerContextMenu(): void {
           bookId,
           pageNum: bookAnchor.pageNum,
           thoughtId: t.id,
+          annotationId: String(createdAt),
           emittedAt: Date.now(),
         });
         bus.channels.emit('thought.activate', {
@@ -255,14 +263,15 @@ export function registerContextMenu(): void {
           emittedAt: Date.now(),
         });
       }
-    })();
+    })().catch((err) => console.error('[ebook-view.add-thought-from-annotation] failed:', err));
   });
 
   /**
    * 🤖 问 AI(已标注上)— 复用 note 同款 AskAIPanel popup。
    *
-   * - 文字流标注(highlight/strikethrough):有 textContent → 走完整 ask-ai 流程
-   * - 框选标注(rect):只有 thumbnail 无 textContent → 暂不支持(等 AIView image input)
+   * - 文字流标注(highlight/strikethrough):有 textContent → 选区文字进 prompt
+   * - 框选标注(rect):只有 thumbnail 无 textContent → 截图随 prompt 一起粘进 AI
+   *   (imageDataUrl;问题框显示缩略图,问题可留空)
    *
    * 流程对齐 EPUB / Note:openRight → 复用既有 bookAnchor 创 thought atom → 弹 popup。
    * 不重复落 highlight(已有),thought atom 关联到既有 createdAt。
@@ -296,10 +305,12 @@ export function registerContextMenu(): void {
         return;
       }
       const text = bookAnchor.textContent ?? '';
-      if (!text) {
-        // 框选标注无文字 → 待 AIView image input
-        console.info(
-          '[ebook-view.ask-ai-from-annotation] 框选标注无 textContent,等 AIView image input',
+      const imageDataUrl = !text && bookAnchor.thumbnail ? bookAnchor.thumbnail : undefined;
+      if (!text && !imageDataUrl) {
+        console.warn(
+          '[ebook-view.ask-ai-from-annotation] 标注既无 textContent 也无 thumbnail,无内容可问',
+          id,
+          bookAnchor.type,
         );
         return;
       }
@@ -319,12 +330,13 @@ export function registerContextMenu(): void {
       });
       commandRegistry.execute('note-view.open-ask-ai-popup', {
         selectionMarkdown: text,
+        imageDataUrl,
         defaultServiceId,
         anchorX,
         anchorY,
         thoughtId: placeholder.id,
       });
-    })();
+    })().catch((err) => console.error('[ebook-view.ask-ai-from-annotation] failed:', err));
   });
 
   /**
@@ -478,6 +490,7 @@ export function registerContextMenu(): void {
             bookId,
             pageNum: loc.pageNum,
             thoughtId: matched.id,
+            annotationId: String(createdAt),
             emittedAt: Date.now(),
           });
           bus.channels.emit('thought.activate', {
@@ -519,14 +532,29 @@ export function registerContextMenu(): void {
     })();
   });
 
-  /** 🗑 删除标注 — 走 legacy removeReadingThoughtBlock(createdAt key) */
+  /**
+   * 🗑 删除标注 — 交给 EBookView 的 pdfAnn.remove:先去掉方框,后台落库。
+   *
+   * 2026-10-17 改:原先直接 lib.removeReadingThoughtBlock,方框要等「整份 doc 重写
+   * (≈1.7s)→ 广播 → 整份重拉」才消失,用户觉得删除很慢。标注状态在 EBookView 的
+   * hook 里,命令够不着 → 走本 ws bus 定向给持有这本书的那一栏。
+   */
   commandRegistry.register('ebook-view.delete-pdf-annotation', () => {
     const id = getPdfAnnotationId();
     if (!id) return;
     const bookId = getActiveBookId();
     if (!bookId) return;
-    const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
-    void lib.removeReadingThoughtBlock(bookId, id);
+    const wsId = getContextWsId();
+    const bus = wsId ? workspaceManager.getBus(wsId) : null;
+    if (!bus) {
+      console.error('[ebook-view.delete-pdf-annotation] 拿不到本 ws bus,未删除', { wsId, id });
+      return;
+    }
+    bus.channels.emit('ebook.remove-pdf-annotation', {
+      bookId,
+      annotationId: id,
+      emittedAt: Date.now(),
+    });
   });
 
   /** 📖 查词 — PDF textLayer 选区 → DictionaryPanel lookup */

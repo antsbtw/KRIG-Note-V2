@@ -14,6 +14,7 @@ import type {
   ThoughtInfo,
   ThoughtSource,
 } from '@capabilities/thought/types';
+import type { EBookLibraryApi } from '@capabilities/ebook-library/types';
 
 export function useAllThoughts(): ThoughtInfo[] {
   const [thoughts, setThoughts] = useState<ThoughtInfo[]>([]);
@@ -64,4 +65,42 @@ export function useThoughtsBySource(
     };
   }, [source, resourceId]);
   return thoughts;
+}
+
+/**
+ * 当前书的标注颜色表:bookAnchor.createdAt → color(PDF 方框 / EPUB 高亮的实际颜色)。
+ *
+ * 卡片来源条按它上色,做到「卡片 ↔ 方框」同色可对(2026-10-17 用户选「卡片类型也跟方框走」)。
+ * ⚠️ 实时读标注,不在建卡时抄进 locator:方框之后还能 🎨 改颜色,抄下来的会过时。
+ * 标注增删改都会 broadcastNoteListChanged → 这里跟着重拉。
+ */
+export function useBookAnnotationColors(
+  source: ThoughtSource | null,
+  resourceId: string | null,
+): Map<number, string> {
+  const [colors, setColors] = useState<Map<number, string>>(() => new Map());
+  useEffect(() => {
+    if (source !== 'book' || !resourceId) {
+      setColors(new Map());
+      return;
+    }
+    const lib = requireCapabilityApi<EBookLibraryApi>('ebook-library');
+    let cancelled = false;
+    const refresh = (): void => {
+      lib
+        .getReadingThoughtAnnotations(resourceId)
+        .then((anchors) => {
+          if (cancelled) return;
+          setColors(new Map(anchors.map((a) => [a.createdAt, a.color])));
+        })
+        .catch((err) => console.error('[thought] 读标注颜色失败:', err));
+    };
+    refresh();
+    const unsubscribe = window.electronAPI?.onNoteListChanged?.(refresh);
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [source, resourceId]);
+  return colors;
 }

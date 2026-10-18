@@ -43,6 +43,7 @@ function atomToThoughtInfo(
     type: p.type,
     resolved: p.resolved,
     pinned: p.pinned,
+    sortOrder: p.sortOrder,
     serviceId: p.serviceId,
     thumbnail: p.thumbnail,
     doc: wrapThoughtDoc(p.doc),
@@ -270,7 +271,7 @@ export async function updateThought(
   updates: Partial<
     Pick<
       ThoughtInfo,
-      'doc' | 'type' | 'resolved' | 'pinned' | 'thumbnail' | 'serviceId'
+      'doc' | 'type' | 'resolved' | 'pinned' | 'thumbnail' | 'serviceId' | 'sortOrder'
     >
   >,
 ): Promise<ThoughtInfo | null> {
@@ -287,6 +288,7 @@ export async function updateThought(
         type: updates.type ?? cur.type,
         resolved: updates.resolved ?? cur.resolved,
         pinned: updates.pinned ?? cur.pinned,
+        sortOrder: 'sortOrder' in updates ? updates.sortOrder : cur.sortOrder,
         serviceId: 'serviceId' in updates ? updates.serviceId : cur.serviceId,
         thumbnail: 'thumbnail' in updates ? updates.thumbnail : cur.thumbnail,
         doc: nextDoc,

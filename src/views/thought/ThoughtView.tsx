@@ -17,7 +17,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { ThoughtSource } from '@capabilities/thought/types';
-import { useThoughtsBySource } from './use-thoughts';
+import { useThoughtsBySource, useBookAnnotationColors } from './use-thoughts';
 import { ThoughtPanel } from './ThoughtPanel';
 import './thought.css';
 
@@ -57,9 +57,15 @@ export function ThoughtView({ workspaceId }: ThoughtViewProps) {
   );
 
   const thoughts = useThoughtsBySource(source, resourceId);
+  const annotationColors = useBookAnnotationColors(source, resourceId);
 
   // active thought id(跨槽 thought.activate 触发后高亮)
   const [activeId, setActiveId] = useState<string | null>(null);
+  /**
+   * 每次 thought.activate 自增 —— 同一张卡被再次激活(双击同一个标注 / 刚问完 AI 又双击)
+   * 时 activeId 不变,卡片的「展开 + 滚到可见」effect 不会重跑;靠它强制再跑一次。
+   */
+  const [activateSeq, setActivateSeq] = useState(0);
   /**
    * push-pull 双向契约(memory feedback_module_push_pull_both):右槽 ThoughtView
    * 已 mount 后,新的右键"💭 加思考"/AI 命令仍要能切 activeId;若 emit 发生在
@@ -79,6 +85,7 @@ export function ThoughtView({ workspaceId }: ThoughtViewProps) {
       if (ts <= lastHandledAtRef.current) return;
       lastHandledAtRef.current = ts;
       setActiveId(p.thoughtId);
+      setActivateSeq((n) => n + 1);
     };
     // 1. last-known pull(若 emit 已在 mount 前发生)
     const last = bus.channels.getLastValue('thought.activate');
@@ -109,7 +116,9 @@ export function ThoughtView({ workspaceId }: ThoughtViewProps) {
       </div>
       <ThoughtPanel
         thoughts={thoughts}
+        annotationColors={annotationColors}
         activeId={activeId}
+        activateSeq={activateSeq}
         onActivate={setActiveId}
         source={source}
         resourceId={resourceId}

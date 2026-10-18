@@ -35,5 +35,6 @@ export {
 export {
   focusInputBox,
   pasteTextToWebview,
+  pasteImageToWebview,
   PASTE_MODIFIER,
 } from './webview-input';

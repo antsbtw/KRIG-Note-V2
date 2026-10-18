@@ -26,6 +26,7 @@
 import {
   focusInputBox,
   pasteTextToWebview,
+  pasteImageToWebview,
 } from '../web-service-base';
 import { getAIServiceProfile, type AIServiceId } from '@shared/types/ai-service-types';
 
@@ -53,6 +54,84 @@ export async function pasteTextToAI(
 ): Promise<boolean> {
   const profile = getAIServiceProfile(serviceId);
   return pasteTextToWebview(webContents, profile.selectors.inputBox, text);
+}
+
+/**
+ * 把图片(dataUrl)粘进 AI 输入框 —— 薄包装,委托公共 pasteImageToWebview。
+ */
+export async function pasteImageToAI(
+  webContents: Electron.WebContents,
+  serviceId: AIServiceId,
+  dataUrl: string,
+): Promise<{ landed: boolean; detail: string }> {
+  const profile = getAIServiceProfile(serviceId);
+  return pasteImageToWebview(webContents, profile.selectors.inputBox, dataUrl);
+}
+
+/**
+ * 等发送按钮变成可点(图片上传中按钮通常禁用 / 不出现)。
+ *
+ * 带图发送必须先等这一步:上传没完就按 Enter,站点要么忽略、要么只发出文字。
+ * @returns 是否在超时前等到可用按钮
+ */
+export async function waitSendButtonEnabled(
+  webContents: Electron.WebContents,
+  serviceId: AIServiceId,
+  timeoutMs: number,
+): Promise<boolean> {
+  const profile = getAIServiceProfile(serviceId);
+  const script = `
+    (function() {
+      var sendSelectors = ${JSON.stringify(profile.selectors.sendButton)}.split(',').map(function(s) { return s.trim(); });
+      for (var i = 0; i < sendSelectors.length; i++) {
+        var el = document.querySelector(sendSelectors[i]);
+        if (el && !el.disabled && el.getAttribute('aria-disabled') !== 'true') return true;
+      }
+      return false;
+    })();
+  `;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      if (await webContents.executeJavaScript(script)) return true;
+    } catch { /* 页面切换中,继续等 */ }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  return false;
+}
+
+/**
+ * 直接点可用的发送按钮(不走 Enter)。
+ *
+ * 只发图(输入框无文字)时用:clickSendButton 的 Enter 路径靠「输入框被清空」判成功,
+ * 而输入框本来就空 → 必然误判成功。这里只认「找到可用按钮并 click 了」。
+ */
+export async function clickEnabledSendButton(
+  webContents: Electron.WebContents,
+  serviceId: AIServiceId,
+): Promise<boolean> {
+  const profile = getAIServiceProfile(serviceId);
+  const script = `
+    (function() {
+      var sendSelectors = ${JSON.stringify(profile.selectors.sendButton)}.split(',').map(function(s) { return s.trim(); });
+      for (var i = 0; i < sendSelectors.length; i++) {
+        var el = document.querySelector(sendSelectors[i]);
+        if (el && !el.disabled && el.getAttribute('aria-disabled') !== 'true') {
+          el.click();
+          return true;
+        }
+      }
+      return false;
+    })();
+  `;
+  try {
+    const clicked = Boolean(await webContents.executeJavaScript(script));
+    console.log(`[ContentSender] ${profile.name} send button click: ${clicked}`);
+    return clicked;
+  } catch (err) {
+    console.error(`[ContentSender] ${profile.name} send button click failed:`, err);
+    return false;
+  }
 }
 
 /**

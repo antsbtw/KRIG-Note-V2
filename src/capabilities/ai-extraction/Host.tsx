@@ -146,10 +146,22 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
    *
    * 多次调以最后一次为准(覆盖,不排队);dom-ready 后立即 flush。
    */
-  const pendingPromptRef = useRef<{ prompt: string; serviceId?: AIServiceId } | null>(null);
+  const pendingPromptRef = useRef<
+    {
+      prompt: string;
+      serviceId?: AIServiceId;
+      imageDataUrl?: string;
+      /** flush 时已因页面不符切过一次服务(防登录跳转等导致反复 loadURL 死循环) */
+      redirected?: boolean;
+    } | null
+  >(null);
 
   /** 内部:真正发送给 main 进程的 paste+send 调用 */
-  const sendNow = useCallback(async (prompt: string, targetService: AIServiceId) => {
+  const sendNow = useCallback(async (
+    prompt: string,
+    targetService: AIServiceId,
+    imageDataUrl?: string,
+  ) => {
     const api = window.electronAPI;
     if (!api?.aiPasteAndSend) {
       console.warn('[ai Host] electronAPI.aiPasteAndSend not available');
@@ -158,7 +170,13 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
     // 注入目标 = 本 ws 的 AI Host guest(治多实例串扰:不再依赖 main 全局「最后 navigate」)。
     // sendNow 只在 dom-ready 后调,故此时本 ws 已登记;未命中 → 传 null,main fail loud。
     const targetWcId = getAIHostWcId(workspaceId);
-    await api.aiPasteAndSend(targetService, prompt, targetWcId ?? undefined);
+    const result = await api.aiPasteAndSend(
+      targetService,
+      prompt,
+      targetWcId ?? undefined,
+      imageDataUrl,
+    );
+    if (!result?.success) console.error('[ai Host] pasteAndSend failed:', result?.error);
   }, [workspaceId]);
 
   // imperative API
@@ -181,22 +199,26 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
           return null;
         }
       },
-      pasteAndSend: async (prompt: string, targetServiceId?: AIServiceId) => {
-        if (!prompt) return;
+      pasteAndSend: async (
+        prompt: string,
+        targetServiceId?: AIServiceId,
+        imageDataUrl?: string,
+      ) => {
+        if (!prompt && !imageDataUrl) return;
         const finalService = targetServiceId ?? serviceId;
         // webview 未 dom-ready,缓存等 dom-ready 后再发(防 main 拿空 webContents)
         if (!domReadyRef.current) {
-          pendingPromptRef.current = { prompt, serviceId: finalService };
+          pendingPromptRef.current = { prompt, serviceId: finalService, imageDataUrl };
           return;
         }
         // 若需切服务,先 loadURL(loadURL 后页面会重 ready,把 prompt 入 pending 等)
         if (targetServiceId && targetServiceId !== serviceId) {
-          pendingPromptRef.current = { prompt, serviceId: finalService };
+          pendingPromptRef.current = { prompt, serviceId: finalService, imageDataUrl };
           webviewRef.current?.loadURL(getAIServiceProfile(targetServiceId).newChatUrl);
           domReadyRef.current = false; // loadURL 会触发新一轮 dom-ready
           return;
         }
-        await sendNow(prompt, finalService);
+        await sendNow(prompt, finalService, imageDataUrl);
       },
     }),
     [serviceId, sendNow],
@@ -211,8 +233,33 @@ export const Host = forwardRef<AIHostHandle, AIHostProps>(function AIHost(
   flushPendingRef.current = () => {
     const pending = pendingPromptRef.current;
     if (!pending) return;
+    const target = pending.serviceId ?? serviceId;
+    // 排队期间页面可能已换成别家(用户切了 tab / webview 重建后按 prop 加载了另一家):
+    // 按**实际 URL** 核对,对不上就先 loadURL 到目标服务、保留排队,等它 dom-ready 再发。
+    // 不核对 → 「发给 chatgpt」被投到 claude 页,main 报「当前不是 chatgpt AI 页」。
+    const wv = webviewRef.current;
+    let actualUrl = '';
+    try {
+      actualUrl = wv?.getURL() ?? '';
+    } catch {
+      /* ignore */
+    }
+    if (wv && !new RegExp(getAIServiceProfile(target).urlPattern).test(actualUrl)) {
+      if (pending.redirected) {
+        pendingPromptRef.current = null;
+        console.error(
+          `[ai Host] 已切到 ${target} 但页面仍是 ${actualUrl}(未登录 / 被跳转?),放弃发送`,
+        );
+        return;
+      }
+      pending.redirected = true;
+      console.log(`[ai Host] pending 目标 ${target} 与当前页 ${actualUrl} 不符,先切过去再发`);
+      domReadyRef.current = false;
+      wv.loadURL(getAIServiceProfile(target).newChatUrl);
+      return;
+    }
     pendingPromptRef.current = null;
-    void sendNow(pending.prompt, pending.serviceId ?? serviceId);
+    void sendNow(pending.prompt, target, pending.imageDataUrl);
   };
 
   // webview tag:TS 不识别 partition/allowpopups,用 cast 满足 props 类型。
