@@ -87,6 +87,12 @@ import { registerWebDomIpc } from './web-capability/wiring/ipc-dom';
  */
 import '@modules/x/main';
 import { startTraceLifecycle, stopTraceLifecycle } from './web-capability/wiring/trace-lifecycle';
+/**
+ * ⭐⭐ 日常诊断日志(2026-10-19):终端日志 + 每个网页的 DevTools 日志落盘到 krig-data/logs/,
+ * AI 用 `node scripts/logs.mjs` 自己读现场。用户:「AI必须有能力执行日常的诊断方式-- terminal log/devtools log」
+ */
+import { startDiagnosticLogs, stopDiagnosticLogs } from './diagnostics/logs/diagnostic-logs';
+import { pageIdOfWebContents } from './web-capability/wiring/page-hosts';
 /** ⚠️ X 模块已彻底归零(2026-09-29 用户定)—— 接线一并摘掉,重建时重新接 */
 /** ⚠️ X 业务层已整体移除(2026-09-29 推倒重建)—— 接线一并摘掉 */
 
@@ -151,6 +157,9 @@ if (!app.requestSingleInstanceLock()) {
   console.log('[main] 已有实例在运行,本进程退出(单实例守卫)');
   app.quit();
 } else {
+  // ⭐ 越早越好(要接住启动阶段的日志);只在拿到锁的实例里起,免得两个进程写同一份文件。
+  // 停止调用在 before-quit 的最终分支。
+  startDiagnosticLogs({ resolvePageId: pageIdOfWebContents });
   app.on('second-instance', () => {
     // 有人试图再开一个 → 激活已有窗口
     const wins = BrowserWindow.getAllWindows();
@@ -386,6 +395,8 @@ app.on('before-quit', (event) => {
   stopTraceLifecycle();
   if (reconciled) {
     shutdownStorageSync();
+    // ⭐ 只停老化 timer + 新 wc 监听;终端日志照常落盘到进程退出(关库后子进程的退出日志也要)
+    stopDiagnosticLogs();
     return;
   }
   event.preventDefault();

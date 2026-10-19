@@ -1,6 +1,6 @@
 # Web 能力层 · 站点说明书与自修闭环(设计)
 
-> 立于 2026-10-18,10-19 按用户四条决定改版。状态:**设计稿,未开工**。
+> 立于 2026-10-18,10-19 按用户四条决定改版。状态:**P1 日常诊断底座已实施(10-19,分支 `feature/web-diagnostics-p1`)**,P2 起未开工。
 > 前置阅读:`01-contract.md`(三能力 + adapter 契约 §14 + L-raw §13)。
 > 本篇回答:**怎样让 AI 看懂、操作、核对任意网页,而且解析错了能快速修好,不靠一行行写站点代码。**
 
@@ -297,7 +297,7 @@ X 每次出问题,现在都要用户截图、复制日志;有了它,这一步就
 
 | # | 问题 | 哪一期 |
 |---|---|---|
-| 1 | 日志保留多久、占多大(默认 30 天、可改,与 L-raw / trace 同口径?) | P1 |
+| 1 | ~~日志保留多久~~ ✅ 用户 10-19 选「30 天」;占用待 X 后台采集实跑后报实测 | P1 |
 | 2 | 说明书格式细节(路径表达式用哪种) | P2 |
 | 3 | 档案多久归档一次 | P2 |
 | 4 | 云端授权粒度(按站点 / 页面类型 / 按次)、用哪个云端模型 | P4 |
@@ -307,8 +307,8 @@ X 每次出问题,现在都要用户截图、复制日志;有了它,这一步就
 
 | 项 | 现状 |
 |---|---|
-| 终端日志 | 只打到终端,不落盘(主进程只处理了 stdout EPIPE) |
-| 网页 console | 只有剪藏(`extraction-handler.ts`)监听 `console-message`,且只认 `KRIG_IMPORT:` 前缀;其余网页的日志只在各自 DevTools |
+| 终端日志 | ✅ P1(10-19):主进程 `console.*` 同时落 `krig-data/logs/main/*.jsonl`,保留 30 天(用户 10-19 定);读:`node scripts/logs.mjs` |
+| 网页 console | ✅ P1(10-19):每个 webContents(主窗口 renderer / webview / 隐藏窗口)的 console、未捕获异常、加载失败、导航、进程退出落 `krig-data/logs/page/*.jsonl`,带 wc# / URL;能力层登记过的页面带 pageId(⚠️ X 页面在能力层第一次操作它时才登记,之前的行只有 wc#,`--wc` 能串起两段) |
 | 能力层留痕 | ✅ `krig-data/web-trace/lifecycle/*.jsonl` |
 | 运行黑匣子 | ✅ `krig-data/health/*.jsonl` + `scripts/health-report.mjs` |
 | L-raw | `raw/raw-store.ts` + `wiring/fs-raw-sink.ts` 已建已测,**无消费者**;磁盘上无 L-raw 数据 |

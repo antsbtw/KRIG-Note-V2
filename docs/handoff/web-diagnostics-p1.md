@@ -41,3 +41,14 @@
 
 当前在 `feature/x-blue-mutual-m1m2`(蓝V互关,未合 main、未推送;设计文档也在这条分支上)。
 P1 与蓝V互关代码无关 —— 建议从这条分支开新分支 `feature/web-diagnostics-p1`,开工前问用户一句是否要先合 main。
+
+## 进度(2026-10-19 实施)
+
+- ✅ 写入端 `src/platform/main/diagnostics/logs/`:`log-file.ts`(按天分片、fd 常开 writeSync、写失败翻转时才响并报丢了几条)·
+  `main-console-tap.ts`(终端输出不变 + 落盘)· `page-console-tap.ts`(每个 wc;每分钟 600 条限流,丢弃数留痕)· `diagnostic-logs.ts`(起停、30 天老化)
+- ✅ 接线 `index.ts`:拿到单实例锁立刻起(早于 whenReady);before-quit 最终分支只停 timer / 监听,console 接管留到进程退出
+- ✅ 读取 `node scripts/logs.mjs`(`--since/--around/--from` · `--src` · `--level` · `--page/--wc/--url` · `--grep` · `--kind` · `--trace` · `--pages` · `--runs` · `--json`)
+- ✅ 测试 `tests/platform/main/diagnostic-logs.test.ts` 18 条;15 处注入违规全部变红
+- ✅ 本机真 app:CDP 往 X webview 注入未捕获异常 → `logs.mjs --grep` 读出,带 wc#3 / x.com/home;退出过程的日志逐行与终端一致
+- ⚠️ 真 app 上这条报错**没带 pageId**:X 页面在能力层第一次操作它(采集 / web.dom)时才登记。没改登记时机(那是能力层语义);同一 wc# 前后两段能串起来
+- 待办:X 后台采集实跑一天后报实际占用;验收①「X 出一次问题时 AI 自己读现场」等下次真出问题时兑现
