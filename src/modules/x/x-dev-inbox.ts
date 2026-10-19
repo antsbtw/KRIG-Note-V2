@@ -12,36 +12,56 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import path from 'node:path';
 import { collectSearchByScroll } from './x-search-scroll';
 import { collectPersonTab } from './x-person-collect';
-import { getXHostBusy, getXHostState } from './x-host-registry';
+import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
 import { bgRunningOn } from './x-bg-runner';
-import { pageProblem } from './x-page-ledger';
+import { manualSummary, pageProblem } from './x-page-ledger';
+import { X_MANUAL } from './x-manual';
+import { setPageTap } from './x-page-tap';
+import { runCollect } from './x-collect-run';
+import { webviewPorts } from './x-collect-ports';
+import { X_USER_LIST_PAGES } from './x-pages';
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
 
-const dirs = (): { inbox: string; outbox: string } => {
+const dirs = (): { inbox: string; outbox: string; samples: string } => {
   const base = path.join(app.getPath('userData'), 'krig-data', 'x-dev');
-  return { inbox: path.join(base, 'inbox'), outbox: path.join(base, 'outbox') };
+  return { inbox: path.join(base, 'inbox'), outbox: path.join(base, 'outbox'), samples: path.join(base, 'samples') };
 };
 
-type SearchCmd = { op: 'searchScroll'; wsId: string; q: string; f?: 'latest' | 'top'; wantPages: number; maxMs: number; recipeName?: string };
+/**
+ * ⭐ 任何指令都可带 `sample: "名字"`(P2 2026-10-19):每记一页账,把这一页的原始载荷存成
+ * `samples/<时间>-<名字>/page-NNN.json` —— 说明书新旧账一致性的基线(tests/modules/x-manual-parity.test.ts 读它)。
+ * ⚠️ 载荷含登录态下的内容:只在本机 userData,不进 git。
+ */
+type Sampling = { sample?: string };
+type SearchCmd = Sampling & { op: 'searchScroll'; wsId: string; q: string; f?: 'latest' | 'top'; wantPages: number; maxMs: number; recipeName?: string };
 /** 人卡同一条路(主进程 collectPersonTab:游标翻页 + 一页一存回读)—— 验人卡 / 后台的逐页账 */
-type PersonCmd = { op: 'personTab'; wsId: string; page: 'x.profile' | 'x.withReplies' | 'x.reposts'; handle: string; restId: string; pageCap: number };
-type Cmd = SearchCmd | PersonCmd;
+type PersonCmd = Sampling & { op: 'personTab'; wsId: string; page: 'x.profile' | 'x.withReplies' | 'x.reposts'; handle: string; restId: string; pageCap: number };
+/** 名单页(followers / following …):游标翻页记账,不存库 —— 只为存基线样本、看逐页账 */
+type UserListCmd = Sampling & { op: 'userList'; wsId: string; page: string; handle: string; pageCap: number };
+type Cmd = SearchCmd | PersonCmd | UserListCmd;
 
 function validate(c: unknown): Cmd | string {
-  const o = c as Partial<SearchCmd> & Partial<PersonCmd>;
+  const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
+  if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
+  if (o?.op === 'userList') {
+    if (typeof o.wsId !== 'string' || typeof o.handle !== 'string' || o.handle === '') return 'userList 要 wsId / handle';
+    if (X_USER_LIST_PAGES[String(o.page)] === undefined) return `userList 的 page 只收 ${Object.keys(X_USER_LIST_PAGES).join(' / ')}`;
+    if (!Number.isInteger(o.pageCap) || (o.pageCap as number) < 1 || (o.pageCap as number) > 10) return 'userList 的 pageCap 要 1–10';
+    return o as unknown as UserListCmd;
+  }
   if (o?.op === 'personTab') {
     if (typeof o.wsId !== 'string' || typeof o.handle !== 'string' || typeof o.restId !== 'string' || !/^\d+$/.test(o.restId)) return 'personTab 要 wsId / handle / restId';
     if (!['x.profile', 'x.withReplies', 'x.reposts'].includes(String(o.page))) return 'personTab 的 page 只收 x.profile / x.withReplies / x.reposts';
     if (!Number.isInteger(o.pageCap) || (o.pageCap as number) < 1 || (o.pageCap as number) > 10) return 'personTab 的 pageCap 要 1–10';
-    return o as PersonCmd;
+    return o as unknown as PersonCmd;
   }
   if (o?.op !== 'searchScroll') return `不认识的指令 ${String(o?.op)}`;
   if (typeof o.wsId !== 'string' || typeof o.q !== 'string' || o.q === '') return 'searchScroll 要 wsId 和 q';
   if (!Number.isInteger(o.wantPages) || (o.wantPages as number) < 1 || (o.wantPages as number) > 40) return 'wantPages 要 1–40(防限流)';
   if (!Number.isInteger(o.maxMs) || (o.maxMs as number) < 10_000 || (o.maxMs as number) > 15 * 60_000) return 'maxMs 要 10s–15min';
-  return o as SearchCmd;
+  return o as unknown as SearchCmd;
 }
 
 async function runPersonTab(cmd: PersonCmd): Promise<unknown> {
@@ -55,8 +75,48 @@ async function runPersonTab(cmd: PersonCmd): Promise<unknown> {
   return {
     ok: true, records: r.records.length, pageInserted: r.pageInserted, stopReason: r.paging?.stopReason,
     ledgerProblem: r.ledgerProblem,
+    manual: manualSummary(r.ledger, X_MANUAL.site, X_MANUAL.version),
     ledger: r.ledger.map((l) => ({ page: l.page, label: l.label, x: l.xTweets, notParsed: l.notParsed.length, notInDb: l.notInDb?.length, dir: l.directionWrong, retried: l.retried, other: l.other, ok: pageProblem(l) === undefined })),
   };
+}
+
+async function runUserList(cmd: UserListCmd): Promise<unknown> {
+  const wcId = getXHostState(cmd.wsId)?.wcId;
+  if (wcId === undefined) return { ok: false, why: `${cmd.wsId} 的 X 网页没开` };
+  const busy = getXHostBusy(wcId);
+  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
+  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
+  setXHostBusy(wcId, '开发测试:采名单');
+  try {
+    const ports = webviewPorts(wcId);
+    const go = await ports.goto(cmd.page, { handle: cmd.handle });
+    if (!go.ok) return { ok: false, why: go.reason };
+    const r = await runCollect({
+      harvest: ports.harvest,
+      runScript: ports.runScript,
+      stopPaging: (st) => ({ go: st.round < cmd.pageCap }),
+    }, { wantPages: 1, depth: 'as-is', seedPages: 1, maxRounds: 20, maxMs: 60_000 });
+    const ledger = r.paging?.ledger ?? [];
+    return {
+      ok: true, stopReason: r.paging?.stopReason, manual: manualSummary(ledger, X_MANUAL.site, X_MANUAL.version),
+      ledger: ledger.map((l) => ({ page: l.page, label: l.label, xUsers: l.xUsers, notParsed: l.notParsed.length, other: l.other, manualDiff: l.manualDiff, ok: pageProblem(l) === undefined })),
+    };
+  } finally {
+    setXHostBusy(wcId, null);
+  }
+}
+
+/** 挂上旁路,把每页原始载荷存进样本目录;返回摘钩子的函数 */
+function startSampling(name: string): { dir: string; pages: () => number; stop: () => void } {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const dir = path.join(dirs().samples, `${stamp}-${name}`);
+  mkdirSync(dir, { recursive: true });
+  let n = 0;
+  setPageTap((p) => {
+    writeFileSync(path.join(dir, `page-${String(n).padStart(3, '0')}.json`), JSON.stringify({ ...p, savedAt: new Date().toISOString() }));
+    n += 1;
+  });
+  return { dir, pages: () => n, stop: () => setPageTap(null) };
 }
 
 async function tick(): Promise<void> {
@@ -75,12 +135,26 @@ async function tick(): Promise<void> {
     const cmd = validate(JSON.parse(readFileSync(doing, 'utf8')));
     const startedAt = new Date().toISOString();
     if (typeof cmd === 'string') out = { ok: false, why: cmd };
-    else if (cmd.op === 'personTab') {
-      console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
-      out = await runPersonTab(cmd);
-    } else {
-      console.log(`[x.dev] 执行 ${next}:${cmd.op}「${cmd.q.slice(0, 40)}」最多 ${cmd.wantPages} 页`);
-      out = await collectSearchByScroll(cmd);
+    else {
+      const sampling = cmd.sample ? startSampling(cmd.sample) : undefined;
+      try {
+        if (cmd.op === 'personTab') {
+          console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
+          out = await runPersonTab(cmd);
+        } else if (cmd.op === 'userList') {
+          console.log(`[x.dev] 执行 ${next}:userList @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
+          out = await runUserList(cmd);
+        } else {
+          console.log(`[x.dev] 执行 ${next}:${cmd.op}「${cmd.q.slice(0, 40)}」最多 ${cmd.wantPages} 页`);
+          out = await collectSearchByScroll(cmd);
+        }
+      } finally {
+        sampling?.stop();
+      }
+      if (sampling) {
+        console.log(`[x.dev] 样本 ${sampling.pages()} 页存到 ${sampling.dir}`);
+        out = { ...(out as object), samples: { dir: sampling.dir, pages: sampling.pages() } };
+      }
     }
     writeFileSync(path.join(outbox, next), JSON.stringify({ cmd: next, startedAt, finishedAt: new Date().toISOString(), result: out }, null, 2));
     renameSync(doing, `${doing.replace(/\.running$/, '')}.done`);

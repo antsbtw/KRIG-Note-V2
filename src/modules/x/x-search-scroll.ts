@@ -18,7 +18,8 @@ import { getXHostBusy, getXHostState, listXHostStates, setXHostBusy } from './x-
 import { bgRunningOn } from './x-bg-runner';
 import { auditTimelinePayload, type TweetRecord } from './x-timeline-audit';
 import { ledgerFor, pageTimes, type RunHarvest } from './x-collect-run';
-import { pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { manualSummary, pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { X_MANUAL } from './x-manual';
 import { summarizeBatch, type BatchStats } from './x-batch-stats';
 import { saveTweetPage } from './x-save-page';
 import { app } from 'electron';
@@ -47,6 +48,7 @@ function writeReport(input: SearchScrollInput, r: SearchScrollReport): string | 
       '── 逐页账 ──',
       ...r.pages.map((p) => `${ledgerLine(p)}  ${p.newest ?? ''} ~ ${p.oldest ?? ''}`),
       r.totals ? `合计:${r.totals.pages} 页 · X 列 ${r.totals.xTweets} · 解析缺 ${r.totals.notParsed} · 入库缺 ${r.totals.notInDb} · 对不上 ${r.totals.badPages} 页` : '',
+      manualSummary(r.pages, X_MANUAL.site, X_MANUAL.version),
       '',
       r.stats ? `本批:${statsLine(r.stats)}` : '',
     ];

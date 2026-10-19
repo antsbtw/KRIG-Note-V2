@@ -17,9 +17,10 @@
  * 每个条目按内容归类;**不认识的照样计数、留下名字** —— 第一次真机跑完就知道每页实际由什么组成。
  */
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-const str = (v: unknown): string => (typeof v === 'string' ? v : '');
-
+/**
+ * ⭐ 清点由说明书引擎做(P2 2026-10-19):`censusByManual`(x-manual.ts)= 通用引擎 + manual/x.manual.json。
+ * 原 X 专用的 censusPage 冻结在 tests/modules/x-legacy-census.ts 当对照。
+ */
 export type PageCensus = {
   /** X 列出的推文条目(可见的)—— 对账的基准 */
   readonly tweetIds: readonly string[];
@@ -35,93 +36,6 @@ export type PageCensus = {
   /** 各种 instruction 的个数 —— 看这一页的结构 */
   readonly instructions: Readonly<Record<string, number>>;
 };
-
-/** TweetWithVisibilityResults 包了一层 */
-function unwrapTweet(r: Record<string, unknown>): Record<string, unknown> {
-  return str(r.__typename) === 'TweetWithVisibilityResults' && isObj(r.tweet) ? r.tweet : r;
-}
-
-function tweetIdOf(r: Record<string, unknown>): string {
-  const t = unwrapTweet(r);
-  const legacy = isObj(t.legacy) ? t.legacy : undefined;
-  return str(t.rest_id) || str(legacy?.id_str);
-}
-
-/** entryId 去掉尾部数字/id,当类型名(who-to-follow-12345 → who-to-follow) */
-function kindOf(entryId: string): string {
-  return entryId.replace(/-\d[\w-]*$/, '').replace(/-[A-Za-z0-9_]{12,}$/, '') || '(无 entryId)';
-}
-
-export function censusPage(text: string): PageCensus | null {
-  let root: unknown;
-  try { root = JSON.parse(text); } catch { return null; }
-  const tweetIds: string[] = [];
-  const promotedIds: string[] = [];
-  const userIds: string[] = [];
-  let tombstones = 0;
-  const cursors: { top?: string; bottom?: string } = {};
-  const other: Record<string, number> = {};
-  const instructions: Record<string, number> = {};
-
-  const visitContent = (entryId: string, content: unknown): void => {
-    if (!isObj(content)) { other[kindOf(entryId)] = (other[kindOf(entryId)] ?? 0) + 1; return; }
-    const ct = str(content.cursorType).toLowerCase();
-    if (ct !== '' || str(content.entryType) === 'TimelineTimelineCursor' || str(content.itemType) === 'TimelineTimelineCursor') {
-      if (ct === 'top') cursors.top = str(content.value);
-      else if (ct === 'bottom') cursors.bottom = str(content.value);
-      return;
-    }
-    const ic = isObj(content.itemContent) ? content.itemContent : (isObj(content.content) ? content.content : undefined);
-    if (ic && isObj(ic.tweet_results)) {
-      const r = isObj(ic.tweet_results.result) ? ic.tweet_results.result : undefined;
-      const id = r ? tweetIdOf(r) : '';
-      const typename = r ? str(unwrapTweet(r).__typename) : '';
-      if (!r || id === '' || /Tombstone|Unavailable/.test(typename)) { tombstones += 1; return; }
-      if (entryId.includes('promoted') || isObj(ic.promotedMetadata)) promotedIds.push(id);
-      else tweetIds.push(id);
-      return;
-    }
-    if (ic && isObj(ic.user_results)) {
-      const r = isObj(ic.user_results.result) ? ic.user_results.result : undefined;
-      const id = r ? str(r.rest_id) : '';
-      if (id !== '') userIds.push(id); else other['user(无id)'] = (other['user(无id)'] ?? 0) + 1;
-      return;
-    }
-    /** 模块(对话串 / 推荐卡):里面一项一项再分 */
-    if (Array.isArray(content.items)) {
-      for (const it of content.items) {
-        if (!isObj(it)) continue;
-        visitContent(str(it.entryId) || entryId, it.item ?? it);
-      }
-      return;
-    }
-    other[kindOf(entryId)] = (other[kindOf(entryId)] ?? 0) + 1;
-  };
-
-  const visitEntry = (e: unknown): void => {
-    if (!isObj(e)) return;
-    visitContent(str(e.entryId), e.content ?? e.item);
-  };
-
-  const walk = (v: unknown): void => {
-    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
-    if (!isObj(v)) return;
-    if (Array.isArray(v.instructions)) {
-      for (const ins of v.instructions) {
-        if (!isObj(ins)) continue;
-        const type = str(ins.type) || '(无 type)';
-        instructions[type] = (instructions[type] ?? 0) + 1;
-        if (Array.isArray(ins.entries)) for (const e of ins.entries) visitEntry(e);
-        if (isObj(ins.entry)) visitEntry(ins.entry);
-        if (Array.isArray(ins.moduleItems)) for (const e of ins.moduleItems) visitEntry(e);
-      }
-      return;
-    }
-    for (const x of Object.values(v)) walk(x);
-  };
-  walk(root);
-  return { tweetIds: [...new Set(tweetIds)], promotedIds: [...new Set(promotedIds)], tombstones, userIds: [...new Set(userIds)], cursors, other, instructions };
-}
 
 /** 一页的账 */
 export type PageLedgerRow = {
@@ -145,6 +59,12 @@ export type PageLedgerRow = {
   readonly nextCursor?: string;
   /** 这一页是重采过的 */
   readonly retried: boolean;
+  /**
+   * ⭐ 说明书算的「往下」游标与翻页实际所用的不一致(2026-10-19);undefined = 一致。
+   * 翻页挑游标还在说明书外(x.manual.json outside),这一项盯着两者别漂开。
+   * ⚠️ 只记录不判定 —— 不进 pageProblem,不触发重采 / 停止。
+   */
+  readonly manualDiff?: string;
 };
 
 /** 这一页对不对得上 —— 不对的话说清楚是哪一层 */
@@ -161,14 +81,18 @@ export function pageProblem(r: PageLedgerRow): string | undefined {
   return undefined;
 }
 
+/** 翻页方向判据挪进通用引擎(P2 2026-10-19),这里转出去,调用方不用改 */
+export { directionWrong } from '@platform/main/web-capability/manual';
+
 /**
- * 翻页方向:这一页的推文(去掉置顶)多数比上一页最新那条还新 → 方向反了。
- * ⚠️ 只在两页都有时间时判;一页没时间就不判(不猜)。
+ * ⭐ 报告用:这份账按哪版说明书算的 + 游标一致性一行。
+ * `version` 由调用方给(本文件不引说明书,避免和 x-manual.ts 互相 import)。
  */
-export function directionWrong(prevNewestMs: number | undefined, pageTimesMs: readonly number[]): boolean {
-  if (prevNewestMs === undefined || pageTimesMs.length === 0) return false;
-  const newer = pageTimesMs.filter((t) => t > prevNewestMs).length;
-  return newer * 2 > pageTimesMs.length;
+export function manualSummary(ledger: readonly PageLedgerRow[], site: string, version: number): string {
+  const bad = ledger.filter((r) => r.manualDiff !== undefined);
+  return bad.length === 0
+    ? `账按说明书 ${site} v${version} 清点 · ${ledger.length} 页的往下游标都与翻页所用一致`
+    : `⚠️ 账按说明书 ${site} v${version} 清点 · ${bad.length}/${ledger.length} 页游标不一致 —— ${bad.slice(0, 3).map((r) => `第 ${r.page} 页 ${r.manualDiff}`).join(';')}`;
 }
 
 /** 报告用:一页一行 */
@@ -183,5 +107,6 @@ export function ledgerLine(r: PageLedgerRow): string {
   const ok = pageProblem(r) === undefined;
   return `${String(r.page).padStart(4)}  ${r.label.padEnd(4)}  X给 ${x.padEnd(6)}  解析 ${r.notParsed.length === 0 ? '✓' : `✗缺${r.notParsed.length}`}`
     + `  入库 ${db}  ${r.directionWrong ? '⚠️方向反' : ''}${r.retried ? ' (重采过)' : ''}  ${ok ? '✓' : '✗'}`
-    + (extra ? `  [${extra}]` : '') + (r.cursor ? `  游标 ${r.cursor}` : '');
+    + (extra ? `  [${extra}]` : '') + (r.cursor ? `  游标 ${r.cursor}` : '')
+    + (r.manualDiff ? `  ⚠️说明书账不一致:${r.manualDiff}` : '');
 }

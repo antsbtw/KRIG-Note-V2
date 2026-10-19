@@ -893,11 +893,7 @@ export function auditTimelinePayload(text: string): TimelineAudit {
    * (此条件自 10-02 重建起就在;9-27 那次 894 条用的是重建前的旧代码。)
    * ⭐ 先只认**明确标了 bottom** 的;一个都没有时才退回「DAAD 开头」,且排除标了 top 的。
    */
-  const bottoms = collectBy(root, (o) => str(o.cursorType).toLowerCase() === 'bottom');
-  const cursors = bottoms.length > 0 ? bottoms : collectBy(root, (o) =>
-    str(o.cursorType).toLowerCase() !== 'top'
-    && typeof o.value === 'string' && str(o.value).startsWith('DAAD'));
-  const cursor = cursors.length > 0 ? str(cursors[0].value) : '';
+  const cursor = nextPageCursorOf(root);
 
   if (items.length === 0) {
     problems.push('这个载荷里**一条推文都没解出来** —— 可能不是 timeline 载荷,或结构变了');
@@ -919,6 +915,19 @@ export function auditTimelinePayload(text: string): TimelineAudit {
     coverage: buildCoverage(items),
     problems,
   };
+}
+
+/**
+ * ⭐ 翻页用的下一页游标(由 auditTimelinePayload 抽出,2026-10-19)—— 逐页账拿它与说明书算的比。
+ * 先只认明确标了 bottom 的;一个都没有时才退回「DAAD 开头」且排除 top(10-16 真根因,见上)。
+ * ⚠️ 说明书外:DAAD 兜底是启发式,登记在 x.manual.json `outside`。
+ */
+export function nextPageCursorOf(root: unknown): string {
+  const bottoms = collectBy(root, (o) => str(o.cursorType).toLowerCase() === 'bottom');
+  const cursors = bottoms.length > 0 ? bottoms : collectBy(root, (o) =>
+    str(o.cursorType).toLowerCase() !== 'top'
+    && typeof o.value === 'string' && str(o.value).startsWith('DAAD'));
+  return cursors.length > 0 ? str(cursors[0].value) : '';
 }
 
 /**

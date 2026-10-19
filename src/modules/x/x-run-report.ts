@@ -22,7 +22,8 @@
 
 import type { RunResult } from './x-collect-run';
 import { buildStamp, buildAgeMinutes } from './x-build-stamp';
-import { ledgerLine, pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { ledgerLine, manualSummary, pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { X_MANUAL } from './x-manual';
 
 /**
  * ⭐⭐⭐ 逐页账一段(2026-10-16)—— 每页:X 列了什么 / 解析 / 入库 / 方向;最后一行合计。
@@ -39,6 +40,7 @@ export function ledgerSection(ledger: readonly PageLedgerRow[] | undefined): str
   const bad = ledger.filter((r) => pageProblem(r) !== undefined).length;
   L.push(`合计:${ledger.length} 页 · X 列了 ${x} 条 · 解析缺 ${lostParse} · 入库缺 ${lostDb}`
     + (bad === 0 ? ' · ✓ 每页都对上了' : ` · ⚠️ ${bad} 页对不上`));
+  L.push(manualSummary(ledger, X_MANUAL.site, X_MANUAL.version));
   return L;
 }
 

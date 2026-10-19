@@ -15,7 +15,7 @@
  */
 
 import {
-  auditTimelinePayload, summarizeAudits, mergeExpandedText,
+  auditTimelinePayload, summarizeAudits, mergeExpandedText, nextPageCursorOf,
   type TimelineAudit, type TweetAudit,
   type TweetRecord,
 } from './x-timeline-audit';
@@ -24,7 +24,10 @@ import { carriesTweets, carriesUsers, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME
 import { dispatchPayloads, type PayloadKind } from './x-payload-dispatch';
 import type { XUserAudit, XUserRecord } from './x-user-audit';
 import { X_SCRIPTS } from './x-dom-scripts';
-import { censusPage, directionWrong, pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { directionWrong, pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { censusByManual, X_MANUAL } from './x-manual';
+import { orderedByTime } from '@platform/main/web-capability/manual';
+import { tapPage } from './x-page-tap';
 
 /** 短指纹(FNV-1a,8 位十六进制)—— 只为在报告里分辨两个长得像的游标,不做安全用途 */
 export function shortHash(s: string): string {
@@ -414,10 +417,8 @@ function targetItems(one: RunHarvest): RunHarvest['items'] {
  * ⚠️ 首页推荐流(HomeTimeline)、搜索「热门」(product=Top)、推文详情不是按时间排的,判了会误报。
  */
 export function isChronological(url: string): boolean {
-  let u = url;
-  try { u = decodeURIComponent(url); } catch { /* 原样用 */ }
-  if (/\/SearchTimeline/.test(u)) return u.includes('"product":"Latest"');
-  return /\/(UserTweets|UserTweetsAndReplies|UserRepliesTimeline|UserOriginalsTimeline|UserRepostsTimeline|UserMedia)\b/.test(u);
+  /** ⭐ P2(2026-10-19):哪些页按时间排挪进说明书 data.orderedByTime */
+  return orderedByTime(X_MANUAL.data.orderedByTime, url);
 }
 
 /** 这一页推文的发布时间(去掉置顶)—— 判翻页方向 */
@@ -440,13 +441,29 @@ export async function ledgerFor(
   const tweetIds = new Set<string>(); const userIds = new Set<string>(); const promoted = new Set<string>();
   let tombstones = 0; const other: Record<string, number> = {};
   let nextCursor: string | undefined;
-  for (const it of targetItems(one)) {
-    const c = censusPage(it.text);
+  const targets = targetItems(one);
+  tapPage({ page, label, items: targets.map((it) => ({ url: it.url, status: it.status, text: it.text })) });
+  const manualDiffs: string[] = [];
+  for (const it of targets) {
+    /**
+     * ⭐⭐ 照说明书清点(P2 2026-10-19 切换)。切换前:基线样本 20 份 + 随机 1 万份与旧 censusPage 逐条一致,
+     * 真机并跑两轮(搜索 4 页 / 转发 3 页)报告「逐页与旧账一致」。
+     */
+    const c = censusByManual(it.text);
     if (!c) { other['非JSON响应'] = (other['非JSON响应'] ?? 0) + 1; continue; }
     c.tweetIds.forEach((x) => tweetIds.add(x)); c.userIds.forEach((x) => userIds.add(x));
     c.promotedIds.forEach((x) => promoted.add(x)); tombstones += c.tombstones;
     for (const [k, n] of Object.entries(c.other)) other[k] = (other[k] ?? 0) + n;
     if (c.cursors.bottom) nextCursor = c.cursors.bottom;
+    /** 说明书算的「往下」游标 vs 翻页实际用的(nextPageCursorOf,说明书外登记过)—— 逐份比,只比推文载荷 */
+    if (carriesTweets(it.url)) {
+      const used = nextPageCursorOf(JSON.parse(it.text));
+      const down = c.cursors.bottom ?? '';
+      if (used !== down) manualDiffs.push(`游标:说明书 down ${down ? `#${shortHash(down)}` : '(无)'} / 翻页用 ${used ? `#${shortHash(used)}` : '(无)'}`);
+    }
+  }
+  if (manualDiffs.length > 0) {
+    console.warn(`[x.manual] 第 ${page} 页(${label})说明书的往下游标与翻页所用不一致:${manualDiffs.join(';')}`);
   }
   /**
    * ⚠️ 推文页里夹着的人(推荐关注之类的卡片)不是这一页采的对象 —— 单独计数,不进对账;
@@ -477,6 +494,7 @@ export async function ledgerFor(
     cursor: cursorBrief,
     nextCursor: nextCursor ? `${nextCursor.slice(0, 6)}…#${shortHash(nextCursor)}` : undefined,
     retried,
+    manualDiff: manualDiffs.length > 0 ? manualDiffs.join(';') : undefined,
   };
 }
 

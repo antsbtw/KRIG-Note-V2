@@ -1,6 +1,6 @@
 # Web 能力层 · 站点说明书与自修闭环(设计)
 
-> 立于 2026-10-18,10-19 按用户四条决定改版。状态:**P1 日常诊断底座已实施(10-19,分支 `feature/web-diagnostics-p1`)**,P2 起未开工。
+> 立于 2026-10-18,10-19 按用户四条决定改版。状态:**P1 日常诊断底座已实施(10-19,分支 `feature/web-diagnostics-p1`)**;**P2 通用对账 + 说明书格式已实施(10-19,分支 `feature/web-manual-p2`,§4.4)**;P3 起未开工。
 > 前置阅读:`01-contract.md`(三能力 + adapter 契约 §14 + L-raw §13)。
 > 本篇回答:**怎样让 AI 看懂、操作、核对任意网页,而且解析错了能快速修好,不靠一行行写站点代码。**
 
@@ -90,7 +90,7 @@
 | **控件** | 语义动作 → 按「角色 + 名字」找控件 → 点完应变成什么 | `x-dom-scripts.ts`(follow / like / sendReply)写死 testid |
 | **领域映射** | 条目 → 本站领域对象(推文 / 人)的字段对应 | `x-timeline-audit.ts` toRecord |
 
-### 4.2 样子(示意,格式在 P2 定)
+### 4.2 样子(10-18 示意;P2 定稿的格式见 §4.4)
 
 ```yaml
 site: x.com
@@ -120,6 +120,31 @@ pages:
 2. ⭐ **每次修改是一个新版本**,带「为什么改 + 依据样本 + 回归结果」,进修改档案(§9);可回滚到任一版本。
 3. 说明书表达不了的(真需要计算的),留在 adapter 代码里,**显式登记**为「说明书外」——
    数量本身就是指标:越少说明这套格式越够用。
+
+### 4.4 ✅ P2 定稿的格式(2026-10-19)
+
+**文件**:每站一个目录,X 的在 `src/modules/x/manual/`:`x.manual.json`(当前版)· `history/v0001.json`(每版快照)· `changes.json`(修改档案主列表)· `archive/YYYY-MM.json`(按月归档)。
+**引擎**:`src/platform/main/web-capability/manual/`(纯函数,renderer / main 都用;能力层「不认识站点」守卫自动覆盖)。
+
+**路径表达式**(§12 #2,我定的,理由是效果):`$变量.键.键`,只有末尾可带 `[*]`;取值可写 `{first|firstObject|firstString: [路径…]}`;
+条件只有 `isObject / isArray / nonEmpty / equals / contains / matches / any / all / not`。
+- 不用 JSONPath:常见库的过滤表达式 `?(@.x=='y')` 靠 eval 实现 = 把代码塞进数据,违反铁律 1
+- 加载时**逐条自检**(`checkManual`):变量在那个位置有没有、`[*]` 该不该有、正则编不编得过、字段齐不齐 —— 写错当场报「哪一段哪一条」,不等真机跑出 0 条
+- 每条规则 / 噪音带 `why`(JSON 没注释,AI 改之前要能看懂来历)
+- 引擎源码有守卫:零处 eval / new Function / 动态 import
+
+**数据段现有**:`census`(容器 → 条目 → 规则:cursor / item / group,不认识的照样计数留名)· `orderedByTime`(判翻页方向的页)· `noise`。
+**说明书外**(铁律 3,登记在 JSON 的 `outside`):翻页实际挑游标(DAAD 兜底是启发式)· 哪些响应算这一页(接口判据)· 推文页夹的人记「推荐的人」· 领域映射 / 条目时间 / 截断判据。
+
+**修改档案**(§9;§12 #3 用户 10-19 选「按月归档」):`node scripts/manual.mjs list|show|diff|check|record|rollback|archive <目录>`。
+对比由工具从快照算,不手写;举手(`--raised`)的不归档、主列表置顶;回滚也是一次新版本、也记档。守卫 `tests/modules/x-manual-archive.test.ts`:改了说明书不记档 / 手改对比 / 版本跳号 → 红。
+
+**验收**(§11 P2):
+1. 基线:dev 收件箱指令带 `sample` 存每页原始载荷到本机 `krig-data/x-dev/samples/`(不进 git);新增 `userList` 指令采名单页。10-19 存了搜索最新 / 热门、主页帖子 / 回复 / 转发、followers、following 共 27 页
+2. 新旧并跑:`tests/modules/x-manual-parity.test.ts` —— 手造 4 份 + 随机 1 万份(每个分支都撞到 >50 次)+ 真实样本逐字段一致;旧实现冻结在 `tests/modules/x-legacy-census.ts`
+3. 真机并跑:两套账同时算,报告写「说明书账 4 页逐页与旧账一致」(搜索)/ 转发 3 页一致 → 切换为照说明书清点
+- ⚠️ 真实样本里**没撞到广告和墓碑**(连 bitcoin「热门」也没有);这两类目前只由手造 + 随机载荷覆盖
+- ⚠️ followers / following 第一页 70 人 X 就发了 `TimelineTerminateTimeline`(两个名单都是)—— 与 P2 无关,未查
 
 ### 4.3 控件为什么用「角色 + 名字」
 
@@ -298,8 +323,8 @@ X 每次出问题,现在都要用户截图、复制日志;有了它,这一步就
 | # | 问题 | 哪一期 |
 |---|---|---|
 | 1 | ~~日志保留多久~~ ✅ 用户 10-19 选「30 天」;占用待 X 后台采集实跑后报实测 | P1 |
-| 2 | 说明书格式细节(路径表达式用哪种) | P2 |
-| 3 | 档案多久归档一次 | P2 |
+| 2 | ~~说明书格式细节(路径表达式用哪种)~~ ✅ 10-19 定:自定小语法 `$变量.键`,加载自检(§4.4) | P2 |
+| 3 | ~~档案多久归档一次~~ ✅ 用户 10-19 选「按月归档」 | P2 |
 | 4 | 云端授权粒度(按站点 / 页面类型 / 按次)、用哪个云端模型 | P4 |
 | 5 | 本机看图模型选哪个(这台 Mac 现在一个模型都没装) | P4 |
 
@@ -315,5 +340,5 @@ X 每次出问题,现在都要用户截图、复制日志;有了它,这一步就
 | 截图 | web 能力层没有截图能力(`01-contract.md` §4 列为第 5 层 fallback,未实现) |
 | 无障碍树 | 未接 |
 | 本机看图模型 | 本机 Ollama **一个模型都没装**(`ollama list` 为空) |
-| 对账 | X 专用:`x-page-ledger.ts`、`x-collect-run.ts`;底座 `harvest.ts` 的 apiSeen 双向核对与站点无关 |
+| 对账 | ✅ P2(10-19):清点 / 按时间排 / 噪音由引擎 `web-capability/manual/` 照 `x.manual.json` 执行;编排仍在 `x-collect-run.ts`;底座 `harvest.ts` 的 apiSeen 双向核对与站点无关 |
 | 抽检 | X 专用:右键查库(`x-spot-check.ts`)—— 截图对照的人工版 |

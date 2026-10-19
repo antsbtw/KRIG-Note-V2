@@ -6,7 +6,8 @@
  * 旧测试只放一个 bottom 游标,搜索翻页往错方向翻了两周没被抓到。
  */
 import { describe, it, expect } from 'vitest';
-import { censusPage, directionWrong, pageProblem } from '@modules/x/x-page-ledger';
+import { directionWrong, pageProblem } from '@modules/x/x-page-ledger';
+import { censusByManual as censusPage } from '@modules/x/x-manual';
 import { runCollect, isChronological, type RunDeps } from '@modules/x/x-collect-run';
 
 const t = (id: string, at: string, promoted = false) => ({

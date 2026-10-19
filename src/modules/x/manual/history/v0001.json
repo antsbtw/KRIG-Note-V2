@@ -1,0 +1,242 @@
+{
+  "site": "x.com",
+  "version": 1,
+  "data": {
+    "census": {
+      "containers": {
+        "find": "instructions",
+        "label": "$ins.type",
+        "labelMissing": "(无 type)"
+      },
+      "entries": [
+        "$ins.entries[*]",
+        "$ins.entry",
+        "$ins.moduleItems[*]"
+      ],
+      "entry": {
+        "id": {
+          "firstString": [
+            "$entry.entryId"
+          ]
+        },
+        "body": {
+          "first": [
+            "$entry.content",
+            "$entry.item"
+          ]
+        }
+      },
+      "bind": {
+        "ic": {
+          "firstObject": [
+            "$body.itemContent",
+            "$body.content"
+          ]
+        }
+      },
+      "rules": [
+        {
+          "rule": "cursor",
+          "why": "游标条目:有 cursorType,或类型名是 TimelineTimelineCursor。top = 往新翻,bottom = 往旧翻(10-16:搜索页 top / bottom 值都以 DAAD 开头,只能认 cursorType)",
+          "when": {
+            "any": [
+              {
+                "nonEmpty": "$body.cursorType"
+              },
+              {
+                "equals": [
+                  "$body.entryType",
+                  "TimelineTimelineCursor"
+                ]
+              },
+              {
+                "equals": [
+                  "$body.itemType",
+                  "TimelineTimelineCursor"
+                ]
+              }
+            ]
+          },
+          "value": "$body.value",
+          "direction": "$body.cursorType",
+          "directions": {
+            "top": "up",
+            "bottom": "down"
+          }
+        },
+        {
+          "rule": "item",
+          "kind": "tweet",
+          "why": "推文:result 可能包一层 TweetWithVisibilityResults;id 优先 rest_id;没内容 / 墓碑 / 受限单独计数;entryId 带 promoted 或有 promotedMetadata 的是广告",
+          "when": {
+            "isObject": "$ic.tweet_results"
+          },
+          "node": "$ic.tweet_results.result",
+          "unwrap": [
+            {
+              "when": {
+                "all": [
+                  {
+                    "equals": [
+                      "$node.__typename",
+                      "TweetWithVisibilityResults"
+                    ]
+                  },
+                  {
+                    "isObject": "$node.tweet"
+                  }
+                ]
+              },
+              "to": "$node.tweet"
+            }
+          ],
+          "id": {
+            "firstString": [
+              "$node.rest_id",
+              "$node.legacy.id_str"
+            ]
+          },
+          "missing": {
+            "countAs": "tombstone"
+          },
+          "hidden": {
+            "when": {
+              "matches": [
+                "$node.__typename",
+                "Tombstone|Unavailable"
+              ]
+            },
+            "countAs": "tombstone"
+          },
+          "variants": [
+            {
+              "kind": "promoted",
+              "when": {
+                "any": [
+                  {
+                    "contains": [
+                      "$id",
+                      "promoted"
+                    ]
+                  },
+                  {
+                    "isObject": "$ic.promotedMetadata"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "rule": "item",
+          "kind": "user",
+          "why": "人(名单页的条目,或推文页夹的推荐卡)",
+          "when": {
+            "isObject": "$ic.user_results"
+          },
+          "node": "$ic.user_results.result",
+          "id": {
+            "firstString": [
+              "$node.rest_id"
+            ]
+          },
+          "missing": {
+            "unknownAs": "user(无id)"
+          }
+        },
+        {
+          "rule": "group",
+          "why": "模块(对话串 / 推荐卡):子项各自再分;子项没 entryId 就沿用模块的",
+          "when": {
+            "isArray": "$body.items"
+          },
+          "children": "$body.items[*]",
+          "childId": {
+            "firstString": [
+              "$child.entryId",
+              "$id"
+            ]
+          },
+          "childBody": {
+            "first": [
+              "$child.item",
+              "$child"
+            ]
+          }
+        }
+      ],
+      "unknownName": {
+        "strip": [
+          "-\\d[\\w-]*$",
+          "-[A-Za-z0-9_]{12,}$"
+        ],
+        "empty": "(无 entryId)"
+      }
+    },
+    "orderedByTime": [
+      {
+        "url": "/SearchTimeline",
+        "require": [
+          "\"product\":\"Latest\""
+        ],
+        "why": "搜索只有「最新」按时间排;「热门」(Top)不是"
+      },
+      {
+        "url": "/(UserTweets|UserTweetsAndReplies|UserRepliesTimeline|UserOriginalsTimeline|UserRepostsTimeline|UserMedia)\\b",
+        "why": "个人主页各栏按时间排;首页推荐流(HomeTimeline)、推文详情不是"
+      }
+    ],
+    "noise": [
+      {
+        "url": "video.twimg.com",
+        "why": "视频分片(.m4s/.mp4/.m3u8);10-02 实测滚 10 轮 59 条里 52 条是它,挤爆采集池"
+      },
+      {
+        "url": "pbs.twimg.com",
+        "why": "图片"
+      },
+      {
+        "url": "abs.twimg.com",
+        "why": "前端静态资源"
+      },
+      {
+        "url": "/i/api/1.1/jot/",
+        "why": "埋点"
+      },
+      {
+        "url": "promoted_content/log",
+        "why": "广告埋点"
+      },
+      {
+        "url": "fleets/v1/avatar_content",
+        "why": "头像外圈;10-16 apiSeen:搜索页 74 秒 44 次,把搜索结果挤出采集池 → 漏采 17/19 页"
+      },
+      {
+        "url": "1.1/graphql/viewer_context.json",
+        "why": "当前登录者的上下文,同 10-16;⚠️ 1.1/flow/timeline.json 没加 —— 装的是什么还没看过,不凭猜当噪音"
+      }
+    ]
+  },
+  "outside": [
+    {
+      "what": "翻页实际用的下一页游标",
+      "where": "src/modules/x/x-timeline-audit.ts auditTimelinePayload · src/modules/x/x-user-audit.ts",
+      "why": "推文页在没有明确 bottom 时退回「DAAD 开头且不是 top」—— 是启发式兜底,还没在真实载荷里见过需要它的样本;逐页账会把说明书算的 down 游标与它比,不一致记进账"
+    },
+    {
+      "what": "哪些响应算「这一页」的载荷",
+      "where": "src/modules/x/x-pages.ts carriesTweets / carriesUsers(x-collect-run.ts targetItems)",
+      "why": "按操作名后缀 + 精确名 + 排除表三道判,P2 先迁清点;接口判据迁进说明书要先拿全部样本 URL 做新旧一致核对"
+    },
+    {
+      "what": "推文页里夹着的人记成「推荐的人」、不进对账",
+      "where": "src/modules/x/x-collect-run.ts ledgerFor",
+      "why": "「这一页采的对象是什么」取决于这一页有没有推文,是跨条目的判断"
+    },
+    {
+      "what": "条目 → 推文 / 人的字段对应(领域映射)、条目时间、截断判据",
+      "where": "src/modules/x/x-timeline-audit.ts · src/modules/x/x-user-audit.ts · x-collect-run.ts pageTimes",
+      "why": "字段多、含截断 / 长文 / 码点换算等计算;设计 §4.1「领域映射」段,P2 不迁"
+    }
+  ]
+}
