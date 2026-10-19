@@ -218,7 +218,10 @@ export type XDataInvoke =
   /** ⭐ 主进程那份「忙」(查回关 / 关注队列 / 求关 …)—— 登记表每进程一份,renderer 自己那份看不到(2026-10-19) */
   | { readonly op: 'mainBusy'; readonly wcId: number }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
-  | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string }
+  /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
+  | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }
+  /** ⭐ 人卡「他的名单」:三个名单各多少人 + 其中的求关候选(2026-10-19) */
+  | { readonly op: 'personLists'; readonly wsId: string; readonly restId: string; readonly limit: number }
   /** 列任务;给 restId 只列这个人的,给 wsId 只列这个号的 */
   | { readonly op: 'bgListJobs'; readonly wsId?: string; readonly restId?: string }
   /** ⭐ 此刻在不在跑(runner 内存态)+ 这个号各状态任务数;回 `BgStatusView` */

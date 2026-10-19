@@ -35,6 +35,7 @@ import { readBlueMutualOverview, readCandidates, readFollowProgress } from './x-
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
 import { checkFollowBack, followCheckRunning } from './x-follow-check';
 import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
+import { readPersonLists } from './x-list-member-repo';
 import { prepareAsk } from './x-ask-prepare';
 import { runAsk } from './x-ask-run';
 import { readFollowGate } from './x-ops-actions-repo';
@@ -401,6 +402,14 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           };
         }
 
+        case 'personLists': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] personLists 要数字 id');
+          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 500) return failed('[x.data] personLists 的 limit 要 1–500');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readPersonLists(acc.restId, p.restId, p.limit) };
+        }
+
         case 'personTimeline': {
           if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] personTimeline 要数字 id');
           const acc = await accountOfWs(p.wsId);
@@ -532,10 +541,12 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] bgCreateJob 缺 wsId —— 任务属于发起的号');
           /** ⚠️ month 当场采,不进后台;别的字符串一律拒(别兜底成 all) */
           if (!isBgRange(p.range as TimelineRange)) return failed(`[x.data] bgCreateJob 范围只接 halfYear/year/all,收到 ${String(p.range)}`);
-          const r = await createJob({ restId: p.restId, handle: p.handle, wsId: p.wsId, range: p.range as 'halfYear' | 'year' | 'all' });
+          if (p.kind !== undefined && p.kind !== 'lists') return failed(`[x.data] bgCreateJob 的 kind 只接 lists,收到 ${String(p.kind)}`);
+          if (p.kind === 'lists' && p.range !== 'all') return failed('[x.data] 名单任务的范围只能是 all(名单没有时间范围)');
+          const r = await createJob({ restId: p.restId, handle: p.handle, wsId: p.wsId, range: p.range as 'halfYear' | 'year' | 'all', kind: p.kind });
           traceRecorder.lifecycle({
             layer: 'web.net', event: 'x-bg-job-create', pageId: 'x-data',
-            detail: { id: r.id, created: r.created, handle: p.handle, range: p.range, wsId: p.wsId },
+            detail: { id: r.id, created: r.created, handle: p.handle, range: p.range, kind: p.kind ?? 'timeline', wsId: p.wsId },
           });
           kickBgRunner();
           return { status: 'ok', value: r };

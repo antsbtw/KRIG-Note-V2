@@ -21,7 +21,8 @@
 import { getXHostState, getXHostBusy } from './x-host-registry';
 import { readSettings } from './x-ops-actions-repo';
 import { activeJobsForWs, wsWithActiveJobs, readJob, saveJob } from './x-bg-job-repo';
-import { describeProgress, isDue, type BgJob } from './x-bg-job';
+import { BG_LIST_TABS, describeProgress, isDue, kindOf, type BgJob, type BgListTab } from './x-bg-job';
+import { collectPersonListSegment } from './x-person-list-collect';
 import { runSegment, type SegmentDeps, type RunOneResult } from './x-bg-segment';
 import { collectPersonTab, personCollectProgress } from './x-person-collect';
 import { saveTweets } from './x-tweet-repo';
@@ -36,6 +37,8 @@ const DEFAULTS = {
   pagesPerSegment: 10,
   /** 两段之间至少隔多久(秒)—— isDue 用 */
   segmentGapSec: 120,
+  /** ⭐ 名单任务两段间隔(秒):Followers 接口约 50 次 / 15 分钟,每段 10 页要隔开(2026-10-19) */
+  listSegmentGapSec: 300,
 };
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -80,17 +83,22 @@ export function bgRunnerStatus(wsId: string): BgRunnerStatus {
 }
 
 /** 读节奏设置(库里没有就用默认) */
-async function readPace(): Promise<{ pagesPerSegment: number; segmentGapSec: number }> {
+async function readPace(): Promise<{ pagesPerSegment: number; segmentGapSec: number; listSegmentGapSec: number }> {
   try {
     const { settings } = await readSettings();
     return {
       pagesPerSegment: settings['bg.pages_per_segment'] ?? DEFAULTS.pagesPerSegment,
       segmentGapSec: settings['bg.segment_gap_sec'] ?? DEFAULTS.segmentGapSec,
+      listSegmentGapSec: settings['bg.list_segment_gap_sec'] ?? DEFAULTS.listSegmentGapSec,
     };
   } catch {
-    return { pagesPerSegment: DEFAULTS.pagesPerSegment, segmentGapSec: DEFAULTS.segmentGapSec };
+    return { pagesPerSegment: DEFAULTS.pagesPerSegment, segmentGapSec: DEFAULTS.segmentGapSec, listSegmentGapSec: DEFAULTS.listSegmentGapSec };
   }
 }
+
+/** 这个任务的段间隔:名单任务另算(额度更紧) */
+const gapOf = (j: BgJob, pace: { segmentGapSec: number; listSegmentGapSec: number }): number =>
+  (kindOf(j) === 'lists' ? pace.listSegmentGapSec : pace.segmentGapSec);
 
 /**
  * ⭐⭐ runner 用的 SegmentDeps —— 把真采集(collectPersonTab)+ 存库 组装成 RunOneResult。
@@ -109,6 +117,17 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
   };
   return {
     async runOne(input) {
+      /** ⭐ 名单任务(2026-10-19):他的 followers / following / verified followers —— 另一个采集器 */
+      if (kindOf(job) === 'lists') {
+        if (!(BG_LIST_TABS as readonly string[]).includes(input.tab)) {
+          const why = `名单任务拿到了不是名单的标签页 ${input.tab}`;
+          return { pages: 0, saved: 0, exhausted: false, stopReason: why, failure: why } satisfies RunOneResult;
+        }
+        return collectPersonListSegment({
+          wcId, page: input.page, list: input.tab as BgListTab, handle: input.handle, ownerRestId: job.restId,
+          pageCap: input.pageCap, resumeCursor: input.resumeCursor, onProgress: progress,
+        });
+      }
       const start = rangeStart(job.range, now);
       let pages = 0;
       let saved = 0;
@@ -219,11 +238,11 @@ export async function tickOnce(
     const wsBusy = getXHostBusy(host.wcId) !== null;
     const jobs = await activeJobsForWs(wsId);
     // 挑第一个到期的
-    const due = jobs.find((j) => isDue(j, { now, wsBusy, segmentGapSec: pace.segmentGapSec }).due);
+    const due = jobs.find((j) => isDue(j, { now, wsBusy, segmentGapSec: gapOf(j, pace) }).due);
     if (!due) {
       if (wsBusy && jobs.length > 0) console.log(`[x.bg] ${wsId} 让路:X 网页正忙(${getXHostBusy(host.wcId)})`);
       const first = jobs[0];
-      if (first) waitNoteByWs.set(wsId, isDue(first, { now, wsBusy, segmentGapSec: pace.segmentGapSec }).why);
+      if (first) waitNoteByWs.set(wsId, isDue(first, { now, wsBusy, segmentGapSec: gapOf(first, pace) }).why);
       continue;
     }
     console.log(`[x.bg] ${wsId} 开跑一段:@${due.handle} ${due.range}(${due.id})`);

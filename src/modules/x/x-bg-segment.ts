@@ -15,7 +15,7 @@
  */
 
 import type { BgJob, BgTab, SegmentOutcome } from './x-bg-job';
-import { mergeSegment, nextTab } from './x-bg-job';
+import { mergeSegment, nextTab, tabProgress } from './x-bg-job';
 import { PERSON_TABS, rangeStart } from './x-person-timeline';
 import { X_PAGE_NAME } from './x-pages';
 
@@ -24,7 +24,12 @@ const TAB_PAGE: Record<BgTab, string> = {
   profile: X_PAGE_NAME.profile,
   replies: X_PAGE_NAME.withReplies,
   reposts: X_PAGE_NAME.reposts,
+  /** 名单任务(2026-10-19) */
+  followers: X_PAGE_NAME.followers,
+  following: X_PAGE_NAME.following,
+  verifiedFollowers: X_PAGE_NAME.verifiedFollowers,
 };
+const LIST_LABEL: Partial<Record<BgTab, string>> = { followers: '关注者', following: '他关注的', verifiedFollowers: '蓝V关注者' };
 
 /** 一段的结果(除了并进 job,还带出给留痕/日志看的细节) */
 export type SegmentReport = {
@@ -66,6 +71,8 @@ export type SegmentDeps = {
    * `pageCap` 是本段最多翻几页(翻够就停这段,不是停整个页)。
    */
   runOne(input: {
+    /** 哪个标签页(名单任务要知道记进哪个名单) */
+    readonly tab: BgTab;
     readonly page: string;
     readonly handle: string;
     readonly resumeCursor?: string;
@@ -115,18 +122,18 @@ export async function runSegment(
   }
 
   const page = TAB_PAGE[tab];
-  const label = PERSON_TABS.find((t) => t.name === page)?.label ?? tab;
+  const label = LIST_LABEL[tab] ?? PERSON_TABS.find((t) => t.name === page)?.label ?? tab;
   const start = rangeStart(job.range, now); // 'all' → undefined(没有时间终点,只能靠 exhausted)
-  const resumeCursor = job[tab].cursor;
+  const resumeCursor = tabProgress(job, tab).cursor;
   deps.onProgress?.(`采${label}…${resumeCursor ? '(从断点续)' : ''}`);
 
-  const r = await deps.runOne({ page, handle: job.handle, resumeCursor, start, pageCap });
+  const r = await deps.runOne({ tab, page, handle: job.handle, resumeCursor, start, pageCap });
 
   const out: SegmentOutcome = {
     tab,
     pages: r.pages,
     saved: r.saved,
-    nextCursor: r.failure !== undefined ? job[tab].cursor : r.nextCursor,
+    nextCursor: r.failure !== undefined ? tabProgress(job, tab).cursor : r.nextCursor,
     tabDone: r.failure === undefined && tabDoneFrom(r),
     oldestAt: r.oldestAt,
     failed: r.failure,

@@ -16,6 +16,8 @@ const S = {
   'unfollow.daily_cap': 50, 'unfollow.min_gap_sec': 20, 'collect.live_page_cap': 30,
   // 2026-10-13 (3b):后台采集节奏变量
   'bg.pages_per_segment': 10, 'bg.segment_gap_sec': 120,
+  // 2026-10-19 人卡采名单:名单任务两段间隔(Followers 接口额度紧)
+  'bg.list_segment_gap_sec': 300,
   // 2026-10-16 蓝V互关 M4:关注的节奏与回访天数
   'follow.daily_cap': 30, 'follow.min_gap_sec': 60, 'follow.jitter_sec': 30, 'follow.revisit_days': 7,
   // 2026-10-17 求关:连续 15 个歇 15 分钟(用户选的);准备时采他主页 2 页

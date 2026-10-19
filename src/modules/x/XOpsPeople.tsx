@@ -37,6 +37,7 @@ import type { CirclePerson } from './x-friend-circle';
 import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
 import { readProfileAndRefresh, unfollowOnce, type UnfollowOutcome } from './x-unfollow-run';
 import { XPersonTimeline } from './XPersonTimeline';
+import { XPersonLists } from './XPersonLists';
 import { describeProgress, type BgJob } from './x-bg-job';
 import { useBgStatus } from './XBgStatus';
 import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
@@ -989,6 +990,12 @@ function PersonCard(
           {/* ⭐ 放在「他的推文」上面 —— 下面是 20 条推文,放后面要翻很远才看得到(用户 10-15 找不到) */}
           <BgJobsSection restId={restId} wsId={wsId} msg={bgMsg} rev={bgRev} />
 
+          {/* ⭐ 2026-10-19 用户:「在人卡中增加自动采集follower/following/verified followers」—— 后台采全 + 名单里的求关候选 */}
+          <Section title="他的名单" note="关注者 / 他关注的 / 蓝V关注者">
+            <XPersonLists wsId={wsId} restId={restId} handle={p.handle} wcOpen={wcId != null}
+              onOpenInX={(x) => onOpenInX({ rest_id: x.rest_id, handle: x.handle } as PersonRow)} />
+          </Section>
+
           <Section
             title="他的推文"
             note={tw === null ? '读取中…' : tw.total === 0 ? '还没采集' : `库里 ${tw.total} 条,显示最新 ${tw.rows.length} 条`}
@@ -1216,7 +1223,7 @@ function BgJobsSection({ restId, wsId, msg, rev }: { restId: string; wsId: strin
     setTick((n) => n + 1);
   };
 
-  const rangeLabel = (id: string): string => TIMELINE_RANGES.find((x) => x.id === id)?.label ?? id;
+  const rangeLabel = (j: BgJob): string => (j.kind === 'lists' ? '他的名单(采全)' : TIMELINE_RANGES.find((x) => x.id === j.range)?.label ?? j.range);
   return (
     <Section title="后台采集" note={jobs === null ? '读取中…' : jobs.length === 0 ? '没有后台任务(右键「采他的帖子/回复/转发…」选半年/一年/全部)' : `${jobs.length} 个任务`}>
       {msg && <div style={S.muted}>{msg}</div>}
@@ -1224,7 +1231,7 @@ function BgJobsSection({ restId, wsId, msg, rev }: { restId: string; wsId: strin
       {jobs?.map((j) => (
         <div key={j.id} style={S.tweetRow}>
           <div style={S.line}>
-            <strong>{rangeLabel(j.range)}</strong>
+            <strong>{rangeLabel(j)}</strong>
             <span style={S.muted}>{j.lastSegmentAt ? `上一段 ${new Date(j.lastSegmentAt).toLocaleString()}` : '还没跑过一段'}</span>
           </div>
           <div style={S.tweetText}>{describeProgress(j)}</div>

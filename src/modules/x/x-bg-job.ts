@@ -29,8 +29,17 @@ export function isBgRange(r: TimelineRange): r is BgRange {
 export type BgStatus = 'queued' | 'running' | 'paused' | 'done' | 'failed';
 
 /** 三个标签页 —— 各采各的、各停各的(翻页速度不同,某个页可能先到底) */
-export type BgTab = 'profile' | 'replies' | 'reposts';
-export const BG_TABS: readonly BgTab[] = ['profile', 'replies', 'reposts'];
+export type BgTimelineTab = 'profile' | 'replies' | 'reposts';
+/**
+ * ⭐ 名单任务的三个标签页(2026-10-19,用户:「在人卡中增加自动采集 follower/following/verified followers」,
+ * 选「后台慢慢采全」+「人卡显示名单 + 标出候选」)。
+ */
+export type BgListTab = 'followers' | 'following' | 'verifiedFollowers';
+export type BgTab = BgTimelineTab | BgListTab;
+export const BG_TABS: readonly BgTimelineTab[] = ['profile', 'replies', 'reposts'];
+export const BG_LIST_TABS: readonly BgListTab[] = ['followers', 'following', 'verifiedFollowers'];
+/** 任务种类:timeline = 帖子/回复/转发(老任务没有 kind 字段就是它);lists = 他的三个名单 */
+export type BgKind = 'timeline' | 'lists';
 
 /** 一个标签页的进度 */
 export type BgTabProgress = {
@@ -50,9 +59,15 @@ export type BgJob = {
   readonly wsId: string;
   readonly range: BgRange;
   readonly status: BgStatus;
+  /** 没有 = timeline(2026-10-19 前建的任务都没有这个字段) */
+  readonly kind?: BgKind;
   readonly profile: BgTabProgress;
   readonly replies: BgTabProgress;
   readonly reposts: BgTabProgress;
+  /** 名单任务才有;读的时候走 tabProgress(没有 = 还没开始) */
+  readonly followers?: BgTabProgress;
+  readonly following?: BgTabProgress;
+  readonly verifiedFollowers?: BgTabProgress;
   readonly lastError?: string;
   readonly totalPages: number;
   readonly totalSaved: number;
@@ -62,7 +77,16 @@ export type BgJob = {
 };
 
 export function tabProgress(job: BgJob, tab: BgTab): BgTabProgress {
-  return job[tab];
+  return job[tab] ?? { done: false };
+}
+
+export function kindOf(job: BgJob): BgKind {
+  return job.kind ?? 'timeline';
+}
+
+/** 这个任务有哪几个标签页 */
+export function tabsOf(job: BgJob): readonly BgTab[] {
+  return kindOf(job) === 'lists' ? BG_LIST_TABS : BG_TABS;
 }
 
 /**
@@ -70,7 +94,7 @@ export function tabProgress(job: BgJob, tab: BgTab): BgTabProgress {
  * ⚠️ 这是**完成**的唯一判据(不靠页数、不靠时间猜),与停止判据同源:数据说了算。
  */
 export function allTabsDone(job: BgJob): boolean {
-  return job.profile.done && job.replies.done && job.reposts.done;
+  return tabsOf(job).every((t) => tabProgress(job, t).done);
 }
 
 /**
@@ -78,7 +102,7 @@ export function allTabsDone(job: BgJob): boolean {
  * 全到底返回 undefined(调用方据此把 job 标 done)。
  */
 export function nextTab(job: BgJob): BgTab | undefined {
-  return BG_TABS.find((t) => !job[t].done);
+  return tabsOf(job).find((t) => !tabProgress(job, t).done);
 }
 
 /**
@@ -145,7 +169,7 @@ export function mergeSegment(job: BgJob, out: SegmentOutcome, now: Date): BgJob 
   }
   const prog: BgTabProgress = {
     cursor: out.nextCursor,
-    oldestAt: out.oldestAt ?? job[out.tab].oldestAt,
+    oldestAt: out.oldestAt ?? tabProgress(job, out.tab).oldestAt,
     done: out.tabDone,
   };
   const next: BgJob = {
@@ -170,5 +194,10 @@ export function describeProgress(job: BgJob): string {
     : job.status === 'failed' ? `❌ ${job.lastError ?? '失败'}`
     : job.status === 'paused' ? '⏸ 暂停'
     : job.status === 'running' ? '▶ 采集中' : '⏳ 排队';
+  if (kindOf(job) === 'lists') {
+    const l = (label: string, p: BgTabProgress): string => `${label} ${p.done ? '已到底' : p.cursor ? '翻到一半' : '待采'}`;
+    return `${head}｜名单：${l('关注者', tabProgress(job, 'followers'))}／${l('他关注的', tabProgress(job, 'following'))}／${l('蓝V关注者', tabProgress(job, 'verifiedFollowers'))}`
+      + `｜共 ${job.totalPages} 页 记下 ${job.totalSaved} 人次`;
+  }
   return `${head}｜${one('帖子', job.profile)}／${one('回复', job.replies)}／${one('转发', job.reposts)}｜共 ${job.totalPages} 页 新增 ${job.totalSaved} 条`;
 }

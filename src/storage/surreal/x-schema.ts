@@ -1766,6 +1766,50 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.34 —— 人卡采他的三个名单(2026-10-19)
+ *
+ * 用户 10-19:「在人卡中增加自动采集follower/following/verified followers这三个自动采集的方法吧。」
+ * 选了「后台慢慢采全」+「人卡显示名单 + 标出候选」。
+ * ① x_bg_job 加 kind(NONE = 老的帖子/回复/转发任务)+ 三个名单各自的断点 / 到底 —— 复用后台调度、暂停、跨重启续采
+ * ② x_list_member:谁在谁的名单里(只追加观察时间,不删;取关 / 被取关看 last_seen 落后就知道)
+ *    ⚠️ 不复用 x_author.list_memberships:那是「我的哪个名单采到过他」的采集痕迹,别人的名单混进去意思就错了
+ */
+const X_SCHEMA_1_2_34 = `
+DEFINE FIELD IF NOT EXISTS kind ON x_bg_job TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['timeline', 'lists'];
+DEFINE FIELD IF NOT EXISTS followers_cursor  ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS followers_done    ON x_bg_job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS following_cursor  ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS following_done    ON x_bg_job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS verified_cursor   ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS verified_done     ON x_bg_job TYPE option<bool>;
+
+DEFINE TABLE IF NOT EXISTS x_list_member SCHEMAFULL;
+-- 名单是谁的(数字 id)/ 哪个名单 / 名单里的人(数字 id)
+DEFINE FIELD IF NOT EXISTS owner      ON x_list_member TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS list       ON x_list_member TYPE string ASSERT $value INSIDE ['followers', 'following', 'verifiedFollowers'];
+DEFINE FIELD IF NOT EXISTS member     ON x_list_member TYPE string ASSERT $value != '';
+-- 哪个号看到的(名单对不同登录号可能不同:受保护号 / 屏蔽)
+DEFINE FIELD IF NOT EXISTS seen_by    ON x_list_member TYPE string;
+DEFINE FIELD IF NOT EXISTS first_seen ON x_list_member TYPE datetime;
+DEFINE FIELD IF NOT EXISTS last_seen  ON x_list_member TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_list_member_owner ON x_list_member FIELDS owner, list;
+DEFINE INDEX IF NOT EXISTS idx_list_member_member ON x_list_member FIELDS member;
+`;
+
+export async function x_migration_1_2_34(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_34);
+  type Info = { fields?: Record<string, string> };
+  const [job, lm] = await db.query<[Info, Info]>('INFO FOR TABLE x_bg_job; INFO FOR TABLE x_list_member;');
+  if (!('kind' in (job?.fields ?? {}))) throw new Error('[x-schema 1.2.34] x_bg_job.kind 没加上');
+  if (!('last_seen' in (lm?.fields ?? {}))) throw new Error('[x-schema 1.2.34] x_list_member 没建起来');
+  console.log('[x-schema 1.2.34] 后台任务加「名单」种类,建 x_list_member');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.34', appliedAt = $now, description = '后台任务加名单种类 + x_list_member'`,
+    { rid: new RecordId('schema_version', '1.2.34'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.33 —— 查回关运行记录 x_follow_check(2026-10-19,蓝V互关求关第 4 阶段)
  *
  * 用户 10-17:「这些动作完毕后,要记录关注时间,定期检查对方是否回关,建立和对方互动的时间线。」
