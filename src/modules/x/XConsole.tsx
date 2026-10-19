@@ -367,7 +367,12 @@ export function XConsole(
     users: number;
     saved: { inserted: number; updated: number; skippedNoHandle: number; skippedNoRestId?: number; failed: unknown[] } | null;
     reason: string;
+    /** ⭐ 按页存时累计的新增 / 更新(2026-10-19)—— 「入库 新」看它;saved 是采完整批重存那一遍(每页存过,新增必为 0) */
+    pageInserted: number;
+    pageUpdated: number;
   } | null>(null);
+  /** 这一跑按页存的累计 —— savePage 回调里加,采完写进 userRun */
+  const pageSaved = useRef({ inserted: 0, updated: 0 });
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
   const [plan, setPlan] = useState<{
     depth: FetchDepth;
@@ -914,6 +919,7 @@ export function XConsole(
                         }
                       }
 
+                      pageSaved.current = { inserted: 0, updated: 0 };
                       const run = await runCollect({
                         harvest: async (plan) => {
                           const rr = await window.electronAPI!.webDomInvoke({
@@ -1039,7 +1045,10 @@ export function XConsole(
                             userCtx: listSource !== '' ? { listSource, wcId: wcId ?? undefined } : undefined,
                           });
                           if (sv.status === 'failed') return { error: sv.reason };
-                          return { inDb: (sv.value as { inDb: string[] }).inDb };
+                          const v = sv.value as { inDb: string[]; usersInserted?: number; usersUpdated?: number };
+                          pageSaved.current.inserted += v.usersInserted ?? 0;
+                          pageSaved.current.updated += v.usersUpdated ?? 0;
+                          return { inDb: v.inDb };
                         },
                         /**
                          * ⭐⭐ **被限流时的等待** —— 2026-10-06。
@@ -1186,6 +1195,8 @@ export function XConsole(
                             })
                             : null,
                           reason: su.status === 'ok' ? '' : (su as { reason?: string }).reason ?? '',
+                          pageInserted: pageSaved.current.inserted,
+                          pageUpdated: pageSaved.current.updated,
                         });
                         /** ⭐⭐ 一个都没存进去 = 失败,别让它看着像成功 */
                         if (su.status !== 'ok') {
@@ -1456,8 +1467,11 @@ export function XConsole(
                     解出 <strong>{userRun.users}</strong> 人
                     {userRun.saved !== null && (
                       <>
-                        　·　入库 新 <strong>{userRun.saved.inserted}</strong>
-                        　·　更新 <strong>{userRun.saved.updated}</strong>
+                        　·　入库 新 <strong>{userRun.pageInserted}</strong>
+                        　·　更新 <strong>{userRun.pageUpdated}</strong>
+                        <span style={{ opacity: 0.6 }} title="每页采到就存一次(新增算在上面);采完再整批存一遍,那一遍的新增必然是 0">
+                          {'　'}(按页存;采完整批复存:新 {userRun.saved.inserted} / 更新 {userRun.saved.updated})
+                        </span>
                         {userRun.saved.skippedNoHandle > 0 && (
                           <>　·　<span style={{ opacity: 0.8 }}>
                             无 handle 挡下 {userRun.saved.skippedNoHandle}
@@ -1578,6 +1592,10 @@ export function XConsole(
                     ⭐ 人要知道的是「采到几条推文」,响应数是排查用的,放后面。
                   */}
                   <div style={S.statRow}>
+                    {/* ⭐ 名单页采的是人 —— 只摆「推文 0 / 载荷 0」会让人以为啥都没采到(用户 10-19 截图:「怎么感觉这个方法又失效啦?」) */}
+                    {userRun !== null && (
+                      <Stat label="人" v={userRun.users} tone={userRun.users > 0 ? 'good' : 'idle'} hint={`名单 ${userRun.listSource} 解出的人数(去重)`} />
+                    )}
                     <Stat
                       label="推文"
                       v={audit?.uniqueTweets ?? 0}

@@ -687,20 +687,32 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
         case 'savePageVerify': {
           const tweets = Array.isArray(p.tweets) ? p.tweets : [];
           const users = Array.isArray(p.users) ? p.users : [];
+          /**
+           * ⭐ 这一页的新增 / 更新也带回去(2026-10-19)—— 面板按页累计。
+           * 用户截图:采 following 10 页面板写「入库 新 0」,其实按页已新增 33;那个 0 是采完整批重存那一遍(每页早存过)。
+           */
+          const n = (v: unknown, k: 'inserted' | 'updated'): number => {
+            const x = (v as Record<string, unknown> | undefined)?.[k];
+            return typeof x === 'number' ? x : 0;
+          };
+          const counts = { tweetsInserted: 0, usersInserted: 0, usersUpdated: 0 };
           if (tweets.length > 0) {
             const r = await handle({ op: 'saveTweets', records: tweets, ctx: p.tweetCtx });
             if (r.status === 'failed') return r;
+            counts.tweetsInserted = n(r.value, 'inserted');
           }
           if (users.length > 0) {
             if (!p.userCtx) return failed('[x.data] savePageVerify 有人但没给 userCtx(listSource)');
             const r = await handle({ op: 'saveUsers', records: users, ctx: p.userCtx });
             if (r.status === 'failed') return r;
+            counts.usersInserted = n(r.value, 'inserted');
+            counts.usersUpdated = n(r.value, 'updated');
           }
           const inDb = [
             ...await existingTweetIds(tweets.map((t) => t.id).filter((x) => x !== '')),
             ...await existingUserIds(users.map((u) => u.restId).filter((x) => x !== '')),
           ];
-          return { status: 'ok', value: { inDb } };
+          return { status: 'ok', value: { inDb, ...counts } };
         }
 
         default:

@@ -142,7 +142,11 @@ describe('一个入口:采到人就存', () => {
   it('⭐⭐⭐ 面板要显示「解出多少」和「存了多少」两个数', () => {
     /** ⚠️ 合成一个数就是「面板报 44、库里 0」那家族的起点 */
     expect(CONSOLE).toMatch(/解出 <strong>\{userRun\.users\}<\/strong>/);
-    expect(CONSOLE).toMatch(/新 <strong>\{userRun\.saved\.inserted\}<\/strong>/);
+    /** 2026-10-19:「入库 新」看按页累计(整批复存那一遍新增必为 0,用户截图误以为失效);整批那遍仍并排写出 */
+    expect(CONSOLE).toMatch(/入库 新 <strong>\{userRun\.pageInserted\}<\/strong>/);
+    expect(CONSOLE).toMatch(/采完整批复存:新 \{userRun\.saved\.inserted\}/);
+    expect(CONSOLE).toMatch(/pageSaved\.current\.inserted \+= v\.usersInserted/);
+    expect(CONSOLE).toMatch(/pageSaved\.current = \{ inserted: 0, updated: 0 \};\s*const run = await runCollect\(/);
     /** ⭐ 没存进去要说为什么(最常见=认不出页面被拒收) */
     expect(CONSOLE).toMatch(/没入库：\{userRun\.reason\}/);
   });
