@@ -20,6 +20,8 @@ const S = {
   'follow.daily_cap': 30, 'follow.min_gap_sec': 60, 'follow.jitter_sec': 30, 'follow.revisit_days': 7,
   // 2026-10-17 求关:连续 15 个歇 15 分钟(用户选的);准备时采他主页 2 页
   'follow.burst_size': 15, 'follow.burst_rest_min': 15, 'ask.collect_pages': 2,
+  // 2026-10-19 第 4 阶段查回关:连续 30 个老关注者算追上(沿用 09-19 快速增量阈值);一次最多 20 页
+  'follow.check_known_run': 30, 'follow.check_max_pages': 20,
 };
 
 describe('设置', () => {
@@ -95,32 +97,36 @@ describe('⭐⭐⭐ 取关闸门', () => {
 describe('⭐⭐⭐ 取关流程(页面)', () => {
   const PAGE = read('src/modules/x/XOpsPeople.tsx');
   const fn = PAGE.slice(PAGE.indexOf('const unfollow = useCallback'), PAGE.indexOf('/** 单击:选中'));
+  /** ⭐ 2026-10-19 取关核心抽到 x-unfollow-run.ts(运营人卡 + 任务页「满 N 天没回关」共用一份) */
+  const RUN = read('src/modules/x/x-unfollow-run.ts');
+  const core = RUN.slice(RUN.indexOf('export async function unfollowOnce'), RUN.indexOf('export type VerifyOutcome'));
 
-  it('顺序:暂停检查 → 忙检查 → 闸门 → 去主页 → 点 → 记录 → 核对', () => {
-    expect(fn.length).toBeGreaterThan(1500);
-    const at = (s: string): number => { const i = fn.indexOf(s); expect(i, `找不到 ${s}`).toBeGreaterThan(-1); return i; };
+  it('顺序:暂停检查 → 调共用取关 → 核对;共用取关里:忙检查 → 闸门 → 去主页 → 点 → 记录', () => {
+    expect(fn.length).toBeGreaterThan(600);
+    expect(core.length).toBeGreaterThan(1200);
+    const at = (src: string, s: string): number => { const i = src.indexOf(s); expect(i, `找不到 ${s}`).toBeGreaterThan(-1); return i; };
+    const page = ['if (unfollowPaused !== null)', 'await unfollowOnce(', 'await runVerify(p);'].map((x) => at(fn, x));
+    expect(page).toEqual([...page].sort((a, b) => a - b));
     const order = [
-      'if (unfollowPaused !== null)',
-      'getXHostBusy(wcId)',
+      'await xPageBusy(wcId)',
       "op: 'unfollowGate'",
-      'if (!gv.allowed)',
+      'if (!gate.allowed)',
       "op: 'goto'",
       'scriptId: X_SCRIPTS.unfollow',
       "op: 'logAction'",
-      'await runVerify(p);',
-    ].map(at);
+    ].map((x) => at(core, x));
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
   it('⭐⭐ 成功失败都留记录;不成功(且不是「本来就没关注」)就暂停,要人点恢复', () => {
-    expect(fn).toMatch(/result: result\.done \? 'ok' : 'failed'/);
-    expect(fn).toMatch(/\} else \{\s*setUnfollowPaused\(/);
+    expect(core).toMatch(/result: result\.done \? 'ok' : 'failed'/);
+    expect(fn).toMatch(/\} else \{\s*\/\*\*[^*]*\*\/\s*setUnfollowPaused\(/);
     expect(PAGE).toMatch(/onClick=\{\(\) => \{ setUnfollowPaused\(null\);/);
   });
 
   it('⭐⭐ 取关期间登记忙,结束(含出错)一定清掉', () => {
-    expect(fn).toMatch(/setXHostBusy\(wcId, UNFOLLOW_BUSY\)/);
-    expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);/);
+    expect(core).toMatch(/setXHostBusy\(wcId, busyLabel\)/);
+    expect(core).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);/);
   });
 
   it('⭐ 只有「我关注他」的人才出现取关入口', () => {

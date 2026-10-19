@@ -18,6 +18,8 @@ export type AskTweet = { readonly id: string; readonly text: string; readonly cr
 export type AskPlan =
   | { readonly kind: 'tweet'; readonly tweet: AskTweet; readonly recent: readonly AskTweet[]; readonly why: string }
   | { readonly kind: 'bio-latest'; readonly tweet: AskTweet; readonly recent: readonly AskTweet[]; readonly why: string }
+  /** 再互动(求关过、满 N 天没回关,人点「再互动」):他最新一条没留过言的推文 */
+  | { readonly kind: 'other'; readonly tweet: AskTweet; readonly recent: readonly AskTweet[]; readonly why: string }
   | { readonly kind: 'skip'; readonly recent: readonly AskTweet[]; readonly why: string };
 
 /** 他自己发的、不是转发、不是置顶,按时间新→旧,取前 N */
@@ -31,6 +33,11 @@ export function recentOwn(records: readonly TweetRecord[], restId: string, n = A
 
 export function pickAskTweet(
   records: readonly TweetRecord[], person: { readonly restId: string; readonly handle: string; readonly bio?: string; readonly name?: string },
+  /**
+   * ⭐ 再互动(2026-10-19,第 4 阶段):求关过的人再来一次 —— 跳过已经求关过的那几条推文;
+   * 和互关相关的优先,没有就用最新一条(他已经被求关过,不再要求帖子 / Bio 里有求关字眼)。
+   */
+  revisit?: { readonly avoidIds: ReadonlySet<string> },
 ): AskPlan {
   const own = recentOwn(records, person.restId);
   const recent: AskTweet[] = own.map((r) => {
@@ -41,6 +48,13 @@ export function pickAskTweet(
     };
   });
   if (recent.length === 0) return { kind: 'skip', recent, why: '没采到他最近自己发的推文' };
+  if (revisit) {
+    const fresh = recent.filter((t) => !revisit.avoidIds.has(t.id));
+    if (fresh.length === 0) return { kind: 'skip', recent, why: `最近 ${recent.length} 条都已经求关过 —— 等他发新帖再互动` };
+    const rel = fresh.find((t) => t.related);
+    if (rel) return { kind: 'tweet', tweet: rel, recent, why: `再互动:他最近和互关相关、还没留过言的推文:${rel.evidence ?? ''}` };
+    return { kind: 'other', tweet: fresh[0], recent, why: '再互动:他最新一条还没留过言的推文' };
+  }
   const related = recent.find((t) => t.related);
   if (related) return { kind: 'tweet', tweet: related, recent, why: `他最近和互关相关的推文:${related.evidence ?? ''}` };
   const bioHit = detectMutualIntent(person.bio, [], person.name);

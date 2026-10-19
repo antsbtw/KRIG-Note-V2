@@ -61,6 +61,14 @@ export const SETTING_DEFS: readonly SettingDef[] = [
    */
   { key: 'ask.collect_pages', label: '求关时采他主页几页', default: 2, min: 1, max: 10, unit: '页' },
   { key: 'follow.revisit_days', label: '关注后几天没回关算不回', default: 7, min: 1, max: 60, unit: '天' },
+  /**
+   * ⭐ 查回关(2026-10-19,第 4 阶段;用户选「每天自动一次」):从我的 followers 第一页往下翻,
+   * 连续见到这么多个**原来就关注我**的人 = 追上上次了(followers 按关注时间倒序,新关注的在最前)。
+   * 默认 30 沿用 09-19 快速增量的阈值(真快照复算过:新人连续排在最前、老人整体平移)。
+   */
+  { key: 'follow.check_known_run', label: '查回关:连续几个老关注者算追上', default: 30, min: 5, max: 500, unit: '个' },
+  /** 一次最多翻几页(一页约 50 人)。Followers 端点约 50 次 / 15 分钟(记忆 project-x-user-list-coverage),20 页留足余量 */
+  { key: 'follow.check_max_pages', label: '查回关:一次最多翻几页', default: 20, min: 1, max: 45, unit: '页' },
 ];
 
 export type OpsSettings = Readonly<Record<string, number>>;

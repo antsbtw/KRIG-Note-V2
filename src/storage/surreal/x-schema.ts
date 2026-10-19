@@ -1766,6 +1766,43 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.33 —— 查回关运行记录 x_follow_check(2026-10-19,蓝V互关求关第 4 阶段)
+ *
+ * 用户 10-17:「这些动作完毕后,要记录关注时间,定期检查对方是否回关,建立和对方互动的时间线。」
+ * 用户 10-19 选「每天自动一次」—— 要跨重启记得上次什么时候查的,每次查的结果也留底(只追加)。
+ * 一次查 = 从我的 followers 第一页往下翻,直到连续见到 N 个已知关注者(追上了)或到页数上限。
+ * ⭐ caught_up = false 时,「没出现在名单里」不能当「没回关」—— 界面据此写「未确认」。
+ */
+const X_SCHEMA_1_2_33 = `
+DEFINE TABLE IF NOT EXISTS x_follow_check SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_follow_check TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_follow_check TYPE string;
+DEFINE FIELD IF NOT EXISTS trigger       ON x_follow_check TYPE string ASSERT $value INSIDE ['auto', 'manual'];
+DEFINE FIELD IF NOT EXISTS at            ON x_follow_check TYPE datetime;
+DEFINE FIELD IF NOT EXISTS ok            ON x_follow_check TYPE bool;
+DEFINE FIELD IF NOT EXISTS caught_up     ON x_follow_check TYPE bool;
+DEFINE FIELD IF NOT EXISTS pages         ON x_follow_check TYPE int;
+DEFINE FIELD IF NOT EXISTS seen          ON x_follow_check TYPE int;
+DEFINE FIELD IF NOT EXISTS new_followers ON x_follow_check TYPE int;
+-- 这次查到回关了的求关对象(数字 id)
+DEFINE FIELD IF NOT EXISTS asked_back    ON x_follow_check TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS stop_reason   ON x_follow_check TYPE string;
+DEFINE FIELD IF NOT EXISTS problem       ON x_follow_check TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_follow_check_account_at ON x_follow_check FIELDS account, at;
+`;
+
+export async function x_migration_1_2_33(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_33);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_follow_check');
+  if (!('caught_up' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.33] x_follow_check 没建起来');
+  console.log('[x-schema 1.2.33] 建查回关运行记录 x_follow_check');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.33', appliedAt = $now, description = '查回关运行记录 x_follow_check'`,
+    { rid: new RecordId('schema_version', '1.2.33'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.32 —— 求关:动作记录放开「点赞 / 留言」+ 求关记录表 x_ask(2026-10-17)
  *
  * 用户 10-17:「选择一条和互关相关的,点赞、留言求关、关注。三个动作。…这些动作完毕后,要记录关注时间,

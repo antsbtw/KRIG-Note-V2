@@ -17,6 +17,7 @@ import { bgRunningOn } from './x-bg-runner';
 import { manualSummary, pageProblem } from './x-page-ledger';
 import { X_MANUAL } from './x-manual';
 import { setPageTap } from './x-page-tap';
+import { checkFollowBack } from './x-follow-check';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
 import { X_USER_LIST_PAGES } from './x-pages';
@@ -40,11 +41,17 @@ type SearchCmd = Sampling & { op: 'searchScroll'; wsId: string; q: string; f?: '
 type PersonCmd = Sampling & { op: 'personTab'; wsId: string; page: 'x.profile' | 'x.withReplies' | 'x.reposts'; handle: string; restId: string; pageCap: number };
 /** 名单页(followers / following …):游标翻页记账,不存库 —— 只为存基线样本、看逐页账 */
 type UserListCmd = Sampling & { op: 'userList'; wsId: string; page: string; handle: string; pageCap: number };
-type Cmd = SearchCmd | PersonCmd | UserListCmd;
+/** 查回关(与任务页「现在查」同一个函数,trigger 记 manual)—— 2026-10-19 第 4 阶段 */
+type FollowCheckCmd = Sampling & { op: 'followCheck'; wsId: string };
+type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
+  if ((o as { op?: string })?.op === 'followCheck') {
+    if (typeof o.wsId !== 'string') return 'followCheck 要 wsId';
+    return o as unknown as FollowCheckCmd;
+  }
   if (o?.op === 'userList') {
     if (typeof o.wsId !== 'string' || typeof o.handle !== 'string' || o.handle === '') return 'userList 要 wsId / handle';
     if (X_USER_LIST_PAGES[String(o.page)] === undefined) return `userList 的 page 只收 ${Object.keys(X_USER_LIST_PAGES).join(' / ')}`;
@@ -141,6 +148,9 @@ async function tick(): Promise<void> {
         if (cmd.op === 'personTab') {
           console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
           out = await runPersonTab(cmd);
+        } else if (cmd.op === 'followCheck') {
+          console.log(`[x.dev] 执行 ${next}:followCheck ${cmd.wsId}`);
+          out = await checkFollowBack(cmd.wsId, 'manual');
         } else if (cmd.op === 'userList') {
           console.log(`[x.dev] 执行 ${next}:userList @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
           out = await runUserList(cmd);

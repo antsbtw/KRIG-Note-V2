@@ -146,6 +146,13 @@ export type XDataInvoke =
   | { readonly op: 'blueMutualFollowProgress'; readonly wsId: string }
   | { readonly op: 'followQueueAdd'; readonly wsId: string; readonly items: ReadonlyArray<{ readonly restId: string; readonly handle: string; readonly reason?: string }> }
   | { readonly op: 'followQueueStatus'; readonly wsId: string }
+  /**
+   * ⭐ 第 4 阶段(2026-10-19):查回关 / 求关对象回关状态 / 一个人的互动时间线
+   * followCheckRun 现在查一次(每天自动的那次在主进程定时跑);askFollowStatus 求关名单 + 上次查的结果
+   */
+  | { readonly op: 'followCheckRun'; readonly wsId: string }
+  | { readonly op: 'askFollowStatus'; readonly wsId: string }
+  | { readonly op: 'personTimeline'; readonly wsId: string; readonly restId: string }
   /** ⭐ 求关:准备一个人 —— 采他主页最新一页、选推文(或放弃)—— 返回 `AskPrepared`(2026-10-17) */
   | { readonly op: 'askPrepare'; readonly wsId: string; readonly restId: string; readonly handle: string }
   /** ⭐⭐ 求关:三个动作(点赞 → 留言 → 关注),每步核对,哪步没成停在哪步 —— 返回 `AskRunResult`(2026-10-17) */
@@ -208,6 +215,8 @@ export type XDataInvoke =
   | { readonly op: 'syncBusy'; readonly wcId: number; readonly reason: string | null }
   /** ⭐ 后台此刻在不在用这个 webview 采(人手动操作前先问一句);回 `{ handle } | null` */
   | { readonly op: 'bgBusy'; readonly wcId: number }
+  /** ⭐ 主进程那份「忙」(查回关 / 关注队列 / 求关 …)—— 登记表每进程一份,renderer 自己那份看不到(2026-10-19) */
+  | { readonly op: 'mainBusy'; readonly wcId: number }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
   | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string }
   /** 列任务;给 restId 只列这个人的,给 wsId 只列这个号的 */
@@ -230,6 +239,8 @@ export type XDataInvoke =
         readonly action: 'unfollow'; readonly targetRestId: string; readonly targetHandle: string;
         readonly decidedBy: 'human' | 'ai'; readonly result: 'ok' | 'failed';
         readonly reason?: string; readonly detail?: string;
+        /** 哪个 ws 发起的 —— 时间线按号找动作要它(2026-10-19;之前的取关记录没有) */
+        readonly wsId?: string;
       };
     };
 

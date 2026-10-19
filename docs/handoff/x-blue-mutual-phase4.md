@@ -1,5 +1,7 @@
 # 交接:蓝V互关 · 求关第 4 阶段「定期查回关 + 人的互动时间线」(2026-10-19)
 
+> ✅ **已实施(10-19,分支 `feature/x-blue-mutual-phase4`,未推送)** —— 实施记录见设计文档 §10;下面是开工时的原文。
+
 > 给新对话的开工说明。先读:
 > - 记忆 `project-x-blue-mutual-module`(全过程,末尾是 10-17 求关三阶段)、`project-x-ask-reply-corpus`
 > - 设计文档 `docs/10-business-design/x/blue-mutual-follow-design.md`

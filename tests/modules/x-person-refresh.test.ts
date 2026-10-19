@@ -99,8 +99,12 @@ describe('接线', () => {
   it('⭐⭐ 核对:去主页 + 只等主页资料那一条 + 不多滚 + 有时限', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
     expect(fn.length).toBeGreaterThan(500);
-    expect(fn).toMatch(/gotoPage: \{ name: X_PAGE_NAME\.profile/);
-    expect(fn).toMatch(/pageUrlIncludes: \[PROFILE_ENDPOINT\], wantPages: 1, maxRounds: 3, maxMs: 10_000/);
+    expect(fn).toMatch(/await readProfileAndRefresh\(p, wcId\)/);
+    /** 2026-10-19 去主页读资料抽到 x-unfollow-run.ts(运营核对 + 任务页取关后核对共用) */
+    const RUN = read('src/modules/x/x-unfollow-run.ts');
+    const rd = RUN.slice(RUN.indexOf('export async function readProfileAndRefresh'));
+    expect(rd).toMatch(/gotoPage: \{ name: X_PAGE_NAME\.profile/);
+    expect(rd).toMatch(/pageUrlIncludes: \[PROFILE_ENDPOINT\], wantPages: 1, maxRounds: 3, maxMs: 10_000/);
     expect(PROFILE_ENDPOINT).toBe('UserByScreenName');
   });
 

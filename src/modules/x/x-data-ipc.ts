@@ -25,7 +25,7 @@ import {
 import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
-import { clearXHostState, getXHostState, setXHostBusy, setXHostState } from './x-host-registry';
+import { clearXHostState, getXHostBusy, getXHostState, setXHostBusy, setXHostState } from './x-host-registry';
 import { bgRunnerStatus, bgRunningOn, kickBgRunner } from './x-bg-runner';
 import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
@@ -33,6 +33,8 @@ import { lookupSpot, pollSpot } from './x-spot-check';
 import { collectSearchByScroll } from './x-search-scroll';
 import { readBlueMutualOverview, readCandidates, readFollowProgress } from './x-task-blue-mutual';
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
+import { checkFollowBack, followCheckRunning } from './x-follow-check';
+import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
 import { prepareAsk } from './x-ask-prepare';
 import { runAsk } from './x-ask-run';
 import { readFollowGate } from './x-ops-actions-repo';
@@ -378,6 +380,34 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           return { status: 'ok', value: { ...prog, today: gate.todayCount, cap: gate.cap } };
         }
 
+        case 'followCheckRun': {
+          if (typeof p.wsId !== 'string') return failed('[x.data] followCheckRun 缺 wsId');
+          const r = await checkFollowBack(p.wsId, 'manual');
+          return r.ran ? { status: 'ok', value: r } : failed(`没查:${r.why}`);
+        }
+
+        case 'askFollowStatus': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          const { settings } = await readSettings();
+          return {
+            status: 'ok',
+            value: {
+              statuses: await readAskStatuses(acc.restId, settings['follow.revisit_days']),
+              lastCheck: await readLastFollowCheck(acc.restId),
+              running: followCheckRunning() === p.wsId,
+              revisitDays: settings['follow.revisit_days'],
+            },
+          };
+        }
+
+        case 'personTimeline': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] personTimeline 要数字 id');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readPersonTimeline(acc.restId, p.restId) };
+        }
+
         case 'followQueueAdd': {
           if (typeof p.wsId !== 'string' || !Array.isArray(p.items)) return failed('[x.data] followQueueAdd 要 wsId 和 items');
           const r = addToFollowQueue(p.wsId, p.items);
@@ -485,6 +515,10 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (!Number.isInteger(p.wcId)) return failed('[x.data] syncBusy 缺 wcId');
           setXHostBusy(p.wcId, typeof p.reason === 'string' && p.reason !== '' ? p.reason : null);
           return { status: 'ok', value: { wcId: p.wcId } };
+
+        case 'mainBusy':
+          if (!Number.isInteger(p.wcId)) return failed('[x.data] mainBusy 缺 wcId');
+          return { status: 'ok', value: getXHostBusy(p.wcId) };
 
         case 'bgBusy':
           if (!Number.isInteger(p.wcId)) return failed('[x.data] bgBusy 缺 wcId');

@@ -34,12 +34,17 @@ export async function prepareAsk(wsId: string, account: string, restId: string, 
   const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: settings['ask.collect_pages'], attempt: 1 });
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };
   const p = await readPerson(account, restId);
-  const plan = pickAskTweet(r.records, { restId, handle, bio: p?.bio, name: p?.display_name });
+  /** ⭐ 求关过的人 = 再互动(2026-10-19):避开求关过的推文;选不到也**不排除**他(他已在求关名单里,排除会让他从分析里消失) */
+  const [asked] = await getXDB().query<[string[]]>(
+    'SELECT VALUE tweet_id FROM x_ask WHERE account = $a AND person = $p', { a: account, p: restId },
+  );
+  const revisit = (asked ?? []).length > 0 ? { avoidIds: new Set(asked) } : undefined;
+  const plan = pickAskTweet(r.records, { restId, handle, bio: p?.bio, name: p?.display_name }, revisit);
   /**
    * ⚠️ 只有「采到了他的推文、账对得上、确实没求关」才排除;
    * 一条都没采到 / 这一页账对不上 = 我们这边的问题,不能算到他头上(不排除,说清楚)。
    */
-  if (plan.kind === 'skip' && plan.recent.length > 0 && r.ledgerProblem === undefined) {
+  if (!revisit && plan.kind === 'skip' && plan.recent.length > 0 && r.ledgerProblem === undefined) {
     await getXDB().query(EXCLUDE_RULE_SQL, { rest_id: restId, reason: `求关放弃:${plan.why}` });
   }
   console.log(`[x.ask] @${handle}:${plan.kind === 'skip' ? `放弃 —— ${plan.why}` : `选推文 ${plan.tweet.id}(${plan.why})`}`);

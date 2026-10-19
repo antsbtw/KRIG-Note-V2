@@ -99,14 +99,22 @@ describe('接线守卫', () => {
   it('⭐ 人卡三个手动动作都先问后台在不在用这个网页', () => {
     const page = strip(read('src/modules/x/XOpsPeople.tsx'));
     for (const [a, b] of [
-      ['const runVerify = useCallback', 'const h = await window.electronAPI'],
+      ['const runVerify = useCallback', 'await readProfileAndRefresh('],
       ['const collectTweets = useCallback', 'setXHostBusy(wcId, COLLECT_BUSY)'],
-      ['const unfollow = useCallback', 'setXHostBusy(wcId, UNFOLLOW_BUSY)'],
     ]) {
       const fn = page.slice(page.indexOf(a), page.indexOf(b));
       expect(fn.length, a).toBeGreaterThan(50);
       expect(fn, a).toMatch(/await bgBusyNote\(wcId\)/);
     }
+    /** ⭐ 取关 2026-10-19 抽到 x-unfollow-run.ts:unfollowOnce 先问 xPageBusy(含主进程的忙 + 后台)再动手 */
+    const un = page.slice(page.indexOf('const unfollow = useCallback'), page.indexOf('/** 单击:选中'));
+    expect(un).toMatch(/await unfollowOnce\(/);
+    const run = strip(read('src/modules/x/x-unfollow-run.ts'));
+    const core = run.slice(run.indexOf('export async function unfollowOnce'), run.indexOf('setXHostBusy(wcId, busyLabel)'));
+    expect(core).toMatch(/await xPageBusy\(wcId\)/);
+    const busyFn = run.slice(run.indexOf('export async function xPageBusy'), run.indexOf('export const UNFOLLOW_STATE_TEXT'));
+    expect(busyFn).toMatch(/op: 'mainBusy'/);
+    expect(busyFn).toMatch(/op: 'bgBusy'/);
   });
 });
 

@@ -130,8 +130,8 @@ describe('⭐⭐ 接线:写要认号,读要按号', () => {
     const CON = read('src/modules/x/XConsole.tsx');
     expect(CON).toMatch(/op: 'saveUsers', records: users, ctx: \{ listSource, wcId: wcId \?\? undefined \}/);
     expect(CON).toMatch(/searchRecipe: origin\?\.params\.q,[\s\S]{0,200}wcId: wcId \?\? undefined/);
-    const PEOPLE = read('src/modules/x/XOpsPeople.tsx');
-    expect(PEOPLE).toMatch(/op: 'refreshPerson', record: rec, wcId \}/);
+    /** 2026-10-19 核对抽到 x-unfollow-run.ts readProfileAndRefresh */
+    expect(read('src/modules/x/x-unfollow-run.ts')).toMatch(/op: 'refreshPerson', record: rec, wcId \}/);
   });
 
   it('认号:脚本已注册、迁移已登记、运营顶栏真的挂了', () => {

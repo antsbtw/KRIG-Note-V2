@@ -49,6 +49,7 @@ import { X_DOM_SCRIPTS } from './x-dom-scripts';
 import { registerXDataIpc } from './x-data-ipc';
 import { bgRunnerHealth, startBgRunner, stopBgRunner } from './x-bg-runner';
 import { startDevInbox, stopDevInbox } from './x-dev-inbox';
+import { startFollowCheckDaily, stopFollowCheckDaily } from './x-follow-check';
 import { registerSpotCheckMenu } from './x-spot-check';
 import { startFollowQueue, stopFollowQueue } from './x-follow-queue';
 import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
@@ -109,6 +110,9 @@ export function registerXModule(): void {
   /** ⭐ 开发测试收件箱(只在未打包时启用;2026-10-16 用户授权我自己跑测试)—— 同样自启、before-quit 自停 */
   startDevInbox();
   app.on('before-quit', stopDevInbox);
+  /** ⭐ 查回关:每天自动一次(用户 10-19 选)—— 自启、before-quit 自停,timer unref */
+  startFollowCheckDaily();
+  app.on('before-quit', stopFollowCheckDaily);
   /** ⭐ 右键「查库」抽查(2026-10-16)—— 经平台的网页右键扩展口,删 X 目录这一项就没了 */
   registerSpotCheckMenu();
   /** ⭐ 关注队列(2026-10-16,蓝V互关 M4)—— 自启、before-quit 自停,timer unref */

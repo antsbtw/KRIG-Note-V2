@@ -30,14 +30,13 @@ import {
   type CSSProperties, type ReactElement,
 } from 'react';
 import { xDataCall } from './x-data-types';
-import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
-import { auditUserPayload, type XUserRecord } from './x-user-audit';
-import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
+import type { XUserRecord } from './x-user-audit';
 import type { CollectOnWebviewResult } from './x-collect-on-webview';
 import type { CirclePerson } from './x-friend-circle';
 import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
-import { X_SCRIPTS } from './x-dom-scripts';
+import { readProfileAndRefresh, unfollowOnce, type UnfollowOutcome } from './x-unfollow-run';
+import { XPersonTimeline } from './XPersonTimeline';
 import { describeProgress, type BgJob } from './x-bg-job';
 import { useBgStatus } from './XBgStatus';
 import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
@@ -61,7 +60,10 @@ const fmt = (n: number | undefined): string => (n === undefined ? '—' : n.toLo
 /** 互关倾向是谁定的 —— 人 > AI > 算法 */
 const INTENT_SOURCE: Readonly<Record<string, string>> = { human: '你标的', ai: 'AI', rule: '算法' };
 
+/** 主进程的忙 + 后台采集(renderer 自己登记的忙由调用方先问 —— 各处有自己的豁免)*/
 async function bgBusyNote(wcId: number): Promise<string | null> {
+  const main = await xDataCall({ op: 'mainBusy', wcId });
+  if (main.status === 'ok' && typeof main.value === 'string') return main.value;
   const r = await xDataCall({ op: 'bgBusy', wcId });
   if (r.status !== 'ok') return `问不到后台状态(${r.reason})`;
   const v = r.value as { handle: string } | null;
@@ -163,57 +165,26 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     setXHostBusy(wcId, VERIFY_BUSY);
     let result: { kind: 'same' | 'changed' | 'new' | 'miss'; text: string };
     try {
-      const h = await window.electronAPI!.webDomInvoke({
-        op: 'harvest', pageRef: { wcId },
-        plan: {
-          gotoPage: { name: X_PAGE_NAME.profile, params: { handle: p.handle } },
-          /** 只等主页资料那一条;来了就停,最多 3 轮、10 秒 */
-          pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
-          noisyUrlSubstrings: X_NOISY_URLS,
-        },
-      });
-      if (h.status === 'failed') {
-        result = { kind: 'miss', text: `没读到:${h.reason ?? '原因未知'}` };
-      } else {
-        const rep = h.value as { items?: Array<{ url: string; text: string }>; problems?: string[] };
-        const items = (rep.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
-        const users = items.flatMap((it) => auditUserPayload(it.text).items);
-        const rec = pickProfileUser(users, p.handle, p.rest_id);
-        if (!rec) {
-          /** ⚠️ 把采集层报的原因也带上(如「没能去到这一页」)—— 不只说「没来」 */
-          const why = rep.problems?.[0];
-          result = { kind: 'miss', text: items.length === 0
-            ? `没读到(主页资料那条请求没来${why ? `:${why}` : ''})` : '没读到(载荷里找不到这个人)' };
-        } else {
-          /** ⭐ wcId:主页资料里的关系是这个 X 网页登录的号看到的(1.2.27) */
-          const r = await xDataCall({ op: 'refreshPerson', record: rec, wcId });
-          if (r.status === 'failed') {
-            result = { kind: 'miss', text: `没写进库:${r.reason}` };
-          } else {
-            const d = r.value as { isNew: boolean; changes: string[] };
-            patchRow(rec);
-            setCardRev((v) => v + 1);
-            /**
-             * ⭐⭐ 关系变了、已不属于当前这组 → 立刻移出列表、总数减一,并说清楚去了哪
-             * (2026-10-09 截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」里)。
-             */
-            const g = filterRef.current.group;
-            const iF = rec.following ?? p.i_follow;
-            const fM = rec.followedBy ?? p.follows_me;
-            if (!inGroup(g, iF, fM)) {
-              setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
-              setTotal((t) => (t === null ? t : t - 1));
-              setMoved(`@${p.handle} 关系变为「${relationLabel({ i_follow: iF, follows_me: fM })}」,已移出「${PEOPLE_GROUPS.find((x) => x.id === g)?.label}」`);
-            }
-            if (d.changes.length > 0 || d.isNew) loadOverview();
-            result = d.isNew ? { kind: 'new', text: '库里没有,已补进来' }
-              : d.changes.length > 0 ? { kind: 'changed', text: `有变化:${d.changes.join(';')}(已更新)` }
-                : { kind: 'same', text: '刚核对,与库里一致' };
-          }
+      const r = await readProfileAndRefresh(p, wcId);
+      result = { kind: r.kind, text: r.text };
+      if (r.kind !== 'miss') {
+        const rec = r.rec;
+        patchRow(rec);
+        setCardRev((v) => v + 1);
+        /**
+         * ⭐⭐ 关系变了、已不属于当前这组 → 立刻移出列表、总数减一,并说清楚去了哪
+         * (2026-10-09 截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」里)。
+         */
+        const g = filterRef.current.group;
+        const iF = rec.following ?? p.i_follow;
+        const fM = rec.followedBy ?? p.follows_me;
+        if (!inGroup(g, iF, fM)) {
+          setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
+          setTotal((t) => (t === null ? t : t - 1));
+          setMoved(`@${p.handle} 关系变为「${relationLabel({ i_follow: iF, follows_me: fM })}」,已移出「${PEOPLE_GROUPS.find((x) => x.id === g)?.label}」`);
         }
+        if (r.changes.length > 0 || r.kind === 'new') loadOverview();
       }
-    } catch (e) {
-      result = { kind: 'miss', text: `没读到:${e instanceof Error ? e.message : String(e)}` };
     } finally {
       setXHostBusy(wcId, null);
     }
@@ -399,72 +370,33 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   const [unfollowPaused, setUnfollowPaused] = useState<string | null>(null);
   const [unfollowing, setUnfollowing] = useState<string | null>(null);
   const UNFOLLOW_BUSY = '运营正在取关';
-  const STATE_TEXT: Record<string, string> = {
-    'not-following': '本来就没关注他', 'no-button': '页面上找不到他的关注按钮', 'no-confirm': '确认框没出来',
-    'no-switch': '点了确认,按钮没变回 Follow', 'bad-id': '数字 id 不对', error: '脚本出错',
-  };
 
   const unfollow = useCallback(async (p: PersonRow): Promise<void> => {
     if (unfollowPaused !== null) { setFollowNote(`取关已暂停:${unfollowPaused} —— 看过原因后点「恢复」`); return; }
     if (wcId == null) { setFollowNote('X 网页没开,没法取关'); return; }
-    const busy = getXHostBusy(wcId);
-    if (busy !== null) { setFollowNote(`${busy},先等它结束`); return; }
-    const bg = await bgBusyNote(wcId);
-    if (bg !== null) { setFollowNote(`${bg},先等这一段结束`); return; }
-    /** ① 闸门:每日上限 + 最小间隔(主进程按库里最新的数判) */
-    const g = await xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() });
-    if (g.status === 'failed') { setErr(g.reason); return; }
-    const gv = g.value as UnfollowGate;
-    setGate(gv);
-    if (!gv.allowed) { setFollowNote(`没取关:${gv.reason}`); return; }
-
+    /** ⭐ 闸门 / 让路 / 去主页 / 点 / 记动作 —— 与任务页同一份(x-unfollow-run.ts) */
     setUnfollowing(p.rest_id);
-    setXHostBusy(wcId, UNFOLLOW_BUSY);
-    let result: { done: boolean; state: string; why?: string } = { done: false, state: 'error' };
+    let r: UnfollowOutcome;
     try {
-      /** ② 去他的主页(取关按钮在那)*/
-      const go = await window.electronAPI!.webDomInvoke({
-        op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: p.handle },
-      });
-      if (go.status === 'failed') {
-        result = { done: false, state: 'error', why: `没去到他的主页:${go.reason ?? ''}` };
-      } else {
-        /** ③ 在页面上点:Following → 确认 Unfollow → 等按钮变回 Follow */
-        const r = await window.electronAPI!.webDomInvoke({
-          op: 'run', pageRef: { wcId }, scriptId: X_SCRIPTS.unfollow, params: { restId: p.rest_id },
-        });
-        result = r.status === 'failed'
-          ? { done: false, state: 'error', why: r.reason ?? '' }
-          : (r.value as { done: boolean; state: string; why?: string });
-      }
-    } catch (e) {
-      result = { done: false, state: 'error', why: e instanceof Error ? e.message : String(e) };
+      r = await unfollowOnce(p, wcId, UNFOLLOW_BUSY, undefined, workspaceId);
     } finally {
-      setXHostBusy(wcId, null);
       setUnfollowing(null);
     }
-
-    /** ④ 留动作记录 —— 成功失败都记(只追加) */
-    const detail = result.done ? undefined : `${STATE_TEXT[result.state] ?? result.state}${result.why ? `:${result.why}` : ''}`;
-    await xDataCall({
-      op: 'logAction',
-      entry: {
-        action: 'unfollow', targetRestId: p.rest_id, targetHandle: p.handle, decidedBy: 'human',
-        result: result.done ? 'ok' : 'failed', detail,
-      },
-    });
+    if (r.gate) setGate(r.gate);
+    if ('blocked' in r) { setFollowNote(r.blocked); return; }
     loadGate();
 
-    if (result.done) {
+    if (r.done) {
       setFollowNote(null);
       /** ⑤ 取关后立刻核对 —— 读回他的主页,确认关系真变了再更新库(并按分组移出列表) */
       await runVerify(p);
-    } else if (result.state === 'not-following') {
+    } else if (r.state === 'not-following') {
       /** 本来就没关注:不算异常,核对一下把库里的「我关注」纠正过来 */
       setFollowNote(`@${p.handle} 本来就没关注,已重新核对`);
       await runVerify(p);
     } else {
-      setUnfollowPaused(`@${p.handle} ${detail}`);
+      /** ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续 */
+      setUnfollowPaused(`@${p.handle} ${r.detail}`);
     }
   }, [unfollowPaused, wcId, loadGate, runVerify]);
 
@@ -1120,8 +1052,9 @@ function PersonCard(
             ))}
           </Section>
 
-          <Section title="我们的互动" note="还没采集">
-            <div style={S.muted}>回复往来在第 3 块采(先采「我回复过他」)。</div>
+          {/* ⭐ 第 4 阶段(2026-10-19):用户选「人卡里一个『互动』栏」—— 求关 / 回关 / 回复往来一条线 */}
+          <Section title="我们的互动" note="从早到晚">
+            <XPersonTimeline wsId={wsId} restId={restId} rev={rev} />
           </Section>
 
           <button

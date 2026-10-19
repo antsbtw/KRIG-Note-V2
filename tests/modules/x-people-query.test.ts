@@ -109,8 +109,11 @@ describe('人卡与接线', () => {
   it('⭐ 「人」类真的渲染人页;页面不写死页名', () => {
     expect(read('src/modules/x/XOpsView.tsx')).toMatch(/category === 'people' && <XOpsPeople key=\{accountKey\} workspaceId=\{workspaceId\} \/>/);
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    expect(PAGE).toContain('X_PAGE_NAME.profile');
+    /** 2026-10-19 去主页的动作(核对 / 取关)抽到 x-unfollow-run.ts —— 两处都不许写死页名 */
+    const RUN = read('src/modules/x/x-unfollow-run.ts');
+    expect(RUN).toContain('X_PAGE_NAME.profile');
     expect(PAGE).not.toContain("'x.profile'");
+    expect(RUN).not.toContain("'x.profile'");
   });
 
   it('⭐⭐ 还没做的按钮必须禁用并说「还没做」—— 不做成点了没反应的假按钮', () => {
@@ -199,7 +202,8 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
     expect(fn.length).toBeGreaterThan(200);
     const busy = fn.indexOf('getXHostBusy(wcId)');
-    const go = fn.indexOf('gotoPage:');
+    /** 2026-10-19 去主页 + 读资料抽到 readProfileAndRefresh(x-unfollow-run.ts) */
+    const go = fn.indexOf('readProfileAndRefresh(');
     expect(busy, '没问忙不忙').toBeGreaterThan(-1);
     expect(go).toBeGreaterThan(-1);
     expect(busy, '先 goto 后问忙 —— 采集已经被打断了').toBeLessThan(go);

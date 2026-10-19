@@ -7,9 +7,12 @@
  */
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { getXHostBusy, getXHostState, subscribeXHost } from './x-host-registry';
+import { getXHostState, subscribeXHost } from './x-host-registry';
 import { X_PAGE_NAME } from './x-pages';
 import { AskRun, type AskWho } from './XTaskAsk';
+import { XPersonTimeline } from './XPersonTimeline';
+import { readProfileAndRefresh, unfollowOnce, xPageBusy } from './x-unfollow-run';
+import type { AskStatus } from './x-follow-back';
 
 type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
 type Prog = { followedTotal: number; followedBack: number; revisit: Array<{ rest_id: string; handle: string; followedAt: string }>; revisitDays: number; today: number; cap: number };
@@ -18,6 +21,17 @@ type QDone = { restId: string; handle: string; at: string; state: 'followed' | '
 type QStatus = { waiting: number; next: QItem[]; current?: QItem; paused?: string; note?: string; nextAt: number; done: QDone[]; now: number };
 
 const STATE: Record<QDone['state'], string> = { followed: '✓ 已关注', 'already-following': '· 本来就关注着', failed: '✗ 没关成' };
+
+/** 第 4 阶段:求关对象回关状态 + 上次查回关 */
+type LastCheck = { at: string; ok: boolean; caughtUp: boolean; trigger: string; pages: number; newFollowers: number; askedBack: string[]; stopReason: string; problem?: string };
+type FollowStatus = { statuses: AskStatus[]; lastCheck: LastCheck | null; running: boolean; revisitDays: number };
+const STATUS_LABEL: Record<AskStatus['status'], string> = {
+  back: '已回关', waiting: '等待中', overdue: '没回关', unconfirmed: '未确认', dropped: '已取关',
+};
+const ago = (iso: string): string => {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  return m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`;
+};
 
 export function FollowStep({ wsId, candidates }: { wsId: string; candidates: number | undefined }): ReactElement {
   const [open, setOpen] = useState(false);
@@ -31,6 +45,54 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   /** ⭐ 正在求关的这一批(用户 10-17:点赞、留言求关、关注 —— 取代「勾了就直接关注」) */
   const [asking, setAsking] = useState<AskWho[] | null>(null);
   const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
+  /** ⭐ 第 4 阶段(2026-10-19):回关状态 / 上次查 / 正在查 */
+  const [fs, setFs] = useState<FollowStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+  /** 点了哪个人名 —— 就地展开他的时间线 */
+  const [lineOf, setLineOf] = useState<string | null>(null);
+  /** ⭐ 异常即停:任务页取关失败一次就停,人看过原因点「恢复」才继续(与运营取关同规矩) */
+  const [unfPaused, setUnfPaused] = useState<string | null>(null);
+  const [unfDoing, setUnfDoing] = useState<string | null>(null);
+  const loadFs = useCallback(() => {
+    void xDataCall({ op: 'askFollowStatus', wsId }).then((r) => { if (r.status === 'ok') setFs(r.value as FollowStatus); });
+  }, [wsId]);
+  useEffect(() => {
+    loadFs();
+    /** 每天自动查在主进程跑,这里 30 秒看一次结果 / 在不在查 */
+    const t = setInterval(loadFs, 30_000);
+    return () => clearInterval(t);
+  }, [loadFs]);
+  const checkNow = async (): Promise<void> => {
+    setChecking(true);
+    setMsg('正在查回关:去你的 followers 从第一页往下翻,翻到上次见过的人为止…');
+    const r = await xDataCall({ op: 'followCheckRun', wsId });
+    setChecking(false);
+    if (r.status === 'failed') { setMsg(r.reason); return; }
+    const v = r.value as { pages: number; newFollowers: number; askedBack: string[]; caughtUp: boolean; problem?: string };
+    setMsg(`查完:翻了 ${v.pages} 页 · 新关注你 ${v.newFollowers} 人 · 求关过的新回关 ${v.askedBack.length} 人${v.problem ? ` · ⚠️ ${v.problem}` : ''}`);
+    loadFs();
+  };
+  const unfollowAsked = async (s: AskStatus): Promise<void> => {
+    if (unfPaused) { setMsg(`取关已暂停:${unfPaused} —— 看过原因后点「恢复」`); return; }
+    if (wcId === null) { setMsg('X 网页没开,没法取关'); return; }
+    setUnfDoing(s.person);
+    try {
+      const who = { rest_id: s.person, handle: s.handle };
+      const r = await unfollowOnce(who, wcId, '任务:正在取关', `求关 ${s.askDays} 天没回关`, wsId);
+      if ('blocked' in r) { setMsg(r.blocked); return; }
+      if (r.done || r.state === 'not-following') {
+        /** 执行后核对:读回他主页把关系写进库 */
+        const v = await readProfileAndRefresh(who, wcId);
+        setMsg(`@${s.handle} ${r.done ? '已取关' : '本来就没关注'} · 核对:${v.text}`);
+      } else {
+        setUnfPaused(`@${s.handle} ${r.detail}`);
+        setMsg(`@${s.handle} 没取关成:${r.detail} —— 已暂停取关`);
+      }
+    } finally {
+      setUnfDoing(null);
+      loadFs();
+    }
+  };
 
   const loadProg = useCallback(() => {
     void xDataCall({ op: 'blueMutualFollowProgress', wsId }).then((r) => { if (r.status === 'ok') setProg(r.value as Prog); });
@@ -66,10 +128,8 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     setViewing(c.rest_id);
     if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
-    const busy = getXHostBusy(wcId);
+    const busy = await xPageBusy(wcId);
     if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
-    const bg = await xDataCall({ op: 'bgBusy', wcId });
-    if (bg.status === 'ok' && bg.value) { setMsg('后台正在采,没跳转(跳走会打断)'); return; }
     const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: c.handle } });
     setMsg(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
   };
@@ -90,6 +150,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     loadQ();
   };
 
+  const n = (k: AskStatus['status']): number => (fs?.statuses ?? []).filter((x) => x.status === k).length;
   const secs = qs && qs.nextAt > qs.now ? Math.round((qs.nextAt - qs.now) / 1000) : 0;
   const qLine = !qs ? '' : qs.paused ? `⏸ 已暂停:${qs.paused}`
     : qs.current ? `▶ 正在关注 @${qs.current.handle}`
@@ -100,8 +161,17 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     <div>
       <div>候选(蓝V · 我没关注 · 有互关倾向):{candidates ?? '…'} 人</div>
       <div style={{ marginTop: 4 }}>
-        今天已关注 {prog ? `${prog.today}/${prog.cap}` : '…'} · 累计关注 {prog?.followedTotal ?? '…'} · 已回关 {prog?.followedBack ?? '…'}
-        {' '}· 回访(满 {prog?.revisitDays ?? 7} 天没回关){prog?.revisit.length ?? '…'} 人
+        今天已关注 {prog ? `${prog.today}/${prog.cap}` : '…'}
+        {' '}· 求关 {fs ? fs.statuses.length : '…'} 人:已回关 {n('back')} · 等待中 {n('waiting')}
+        {' '}· 满 {fs?.revisitDays ?? 7} 天没回关 {n('overdue')}{n('unconfirmed') > 0 ? ` · 未确认 ${n('unconfirmed')}` : ''}
+      </div>
+      <div style={{ marginTop: 4, fontSize: 12 }}>
+        回关上次查:{fs?.running || checking ? '正在查…'
+          : fs?.lastCheck ? `${ago(fs.lastCheck.at)}(${fs.lastCheck.trigger === 'auto' ? '每天自动' : '手动'})· 新关注你 ${fs.lastCheck.newFollowers} 人`
+            + `,其中求关过的 ${fs.lastCheck.askedBack.length} 人${fs.lastCheck.ok ? '' : ` · ⚠️ ${fs.lastCheck.problem ?? fs.lastCheck.stopReason}`}`
+            : '还没查过'}
+        {' '}<button type="button" style={{ fontSize: 11 }} disabled={checking || fs?.running === true || wcId === null} onClick={() => void checkNow()}
+          title="去你的 followers 从第一页往下翻,翻到上次见过的人为止">现在查</button>
       </div>
       <div style={{ marginTop: 4, fontSize: 12 }}>{qLine}</div>
       <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
@@ -166,11 +236,49 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
             </div>
           )}
           <div>
-            <strong style={{ fontSize: 12 }}>回访:关注满 {prog?.revisitDays ?? 7} 天还没回关</strong>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <strong style={{ fontSize: 12 }}>求关名单</strong>
+              <span style={{ fontSize: 12, opacity: 0.7 }}>点名字看你们的往来</span>
+              {unfPaused && <button type="button" style={{ fontSize: 11 }} onClick={() => { setUnfPaused(null); setMsg(null); }} title={unfPaused}>恢复取关</button>}
+            </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
-              {prog && prog.revisit.length === 0 && <span style={{ opacity: 0.6 }}>暂无</span>}
-              {prog?.revisit.map((r) => <div key={r.rest_id}>@{r.handle} · 关注于 {new Date(r.followedAt).toLocaleDateString()}</div>)}
-              {prog && prog.revisit.length > 0 && <div style={{ opacity: 0.6, marginTop: 4 }}>要取关:在「运营 → 人」的「我关注·他没回关」里处理</div>}
+              {fs && fs.statuses.length === 0 && <span style={{ opacity: 0.6 }}>还没求关过谁</span>}
+              {(['overdue', 'unconfirmed', 'waiting', 'back', 'dropped'] as const).map((k) => {
+                const list = (fs?.statuses ?? []).filter((x) => x.status === k);
+                if (list.length === 0) return null;
+                return (
+                  <div key={k} style={{ marginTop: 6 }}>
+                    <div style={{ opacity: 0.75 }}>
+                      {k === 'overdue' ? `满 ${fs!.revisitDays} 天没回关(${list.length} 人)—— 你决定:再互动一次 / 取关`
+                        : k === 'unconfirmed' ? `满 ${fs!.revisitDays} 天、还没确认(${list.length} 人)—— 求关之后还没有一次完整的查回关,先点「现在查」`
+                          : `${STATUS_LABEL[k]}(${list.length} 人)`}
+                    </div>
+                    {list.map((x) => (
+                      <div key={x.person}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '2px 0' }}>
+                          <span style={{ cursor: 'pointer', flex: 1, minWidth: 0 }} onClick={() => setLineOf((v) => (v === x.person ? null : x.person))}>
+                            {lineOf === x.person ? '▾' : '▸'} @{x.handle} · 求关 {x.askDays} 天
+                            {x.status === 'back' && (x.alreadyBefore ? ' · 求关前就关注你了'
+                              : x.backBetween ? ` · 在 ${new Date(x.backBetween.from ?? x.askedAt).toLocaleDateString()} ~ ${new Date(x.backBetween.to).toLocaleDateString()} 之间回关` : '')}
+                          </span>
+                          {k === 'overdue' && (
+                            <>
+                              <button type="button" style={{ fontSize: 11 }} disabled={asking !== null}
+                                onClick={() => { setAsking([{ restId: x.person, handle: x.handle }]); }}
+                                title="再求关一次:选他一条帖子,点赞 + 留言(关注已在,会记「本来就关注着」)">再互动</button>
+                              <button type="button" style={{ fontSize: 11 }} disabled={unfDoing !== null || unfPaused !== null}
+                                onClick={() => void unfollowAsked(x)} title="去他主页取关(走取关的每日上限 / 间隔;记动作;取关后读回核对)">
+                                {unfDoing === x.person ? '取关中…' : '取关'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {lineOf === x.person && <div style={{ margin: '2px 0 6px 14px' }}><XPersonTimeline wsId={wsId} restId={x.person} /></div>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
