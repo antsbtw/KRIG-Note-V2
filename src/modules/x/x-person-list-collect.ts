@@ -21,7 +21,7 @@ import { writeListMembers } from './x-list-member-repo';
 import { scanMutualIntent } from './x-people-repo';
 import { makeKnownRunTracker } from './x-follow-back';
 import { isRateLimited } from './x-pace';
-import { KNOWN_RUN, canReconcile, type RelTabPlan } from './x-relation-plan';
+import { KNOWN_RUN, canReconcile, escalateAfterCatchUp, type RelTabPlan } from './x-relation-plan';
 import type { BgListTab } from './x-bg-job';
 import type { RunOneResult } from './x-bg-segment';
 
@@ -42,6 +42,11 @@ async function readKnown(account: string, owner: string, list: BgListTab, self: 
   const col = list === 'followers' ? 'follows_me' : 'i_follow';
   const [r] = await db.query<[string[]]>(`SELECT VALUE person FROM x_relation WHERE account = $a AND ${col} = true`, { a: account });
   return new Set(r ?? []);
+}
+
+/** 库里现在这个名单有几个人(复核用;与 x-relation-task dbCounts 同口径) */
+async function countNow(account: string, owner: string, list: BgListTab, self: boolean): Promise<number> {
+  return (await readKnown(account, owner, list, self)).size;
 }
 
 /**
@@ -138,6 +143,12 @@ export async function collectPersonListSegment(input: {
 
   let reconciled: number | undefined;
   let note: string | undefined;
+  let escalate: string | undefined;
+  /** ⭐ 增量追上后复核:库里现在和 X 还差一截 → 改全量(PDCA,2026-10-20 真机:追上了还差 ~150) */
+  if (failure === undefined && caughtUp && input.plan) {
+    escalate = escalateAfterCatchUp(input.plan, await countNow(account.restId, input.ownerRestId, input.list, self));
+    if (escalate) note = escalate;
+  }
   if (limited) note = `被限流 —— 这一段停在这里,节奏自动放慢,歇够了从断点接着翻`;
   if (failure === undefined && exhausted && input.plan && self && (input.list === 'followers' || input.list === 'following')) {
     /** ⭐ 够不够数用库里的真实人数(任务开始后被看到、仍在名单里的),不用各段累加 —— 累加会被重复页撑大 */
@@ -170,5 +181,6 @@ export async function collectPersonListSegment(input: {
     failure,
     note,
     listStats: { seen, fresh: tracker.state.fresh.length, reconciled, note },
+    escalate,
   };
 }

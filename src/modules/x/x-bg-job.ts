@@ -169,6 +169,8 @@ export type SegmentOutcome = {
   readonly listStats?: { readonly seen: number; readonly fresh: number; readonly reconciled?: number; readonly note?: string };
   /** 歇着的原因(限流放慢了节奏)—— 显示用,不是失败 */
   readonly note?: string;
+  /** 增量追上后复核还差一截 → 改全量(原因)—— 改写任务里这个名单的策略 */
+  readonly escalate?: string;
 };
 
 export function mergeSegment(job: BgJob, out: SegmentOutcome, now: Date): BgJob {
@@ -193,10 +195,16 @@ export function mergeSegment(job: BgJob, out: SegmentOutcome, now: Date): BgJob 
       note: ls.note ?? prevStats?.note,
     },
   };
+  const lt = out.tab as BgListTab;
+  const plan = out.escalate !== undefined && job.plan?.tabs[lt] ? {
+    ...job.plan,
+    tabs: { ...job.plan.tabs, [lt]: { ...job.plan.tabs[lt], mode: 'full' as const, why: out.escalate, estPages: Math.ceil((job.plan.tabs[lt].xCount ?? 0) / 50) } },
+  } : job.plan;
   const next: BgJob = {
     ...job,
+    plan,
     stats,
-    lastError: out.note,
+    lastError: out.escalate ?? out.note,
     [out.tab]: prog,
     totalPages: job.totalPages + out.pages,
     totalSaved: job.totalSaved + out.saved,

@@ -188,7 +188,7 @@ export async function saveJob(job: BgJob): Promise<void> {
        reposts_cursor = $xc, reposts_oldest_at = (IF $xo = NONE THEN NONE ELSE type::datetime($xo) END), reposts_done = $xd,
        followers_cursor = $fc, followers_done = $fd, following_cursor = $gc, following_done = $gd,
        verified_cursor = $vc, verified_done = $vd,
-       stats_json = $stats,
+       stats_json = $stats, plan_json = $plan_json,
        last_error = $err, total_pages = $pages, total_saved = $saved,
        updated_at = type::datetime($now),
        last_segment_at = (IF $seg = NONE THEN NONE ELSE type::datetime($seg) END)`,
@@ -200,6 +200,8 @@ export async function saveJob(job: BgJob): Promise<void> {
       fc: job.followers?.cursor, fd: job.followers?.done, gc: job.following?.cursor, gd: job.following?.done,
       vc: job.verifiedFollowers?.cursor, vd: job.verifiedFollowers?.done,
       stats: job.stats ? JSON.stringify(job.stats) : undefined,
+      /** 策略会变(增量追上后复核还差一截 → 改全量),要存回去 */
+      plan_json: job.plan ? JSON.stringify(job.plan) : undefined,
       err: job.lastError, pages: job.totalPages, saved: job.totalSaved,
       now,
       seg: job.lastSegmentAt,

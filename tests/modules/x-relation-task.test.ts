@@ -80,3 +80,31 @@ describe('进度累计 / 到底判据', () => {
     expect(tabDoneFrom({ pages: 1, saved: 50, exhausted: false, stopReason: '429', note: '被限流 —— 放慢' })).toBe(false);
   });
 });
+
+describe('⭐⭐ 增量追上后复核(2026-10-20 真机:追上了,库里还比 X 少 ~150)', () => {
+  it('还差一截 → 改全量;差在容差内 → 不改;全量 / 不知道总数 → 不改', async () => {
+    const { escalateAfterCatchUp } = await import('@modules/x/x-relation-plan');
+    const inc = planTab(6905, 6709, true);
+    expect(escalateAfterCatchUp(inc, 6751)).toMatch(/少 154.*改成全量/);
+    expect(escalateAfterCatchUp(inc, 6800)).toBeUndefined();
+    expect(escalateAfterCatchUp(planTab(6905, 0, true), 10)).toBeUndefined();
+    expect(escalateAfterCatchUp(planTab(undefined, 5176, true), 10)).toBeUndefined();
+  });
+  it('升级后:这个名单没到底、断点清空(从头翻)、任务里的策略改成全量并写明原因', async () => {
+    const { runSegment } = await import('@modules/x/x-bg-segment');
+    const plan = planRelation({ target: { restId: 'ME', handle: 'me' }, self: true, xCounts: { followers: 6905, following: 6191 }, db: { followers: 6709, following: 6223, verifiedFollowers: 5176 }, now: new Date() });
+    const job = {
+      id: 'L', restId: 'ME', handle: 'me', wsId: 'ws-1', range: 'all', status: 'running', kind: 'lists', self: true, plan,
+      profile: { done: false }, replies: { done: false }, reposts: { done: false },
+      followers: { done: false }, following: { done: false }, verifiedFollowers: { done: false },
+      totalPages: 0, totalSaved: 0, createdAt: '', updatedAt: '',
+    } as BgJob;
+    const r = await runSegment(job, { async runOne() {
+      return { pages: 1, saved: 148, exhausted: false, caughtUp: true, nextCursor: 'C1', stopReason: '追上了', escalate: '增量追上了,可库里还少 154 —— 改成全量' };
+    } } as never, 10, new Date());
+    expect(r.job.followers).toMatchObject({ done: false, cursor: undefined });
+    expect(r.job.plan?.tabs.followers).toMatchObject({ mode: 'full', estPages: 139 });
+    expect(r.job.plan?.tabs.followers.why).toMatch(/改成全量/);
+    expect(r.job.lastError).toMatch(/改成全量/);
+  });
+});

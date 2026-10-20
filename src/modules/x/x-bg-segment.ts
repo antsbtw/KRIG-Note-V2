@@ -69,6 +69,8 @@ export type RunOneResult = {
   readonly listStats?: { readonly seen: number; readonly fresh: number; readonly reconciled?: number; readonly note?: string };
   /** 被限流放慢了节奏(不是失败)—— 显示用 */
   readonly note?: string;
+  /** ⭐ 增量追上后复核还差一截 → 这个名单改全量从头翻(原因)*/
+  readonly escalate?: string;
 };
 
 export type SegmentDeps = {
@@ -142,8 +144,9 @@ export async function runSegment(
     tab,
     pages: r.pages,
     saved: r.saved,
-    nextCursor: r.failure !== undefined ? tabProgress(job, tab).cursor : r.nextCursor,
-    tabDone: r.failure === undefined && tabDoneFrom(r),
+    nextCursor: r.failure !== undefined ? tabProgress(job, tab).cursor : r.escalate !== undefined ? undefined : r.nextCursor,
+    tabDone: r.failure === undefined && r.escalate === undefined && tabDoneFrom(r),
+    escalate: r.escalate,
     oldestAt: r.oldestAt,
     failed: r.failure,
     listStats: r.listStats,

@@ -52,7 +52,7 @@ export function planTab(xCount: number | undefined, dbCount: number, self: boole
   if (xCount === undefined) {
     return { xCount, dbCount, mode: 'incremental', why: `X 不显示总数,库里 ${dbCount} —— 从第一页增量采到追上`, estPages: Math.ceil(KNOWN_RUN / PER_PAGE) + 1 };
   }
-  const tol = Math.max(20, Math.ceil(xCount * 0.02));
+  const tol = gapTolerance(xCount);
   if (dbCount > xCount + tol) {
     return {
       xCount, dbCount, mode: 'full',
@@ -85,6 +85,23 @@ export function planRelation(input: {
       verifiedFollowers: planTab(undefined, input.db.verifiedFollowers, input.self),
     },
   };
+}
+
+/** 「差多少算差出一截」—— 定策略和追上后复核用同一个口径 */
+export function gapTolerance(xCount: number): number {
+  return Math.max(20, Math.ceil(xCount * 0.02));
+}
+
+/**
+ * ⭐⭐ 增量追上后复核(PDCA,2026-10-20 真机):追上了,但库里和 X 还差出一截 →
+ * 差的不是新来的,是散在名单中间、以前没采到的人;增量从第一页往下永远找不到 → 升级成全量。
+ * 返回升级原因;不用升级返回 undefined。
+ */
+export function escalateAfterCatchUp(tab: RelTabPlan, dbNow: number): string | undefined {
+  if (tab.mode !== 'incremental' || tab.xCount === undefined) return undefined;
+  const gap = tab.xCount - dbNow;
+  if (gap <= gapTolerance(tab.xCount)) return undefined;
+  return `增量追上了,可库里 ${dbNow} 还比 X 的 ${tab.xCount} 少 ${gap} —— 差的是名单中间以前没采到的人,改成全量`;
 }
 
 /**

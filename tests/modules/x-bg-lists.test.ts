@@ -175,3 +175,17 @@ describe('⭐⭐ 关系采集策略(2026-10-20)', () => {
     expect(r.failure).toMatch(/登录的是/);
   });
 });
+
+describe('⭐ 采集器:增量追上后复核', () => {
+  beforeEach(() => { saveUsersCalls.length = 0; memberCalls.length = 0; n = 0; });
+  it('追上了但库里人数比 X 少一截 → 交出升级原因', async () => {
+    knownIds = Array.from({ length: 200 }, (_, i) => `${1000 + i}`);
+    pages = [page(Array.from({ length: 40 }, (_, i) => `${1000 + i}`), 'c1')];
+    const r = await collectPersonListSegment({
+      wcId: 7, page: 'x.followers', list: 'followers', handle: 'owner', ownerRestId: 'OWNER', pageCap: 10,
+      plan: { mode: 'incremental', xCount: 1000, dbCount: 200, why: '', estPages: 2 },
+    });
+    expect(r.caughtUp).toBe(true);
+    expect(r.escalate).toMatch(/改成全量/);
+  });
+});
