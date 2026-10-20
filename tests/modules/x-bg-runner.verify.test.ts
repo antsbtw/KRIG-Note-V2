@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Surreal } from 'surrealdb';
 import { __setXDBForTest } from '@storage/surreal/client';
-import { x_migration_1_2_26, x_migration_1_2_24, x_migration_1_2_34 } from '@storage/surreal/x-schema';
+import { x_migration_1_2_26, x_migration_1_2_24, x_migration_1_2_34, x_migration_1_2_35 } from '@storage/surreal/x-schema';
 import { createJob, saveJob, readJob } from '@modules/x/x-bg-job-repo';
 import { tickOnce, _resetBgRunner } from '@modules/x/x-bg-runner';
 import { setXHostState, clearXHostState, setXHostBusy } from '@modules/x/x-host-registry';
@@ -50,7 +50,9 @@ describe.skipIf(!BINARY)('x-bg-runner tickOnce —— 真库调度', () => {
     await x_migration_1_2_24(db); // x_setting(节奏设置读它,没有则用默认)
     await x_migration_1_2_26(db);
     /** 1.2.34(2026-10-19)加了名单任务的字段 —— createJob / saveJob 会写它们,结构固定的表没定义就拒收 */
-    await x_migration_1_2_34(db); // x_bg_job
+    await x_migration_1_2_34(db);
+    /** 1.2.35(2026-10-20):节奏自调 x_pace —— runner 按它定段间隔 / 页数;任务表 plan_json / stats_json */
+    await x_migration_1_2_35(db); // x_bg_job
     __setXDBForTest(db);
   }, 40000);
 

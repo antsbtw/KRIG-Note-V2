@@ -63,6 +63,12 @@ export type RunOneResult = {
   readonly oldestAt?: string;
   /** 被限流/失败了(有话说);扛不住就停整个任务 */
   readonly failure?: string;
+  /** ⭐ 名单增量采到追上了(连续 N 个库里已有的)—— 这个名单这一轮做完 */
+  readonly caughtUp?: boolean;
+  /** 名单任务:这一段看到几个人 / 其中新的 / 对账标走了几个 */
+  readonly listStats?: { readonly seen: number; readonly fresh: number; readonly reconciled?: number; readonly note?: string };
+  /** 被限流放慢了节奏(不是失败)—— 显示用 */
+  readonly note?: string;
 };
 
 export type SegmentDeps = {
@@ -98,6 +104,9 @@ export type SegmentDeps = {
  */
 export function tabDoneFrom(r: RunOneResult): boolean {
   if (r.exhausted) return true;
+  if (r.caughtUp) return true;
+  /** 被限流歇着 ≠ 到底(下段接着翻) */
+  if (r.note !== undefined && r.failure === undefined && /限流/.test(r.note)) return false;
   // 页数上限停 → 没到底(还要续)。其余的「停」里,到起点那种才算 done。
   if (/上限/.test(r.stopReason)) return false;
   if (/采到.*之前|到.*起点|范围/.test(r.stopReason)) return true;
@@ -109,7 +118,7 @@ export function tabDoneFrom(r: RunOneResult): boolean {
 /**
  * ⭐⭐ 跑一个任务的一段。
  * @param job 当前任务
- * @param pageCap 本段最多翻几页(来自 bg.pages_per_segment 设置)
+ * @param pageCap 本段最多翻几页(来自节奏自调 x_pace,2026-10-20)
  * @param now 时间源(注入,便于测)
  */
 export async function runSegment(
@@ -137,6 +146,8 @@ export async function runSegment(
     tabDone: r.failure === undefined && tabDoneFrom(r),
     oldestAt: r.oldestAt,
     failed: r.failure,
+    listStats: r.listStats,
+    note: r.note,
   };
   const next = mergeSegment(job, out, now);
   const note = r.failure !== undefined

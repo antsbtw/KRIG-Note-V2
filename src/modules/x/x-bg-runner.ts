@@ -19,9 +19,10 @@
  */
 
 import { getXHostState, getXHostBusy } from './x-host-registry';
-import { readSettings } from './x-ops-actions-repo';
 import { activeJobsForWs, wsWithActiveJobs, readJob, saveJob } from './x-bg-job-repo';
-import { BG_LIST_TABS, describeProgress, isDue, kindOf, type BgJob, type BgListTab } from './x-bg-job';
+import { BG_LIST_TABS, describeProgress, isDue, kindOf, nextTab, type BgJob, type BgListTab } from './x-bg-job';
+import { readPace as readPaceState, recordPaceOutcome } from './x-pace-repo';
+import { isRateLimited, type PaceKey } from './x-pace';
 import { collectPersonListSegment } from './x-person-list-collect';
 import { runSegment, type SegmentDeps, type RunOneResult } from './x-bg-segment';
 import { collectPersonTab, personCollectProgress } from './x-person-collect';
@@ -33,12 +34,7 @@ import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 const DEFAULTS = {
   /** timer 多久醒一次(毫秒)—— 醒来挑到期任务 */
   tickMs: 120_000,
-  /** 一段最多翻几页(翻够就停这段,等下个窗口再跑) */
-  pagesPerSegment: 10,
-  /** 两段之间至少隔多久(秒)—— isDue 用 */
-  segmentGapSec: 120,
-  /** ⭐ 名单任务两段间隔(秒):Followers 接口约 50 次 / 15 分钟,每段 10 页要隔开(2026-10-19) */
-  listSegmentGapSec: 300,
+  /** ⚠️ 每段页数 / 段间隔不在这里了:由节奏自调(x_pace)按限流情况定,2026-10-20 */
 };
 
 let timer: ReturnType<typeof setInterval> | null = null;
@@ -82,23 +78,16 @@ export function bgRunnerStatus(wsId: string): BgRunnerStatus {
   };
 }
 
-/** 读节奏设置(库里没有就用默认) */
-async function readPace(): Promise<{ pagesPerSegment: number; segmentGapSec: number; listSegmentGapSec: number }> {
-  try {
-    const { settings } = await readSettings();
-    return {
-      pagesPerSegment: settings['bg.pages_per_segment'] ?? DEFAULTS.pagesPerSegment,
-      segmentGapSec: settings['bg.segment_gap_sec'] ?? DEFAULTS.segmentGapSec,
-      listSegmentGapSec: settings['bg.list_segment_gap_sec'] ?? DEFAULTS.listSegmentGapSec,
-    };
-  } catch {
-    return { pagesPerSegment: DEFAULTS.pagesPerSegment, segmentGapSec: DEFAULTS.segmentGapSec, listSegmentGapSec: DEFAULTS.listSegmentGapSec };
-  }
+/**
+ * ⭐⭐ 节奏由 AI 自调(2026-10-20,用户:「这些是配置项,没有必要用户做配置,而是AI执行这些任务时自我优化就可以了。
+ * 根据限流出现的不同来调整这些参数。」)—— 每种接口一份(x_pace),撞限流放慢、连续顺利加快。
+ * 这个任务下一段要采的是哪种接口:名单任务按下一个名单,推文任务统一 timeline。
+ */
+export function paceKeyOf(job: BgJob): PaceKey {
+  if (kindOf(job) !== 'lists') return 'timeline';
+  const t = nextTab(job);
+  return t === 'following' ? 'list:following' : t === 'verifiedFollowers' ? 'list:verifiedFollowers' : 'list:followers';
 }
-
-/** 这个任务的段间隔:名单任务另算(额度更紧) */
-const gapOf = (j: BgJob, pace: { segmentGapSec: number; listSegmentGapSec: number }): number =>
-  (kindOf(j) === 'lists' ? pace.listSegmentGapSec : pace.segmentGapSec);
 
 /**
  * ⭐⭐ runner 用的 SegmentDeps —— 把真采集(collectPersonTab)+ 存库 组装成 RunOneResult。
@@ -123,9 +112,11 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
           const why = `名单任务拿到了不是名单的标签页 ${input.tab}`;
           return { pages: 0, saved: 0, exhausted: false, stopReason: why, failure: why } satisfies RunOneResult;
         }
+        const list = input.tab as BgListTab;
         return collectPersonListSegment({
-          wcId, page: input.page, list: input.tab as BgListTab, handle: input.handle, ownerRestId: job.restId,
+          wcId, page: input.page, list, handle: input.handle, ownerRestId: job.restId,
           pageCap: input.pageCap, resumeCursor: input.resumeCursor, onProgress: progress,
+          plan: job.plan?.tabs[list], self: job.self === true, startedAt: job.createdAt,
         });
       }
       const start = rangeStart(job.range, now);
@@ -187,13 +178,19 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
          * 「到起点 / X 到头 / 页数上限」都是正常停,不是 failure。
          * 403 现在的失败语是「没带鉴权头」(见 project-x-paging-403-root-cause),一并认。
          */
-        const failed = /403|没带鉴权头|限流|429/.test(stopReason)
+        /**
+         * ⭐ 2026-10-20 起限流不算失败:保住断点、交给节奏自调放慢(用户:「根据限流出现的不同来调整这些参数」)。
+         * 没带鉴权头 / 403 仍是失败(那不是快慢的问题)。
+         */
+        const limited = isRateLimited(stopReason);
+        const failed = !limited && /403|没带鉴权头/.test(stopReason)
           ? `${attempt > 1 ? '[重载后第 2 次仍失败] ' : ''}${stopReason}` : undefined;
         if (attempt > 1 && !failed) progress('重载后第 2 次成功');
         return {
           pages,
           saved,
-          nextCursor: r.nextCursor,
+          nextCursor: r.nextCursor ?? (limited ? input.resumeCursor : undefined),
+          note: limited ? '被限流 —— 这一段停在这里,节奏自动放慢,歇够了从断点接着翻' : undefined,
           exhausted: r.exhausted,
           stopReason,
           /** ⭐ 翻页前沿(最后一页他自己最新那条),不是这一段最新/最旧一条 —— 见 collectOnWebview */
@@ -223,7 +220,6 @@ export async function tickOnce(
   drive: (wsId: string, wcId: number, job: BgJob) => Promise<void>,
   now: Date = new Date(),
 ): Promise<void> {
-  const pace = await readPace();
   const wss = await wsWithActiveJobs();
   for (const ws of [...waitNoteByWs.keys()]) if (!wss.includes(ws)) waitNoteByWs.delete(ws);
   for (const wsId of wss) {
@@ -238,11 +234,13 @@ export async function tickOnce(
     const wsBusy = getXHostBusy(host.wcId) !== null;
     const jobs = await activeJobsForWs(wsId);
     // 挑第一个到期的
-    const due = jobs.find((j) => isDue(j, { now, wsBusy, segmentGapSec: gapOf(j, pace) }).due);
+    const gaps = new Map<string, number>();
+    for (const j of jobs) gaps.set(j.id, (await readPaceState(paceKeyOf(j))).gapSec);
+    const due = jobs.find((j) => isDue(j, { now, wsBusy, segmentGapSec: gaps.get(j.id) ?? 120 }).due);
     if (!due) {
       if (wsBusy && jobs.length > 0) console.log(`[x.bg] ${wsId} 让路:X 网页正忙(${getXHostBusy(host.wcId)})`);
       const first = jobs[0];
-      if (first) waitNoteByWs.set(wsId, isDue(first, { now, wsBusy, segmentGapSec: gapOf(first, pace) }).why);
+      if (first) waitNoteByWs.set(wsId, isDue(first, { now, wsBusy, segmentGapSec: gaps.get(first.id) ?? 120 }).why);
       continue;
     }
     console.log(`[x.bg] ${wsId} 开跑一段:@${due.handle} ${due.range}(${due.id})`);
@@ -275,9 +273,19 @@ export function bgRunnerHealth(): Record<string, unknown> {
 /** 真正跑一段 + 存回库 —— tickOnce 的默认 drive(生产用) */
 async function driveSegment(_wsId: string, wcId: number, job: BgJob): Promise<void> {
   const now = new Date();
-  const pace = await readPace();
+  const key = paceKeyOf(job);
+  const pace = await readPaceState(key);
   const deps = makeSegmentDeps(wcId, job, now);
-  const report = await runSegment(job, deps, pace.pagesPerSegment, now);
+  let report = await runSegment(job, deps, pace.pages, now);
+  /**
+   * ⭐ 这一段顺利 / 被限流 → 节奏自调;失败(没带鉴权头、对不上 …)不算节奏的事,不调。
+   * 已经最慢还被限流 → 举手:任务停下,原因写清楚。
+   */
+  if (report.job.status !== 'failed') {
+    const limited = /限流/.test(report.job.lastError ?? '');
+    const d = await recordPaceOutcome(key, limited ? 'limited' : 'ok', new Date());
+    if (d.giveUp) report = { ...report, job: { ...report.job, status: 'failed', lastError: d.giveUp } };
+  }
   // ⚠️ 重新读一遍再存?不:runSegment 返回的是基于传入 job 的新状态,直接存。
   // 但人可能在这期间暂停/取消了 —— 存前查一下当前状态,别把「已取消」覆盖回 running。
   const fresh = await readJob(job.id);

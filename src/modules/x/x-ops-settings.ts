@@ -30,18 +30,9 @@ export const SETTING_DEFS: readonly SettingDef[] = [
    */
   { key: 'collect.live_page_cap', label: '当场采每页最多翻', default: 30, min: 1, max: 200, unit: '页' },
   /**
-   * ⭐ 后台采集(半年/一年/全部)的节奏(2026-10-13,3b)。
-   * 一段翻几页 —— 太大则一段跑太久占你 webview,太小则进展慢。真机活跃号翻页快,默认保守 10。
+   * ⚠️ 后台采集的节奏(每段页数 / 两段间隔 / 名单两段间隔)2026-10-20 起不再是设置:
+   * 由节奏自调(x-pace.ts / x_pace)按限流情况定 —— 用户:「这些是配置项,没有必要用户做配置,而是AI执行这些任务时自我优化就可以了。」
    */
-  { key: 'bg.pages_per_segment', label: '后台每段翻几页', default: 10, min: 1, max: 100, unit: '页' },
-  /** 两段之间至少隔多久 —— 太密=连珠炮请求是风控信号(记忆 project-x-cursor-paging) */
-  { key: 'bg.segment_gap_sec', label: '后台两段最小间隔', default: 120, min: 10, max: 3600, unit: '秒' },
-  /**
-   * ⭐ 名单任务(人卡采他的 followers / following / verified followers,2026-10-19)两段最小间隔。
-   * Followers 接口约 50 次 / 15 分钟(记忆 project-x-user-list-coverage),每段 10 页 → 隔 5 分钟约 33 次 / 15 分钟,
-   * 给你自己的查回关留出余量。
-   */
-  { key: 'bg.list_segment_gap_sec', label: '后台采名单两段最小间隔', default: 300, min: 60, max: 3600, unit: '秒' },
   /**
    * ⭐ 关注(2026-10-16,蓝V互关 M4)—— 用户:「勾一批,程序按节奏慢慢关」;上限/间隔同取关,是人可调的变量。
    * 默认取保守(我的判断:X 对短时间大量关注比取关更敏感)。

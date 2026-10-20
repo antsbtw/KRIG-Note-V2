@@ -40,7 +40,7 @@ import { XPersonTimeline } from './XPersonTimeline';
 import { XPersonLists } from './XPersonLists';
 import { describeProgress, type BgJob } from './x-bg-job';
 import { useBgStatus } from './XBgStatus';
-import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
+import { localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
 import {
   DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup,
   type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort,
@@ -357,12 +357,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     });
     loadGate();
   }, [loadGate]);
-  const saveSetting = async (key: string, value: number): Promise<void> => {
-    const r = await xDataCall({ op: 'setOpsSetting', key, value });
-    if (r.status === 'failed') { setErr(r.reason); return; }
-    setSettings((s) => (s ? { ...s, [key]: value } : s));
-    loadGate();
-  };
+
 
   /**
    * ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续。
@@ -636,25 +631,15 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                 {catalog.map((c) => <option key={c.tag} value={c.tag}>{`${c.count} 人`}</option>)}
               </datalist>
             </div>
-            {settings && (
-              <div style={S.settingsBar}>
-                <span>取关:今日 {gate ? `${gate.todayCount}` : '…'}</span>
-                {SETTING_DEFS.map((d) => (
-                  <label key={d.key} style={S.check} title={`${d.min}–${d.max}${d.unit}`}>
-                    {d.label}
-                    <input
-                      type="number" min={d.min} max={d.max} defaultValue={settings[d.key]}
-                      style={{ ...S.input, flex: '0 0 64px' }}
-                      onBlur={(e) => {
-                        const v = Number(e.target.value);
-                        if (v !== settings[d.key]) void saveSetting(d.key, v);
-                      }}
-                    />
-                    {d.unit}
-                  </label>
-                ))}
-              </div>
-            )}
+            {/*
+              ⭐ 2026-10-20 用户:「这些是配置项,没有必要用户做配置,而是AI执行这些任务时自我优化就可以了。
+              根据限流出现的不同来调整这些参数。人参与进来,不是代表着这是一个石器时代的产品吗?」
+              → 设置输入框全部拿掉;采集节奏由 x_pace 按限流自调(任务 → 关系采集 底部只读显示)。
+            */}
+            <div style={S.settingsBar}>
+              <span>取关:今日 {gate ? `${gate.todayCount}` : '…'}</span>
+              <span style={{ opacity: 0.6 }}>· 采集节奏由 AI 按限流情况自己调</span>
+            </div>
             {unfollowPaused !== null && (
               <div style={S.error}>
                 ⏸ 取关已暂停:{unfollowPaused}(X 改版、弹验证或限流时连着硬点只会更糟)

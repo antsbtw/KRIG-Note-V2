@@ -21,7 +21,11 @@ vi.mock('@modules/x/x-account-repo', () => ({ accountForWrite: vi.fn(async () =>
 vi.mock('@modules/x/x-user-repo', () => ({
   saveUsers: vi.fn(async (_u: unknown, ctx: { listSource: string }) => { saveUsersCalls.push({ ctx }); return { inserted: 0, updated: 0, failed: [] }; }),
   existingUserIds: vi.fn(async (ids: string[]) => ids),
+  writeRelations: vi.fn(async () => ({ report: { written: 0, changed: 0, failed: 0 }, before: new Map() })),
 }));
+/** 库:采集器开头查「库里已有的人」(增量追上判据)—— 测试里给 knownIds */
+let knownIds: string[] = [];
+vi.mock('@storage/surreal/client', () => ({ getXDB: () => ({ query: async () => [knownIds] }) }));
 vi.mock('@modules/x/x-list-member-repo', () => ({
   writeListMembers: vi.fn(async (owner: string, list: string, ids: string[]) => { memberCalls.push({ owner, list, ids }); return ids.length; }),
 }));
@@ -124,5 +128,50 @@ describe('⭐⭐ 名单采集器(行为测试:真 runCollect + 真机形状的�
     const r = await collectPersonListSegment({ wcId: 7, page: 'x.followers', list: 'followers', handle: 'owner', ownerRestId: 'OWNER', pageCap: 10 });
     expect(r.exhausted).toBe(true);
     expect(memberCalls.flatMap((c) => c.ids)).toEqual(expect.arrayContaining(['1', '2']));
+  });
+});
+
+describe('⭐⭐ 关系采集策略(2026-10-20)', () => {
+  beforeEach(() => { saveUsersCalls.length = 0; memberCalls.length = 0; n = 0; knownIds = []; });
+  const ids = (from: number, k: number) => Array.from({ length: k }, (_, i) => `${from + i}`);
+  const plan = (mode: 'full' | 'incremental', xCount?: number) => ({ mode, xCount, dbCount: 100, why: '', estPages: 3 });
+
+  it('增量:连续 30 个库里已有的 = 追上,这个名单做完,不翻到本段上限', async () => {
+    knownIds = ids(1000, 200);
+    pages = [page([...ids(1, 10), ...ids(1000, 40)], 'c1'), page(ids(1040, 50), 'c2'), page(ids(1090, 50), 'c3')];
+    const r = await collectPersonListSegment({ wcId: 7, page: 'x.followers', list: 'followers', handle: 'owner', ownerRestId: 'OWNER', pageCap: 10, plan: plan('incremental') });
+    expect(r.caughtUp).toBe(true);
+    expect(r.stopReason).toMatch(/追上了/);
+    expect(r.listStats).toMatchObject({ fresh: 10 });
+    expect(r.pages).toBeLessThanOrEqual(2);
+  });
+
+  it('撞限流(翻页请求回 429):不判失败、保住断点、写明会放慢', async () => {
+    pages = [page(ids(1, 5), 'c1')];
+    const origRun = fakePorts.runScript;
+    fakePorts.runScript = (async () => ({ ok: false, status: 429, why: 'Rate limit exceeded' })) as never;
+    try {
+      const r = await collectPersonListSegment({ wcId: 7, page: 'x.followers', list: 'followers', handle: 'owner', ownerRestId: 'OWNER', pageCap: 10, resumeCursor: 'OLD', plan: plan('full', 5000) });
+      expect(r.stopReason).toMatch(/429/);
+      expect(r.failure).toBeUndefined();
+      expect(r.note).toMatch(/限流/);
+      expect(r.nextCursor).toBeDefined();
+      expect(r.exhausted).toBe(false);
+    } finally {
+      fakePorts.runScript = origRun;
+    }
+  });
+
+  it('我自己的号:listSource 用名单名(写「他和我」的关系),不记 x_list_member', async () => {
+    pages = [page(ids(1, 3), 'c1', true)];
+    const r = await collectPersonListSegment({ wcId: 7, page: 'x.followers', list: 'followers', handle: 'me', ownerRestId: 'ME', pageCap: 10, self: true, plan: plan('incremental') });
+    expect(r.failure).toBeUndefined();
+    expect(saveUsersCalls.every((c) => c.ctx.listSource === 'followers')).toBe(true);
+    expect(memberCalls).toHaveLength(0);
+  });
+
+  it('任务说采我自己,可 X 网页登录的是别的号 → 停下说清楚(不把别人的名单写成我的关系)', async () => {
+    const r = await collectPersonListSegment({ wcId: 7, page: 'x.followers', list: 'followers', handle: 'x', ownerRestId: 'SOMEONE', pageCap: 10, self: true });
+    expect(r.failure).toMatch(/登录的是/);
   });
 });

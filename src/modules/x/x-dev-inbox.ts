@@ -18,6 +18,7 @@ import { manualSummary, pageProblem } from './x-page-ledger';
 import { X_MANUAL } from './x-manual';
 import { setPageTap } from './x-page-tap';
 import { checkFollowBack } from './x-follow-check';
+import { startRelationTask } from './x-relation-task';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
 import { X_USER_LIST_PAGES } from './x-pages';
@@ -43,11 +44,17 @@ type PersonCmd = Sampling & { op: 'personTab'; wsId: string; page: 'x.profile' |
 type UserListCmd = Sampling & { op: 'userList'; wsId: string; page: string; handle: string; pageCap: number };
 /** 查回关(与任务页「现在查」同一个函数,trigger 记 manual)—— 2026-10-19 第 4 阶段 */
 type FollowCheckCmd = Sampling & { op: 'followCheck'; wsId: string };
-type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd;
+/** 关系采集(与任务页「读现状并开始」同一个函数)—— 2026-10-20 */
+type RelationCmd = Sampling & { op: 'relationStart'; wsId: string; restId?: string; handle?: string };
+type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
+  if ((o as { op?: string })?.op === 'relationStart') {
+    if (typeof o.wsId !== 'string') return 'relationStart 要 wsId';
+    return o as unknown as RelationCmd;
+  }
   if ((o as { op?: string })?.op === 'followCheck') {
     if (typeof o.wsId !== 'string') return 'followCheck 要 wsId';
     return o as unknown as FollowCheckCmd;
@@ -148,6 +155,9 @@ async function tick(): Promise<void> {
         if (cmd.op === 'personTab') {
           console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
           out = await runPersonTab(cmd);
+        } else if (cmd.op === 'relationStart') {
+          console.log(`[x.dev] 执行 ${next}:relationStart ${cmd.wsId} ${cmd.handle ?? '(我)'}`);
+          out = await startRelationTask(cmd.wsId, cmd.restId && cmd.handle ? { restId: cmd.restId, handle: cmd.handle } : undefined);
         } else if (cmd.op === 'followCheck') {
           console.log(`[x.dev] 执行 ${next}:followCheck ${cmd.wsId}`);
           out = await checkFollowBack(cmd.wsId, 'manual');

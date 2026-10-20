@@ -1766,6 +1766,53 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.35 —— 关系采集任务 + 节奏自调(2026-10-20)
+ *
+ * 用户 10-20:「在任务中添加一个"关系采集"这样的完整任务吧…1、先读取用户的bio,了解现状,followers/following/verified followers;
+ *  2、比对库中的差距;制定采集策略,然后自动采集,并显示进度。」
+ * 「这些是配置项,没有必要用户做配置,而是AI执行这些任务时自我优化就可以了。根据限流出现的不同来调整这些参数。」
+ * ① x_bg_job:target_self(采的是不是我自己的号)/ plan_json(读到的现状 + 每个名单的策略)/ stats_json(每个名单采了多少)
+ *    —— 存 JSON 字符串:SCHEMAFULL 下 object FLEXIBLE 不往下传(记忆 project-surreal-flexible-parse-error)
+ * ② x_pace:每种接口一行当前节奏(段间隔 / 每段页数 / 连续顺利几段);x_pace_event:每次调整只追加一条(为什么、从多少到多少)
+ */
+const X_SCHEMA_1_2_35 = `
+DEFINE FIELD IF NOT EXISTS target_self ON x_bg_job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS plan_json   ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS stats_json  ON x_bg_job TYPE option<string>;
+
+DEFINE TABLE IF NOT EXISTS x_pace SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS gap_sec    ON x_pace TYPE int;
+DEFINE FIELD IF NOT EXISTS pages      ON x_pace TYPE int;
+DEFINE FIELD IF NOT EXISTS ok_streak  ON x_pace TYPE int;
+DEFINE FIELD IF NOT EXISTS limited_at ON x_pace TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS updated_at ON x_pace TYPE datetime;
+
+DEFINE TABLE IF NOT EXISTS x_pace_event SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS pace_key ON x_pace_event TYPE string;
+DEFINE FIELD IF NOT EXISTS at       ON x_pace_event TYPE datetime;
+DEFINE FIELD IF NOT EXISTS kind     ON x_pace_event TYPE string ASSERT $value INSIDE ['slower', 'faster'];
+DEFINE FIELD IF NOT EXISTS from_gap ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS to_gap   ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS from_pages ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS to_pages ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS why      ON x_pace_event TYPE string;
+DEFINE INDEX IF NOT EXISTS idx_pace_event_at ON x_pace_event FIELDS pace_key, at;
+`;
+
+export async function x_migration_1_2_35(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_35);
+  type Info = { fields?: Record<string, string> };
+  const [job, pace] = await db.query<[Info, Info]>('INFO FOR TABLE x_bg_job; INFO FOR TABLE x_pace;');
+  if (!('plan_json' in (job?.fields ?? {}))) throw new Error('[x-schema 1.2.35] x_bg_job.plan_json 没加上');
+  if (!('gap_sec' in (pace?.fields ?? {}))) throw new Error('[x-schema 1.2.35] x_pace 没建起来');
+  console.log('[x-schema 1.2.35] 关系采集任务字段 + 节奏自调 x_pace / x_pace_event');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.35', appliedAt = $now, description = '关系采集任务 + 节奏自调'`,
+    { rid: new RecordId('schema_version', '1.2.35'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.34 —— 人卡采他的三个名单(2026-10-19)
  *
  * 用户 10-19:「在人卡中增加自动采集follower/following/verified followers这三个自动采集的方法吧。」

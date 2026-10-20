@@ -848,7 +848,8 @@ async function pageUntilDone(
         const sentKeys = Object.keys(seed.requestHeaders ?? {});
         const sawAuth = sentKeys.some((k) => k.toLowerCase() === 'authorization');
         const sawCsrf = sentKeys.some((k) => k.toLowerCase() === 'x-csrf-token');
-        stopReason = `第 ${round} 轮请求失败：${r.why ?? `HTTP ${r.status ?? '?'}`}`
+        /** ⭐ 状态码总要写进去(2026-10-20):节奏自调靠「429」认限流,不能指望 why 的文案里碰巧有 */
+        stopReason = `第 ${round} 轮请求失败(HTTP ${r.status ?? '?'})：${r.why ?? '(没给原因)'}`
           + `（种子带了 ${sentKeys.length} 个请求头`
           + `，authorization=${sawAuth ? '有' : '**无**'}`
           + `，x-csrf-token=${sawCsrf ? '有' : '**无**'}）`;

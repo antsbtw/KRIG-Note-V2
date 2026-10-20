@@ -14,6 +14,7 @@
  */
 
 import type { TimelineRange } from './x-person-timeline';
+import type { RelPlan, RelTabStats } from './x-relation-plan';
 
 /** 后台任务只接这三档(month 当场采,不进后台) */
 export type BgRange = Extract<TimelineRange, 'halfYear' | 'year' | 'all'>;
@@ -68,6 +69,10 @@ export type BgJob = {
   readonly followers?: BgTabProgress;
   readonly following?: BgTabProgress;
   readonly verifiedFollowers?: BgTabProgress;
+  /** ⭐ 关系采集(2026-10-20):采的是不是我自己的号 / 读到的现状 + 每个名单的策略 / 每个名单采了多少 */
+  readonly self?: boolean;
+  readonly plan?: RelPlan;
+  readonly stats?: Partial<Record<BgListTab, RelTabStats>>;
   readonly lastError?: string;
   readonly totalPages: number;
   readonly totalSaved: number;
@@ -160,6 +165,10 @@ export type SegmentOutcome = {
   readonly oldestAt?: string;
   /** 这一段失败了吗(403/限流扛不住…),失败就停整个任务 */
   readonly failed?: string;
+  /** 名单任务:这一段看到几个人 / 其中新的 / 对账标走了几个 */
+  readonly listStats?: { readonly seen: number; readonly fresh: number; readonly reconciled?: number; readonly note?: string };
+  /** 歇着的原因(限流放慢了节奏)—— 显示用,不是失败 */
+  readonly note?: string;
 };
 
 export function mergeSegment(job: BgJob, out: SegmentOutcome, now: Date): BgJob {
@@ -172,8 +181,22 @@ export function mergeSegment(job: BgJob, out: SegmentOutcome, now: Date): BgJob 
     oldestAt: out.oldestAt ?? tabProgress(job, out.tab).oldestAt,
     done: out.tabDone,
   };
+  const ls = out.listStats;
+  const prevStats = job.stats?.[out.tab as BgListTab];
+  const stats = ls === undefined ? job.stats : {
+    ...job.stats,
+    [out.tab]: {
+      seen: (prevStats?.seen ?? 0) + ls.seen,
+      fresh: (prevStats?.fresh ?? 0) + ls.fresh,
+      pages: (prevStats?.pages ?? 0) + out.pages,
+      reconciled: ls.reconciled ?? prevStats?.reconciled,
+      note: ls.note ?? prevStats?.note,
+    },
+  };
   const next: BgJob = {
     ...job,
+    stats,
+    lastError: out.note,
     [out.tab]: prog,
     totalPages: job.totalPages + out.pages,
     totalSaved: job.totalSaved + out.saved,

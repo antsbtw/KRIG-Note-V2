@@ -36,11 +36,14 @@ export function XPersonLists({ wsId, restId, handle, wcOpen, onOpenInX }: {
     return () => clearInterval(t);
   }, [load]);
 
+  /** ⭐ 2026-10-20 改成走「关系采集」任务:读他主页人数 → 比对库 → 定策略 → 自动采(进度在「任务 → 关系采集」) */
   const start = async (): Promise<void> => {
-    const r = await xDataCall({ op: 'bgCreateJob', restId, handle, wsId, range: 'all', kind: 'lists' });
+    setMsg('读他的主页现状…');
+    const r = await xDataCall({ op: 'relationStart', wsId, restId, handle });
     if (r.status === 'failed') { setMsg(r.reason); return; }
-    const v = r.value as { created: boolean };
-    setMsg(v.created ? '已建后台任务:三个名单轮着一段段翻到底(进度看上面「后台采集」)' : '已经有一个采他名单的任务在跑 / 排队,没再建');
+    const v = r.value as { created: boolean; plan: { tabs: Record<string, { mode: string; why: string; xCount?: number; dbCount: number }> } };
+    const line = Object.entries(v.plan.tabs).map(([k, t]) => `${LIST_LABEL[k]}:${t.why}`).join(';');
+    setMsg(`${v.created ? '已开始' : '已经在采'} —— ${line}(进度看「任务 → 关系采集」)`);
   };
 
   const total = data ? data.counts.followers + data.counts.following + data.counts.verifiedFollowers : 0;
@@ -48,8 +51,8 @@ export function XPersonLists({ wsId, restId, handle, wcOpen, onOpenInX }: {
     <div style={{ fontSize: 12 }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button type="button" disabled={!wcOpen} onClick={() => void start()}
-          title={wcOpen ? '后台慢慢采全他的关注者 / 他关注的 / 蓝V关注者(每段 10 页,段间歇 5 分钟,可在设置里改)' : 'X 网页没开'}>
-          采他的名单(后台,采全)
+          title={wcOpen ? '读他主页的人数 → 和库里比 → 定策略 → 自动采(节奏 AI 自调)' : 'X 网页没开'}>
+          关系采集(他的名单)
         </button>
         {data && (
           <span style={{ opacity: 0.8 }}>

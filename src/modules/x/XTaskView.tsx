@@ -11,14 +11,18 @@ import type { ViewComponentProps } from '@slot/view-type-registry/view-definitio
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { XAccountBadge } from './XAccountBadge';
 import { BlueMutualTask } from './XTaskBlueMutual';
+import { RelationTask } from './XTaskRelation';
 
 /** ⚠️ 任务清单 —— 标签与 id 同在一处 */
-const TASKS: ReadonlyArray<{ id: 'blue-mutual'; label: string }> = [
+type TaskId = 'blue-mutual' | 'relation';
+const TASKS: ReadonlyArray<{ id: TaskId; label: string }> = [
   { id: 'blue-mutual', label: '蓝V互关' },
+  /** ⭐ 2026-10-20 用户:「在任务中添加一个"关系采集"这样的完整任务吧」 */
+  { id: 'relation', label: '关系采集' },
 ];
 
 export function XTaskView({ workspaceId, slot }: ViewComponentProps): ReactElement {
-  const [task, setTask] = useState<'blue-mutual'>('blue-mutual');
+  const [task, setTask] = useState<TaskId>('blue-mutual');
   /** 号变了重挂任务内容(关系按号算) */
   const [accountKey, setAccountKey] = useState('none');
   const onAccount = useCallback((a: { restId?: string } | null) => setAccountKey(a?.restId ?? 'none'), []);
@@ -51,6 +55,7 @@ export function XTaskView({ workspaceId, slot }: ViewComponentProps): ReactEleme
         </div>
         <div style={S.body}>
           {task === 'blue-mutual' && <BlueMutualTask key={accountKey} wsId={workspaceId} />}
+          {task === 'relation' && <RelationTask key={accountKey} wsId={workspaceId} />}
         </div>
       </div>
     </div>

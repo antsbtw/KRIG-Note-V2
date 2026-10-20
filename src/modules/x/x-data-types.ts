@@ -220,6 +220,13 @@ export type XDataInvoke =
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
   /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
   | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }
+  /**
+   * ⭐ 关系采集任务(2026-10-20):读现状 → 比对库 → 定策略 → 建任务开跑;不给 restId = 我自己
+   * relationJobs 这个号的关系采集任务;paceStatus 节奏(AI 自调,只读)
+   */
+  | { readonly op: 'relationStart'; readonly wsId: string; readonly restId?: string; readonly handle?: string }
+  | { readonly op: 'relationJobs'; readonly wsId: string }
+  | { readonly op: 'paceStatus' }
   /** ⭐ 人卡「他的名单」:三个名单各多少人 + 其中的求关候选(2026-10-19) */
   | { readonly op: 'personLists'; readonly wsId: string; readonly restId: string; readonly limit: number }
   /** 列任务;给 restId 只列这个人的,给 wsId 只列这个号的 */

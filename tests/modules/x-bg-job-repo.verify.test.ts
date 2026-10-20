@@ -13,12 +13,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Surreal } from 'surrealdb';
 import { __setXDBForTest } from '@storage/surreal/client';
-import { x_migration_1_2_26, x_migration_1_2_34 } from '@storage/surreal/x-schema';
+import { x_migration_1_2_26, x_migration_1_2_34, x_migration_1_2_35 } from '@storage/surreal/x-schema';
 import {
   createJob, readJob, listJobs, activeJobsForWs, wsWithActiveJobs,
   saveJob, setJobStatus, deleteJob,
 } from '@modules/x/x-bg-job-repo';
 import { mergeSegment, type SegmentOutcome } from '@modules/x/x-bg-job';
+import { readPace, recordPaceOutcome, readPaceViews } from '@modules/x/x-pace-repo';
+import { planRelation } from '@modules/x/x-relation-plan';
 
 function findBinary(): string | null {
   for (const c of ['/opt/homebrew/bin/surreal', '/usr/local/bin/surreal']) {
@@ -58,6 +60,8 @@ describe.skipIf(!BINARY)('x_bg_job repo —— 真 SurrealDB 验证', () => {
     await x_migration_1_2_26(db);
     /** 1.2.34(2026-10-19)加了名单任务的字段 —— createJob / saveJob 会写它们,结构固定的表没定义就拒收 */
     await x_migration_1_2_34(db);
+    /** 1.2.35(2026-10-20):节奏自调 x_pace —— runner 按它定段间隔 / 页数;任务表 plan_json / stats_json */
+    await x_migration_1_2_35(db);
     __setXDBForTest(db);
   }, 40000);
 
@@ -105,6 +109,29 @@ describe.skipIf(!BINARY)('x_bg_job repo —— 真 SurrealDB 验证', () => {
     expect(back!.followers?.cursor).toBe('C9');
     expect(back!.following?.done).toBe(true);
     expect(back!.verifiedFollowers?.done).toBe(false);
+  });
+
+  it('⭐⭐ 关系采集(2026-10-20):策略存进任务、跳过的名单一建就到底;各名单统计存得进读得回', async () => {
+    const plan = planRelation({ target: { restId: '888', handle: 'me' }, self: true, xCounts: { followers: 6400, following: 0 }, db: { followers: 6000, following: 3, verifiedFollowers: 10 }, now: new Date() });
+    const { id } = await createJob({ restId: '888', handle: 'me', wsId: 'ws-1', range: 'all', kind: 'lists', plan });
+    const j = await readJob(id);
+    expect(j!.self).toBe(true);
+    expect(j!.plan?.tabs.followers.mode).toBe('incremental');
+    expect(j!.following?.done, 'X 显示 0 人的名单应该一建就跳过').toBe(true);
+    await saveJob({ ...j!, stats: { followers: { seen: 120, fresh: 7, pages: 3 } } });
+    expect((await readJob(id))!.stats?.followers).toEqual({ seen: 120, fresh: 7, pages: 3 });
+  });
+
+  it('⭐⭐ 节奏自调落库:撞限流放慢 + 留一条调整记录;没记过的接口给默认', async () => {
+    expect(await readPace('list:following')).toMatchObject({ gapSec: 300, pages: 10 });
+    const d = await recordPaceOutcome('list:followers', 'limited', new Date('2026-10-20T12:00:00Z'));
+    expect(d.next).toMatchObject({ gapSec: 600, pages: 5 });
+    const back = await readPace('list:followers');
+    expect(back).toMatchObject({ gapSec: 600, pages: 5, okStreak: 0 });
+    expect(Date.parse(back.limitedAt ?? '')).toBe(Date.parse('2026-10-20T12:00:00Z'));
+    const views = await readPaceViews();
+    const f = views.find((v) => v.key === 'list:followers');
+    expect(f?.lastEvent).toMatchObject({ kind: 'slower', from: '每 300s 10 页', to: '每 600s 5 页' });
   });
 
   it('⭐ 不同范围不算重复', async () => {

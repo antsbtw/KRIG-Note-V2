@@ -36,6 +36,8 @@ import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-fol
 import { checkFollowBack, followCheckRunning } from './x-follow-check';
 import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
 import { readPersonLists } from './x-list-member-repo';
+import { listRelationJobs, startRelationTask } from './x-relation-task';
+import { readPaceViews } from './x-pace-repo';
 import { prepareAsk } from './x-ask-prepare';
 import { runAsk } from './x-ask-run';
 import { readFollowGate } from './x-ops-actions-repo';
@@ -401,6 +403,24 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
             },
           };
         }
+
+        case 'relationStart': {
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] relationStart 缺 wsId');
+          if (p.restId !== undefined && (!/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '')) {
+            return failed('[x.data] relationStart 给了 restId 就要数字 id + handle');
+          }
+          const r = await startRelationTask(p.wsId, p.restId !== undefined ? { restId: p.restId, handle: p.handle as string } : undefined);
+          traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-relation-start' : 'x-relation-start-refused', pageId: 'x-data',
+            detail: r.ok ? { jobId: r.jobId, created: r.created, target: r.plan.target.handle, self: r.plan.self } : { why: r.why } });
+          return r.ok ? { status: 'ok', value: r } : failed(r.why);
+        }
+
+        case 'relationJobs':
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] relationJobs 缺 wsId');
+          return { status: 'ok', value: await listRelationJobs(p.wsId) };
+
+        case 'paceStatus':
+          return { status: 'ok', value: await readPaceViews() };
 
         case 'personLists': {
           if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] personLists 要数字 id');
