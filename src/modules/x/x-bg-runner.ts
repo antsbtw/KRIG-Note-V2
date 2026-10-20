@@ -113,11 +113,22 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
           return { pages: 0, saved: 0, exhausted: false, stopReason: why, failure: why } satisfies RunOneResult;
         }
         const list = input.tab as BgListTab;
-        return collectPersonListSegment({
+        const once = (): Promise<RunOneResult> => collectPersonListSegment({
           wcId, page: input.page, list, handle: input.handle, ownerRestId: job.restId,
           pageCap: input.pageCap, resumeCursor: input.resumeCursor, onProgress: progress,
           plan: job.plan?.tabs[list], self: job.self === true, startedAt: job.createdAt,
         });
+        /**
+         * ⭐⭐ 与推文任务同一条规矩:第一轮翻页就没带鉴权头 → 重载这一页再试一次(判据 worthReloadRetry 同一份)。
+         * 2026-10-20 真机:关注者全量翻到第 94 页撞上它,名单任务漏了这一步 → 一次就判失败。
+         */
+        const first = await once();
+        if (first.failure === undefined || !worthReloadRetry(first.stopReason, first.pages)) return first;
+        progress(`第一轮翻页没带鉴权头 —— 重载这一页再试一次(${first.stopReason})`);
+        const second = await once();
+        if (second.failure !== undefined) return { ...second, failure: `[重载后第 2 次仍失败] ${second.failure}` };
+        progress('重载后第 2 次成功');
+        return { ...second, saved: second.saved + first.saved };
       }
       const start = rangeStart(job.range, now);
       let pages = 0;
