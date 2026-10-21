@@ -13,6 +13,9 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
+import { getXHostState } from './x-host-registry';
+import { X_PAGE_NAME } from './x-pages';
+import { xPageBusy } from './x-unfollow-run';
 import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
 import type { AskRunResult, StepState } from './x-ask-run';
@@ -46,6 +49,8 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   /** ⭐ Gemma 原稿 / 正在草拟 / 草拟没成的原因 */
   const [aiText, setAiText] = useState<string | undefined>(undefined);
   const [drafting, setDrafting] = useState(false);
+  /** 点帖子没跳过去的原因 */
+  const [viewNote, setViewNote] = useState<string | null>(null);
   const [draftNote, setDraftNote] = useState<string | null>(null);
   const draftSeq = useRef(0);
   const who = queue[i];
@@ -53,7 +58,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   useEffect(() => {
     if (!who) return;
     let alive = true;
-    setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null);
+    setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null); setViewNote(null);
     void xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle }).then((r) => {
       if (!alive) return;
       setLoading(false);
@@ -87,6 +92,16 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
     if (!sel || !prep?.ok) return;
     void requestDraft(sel.text, false);
   }, [sel, prep, requestDraft]);
+
+  /** 左边 X 网页跳到这条原帖;X 网页忙(采集 / 求关在动手)就不跳,说出来 */
+  const showInX = async (tweetId: string): Promise<void> => {
+    const wcId = getXHostState(wsId)?.wcId;
+    if (wcId === undefined) { setViewNote('X 网页没开'); return; }
+    const busy = await xPageBusy(wcId);
+    if (busy !== null) { setViewNote(`${busy},没跳转(跳走会打断)`); return; }
+    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.status, params: { tweetId } });
+    setViewNote(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
+  };
 
   const next = (outcome: string): void => {
     const d = [...done, { who: who!, outcome }];
@@ -148,12 +163,16 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
       {plan && plan.kind !== 'skip' && sel && (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ opacity: 0.75 }}>{plan.why}</div>
-          <div style={{ padding: 8, background: 'var(--accent-bg, rgba(45,74,107,0.35))', borderRadius: 4 }}>
+          {/* ⭐ 点帖子 → 左边 X 网页打开这条原帖(用户 10-21:「点击截图中的帖子时,左边展示原帖在哪里,什么内容。这样我会更好的判断回复方法的。」) */}
+          <div style={{ padding: 8, background: 'var(--accent-bg, rgba(45,74,107,0.35))', borderRadius: 4, cursor: acting ? 'default' : 'pointer' }}
+            onClick={() => { if (!acting) void showInX(sel.id); }} title="在左边 X 网页打开这条原帖(看上下文、图片、别人的回复)">
             <div style={{ opacity: 0.6 }}>
               用这条求关{sel.related ? '(和互关相关)' : '(他最新的原创)'}{sel.createdAt ? ` · ${new Date(sel.createdAt).toLocaleString()}` : ''}
+              {' · '}<span style={{ textDecoration: 'underline' }}>点一下在左边看原帖</span>
             </div>
             <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{sel.text}</div>
           </div>
+          {viewNote && <div style={{ color: '#fbbf24' }}>{viewNote}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={cycle}>换一条({pool.length} 条可选)</button>
             <button type="button" disabled={acting} onClick={() => next('跳过(人)')}>跳过此人</button>
