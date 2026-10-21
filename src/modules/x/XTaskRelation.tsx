@@ -70,6 +70,7 @@ export function RelationTask({ wsId }: { wsId: string }): ReactElement {
           <span style={{ opacity: 0.7, fontSize: 12 }}>
             {j.status === 'done' ? '✅ 完成' : j.status === 'failed' ? '❌ 停了' : j.status === 'paused' ? '⏸ 暂停' : live ? '🟢 正在采' : '⏳ 等下一段'}
             {j.plan ? ` · 读现状于 ${new Date(j.plan.readAt).toLocaleString()}` : ''}
+            {j.plan?.trigger === 'auto' ? ' · 每天自动' : ''}
           </span>
           <span style={{ flex: 1 }} />
           {(j.status === 'queued' || j.status === 'running') && <button type="button" style={{ fontSize: 11 }} onClick={() => void act('bgPauseJob', j.id)}>暂停</button>}
@@ -128,6 +129,7 @@ export function RelationTask({ wsId }: { wsId: string }): ReactElement {
       <h3 style={{ margin: '0 0 6px', fontSize: 15 }}>关系采集</h3>
       <div style={{ fontSize: 12, opacity: 0.75 }}>
         读你主页上的关注者 / 关注数 → 和库里比 → 每个名单自己定策略(没采过就采全;差一些就从最新的增量采到追上;库里比 X 多就全量对一遍,把走了的标出来)→ 自动采。
+        你自己的号每天会自动跑一次(你在 X 上直接关注 / 取关的人,第二天就同步进来,求关候选跟着更新)。
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
         <button type="button" disabled={starting || activeMine !== undefined} onClick={() => void start()}

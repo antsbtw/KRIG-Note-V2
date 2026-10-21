@@ -29,6 +29,8 @@ export type RelPlan = {
   readonly target: { readonly restId: string; readonly handle: string };
   /** 采的是不是我自己的号(我的名单 → 写「他和我」的关系;别人的 → 记「谁在谁的名单里」) */
   readonly self: boolean;
+  /** 谁发起的:auto = 每天自动(2026-10-21);没有 = 人点的 */
+  readonly trigger?: 'auto' | 'manual';
   readonly tabs: Readonly<Record<BgListTab, RelTabPlan>>;
 };
 export type RelTabStats = {
@@ -74,11 +76,13 @@ export function planRelation(input: {
   readonly xCounts: { readonly followers?: number; readonly following?: number };
   readonly db: Readonly<Record<BgListTab, number>>;
   readonly now: Date;
+  readonly trigger?: 'auto' | 'manual';
 }): RelPlan {
   return {
     readAt: input.now.toISOString(),
     target: input.target,
     self: input.self,
+    trigger: input.trigger,
     tabs: {
       followers: planTab(input.xCounts.followers, input.db.followers, input.self),
       following: planTab(input.xCounts.following, input.db.following, input.self),
@@ -114,4 +118,18 @@ export function canReconcile(tab: RelTabPlan, seen: number, exhausted: boolean):
   if (tab.xCount === undefined) return { ok: false, why: 'X 不给总数,不知道采全没有,不对账' };
   if (seen < tab.xCount * 0.98) return { ok: false, why: `只采到 ${seen} / ${tab.xCount},不到 98%,不标走了的(免得误标)` };
   return { ok: true, why: `采到 ${seen} / ${tab.xCount},翻到底了` };
+}
+
+const DAY_MS = 24 * 3600_000;
+
+/**
+ * ⭐ 我自己的关系采集该不该每天自动跑一次(2026-10-21,用户:「按照顺序做吧」—— 第 1 件:每天顺带翻「我的关注」,
+ * 自动清掉候选里在 X 上直接关注过的人)。
+ * · 有在跑 / 排队的 → 不跑;人暂停的 → 不自动重开(尊重人的决定)
+ * · 最近一个(不管成败)建于 24 小时内 → 不跑
+ */
+export function relationDailyDue(jobs: ReadonlyArray<{ readonly status: string; readonly createdAt: string }>, now: number): boolean {
+  if (jobs.some((j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused')) return false;
+  const latest = Math.max(0, ...jobs.map((j) => Date.parse(j.createdAt)).filter((t) => !Number.isNaN(t)));
+  return now - latest >= DAY_MS;
 }

@@ -50,7 +50,7 @@ export type RelationStart =
 /**
  * @param target 不给 = 我自己(这个 ws 登录的号)
  */
-export async function startRelationTask(wsId: string, target?: { readonly restId: string; readonly handle: string }): Promise<RelationStart> {
+export async function startRelationTask(wsId: string, target?: { readonly restId: string; readonly handle: string }, trigger: 'auto' | 'manual' = 'manual'): Promise<RelationStart> {
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: `${wsId} 的 X 网页没开` };
   const busy = getXHostBusy(wcId);
@@ -87,7 +87,7 @@ export async function startRelationTask(wsId: string, target?: { readonly restId
   }
 
   const plan = planRelation({
-    target: who, self, xCounts: { followers, following },
+    target: who, self, trigger, xCounts: { followers, following },
     db: await dbCounts(account.restId, who.restId, self), now: new Date(),
   });
   const r = await createJob({ restId: who.restId, handle: who.handle, wsId, range: 'all', kind: 'lists', plan });

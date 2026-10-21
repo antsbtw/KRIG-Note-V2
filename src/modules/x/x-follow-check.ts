@@ -17,14 +17,13 @@
 import { webviewPorts } from './x-collect-ports';
 import { pageProblem } from './x-page-ledger';
 import { X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, getXHostState, listXHostStates, setXHostBusy } from './x-host-registry';
+import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
 import { bgRunningOn } from './x-bg-runner';
-import { accountForWrite, readWsAccount } from './x-account-repo';
+import { accountForWrite } from './x-account-repo';
 import { readSettings } from './x-ops-actions-repo';
 import { existingUserIds, saveUsers } from './x-user-repo';
-import { followCheckDue } from './x-follow-back';
 import { scanFollowersUntilCaughtUp } from './x-follow-scan';
-import { insertFollowCheck, readAskStatuses, readKnownFollowers, readLastFollowCheck } from './x-follow-check-repo';
+import { insertFollowCheck, readAskStatuses, readKnownFollowers } from './x-follow-check-repo';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 
 const BUSY = '任务:查回关';
@@ -110,30 +109,4 @@ export async function checkFollowBack(wsId: string, trigger: 'auto' | 'manual'):
   }
 }
 
-/* ───────────────────────── 每天自动一次 ───────────────────────── */
-
-const TICK_MS = 10 * 60_000;
-let timer: NodeJS.Timeout | null = null;
-
-async function tick(): Promise<void> {
-  if (running !== null) return;
-  for (const [wsId] of listXHostStates()) {
-    const acc = await readWsAccount(wsId);
-    if (!acc?.restId) continue;
-    if (!followCheckDue(await readLastFollowCheck(acc.restId), Date.now())) continue;
-    const r = await checkFollowBack(wsId, 'auto');
-    if (!r.ran) console.log(`[x.follow-check] ${wsId} 到点了但没查:${r.why}(${TICK_MS / 60_000} 分钟后再看)`);
-    return;
-  }
-}
-
-/** ⚠️ 常驻 timer:unref + before-quit 必须调 stopFollowCheckDaily(记忆 project-graceful-shutdown) */
-export function startFollowCheckDaily(): void {
-  if (timer) return;
-  timer = setInterval(() => { void tick().catch((e) => console.error('[x.follow-check] 定时检查出错:', e)); }, TICK_MS);
-  timer.unref?.();
-}
-
-export function stopFollowCheckDaily(): void {
-  if (timer) { clearInterval(timer); timer = null; }
-}
+/* 每天自动一次的调度在 x-daily-upkeep.ts(先查回关,再关系采集)—— 2026-10-21 */
