@@ -128,6 +128,18 @@ describe.skipIf(!BINARY)('关系按号存 —— 真 SurrealDB 验证', () => {
     expect(sa.people.followsMe).not.toBe(sb.people.followsMe);
   });
 
+  it('⭐⭐ 我自己不在「人 + 我的关系」里(2026-10-21:自己被当成求关候选、落进「关系不明」)', async () => {
+    /** 号 1000 自己也被采进了人表(比如出现在别人的名单 / 推文里) */
+    await saveUsers([user('1000', { following: undefined, followedBy: undefined })], { listSource: 'followers' }, B);
+    const all = await queryPeople('1000', { ...DEFAULT_PEOPLE_FILTER, group: 'all', scope: 'in' }, 500, 0);
+    expect(all.rows.map((r) => r.rest_id)).not.toContain('1000');
+    const unk = await queryPeople('1000', { ...DEFAULT_PEOPLE_FILTER, group: 'unknown', scope: 'in' }, 500, 0);
+    expect(unk.rows.map((r) => r.rest_id)).not.toContain('1000');
+    /** 换个号看,1000 只是普通的人,照样在 */
+    const other = await queryPeople('2000', { ...DEFAULT_PEOPLE_FILTER, group: 'all', scope: 'in' }, 500, 0);
+    expect(other.rows.map((r) => r.rest_id)).toContain('1000');
+  });
+
   it('⭐⭐ 主页核对:关系按号写,并对这个号报出关系变化;认不出号时不报关系变化', async () => {
     await saveUsers([user('7', { following: true, followedBy: false })], { listSource: 'following' }, A);
     const d = await refreshPerson(user('7', { following: true, followedBy: true }), A);

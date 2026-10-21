@@ -195,8 +195,13 @@ export type RelationWriteReport = {
  * ⚠️ 调用方必须给 `$acct`(号的数字 id);没有这个号的关系 → 两个标记都是 NONE(=关系不明)。
  */
 const REL = "type::record('x_relation', [$acct, rest_id])";
+/**
+ * ⚠️ 排除我自己(2026-10-21 用户截图:「去求关怎么有"打墙的蚂蚁"呢?这是我自己呀?」)——
+ * 自己也在人表里,和自己没有关系记录(两个标记都空),于是落进「关系不明」,Bio 写着「蓝V互关」又被当成求关候选。
+ * 「人 + 我和他的关系」这张视图里本来就不该有我;改在这一处,人页 / 概览 / 候选 / 关系采集计数一起对。
+ */
 export const PEOPLE_WITH_RELATION =
-  `(SELECT *, ${REL}.i_follow AS i_follow, ${REL}.follows_me AS follows_me FROM x_author)`;
+  `(SELECT *, ${REL}.i_follow AS i_follow, ${REL}.follows_me AS follows_me FROM x_author WHERE rest_id != $acct)`;
 
 /** 单个人(人卡)版本 —— `$rest_id` 是他的数字 id */
 export const PERSON_WITH_RELATION =
