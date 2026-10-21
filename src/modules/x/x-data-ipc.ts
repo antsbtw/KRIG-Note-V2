@@ -37,6 +37,8 @@ import { checkFollowBack, followCheckRunning } from './x-follow-check';
 import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
 import { readPersonLists } from './x-list-member-repo';
 import { draftAskReply } from './x-ask-draft';
+import { readEngageOverview } from './x-engage-repo';
+import { collectEngagement } from './x-engage-collect';
 import { listRelationJobs, startRelationTask } from './x-relation-task';
 import { readPaceViews } from './x-pace-repo';
 import { prepareAsk } from './x-ask-prepare';
@@ -453,6 +455,21 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-prepare', pageId: 'x-data',
             detail: { handle: p.handle, ok: r.ok, kind: r.ok ? r.plan.kind : undefined, why: r.ok ? r.plan.why : r.why } });
           return { status: 'ok', value: r };
+        }
+
+        case 'engageOverview': {
+          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 500) return failed('[x.data] engageOverview 的 limit 要 1–500');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          const ws = await readWsAccount(p.wsId as string);
+          return { status: 'ok', value: await readEngageOverview(acc.restId, ws?.handle ?? '', p.limit) };
+        }
+
+        case 'engageCollect': {
+          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] engageCollect 缺 wsId');
+          const r = await collectEngagement(p.wsId);
+          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-engage-collect', pageId: 'x-data', detail: r });
+          return r.ok ? { status: 'ok', value: r } : failed(r.why);
         }
 
         case 'askDraft': {

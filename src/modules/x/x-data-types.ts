@@ -160,6 +160,9 @@ export type XDataInvoke =
       readonly tweetId: string; readonly tweetText: string; readonly pickKind: 'tweet' | 'bio-latest' | 'other'; readonly reply: string;
       /** Gemma 原稿(用了草拟才有) */
       readonly aiText?: string }
+  /** ⭐ 第 3 件事(2026-10-22):已互关蓝V的互动四组 + 互动队列;采互动(三条搜索,最近 90 天) */
+  | { readonly op: 'engageOverview'; readonly wsId: string; readonly limit: number }
+  | { readonly op: 'engageCollect'; readonly wsId: string }
   /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
   | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string }
   | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }

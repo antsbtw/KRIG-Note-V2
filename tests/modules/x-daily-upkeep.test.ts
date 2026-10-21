@@ -32,6 +32,10 @@ vi.mock('@modules/x/x-relation-task', () => ({
   startRelationTask: async (_ws: string, _t: unknown, trigger: string) => { calls.push(`relation:${trigger}`); return { ok: true, jobId: 'J' }; },
 }));
 
+let engageCov: Record<string, { at?: string }> = { mine: {}, toMe: {}, mentionMe: {} };
+vi.mock('@modules/x/x-engage-repo', () => ({ readEngageCoverage: async () => engageCov }));
+vi.mock('@modules/x/x-engage-collect', () => ({ collectEngagement: async () => { calls.push('engage'); return { ok: true, runs: [] }; } }));
+
 import { dailyUpkeepTick } from '@modules/x/x-daily-upkeep';
 
 describe('一轮只做一件:先查回关,再关系采集', () => {
@@ -46,8 +50,16 @@ describe('一轮只做一件:先查回关,再关系采集', () => {
     expect(await dailyUpkeepTick(now)).toBe('relation:ws-1');
     expect(calls).toEqual(['relation:auto']);
   });
-  it('两件都做过 → 什么都不做', async () => {
+  it('前两件做过 → 采互动(三条里有没采过的)', async () => {
     lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
+    engageCov = { mine: {}, toMe: {}, mentionMe: {} };
+    expect(await dailyUpkeepTick(now)).toBe('engage:ws-1');
+    expect(calls).toEqual(['engage']);
+  });
+  it('三件都做过 → 什么都不做', async () => {
+    lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
+    const at = '2026-10-22T10:00:00Z';
+    engageCov = { mine: { at }, toMe: { at }, mentionMe: { at } };
     expect(await dailyUpkeepTick(now)).toBeNull();
     expect(calls).toEqual([]);
   });

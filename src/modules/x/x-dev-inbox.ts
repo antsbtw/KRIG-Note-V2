@@ -20,6 +20,8 @@ import { setPageTap } from './x-page-tap';
 import { checkFollowBack } from './x-follow-check';
 import { startRelationTask } from './x-relation-task';
 import { draftAskReply } from './x-ask-draft';
+import { collectEngagement } from './x-engage-collect';
+import { readEngageOverview } from './x-engage-repo';
 import { readWsAccount } from './x-account-repo';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
@@ -50,11 +52,17 @@ type FollowCheckCmd = Sampling & { op: 'followCheck'; wsId: string };
 type RelationCmd = Sampling & { op: 'relationStart'; wsId: string; restId?: string; handle?: string };
 /** 求关留言草拟(与求关卡同一个函数)—— 2026-10-21;tweets 一次试几条 */
 type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[] };
-type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd;
+/** 第 3 件事:采互动 / 看分组(与任务页同一个函数)—— 2026-10-22 */
+type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling & { op: 'engageOverview'; wsId: string });
+type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
+  if ((o as { op?: string })?.op === 'engageCollect' || (o as { op?: string })?.op === 'engageOverview') {
+    if (typeof o.wsId !== 'string') return 'engage 指令要 wsId';
+    return o as unknown as EngageCmd;
+  }
   if ((o as { op?: string })?.op === 'askDraft') {
     const d = o as unknown as DraftCmd;
     if (typeof d.wsId !== 'string' || !Array.isArray(d.tweets) || d.tweets.length === 0 || d.tweets.length > 10) return 'askDraft 要 wsId + 1–10 条 tweets';
@@ -164,6 +172,11 @@ async function tick(): Promise<void> {
         if (cmd.op === 'personTab') {
           console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
           out = await runPersonTab(cmd);
+        } else if (cmd.op === 'engageCollect') {
+          out = await collectEngagement(cmd.wsId);
+        } else if (cmd.op === 'engageOverview') {
+          const acc = await readWsAccount(cmd.wsId);
+          out = acc?.restId ? await readEngageOverview(acc.restId, acc.handle, 10) : { ok: false, why: '认不出号' };
         } else if (cmd.op === 'askDraft') {
           const acc = await readWsAccount(cmd.wsId);
           if (!acc?.restId) out = { ok: false, why: '认不出号' };

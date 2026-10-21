@@ -1766,6 +1766,29 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐ 1.2.36 —— 采互动的连续覆盖边界 x_engage_cursor(2026-10-22)
+ * 一条搜索一行(id = 号:mine / toMe / mentionMe):连续覆盖到的最早 / 最新时间。
+ * ⚠️ 不能从库里「最早一条推文」推算:库里有别的搜索留下的零散旧推文(真机 09-04),会把中间空档当成已覆盖。
+ */
+const X_SCHEMA_1_2_36 = `
+DEFINE TABLE IF NOT EXISTS x_engage_cursor SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS oldest     ON x_engage_cursor TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS newest     ON x_engage_cursor TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS updated_at ON x_engage_cursor TYPE datetime;
+`;
+
+export async function x_migration_1_2_36(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_36);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_engage_cursor');
+  if (!('oldest' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.36] x_engage_cursor 没建起来');
+  console.log('[x-schema 1.2.36] 采互动的连续覆盖边界 x_engage_cursor');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.36', appliedAt = $now, description = '采互动连续覆盖边界 x_engage_cursor'`,
+    { rid: new RecordId('schema_version', '1.2.36'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.35 —— 关系采集任务 + 节奏自调(2026-10-20)
  *
  * 用户 10-20:「在任务中添加一个"关系采集"这样的完整任务吧…1、先读取用户的bio,了解现状,followers/following/verified followers;

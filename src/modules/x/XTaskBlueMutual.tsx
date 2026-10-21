@@ -17,6 +17,7 @@ import { recipeToQuery } from './x-recipe-query';
 import { ledgerLine, type PageLedgerRow } from './x-page-ledger';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import { FollowStep } from './XTaskFollow';
+import { EngageStep } from './XTaskEngage';
 
 type Overview = {
   lastFindAt?: string; found: number; foundBlue: number; foundBlueNotFollowed: number; candidates: number; mutualBlue: number;
@@ -100,8 +101,8 @@ export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
       </Step>
 
       <Step n={3} title="已互关的蓝V,看互动情况">
-        <div>互关蓝V {ov ? ov.mutualBlue : '…'} 人 · 从没互动的:还没分析</div>
-        <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>要先采「他对我」的互动 —— 以后做</div>
+        {/* ⭐ 2026-10-22:采互动 → 四组 → 互动队列(用户 10-22 选:回复和提及 / 和求关卡一样 / 他找过我的排最前) */}
+        <EngageStep wsId={wsId} />
       </Step>
     </div>
   );
