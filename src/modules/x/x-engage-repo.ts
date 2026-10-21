@@ -77,3 +77,21 @@ export async function writeEngageCursor(handle: string, key: EngageKey, c: { rea
   );
   if (!rows || rows.length !== 1) throw new Error(`[x.engage] ${key} 覆盖边界没写上`);
 }
+
+/**
+ * ⭐ 这一轮搜索真正命中的推文时间范围(2026-10-22 真机):
+ * 不能用逐页账的每页时间 —— 那里含被引用的旧推文、回复的上文,会把边界拉到很早(真机 302 条回复记成 09-04 起)。
+ * 只算符合这条搜索本义的:我发的回复 / 回复我的 / 别人提到我的,且是这一轮(search_recipe = 这次的查询)存的。
+ */
+export async function runRange(account: string, key: EngageKey, q: string): Promise<{ oldest?: string; newest?: string }> {
+  const cond = key === 'mine' ? 'author_rest_id = $a AND in_reply_to_user_id != NONE'
+    : key === 'toMe' ? 'in_reply_to_user_id = $a'
+      : 'author_rest_id != $a AND $a INSIDE mention_ids';
+  const where = `search_recipe = $q AND created_at != NONE AND ${cond}`;
+  const [o, n] = await getXDB().query<[Array<{ t: string }>, Array<{ t: string }>]>(
+    `SELECT <string> created_at AS t FROM x_tweet WHERE ${where} ORDER BY t ASC LIMIT 1;
+     SELECT <string> created_at AS t FROM x_tweet WHERE ${where} ORDER BY t DESC LIMIT 1;`,
+    { a: account, q },
+  );
+  return { oldest: o?.[0]?.t, newest: n?.[0]?.t };
+}
