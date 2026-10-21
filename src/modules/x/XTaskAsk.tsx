@@ -7,10 +7,11 @@
  *
  * 勾的这一批逐个人来:准备(主进程采他主页最新一页 + 选推文)→ 出卡 → 人看 / 换一条 / 改留言 / 跳过。
  * 第 2 阶段(10-17):「点赞 · 留言 · 关注」真执行(主进程 x-ask-run.ts,每步核对,哪步没成停在哪步)。
- * ⭐ 留言框默认**空着**,由用户亲手写 —— 用户 10-17:「看来还是我自己先训练吧。前面是muse的自动回复,效果不好!」
- *    (原来放的模板是我拟的,会带偏;写出去的留言进 x_ask,将来就是 AI 学的范例)
+ * ⭐ 留言:10-17 起先由用户亲手写(「看来还是我自己先训练吧」);10-21 用户:「建议这里跳出一个Gemma草拟的答复吧。
+ *    如果不满意我再修改,如何?」→ 选好推文自动请 Gemma 4 12B 照你写过的范例草拟一句填进来,你改;可「换一版」。
+ *    发出去时带上原稿:一字没改记 ai,改过记 human(只有 human 进范例库)。
  */
-import { useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
@@ -42,12 +43,17 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   const [acting, setActing] = useState(false);
   const [result, setResult] = useState<AskRunResult | null>(null);
   const [done, setDone] = useState<Done[]>([]);
+  /** ⭐ Gemma 原稿 / 正在草拟 / 草拟没成的原因 */
+  const [aiText, setAiText] = useState<string | undefined>(undefined);
+  const [drafting, setDrafting] = useState(false);
+  const [draftNote, setDraftNote] = useState<string | null>(null);
+  const draftSeq = useRef(0);
   const who = queue[i];
 
   useEffect(() => {
     if (!who) return;
     let alive = true;
-    setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null);
+    setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null);
     void xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle }).then((r) => {
       if (!alive) return;
       setLoading(false);
@@ -57,6 +63,30 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
     });
     return () => { alive = false; };
   }, [wsId, who]);
+
+  /**
+   * ⭐ 请 Gemma 草拟一句(对着当前选中的推文)。后发的请求盖掉先发的(换推文 / 换一版连点时只认最后一次)。
+   * ⚠️ 你已经动手改了留言,就不再自动覆盖 —— 只有你点「换一版」才换。
+   */
+  const requestDraft = useCallback(async (tweetText: string, force: boolean): Promise<void> => {
+    const seq = ++draftSeq.current;
+    setDrafting(true); setDraftNote(null);
+    const r = await xDataCall({ op: 'askDraft', wsId, tweetText, name: prep?.ok ? prep.person.name : undefined, bio: prep?.ok ? prep.person.bio : undefined });
+    if (seq !== draftSeq.current) return;
+    setDrafting(false);
+    const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number }) : { ok: false, why: r.reason };
+    if (!v.ok || !v.text) { setDraftNote(`Gemma 没草拟成:${v.why ?? '?'} —— 你直接写也行,或点「换一版」再试`); return; }
+    setAiText(v.text);
+    setDraft((cur) => (force || cur.trim() === '' || cur === aiTextRef.current ? v.text! : cur));
+    setDraftNote(`Gemma 草拟(照你写过的 ${v.examples ?? 0} 条范例,${Math.round((v.ms ?? 0) / 100) / 10} 秒)—— 不满意就改,改过的算你写的`);
+  }, [wsId, prep]);
+  const aiTextRef = useRef<string | undefined>(undefined);
+  aiTextRef.current = aiText;
+  /** 选好 / 换了推文 → 自动草拟(留言框空着或还是上一版原稿时才填) */
+  useEffect(() => {
+    if (!sel || !prep?.ok) return;
+    void requestDraft(sel.text, false);
+  }, [sel, prep, requestDraft]);
 
   const next = (outcome: string): void => {
     const d = [...done, { who: who!, outcome }];
@@ -74,7 +104,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
     setActing(true); setResult(null);
     const r = await xDataCall({
       op: 'askRun', wsId, restId: who.restId, handle: who.handle, tweetId: sel.id, tweetText: sel.text,
-      pickKind: sel.id === plan.tweet.id ? plan.kind : 'other', reply: draft,
+      pickKind: sel.id === plan.tweet.id ? plan.kind : 'other', reply: draft, aiText,
     });
     setActing(false);
     const v: AskRunResult = r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason };
@@ -128,9 +158,18 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
             <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={cycle}>换一条({pool.length} 条可选)</button>
             <button type="button" disabled={acting} onClick={() => next('跳过(人)')}>跳过此人</button>
           </div>
-          <div style={{ opacity: 0.6 }}>留言(你亲手写;发出去的会记下来,以后 AI 照着学)</div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ opacity: 0.6, flex: 1 }}>
+              {drafting ? 'Gemma 正在草拟…' : draftNote ?? '留言(Gemma 草拟,你改;发出去的会记下来)'}
+            </span>
+            <button type="button" style={{ fontSize: 11 }} disabled={drafting || acting || result?.ok === true}
+              onClick={() => void requestDraft(sel.text, true)} title="让 Gemma 对这条推文再写一版(会替换留言框)">换一版</button>
+          </div>
           <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} disabled={acting || result?.ok === true}
-            placeholder="写给他的求关留言" style={{ width: '100%', boxSizing: 'border-box' }} />
+            placeholder={drafting ? 'Gemma 正在草拟…' : '写给他的求关留言'} style={{ width: '100%', boxSizing: 'border-box' }} />
+          {aiText !== undefined && draft.trim() !== '' && draft.trim() !== aiText.trim() && (
+            <div style={{ opacity: 0.55 }}>已改过 —— 发出去记成你写的(会进范例库);Gemma 原稿:{aiText}</div>
+          )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button type="button" disabled={acting || draft.trim() === '' || result?.ok === true} onClick={() => void act()}
               title="左边 X 网页:去这条推文点赞 → 贴留言并发送 → 去他主页关注;每步核对,哪步没成停在哪步">

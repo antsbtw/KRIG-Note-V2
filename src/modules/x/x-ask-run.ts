@@ -35,6 +35,8 @@ export type AskRunInput = {
   readonly tweetText: string;
   readonly pickKind: 'tweet' | 'bio-latest' | 'other';
   readonly reply: string;
+  /** ⭐ Gemma 的原稿(2026-10-21);没用 AI 草拟就没有。发出去的和原稿一字不差 = AI 写的,否则 = 你写的 */
+  readonly aiText?: string;
 };
 
 export type StepState = 'ok' | 'already' | 'unseen' | 'failed';
@@ -152,15 +154,20 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   }
 }
 
-/** 一次求关一行(只追加)—— reply_source 恒 human:这一阶段留言都是人写的 */
+/**
+ * 一次求关一行(只追加)。
+ * reply_source:发出去的和 Gemma 原稿一字不差 → ai;改过或没用草稿 → human(你写的终稿,才进范例库)。
+ * ai_text 记原稿 —— 将来算「原样通过率」(用户 10-16 同意:近 50 条 ≥80% 才可以开自动)。
+ */
 async function recordAsk(account: string, p: AskRunInput, reply: string, r: AskRunResult): Promise<void> {
   const [rows] = await getXDB().query<[unknown[]]>(
     `CREATE x_ask SET account = $account, person = $person, person_handle = $handle, tweet_id = $tid, tweet_text = $ttext,
-       pick_kind = $kind, reply_text = $reply, reply_source = 'human', reply_id = $rid,
+       pick_kind = $kind, reply_text = $reply, reply_source = $src, ai_text = $ai, reply_id = $rid,
        liked = $liked, replied = $replied, followed = $followed, failed_step = $fstep, failed_detail = $fdetail,
        ws_id = $ws, at = time::now() RETURN id`,
     {
       account, person: p.restId, handle: p.handle, tid: p.tweetId, ttext: p.tweetText, kind: p.pickKind, reply,
+      src: replySourceOf(p.aiText, reply), ai: p.aiText,
       /** ⚠️ option 字段传 undefined(→ NONE),不传 null */
       rid: r.replyId, liked: dbState(r.liked), replied: dbState(r.replied), followed: dbState(r.followed),
       fstep: r.failedStep, fdetail: r.detail, ws: p.wsId,
@@ -170,3 +177,8 @@ async function recordAsk(account: string, p: AskRunInput, reply: string, r: AskR
 }
 
 const dbState = (s: StepState | undefined): string | undefined => s;
+
+/** ⭐ 发出去的留言算谁写的:和 Gemma 原稿一字不差(去掉首尾空白)= ai;改过 / 没用草稿 = human(只有 human 进范例库) */
+export function replySourceOf(aiText: string | undefined, reply: string): 'ai' | 'human' {
+  return aiText !== undefined && aiText.trim() === reply.trim() ? 'ai' : 'human';
+}

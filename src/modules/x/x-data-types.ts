@@ -157,7 +157,11 @@ export type XDataInvoke =
   | { readonly op: 'askPrepare'; readonly wsId: string; readonly restId: string; readonly handle: string }
   /** ⭐⭐ 求关:三个动作(点赞 → 留言 → 关注),每步核对,哪步没成停在哪步 —— 返回 `AskRunResult`(2026-10-17) */
   | { readonly op: 'askRun'; readonly wsId: string; readonly restId: string; readonly handle: string;
-      readonly tweetId: string; readonly tweetText: string; readonly pickKind: 'tweet' | 'bio-latest' | 'other'; readonly reply: string }
+      readonly tweetId: string; readonly tweetText: string; readonly pickKind: 'tweet' | 'bio-latest' | 'other'; readonly reply: string;
+      /** Gemma 原稿(用了草拟才有) */
+      readonly aiText?: string }
+  /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
+  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string }
   | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。
