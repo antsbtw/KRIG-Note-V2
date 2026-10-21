@@ -134,7 +134,7 @@ export type XDataInvoke =
   /** ⭐ 运营 → 人卡:按数字 id 取一个人 —— 返回 `PersonDetail | null` */
   | { readonly op: 'personDetail'; readonly wsId: string; readonly restId: string }
   /** ⭐ 排除 / 取消排除(人的决定,source = human)—— 返回 `{ restId, excluded }` */
-  | { readonly op: 'setExcluded'; readonly restId: string; readonly excluded: boolean }
+  | { readonly op: 'setExcluded'; readonly restId: string; readonly excluded: boolean; readonly reason?: string }
   /** ⭐ 写一个人的全部标签(整组替换)—— 返回清洗后的标签 */
   | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
   /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */

@@ -345,9 +345,9 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (typeof p.restId !== 'string' || p.restId === '' || typeof p.excluded !== 'boolean') {
             return failed('[x.data] setExcluded 要 restId(数字 id)和 excluded(true/false)');
           }
-          await setExcluded(p.restId, p.excluded);
+          await setExcluded(p.restId, p.excluded, typeof p.reason === 'string' && p.reason !== '' ? p.reason : undefined);
           /** ⭐ 人的决定也留痕 —— 以后回头看「我排除过谁、何时」不用猜 */
-          console.log(`[x.people] ${p.excluded ? '排除' : '取消排除'} ${p.restId}`);
+          console.log(`[x.people] ${p.excluded ? '排除' : '取消排除'} ${p.restId}${p.reason ? `(${p.reason})` : ''}`);
           return { status: 'ok', value: { restId: p.restId, excluded: p.excluded } };
 
         case 'setTags': {

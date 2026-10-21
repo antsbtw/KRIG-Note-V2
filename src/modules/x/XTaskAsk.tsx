@@ -103,6 +103,14 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
     setViewNote(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
   };
 
+  /** 跳过此人 = 你排除的(原因「求关时跳过」),以后不再进候选;写不上就留在这儿说清楚,不假装跳过了 */
+  const skipPerson = async (): Promise<void> => {
+    if (!who) return;
+    const r = await xDataCall({ op: 'setExcluded', restId: who.restId, excluded: true, reason: '求关时跳过' });
+    if (r.status === 'failed') { setViewNote(`没记上排除:${r.reason}`); return; }
+    next('跳过(以后不再出现;人卡里可取消排除)');
+  };
+
   const next = (outcome: string): void => {
     const d = [...done, { who: who!, outcome }];
     setDone(d);
@@ -182,7 +190,9 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
           {viewNote && <div style={{ color: '#fbbf24' }}>{viewNote}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={cycle}>换一条({pool.length} 条可选)</button>
-            <button type="button" disabled={acting} onClick={() => next('跳过(人)')}>跳过此人</button>
+            {/* ⭐ 用户 10-21:「对于那些跳过的…下一次就不要再列表进来了」→ 记成你排除的(人卡里能取消排除) */}
+            <button type="button" disabled={acting} onClick={() => void skipPerson()}
+              title="不求关他,以后也不再进候选(记成你排除的;人卡里可以取消排除)">跳过此人(以后不再出现)</button>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ opacity: 0.6, flex: 1 }}>
@@ -202,8 +212,9 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
               {acting ? '正在做…' : '点赞 · 留言 · 关注'}
             </button>
             <button type="button" disabled={acting}
-              onClick={() => next(result ? (result.ok ? `✓ 求关完成(${stepLine(result)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : `看过,未执行 · 推文 ${sel.id}`)}>
-              下一个
+              title={result ? '' : '这次先不处理他,下次还会在候选里'}
+              onClick={() => next(result ? (result.ok ? `✓ 求关完成(${stepLine(result)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : `先放一放 · 推文 ${sel.id}`)}>
+              {result ? '下一个' : '先放一放(下次还会出现)'}
             </button>
           </div>
           {result && (

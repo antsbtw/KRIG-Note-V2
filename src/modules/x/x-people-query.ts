@@ -247,8 +247,9 @@ export const SET_TAGS_SQL = `UPDATE type::record('x_author', $rest_id) SET tags 
 /** 标签目录的原料:所有带标签的人的标签 */
 export const TAG_ROWS_SQL = 'SELECT tags FROM x_author WHERE array::len(tags ?? []) > 0;';
 
+/** 人的排除 / 取消排除;$reason 没给就是 NONE(求关卡「跳过此人」会写「求关时跳过」,2026-10-21) */
 export const SET_EXCLUDED_SQL = `UPDATE type::record('x_author', $rest_id) SET
-  excluded = $excluded, excluded_source = 'human', excluded_at = time::now()
+  excluded = $excluded, excluded_source = 'human', excluded_reason = $reason, excluded_at = time::now()
   RETURN rest_id, excluded;`;
 
 /** 人卡 —— 全量字段,按 rest_id 取 */

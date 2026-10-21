@@ -15,7 +15,7 @@ import { __setXDBForTest } from '@storage/surreal/client';
 import { runXMigrations } from '@storage/migrations/x-runner';
 import { x_migration_1_2_27 } from '@storage/surreal/x-schema';
 import { saveUsers, saveTweetAuthors, refreshPerson } from '@modules/x/x-user-repo';
-import { queryPeople, readPeopleOverview, readPerson, scanMutualIntent, setMutualIntent } from '@modules/x/x-people-repo';
+import { queryPeople, readPeopleOverview, readPerson, scanMutualIntent, setMutualIntent, setExcluded } from '@modules/x/x-people-repo';
 import { lookupSpot } from '@modules/x/x-spot-check';
 import { readOpsStatus } from '@modules/x/x-collect-log-repo';
 import { DEFAULT_PEOPLE_FILTER } from '@modules/x/x-people-query';
@@ -138,6 +138,17 @@ describe.skipIf(!BINARY)('关系按号存 —— 真 SurrealDB 验证', () => {
     /** 换个号看,1000 只是普通的人,照样在 */
     const other = await queryPeople('2000', { ...DEFAULT_PEOPLE_FILTER, group: 'all', scope: 'in' }, 500, 0);
     expect(other.rows.map((r) => r.rest_id)).toContain('1000');
+  });
+
+  it('⭐ 求关时跳过 = 你排除的,带原因;取消排除时原因清掉(2026-10-21)', async () => {
+    await saveUsers([user('77', { following: false, followedBy: false })], { listSource: 'followers' }, A);
+    await setExcluded('77', true, '求关时跳过');
+    const [[a]] = await db!.query<[Array<{ excluded: boolean; excluded_source: string; excluded_reason?: string }>]>("SELECT excluded, excluded_source, excluded_reason FROM type::record('x_author', '77')");
+    expect(a).toMatchObject({ excluded: true, excluded_source: 'human', excluded_reason: '求关时跳过' });
+    await setExcluded('77', false);
+    const [[b]] = await db!.query<[Array<{ excluded: boolean; excluded_reason?: string }>]>("SELECT excluded, excluded_reason FROM type::record('x_author', '77')");
+    expect(b.excluded).toBe(false);
+    expect(b.excluded_reason ?? null).toBeNull();
   });
 
   it('⭐⭐ 主页核对:关系按号写,并对这个号报出关系变化;认不出号时不报关系变化', async () => {

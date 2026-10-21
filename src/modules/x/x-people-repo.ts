@@ -42,9 +42,10 @@ export async function readPerson(account: string, restId: string): Promise<Perso
  * ⚠️⚠️ 人不存在时 UPDATE **返回空数组且不报错** —— 2026-10-08 临时库实测。
  * 不检查的话,面板会显示「已排除」而库里什么都没变。
  */
-export async function setExcluded(restId: string, excluded: boolean): Promise<void> {
+export async function setExcluded(restId: string, excluded: boolean, reason?: string): Promise<void> {
   const [rows] = await getXDB().query<[Array<{ rest_id: string; excluded: boolean }>]>(
-    SET_EXCLUDED_SQL, { rest_id: restId, excluded },
+    /** ⚠️ 取消排除时原因清掉(NONE);option 传 undefined 不传 null */
+    SET_EXCLUDED_SQL, { rest_id: restId, excluded, reason: excluded ? reason : undefined },
   );
   if (!rows || rows.length !== 1 || rows[0].excluded !== excluded) {
     throw new Error(`[x.people] 没写上:库里找不到数字 id ${restId} 这个人`);
