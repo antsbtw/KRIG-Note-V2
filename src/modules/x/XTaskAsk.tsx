@@ -20,16 +20,25 @@ import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
 import type { AskRunResult, StepState } from './x-ask-run';
 
-export type AskWho = { readonly restId: string; readonly handle: string; readonly name?: string };
+export type AskWho = {
+  readonly restId: string; readonly handle: string; readonly name?: string;
+  /** 互动卡:他找过我的那条(回它)—— 2026-10-22 */
+  readonly hisTweetId?: string;
+};
 
 const STEP: Record<StepState, string> = { ok: '✓', already: '· 本来就是', unseen: '? 没看到', failed: '✗' };
-const stepLine = (r: AskRunResult): string =>
-  `点赞 ${r.liked ? STEP[r.liked] : '—'} · 留言 ${r.replied ? STEP[r.replied] : '—'} · 关注 ${r.followed ? STEP[r.followed] : '—'}`;
+const stepLine = (r: AskRunResult, engage = false): string =>
+  `点赞 ${r.liked ? STEP[r.liked] : '—'} · ${engage ? '回复' : '留言'} ${r.replied ? STEP[r.replied] : '—'}${engage ? '' : ` · 关注 ${r.followed ? STEP[r.followed] : '—'}`}`;
 
 type Done = { readonly who: AskWho; readonly outcome: string };
 
-export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
+export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask' }: {
   wsId: string; queue: readonly AskWho[]; onEnd: (done: readonly Done[]) => void;
+  /**
+   * ⭐ engage = 已互关蓝V的日常互动卡(2026-10-22,用户选「和求关卡一样」):点赞 + 回复,不关注;
+   * Gemma 用日常互动的口吻;记进 x_engage。不给 = 求关卡
+   */
+  mode?: 'ask' | 'engage';
   /** 动过手(不管成没成)→ 父组件刷新「今天已关注 / 累计」那一行 */
   onActed?: () => void;
   /**
@@ -54,12 +63,16 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   const [draftNote, setDraftNote] = useState<string | null>(null);
   const draftSeq = useRef(0);
   const who = queue[i];
+  const E = mode === 'engage';
 
   useEffect(() => {
     if (!who) return;
     let alive = true;
     setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null); setViewNote(null);
-    void xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle }).then((r) => {
+    const prepCall = mode === 'engage'
+      ? xDataCall({ op: 'engagePrepare', wsId, restId: who.restId, handle: who.handle, hisTweetId: who.hisTweetId })
+      : xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle });
+    void prepCall.then((r) => {
       if (!alive) return;
       setLoading(false);
       const v: AskPrepared = r.status === 'ok' ? (r.value as AskPrepared) : { ok: false, why: r.reason };
@@ -67,7 +80,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
       if (v.ok && v.plan.kind !== 'skip') setSel(v.plan.tweet);
     });
     return () => { alive = false; };
-  }, [wsId, who]);
+  }, [wsId, who, mode]);
 
   /**
    * ⭐ 请 Gemma 草拟一句(对着当前选中的推文)。后发的请求盖掉先发的(换推文 / 换一版连点时只认最后一次)。
@@ -76,7 +89,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   const requestDraft = useCallback(async (tweetText: string, force: boolean): Promise<void> => {
     const seq = ++draftSeq.current;
     setDrafting(true); setDraftNote(null);
-    const r = await xDataCall({ op: 'askDraft', wsId, tweetText, name: prep?.ok ? prep.person.name : undefined, bio: prep?.ok ? prep.person.bio : undefined });
+    const r = await xDataCall({ op: 'askDraft', wsId, tweetText, name: prep?.ok ? prep.person.name : undefined, bio: prep?.ok ? prep.person.bio : undefined, mode });
     if (seq !== draftSeq.current) return;
     setDrafting(false);
     const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number }) : { ok: false, why: r.reason };
@@ -84,7 +97,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
     setAiText(v.text);
     setDraft((cur) => (force || cur.trim() === '' || cur === aiTextRef.current ? v.text! : cur));
     setDraftNote(`Gemma 草拟(照你写过的 ${v.examples ?? 0} 条范例,${Math.round((v.ms ?? 0) / 100) / 10} 秒)—— 不满意就改,改过的算你写的`);
-  }, [wsId, prep]);
+  }, [wsId, prep, mode]);
   const aiTextRef = useRef<string | undefined>(undefined);
   aiTextRef.current = aiText;
   /** 选好 / 换了推文 → 自动草拟(留言框空着或还是上一版原稿时才填) */
@@ -106,7 +119,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   /** 跳过此人 = 你排除的(原因「求关时跳过」),以后不再进候选;写不上就留在这儿说清楚,不假装跳过了 */
   const skipPerson = async (): Promise<void> => {
     if (!who) return;
-    const r = await xDataCall({ op: 'setExcluded', restId: who.restId, excluded: true, reason: '求关时跳过' });
+    const r = await xDataCall({ op: 'setExcluded', restId: who.restId, excluded: true, reason: E ? '互动时跳过' : '求关时跳过' });
     if (r.status === 'failed') { setViewNote(`没记上排除:${r.reason}`); return; }
     next('跳过(以后不再出现;人卡里可取消排除)');
   };
@@ -127,13 +140,13 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
     setActing(true); setResult(null);
     const r = await xDataCall({
       op: 'askRun', wsId, restId: who.restId, handle: who.handle, tweetId: sel.id, tweetText: sel.text,
-      pickKind: sel.id === plan.tweet.id ? plan.kind : 'other', reply: draft, aiText,
+      pickKind: sel.id === plan.tweet.id ? plan.kind : 'other', reply: draft, aiText, mode,
     });
     setActing(false);
     const v: AskRunResult = r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason };
     onActed?.();
     /** ⭐ 成了就直接到下一个人(用户 10-17:「执行成功后,自动到下一个人,不要再停留在原来的蓝V用户了」);没成留在这儿给人看 */
-    if (v.ok) { next(`✓ 求关完成(${stepLine(v)})`); return; }
+    if (v.ok) { next(`✓ ${E ? '互动' : '求关'}完成(${stepLine(v, E)})`); return; }
     setResult(v);
   };
   const cycle = (): void => {
@@ -145,7 +158,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
   return (
     <div style={{ border: '1px solid var(--border-color, #2a2a2a)', borderRadius: 6, padding: 10, fontSize: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <strong>求关 {i + 1}/{queue.length}:{who.name ?? who.handle} @{who.handle}</strong>
+        <strong>{E ? '互动' : '求关'} {i + 1}/{queue.length}:{who.name ?? who.handle} @{who.handle}</strong>
         <button type="button" style={{ fontSize: 11 }} onClick={() => onEnd(done)}>结束这一批</button>
       </div>
       {done.length > 0 && (
@@ -161,15 +174,15 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
       {prep?.ok && prep.ledgerProblem && <div style={{ marginTop: 6, color: '#fbbf24' }}>⚠️ 这一页账没对上:{prep.ledgerProblem}</div>}
       {plan?.kind === 'skip' && plan.alreadyRelated && (
         <div style={{ marginTop: 6 }}>
-          <div style={{ color: '#5fc98a' }}>不求关:{plan.why}</div>
+          <div style={{ color: '#5fc98a' }}>{E ? '不互动' : '不求关'}:{plan.why}</div>
           <div style={{ opacity: 0.7 }}>关系已按 X 上看到的写回库,他会从候选里消失(不算排除)</div>
-          <button type="button" style={{ marginTop: 6 }} onClick={() => next(`不求关:${plan.why}`)}>下一个</button>
+          <button type="button" style={{ marginTop: 6 }} onClick={() => next(`${E ? '不互动' : '不求关'}:${plan.why}`)}>下一个</button>
         </div>
       )}
       {plan?.kind === 'skip' && !plan.alreadyRelated && (
         <div style={{ marginTop: 6 }}>
           <div>放弃:{plan.why}</div>
-          {plan.recent.length > 0 && prep?.ok && !prep.ledgerProblem
+          {E ? <div style={{ opacity: 0.7 }}>没排除 —— 下次他发了新帖再看</div> : plan.recent.length > 0 && prep?.ok && !prep.ledgerProblem
             ? <div style={{ opacity: 0.7 }}>已记成「算法排除」,不再出现在候选里(人可以在人卡里取消排除)</div>
             : <div style={{ opacity: 0.7 }}>没排除 —— 是我们没采到,不算他没求关</div>}
           <button type="button" style={{ marginTop: 6 }} onClick={() => next(`放弃:${plan.why}`)}>下一个</button>
@@ -182,7 +195,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
           <div style={{ padding: 8, background: 'var(--accent-bg, rgba(45,74,107,0.35))', borderRadius: 4, cursor: acting ? 'default' : 'pointer' }}
             onClick={() => { if (!acting) void showInX(sel.id); }} title="在左边 X 网页打开这条原帖(看上下文、图片、别人的回复)">
             <div style={{ opacity: 0.6 }}>
-              用这条求关{sel.related ? '(和互关相关)' : '(他最新的原创)'}{sel.createdAt ? ` · ${new Date(sel.createdAt).toLocaleString()}` : ''}
+              {E ? (sel.related ? '回他找你的这一条' : '回他这一条') : `用这条求关${sel.related ? '(和互关相关)' : '(他最新的原创)'}`}{sel.createdAt ? ` · ${new Date(sel.createdAt).toLocaleString()}` : ''}
               {' · '}<span style={{ textDecoration: 'underline' }}>点一下在左边看原帖</span>
             </div>
             <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{sel.text}</div>
@@ -192,7 +205,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
             <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={cycle}>换一条({pool.length} 条可选)</button>
             {/* ⭐ 用户 10-21:「对于那些跳过的…下一次就不要再列表进来了」→ 记成你排除的(人卡里能取消排除) */}
             <button type="button" disabled={acting} onClick={() => void skipPerson()}
-              title="不求关他,以后也不再进候选(记成你排除的;人卡里可以取消排除)">跳过此人(以后不再出现)</button>
+              title={E ? '不和他互动,以后也不再进互动队列(记成你排除的;人卡里可以取消排除)' : '不求关他,以后也不再进候选(记成你排除的;人卡里可以取消排除)'}>跳过此人(以后不再出现)</button>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <span style={{ opacity: 0.6, flex: 1 }}>
@@ -202,24 +215,24 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
               onClick={() => void requestDraft(sel.text, true)} title="让 Gemma 对这条推文再写一版(会替换留言框)">换一版</button>
           </div>
           <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={3} disabled={acting || result?.ok === true}
-            placeholder={drafting ? 'Gemma 正在草拟…' : '写给他的求关留言'} style={{ width: '100%', boxSizing: 'border-box' }} />
+            placeholder={drafting ? 'Gemma 正在草拟…' : E ? '写给他的回复' : '写给他的求关留言'} style={{ width: '100%', boxSizing: 'border-box' }} />
           {aiText !== undefined && draft.trim() !== '' && draft.trim() !== aiText.trim() && (
             <div style={{ opacity: 0.55 }}>已改过 —— 发出去记成你写的(会进范例库);Gemma 原稿:{aiText}</div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button type="button" disabled={acting || draft.trim() === '' || result?.ok === true} onClick={() => void act()}
-              title="左边 X 网页:去这条推文点赞 → 贴留言并发送 → 去他主页关注;每步核对,哪步没成停在哪步">
-              {acting ? '正在做…' : '点赞 · 留言 · 关注'}
+              title={E ? '左边 X 网页:去这条推文点赞 → 贴回复并发送;每步核对,哪步没成停在哪步(不关注,已经互关)' : '左边 X 网页:去这条推文点赞 → 贴留言并发送 → 去他主页关注;每步核对,哪步没成停在哪步'}>
+              {acting ? '正在做…' : E ? '点赞 · 回复' : '点赞 · 留言 · 关注'}
             </button>
             <button type="button" disabled={acting}
               title={result ? '' : '这次先不处理他,下次还会在候选里'}
-              onClick={() => next(result ? (result.ok ? `✓ 求关完成(${stepLine(result)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : `先放一放 · 推文 ${sel.id}`)}>
+              onClick={() => next(result ? (result.ok ? `✓ ${E ? '互动' : '求关'}完成(${stepLine(result, E)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : `先放一放 · 推文 ${sel.id}`)}>
               {result ? '下一个' : '先放一放(下次还会出现)'}
             </button>
           </div>
           {result && (
             <div style={{ color: result.ok ? '#5fc98a' : '#f87171' }}>
-              {result.blocked ? `没动手:${result.blocked}` : `${result.ok ? '✓ 求关完成' : '✗ 停在这一步'} —— ${stepLine(result)}`}
+              {result.blocked ? `没动手:${result.blocked}` : `${result.ok ? `✓ ${E ? '互动' : '求关'}完成` : '✗ 停在这一步'} —— ${stepLine(result, E)}`}
               {result.detail && <div>{result.detail}</div>}
             </div>
           )}

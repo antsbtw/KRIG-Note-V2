@@ -22,6 +22,7 @@ import { startRelationTask } from './x-relation-task';
 import { draftAskReply } from './x-ask-draft';
 import { collectEngagement } from './x-engage-collect';
 import { readEngageOverview } from './x-engage-repo';
+import { prepareEngage } from './x-engage-prepare';
 import { readWsAccount } from './x-account-repo';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
@@ -51,15 +52,16 @@ type FollowCheckCmd = Sampling & { op: 'followCheck'; wsId: string };
 /** 关系采集(与任务页「读现状并开始」同一个函数)—— 2026-10-20 */
 type RelationCmd = Sampling & { op: 'relationStart'; wsId: string; restId?: string; handle?: string };
 /** 求关留言草拟(与求关卡同一个函数)—— 2026-10-21;tweets 一次试几条 */
-type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[] };
+type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[]; mode?: 'ask' | 'engage' };
 /** 第 3 件事:采互动 / 看分组(与任务页同一个函数)—— 2026-10-22 */
-type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling & { op: 'engageOverview'; wsId: string });
+type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling & { op: 'engageOverview'; wsId: string })
+  | (Sampling & { op: 'engagePrepare'; wsId: string; restId: string; handle: string; hisTweetId?: string });
 type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
-  if ((o as { op?: string })?.op === 'engageCollect' || (o as { op?: string })?.op === 'engageOverview') {
+  if (['engageCollect', 'engageOverview', 'engagePrepare'].includes(String((o as { op?: string })?.op))) {
     if (typeof o.wsId !== 'string') return 'engage 指令要 wsId';
     return o as unknown as EngageCmd;
   }
@@ -174,6 +176,9 @@ async function tick(): Promise<void> {
           out = await runPersonTab(cmd);
         } else if (cmd.op === 'engageCollect') {
           out = await collectEngagement(cmd.wsId);
+        } else if (cmd.op === 'engagePrepare') {
+          const acc = await readWsAccount(cmd.wsId);
+          out = acc?.restId ? await prepareEngage(cmd.wsId, acc.restId, cmd.restId, cmd.handle, cmd.hisTweetId) : { ok: false, why: '认不出号' };
         } else if (cmd.op === 'engageOverview') {
           const acc = await readWsAccount(cmd.wsId);
           out = acc?.restId ? await readEngageOverview(acc.restId, acc.handle, 10) : { ok: false, why: '认不出号' };
@@ -182,7 +187,7 @@ async function tick(): Promise<void> {
           if (!acc?.restId) out = { ok: false, why: '认不出号' };
           else {
             const drafts = [];
-            for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {} }) });
+            for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {}, mode: cmd.mode }) });
             out = { ok: true, drafts };
           }
         } else if (cmd.op === 'relationStart') {

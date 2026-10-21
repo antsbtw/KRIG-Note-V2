@@ -39,6 +39,7 @@ import { readPersonLists } from './x-list-member-repo';
 import { draftAskReply } from './x-ask-draft';
 import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
+import { prepareEngage } from './x-engage-prepare';
 import { listRelationJobs, startRelationTask } from './x-relation-task';
 import { readPaceViews } from './x-pace-repo';
 import { prepareAsk } from './x-ask-prepare';
@@ -465,6 +466,13 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           return { status: 'ok', value: await readEngageOverview(acc.restId, ws?.handle ?? '', p.limit) };
         }
 
+        case 'engagePrepare': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '') return failed('[x.data] engagePrepare 要数字 id + handle');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await prepareEngage(p.wsId, acc.restId, p.restId, p.handle, typeof p.hisTweetId === 'string' && p.hisTweetId !== '' ? p.hisTweetId : undefined) };
+        }
+
         case 'engageCollect': {
           if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] engageCollect 缺 wsId');
           const r = await collectEngagement(p.wsId);
@@ -476,7 +484,7 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (typeof p.tweetText !== 'string' || p.tweetText.trim() === '') return failed('[x.data] askDraft 缺他那条帖子的正文');
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
-          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio } });
+          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode: p.mode === 'engage' ? 'engage' : 'ask' });
           traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-ask-draft' : 'x-ask-draft-failed', pageId: 'x-data',
             detail: r.ok ? { ms: r.ms, examples: r.examples, text: r.text } : { why: r.why } });
           return { status: 'ok', value: r };
@@ -487,7 +495,8 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
             || !['tweet', 'bio-latest', 'other'].includes(p.pickKind)) return failed('[x.data] askRun 参数不全');
           const r = await runAsk({ wsId: p.wsId, restId: p.restId, handle: p.handle, tweetId: p.tweetId,
             tweetText: p.tweetText, pickKind: p.pickKind, reply: p.reply,
-            aiText: typeof p.aiText === 'string' && p.aiText !== '' ? p.aiText : undefined });
+            aiText: typeof p.aiText === 'string' && p.aiText !== '' ? p.aiText : undefined,
+            mode: p.mode === 'engage' ? 'engage' : 'ask' });
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-run', pageId: 'x-data',
             detail: { handle: p.handle, tweetId: p.tweetId, ok: r.ok, blocked: r.blocked, liked: r.liked, replied: r.replied,
               followed: r.followed, failedStep: r.failedStep, detail: r.detail } });

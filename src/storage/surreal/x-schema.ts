@@ -1766,6 +1766,44 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.37 —— 互动记录 x_engage(2026-10-22,蓝V互关第 3 件事)
+ * 已互关的蓝V,一次互动一行(只追加):回他哪条 → 我回了什么 → 点赞 / 回复结果。和 x_ask(求关)分开:
+ * 求关留言和日常互动口吻不同,范例库与「原样通过率」各算各的(设计文档 §3:放手按场景分开统计)。
+ */
+const X_SCHEMA_1_2_37 = `
+DEFINE TABLE IF NOT EXISTS x_engage SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_engage TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person        ON x_engage TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person_handle ON x_engage TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_engage TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_engage TYPE string;
+-- his-message = 回他找我的那条;latest = 他最近的原创;other = 人换了一条
+DEFINE FIELD IF NOT EXISTS pick_kind     ON x_engage TYPE string ASSERT $value INSIDE ['his-message', 'latest', 'other'];
+DEFINE FIELD IF NOT EXISTS reply_text    ON x_engage TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_source  ON x_engage TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reply_id      ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS liked         ON x_engage TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS replied       ON x_engage TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS failed_step   ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS failed_detail ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at            ON x_engage TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_engage_person ON x_engage FIELDS account, person;
+`;
+
+export async function x_migration_1_2_37(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_37);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_engage');
+  if (!('reply_text' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.37] x_engage 没建起来');
+  console.log('[x-schema 1.2.37] 互动记录 x_engage');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.37', appliedAt = $now, description = '互动记录 x_engage'`,
+    { rid: new RecordId('schema_version', '1.2.37'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐ 1.2.36 —— 采互动的连续覆盖边界 x_engage_cursor(2026-10-22)
  * 一条搜索一行(id = 号:mine / toMe / mentionMe):连续覆盖到的最早 / 最新时间。
  * ⚠️ 不能从库里「最早一条推文」推算:库里有别的搜索留下的零散旧推文(真机 09-04),会把中间空档当成已覆盖。

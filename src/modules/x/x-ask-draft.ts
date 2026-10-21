@@ -30,17 +30,25 @@ export function buildAskDraftPrompt(input: {
   readonly examples: readonly AskExample[];
   readonly tweet: string;
   readonly person: { readonly name?: string; readonly bio?: string };
+  /**
+   * ⭐ engage = 对已经互关的朋友日常互动(2026-10-22):接住他说的话回应,**不求关、不提互关**;
+   * 回他找我的那一条时,就是回应他对我说的话
+   */
+  readonly mode?: 'ask' | 'engage';
 }): Array<{ role: 'system' | 'user'; content: string }> {
+  const engage = input.mode === 'engage';
   const sys = [
-    '你替一个中文 X(推特)蓝V用户写「求互关」的回复。他在别人和互关相关的帖子下面留言,目的是让对方回关他。',
-    '照他自己写过的留言的口气和长短来写:口语、短、真诚,一两句话。',
+    engage
+      ? '你替一个中文 X(推特)蓝V用户回复他已经互相关注的朋友的帖子,目的是保持往来、让对方愿意聊下去。接住对方帖子里说的事回应,不要求关注、不要提「互关」。'
+      : '你替一个中文 X(推特)蓝V用户写「求互关」的回复。他在别人和互关相关的帖子下面留言,目的是让对方回关他。',
+    engage ? '口语、短、真诚,一两句话;可以附和、追问一句、或说说自己的看法。' : '照他自己写过的留言的口气和长短来写:口语、短、真诚,一两句话。',
     '规矩:只写中文;不超过 40 个字;不要 @ 任何人;不要链接;不要话题标签;不要编造你不知道的事(不提具体数字、产品、承诺);',
     '可以接住对方帖子里的一句话再求关;可以带一个表情,也可以不带。',
     '只输出这一条留言本身,不要引号,不要解释,不要前缀。',
   ].join('\n');
   const shots = input.examples.map((e, i) => `例 ${i + 1}\n他的帖子:${clip(e.tweet, 120)}\n我的留言:${e.reply.trim()}`).join('\n\n');
   const who = [input.person.name ? `对方名字:${clip(input.person.name, 40)}` : '', input.person.bio ? `对方简介:${clip(input.person.bio, 120)}` : ''].filter(Boolean).join('\n');
-  const user = `${shots ? `下面是我以前亲手写的求关留言:\n\n${shots}\n\n` : ''}现在要回复的帖子:\n${clip(input.tweet, 280)}\n${who}\n\n我的留言:`;
+  const user = `${shots ? `下面是我以前亲手写的${engage ? '回复' : '求关留言'}:\n\n${shots}\n\n` : ''}现在要回复的帖子:\n${clip(input.tweet, 280)}\n${who}\n\n我的留言:`;
   return [{ role: 'system', content: sys }, { role: 'user', content: user }];
 }
 
@@ -57,10 +65,11 @@ export function cleanAskDraft(raw: string): { readonly text: string } | { readon
   return { text: t };
 }
 
-/** 范例:你亲手写、发出去的(最新的在前) */
-export async function readAskExamples(account: string): Promise<AskExample[]> {
+/** 范例:你亲手写、发出去的(最新的在前)—— 求关取 x_ask,互动取 x_engage(两种口吻各学各的) */
+export async function readAskExamples(account: string, mode: 'ask' | 'engage' = 'ask'): Promise<AskExample[]> {
+  const table = mode === 'engage' ? 'x_engage' : 'x_ask';
   const [rows] = await getXDB().query<[Array<{ tweet_text: string; reply_text: string; at: string }>]>(
-    `SELECT tweet_text, reply_text, <string> at AS at FROM x_ask
+    `SELECT tweet_text, reply_text, <string> at AS at FROM ${table}
        WHERE account = $a AND reply_source = 'human' AND replied = 'ok' AND reply_text != '' ORDER BY at DESC LIMIT $n`,
     { a: account, n: MAX_EXAMPLES },
   );
@@ -75,8 +84,9 @@ export async function draftAskReply(input: {
   readonly account: string;
   readonly tweet: string;
   readonly person: { readonly name?: string; readonly bio?: string };
+  readonly mode?: 'ask' | 'engage';
 }): Promise<AskDraft> {
-  const examples = await readAskExamples(input.account);
+  const examples = await readAskExamples(input.account, input.mode ?? 'ask');
   const t0 = Date.now();
   let raw: string;
   try {
@@ -84,7 +94,7 @@ export async function draftAskReply(input: {
      * ⚠️ think: false —— Gemma 4 默认先思考:真机一条 30~80 秒(5 条里 3 条 90 秒超时);关掉 1~2 秒,质量差不多(2026-10-21 实测)
      */
     raw = (await callOllamaChat({
-      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person }),
+      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode }),
       think: false, temperature: 0.8, timeoutMs: 60_000,
     })).content;
   } catch (e) {

@@ -159,12 +159,16 @@ export type XDataInvoke =
   | { readonly op: 'askRun'; readonly wsId: string; readonly restId: string; readonly handle: string;
       readonly tweetId: string; readonly tweetText: string; readonly pickKind: 'tweet' | 'bio-latest' | 'other'; readonly reply: string;
       /** Gemma 原稿(用了草拟才有) */
-      readonly aiText?: string }
+      readonly aiText?: string;
+      /** engage = 已互关的日常互动(点赞 + 回复,不关注,记 x_engage) */
+      readonly mode?: 'ask' | 'engage' }
+  /** ⭐ 互动卡准备(2026-10-22):采他主页、核对还是不是互关、选一条(他找过我就回那条) */
+  | { readonly op: 'engagePrepare'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly hisTweetId?: string }
   /** ⭐ 第 3 件事(2026-10-22):已互关蓝V的互动四组 + 互动队列;采互动(三条搜索,最近 90 天) */
   | { readonly op: 'engageOverview'; readonly wsId: string; readonly limit: number }
   | { readonly op: 'engageCollect'; readonly wsId: string }
   /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
-  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string }
+  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage' }
   | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。

@@ -37,6 +37,11 @@ export type AskRunInput = {
   readonly reply: string;
   /** ⭐ Gemma 的原稿(2026-10-21);没用 AI 草拟就没有。发出去的和原稿一字不差 = AI 写的,否则 = 你写的 */
   readonly aiText?: string;
+  /**
+   * ⭐ engage = 已互关的蓝V日常互动(2026-10-22,蓝V互关第 3 件事):点赞 + 回复,**不关注**、不走关注闸门,记进 x_engage;
+   * 不给 = 求关(点赞 + 留言 + 关注,记进 x_ask)
+   */
+  readonly mode?: 'ask' | 'engage';
 };
 
 export type StepState = 'ok' | 'already' | 'unseen' | 'failed';
@@ -75,8 +80,12 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   if (busy !== null) return { ok: false, blocked: `X 网页正忙:${busy}` };
   if (bgRunningOn(wcId) !== null) return { ok: false, blocked: '后台正在采' };
   if (followQueueStatus(p.wsId).current) return { ok: false, blocked: '关注队列正在动作' };
-  const gate = await readFollowGate(localDayStart(new Date()).toISOString());
-  if (!gate.allowed) return { ok: false, blocked: gate.reason };
+  const engage = p.mode === 'engage';
+  /** 关注闸门(每日上限 / 连续满 15 个歇 15 分钟)只管求关 —— 互动不关注 */
+  if (!engage) {
+    const gate = await readFollowGate(localDayStart(new Date()).toISOString());
+    if (!gate.allowed) return { ok: false, blocked: gate.reason };
+  }
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') return { ok: false, blocked: `认不出登录的号:${account.reason}` };
 
@@ -96,7 +105,7 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
     r.liked = lk?.state === 'liked' ? 'ok' : lk?.state === 'already-liked' ? 'already' : 'failed';
     if (r.liked !== 'already') {
       await appendAction({ action: 'like', targetRestId: p.restId, targetHandle: p.handle, decidedBy: 'human',
-        result: r.liked === 'ok' ? 'ok' : 'failed', reason: `求关 · 推文 ${p.tweetId}`, detail: r.liked === 'failed' ? lk?.state : undefined, wsId: p.wsId });
+        result: r.liked === 'ok' ? 'ok' : 'failed', reason: `${engage ? '互动' : '求关'} · 推文 ${p.tweetId}`, detail: r.liked === 'failed' ? lk?.state : undefined, wsId: p.wsId });
     }
     if (r.liked === 'failed') { stop('like', `点赞没成:${lk?.state ?? '无返回'}${lk?.why ? `(${lk.why})` : ''}`); return r; }
 
@@ -118,7 +127,7 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
     r.replied = sent?.state === 'sent' ? 'ok' : sent?.state === 'unseen' ? 'unseen' : 'failed';
     r.replyId = sent?.replyId;
     await appendAction({ action: 'reply', targetRestId: p.restId, targetHandle: p.handle, decidedBy: 'human',
-      result: r.replied === 'failed' ? 'failed' : 'ok', reason: `求关 · 推文 ${p.tweetId}`,
+      result: r.replied === 'failed' ? 'failed' : 'ok', reason: `${engage ? '互动' : '求关'} · 推文 ${p.tweetId}`,
       detail: r.replied === 'ok' ? `回复 ${r.replyId}:${reply}` : `${sent?.state ?? '无返回'}:${reply}`, wsId: p.wsId });
     if (r.replied !== 'ok') {
       /** ⚠️ unseen(框清空了、页面上没看到)也停:说不清发没发出去,不能接着关注假装都成了 */
@@ -127,6 +136,9 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
         : `留言没发出去:${sent?.state ?? '无返回'}${sent?.why ? `(${sent.why})` : ''}`);
       return r;
     }
+
+    /** 互动到这里就完了(已经互关,不关注) */
+    if (engage) { r.ok = true; return r; }
 
     // ── ③ 关注 ──
     const goP = await ports.goto(X_PAGE_NAME.profile, { handle: p.handle });
@@ -149,7 +161,8 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   } finally {
     setXHostBusy(wcId, null);
     running.delete(p.wsId);
-    await recordAsk(account.restId, p, reply, r).catch((e) => console.error('[x.ask] x_ask 没写上', e));
+    await (engage ? recordEngage(account.restId, p, reply, r) : recordAsk(account.restId, p, reply, r))
+      .catch((e) => console.error(`[x.ask] ${engage ? 'x_engage' : 'x_ask'} 没写上`, e));
     console.log(`[x.ask] @${p.handle} 推文 ${p.tweetId}:赞 ${r.liked ?? '-'} · 留言 ${r.replied ?? '-'} · 关注 ${r.followed ?? '-'}${r.detail ? ` —— ${r.detail}` : ''}`);
   }
 }
@@ -177,6 +190,25 @@ async function recordAsk(account: string, p: AskRunInput, reply: string, r: AskR
 }
 
 const dbState = (s: StepState | undefined): string | undefined => s;
+
+/**
+ * 互动一次一行(只追加)。pick_kind:卡片传 tweet = 回他找我的那条 → his-message;其余(他最近的 / 人换的一条)→ latest。
+ * ⚠️ 卡片把「他最近的」和「人换的」都传 other,这里分不开,不假装分得开。
+ */
+async function recordEngage(account: string, p: AskRunInput, reply: string, r: AskRunResult): Promise<void> {
+  const pick = p.pickKind === 'tweet' ? 'his-message' : 'latest';
+  const [rows] = await getXDB().query<[unknown[]]>(
+    `CREATE x_engage SET account = $account, person = $person, person_handle = $handle, tweet_id = $tid, tweet_text = $ttext,
+       pick_kind = $kind, reply_text = $reply, reply_source = $src, ai_text = $ai, reply_id = $rid,
+       liked = $liked, replied = $replied, failed_step = $fstep, failed_detail = $fdetail, ws_id = $ws, at = time::now() RETURN id`,
+    {
+      account, person: p.restId, handle: p.handle, tid: p.tweetId, ttext: p.tweetText, kind: pick, reply,
+      src: replySourceOf(p.aiText, reply), ai: p.aiText,
+      rid: r.replyId, liked: dbState(r.liked), replied: dbState(r.replied), fstep: r.failedStep, fdetail: r.detail, ws: p.wsId,
+    },
+  );
+  if (!rows || rows.length !== 1) throw new Error('CREATE x_engage 没返回行');
+}
 
 /** ⭐ 发出去的留言算谁写的:和 Gemma 原稿一字不差(去掉首尾空白)= ai;改过 / 没用草稿 = human(只有 human 进范例库) */
 export function replySourceOf(aiText: string | undefined, reply: string): 'ai' | 'human' {

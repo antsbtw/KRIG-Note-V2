@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import type { EngageOverview } from './x-engage-repo';
+import { AskRun, type AskWho } from './XTaskAsk';
 
 const GROUP: ReadonlyArray<{ id: 'both' | 'onlyMe' | 'onlyHim' | 'none'; label: string; hint: string }> = [
   { id: 'both', label: '双向都有', hint: '我回过他,他也回过我' },
@@ -20,6 +21,8 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const [msg, setMsg] = useState<string | null>(null);
   const [collecting, setCollecting] = useState(false);
   const [open, setOpen] = useState(false);
+  /** ⭐ 正在过互动卡的这一批(用户 10-22 选「和求关卡一样」) */
+  const [engaging, setEngaging] = useState<AskWho[] | null>(null);
   const load = useCallback(() => {
     void xDataCall({ op: 'engageOverview', wsId, limit: 30 }).then((r) => { if (r.status === 'ok') setOv(r.value as EngageOverview); else setMsg(r.reason); });
   }, [wsId]);
@@ -60,8 +63,22 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
         互动数据上次采:{last ? new Date(last).toLocaleString() : '还没采过(分组先按库里已有的推文算)'}
         {' '}<button type="button" style={{ fontSize: 11 }} disabled={collecting} onClick={() => void collect()}>{collecting ? '采集中…' : '采互动'}</button>
         {' '}<button type="button" style={{ fontSize: 11 }} onClick={() => setOpen((o) => !o)}>{open ? '收起队列' : `看互动队列(${ov?.queueTotal ?? '…'} 人)`}</button>
+        {' '}<button type="button" style={{ fontSize: 11 }} disabled={!ov || ov.queue.length === 0 || engaging !== null}
+          onClick={() => setEngaging(ov!.queue.slice(0, 10).map((p) => ({ restId: p.restId, handle: p.handle, name: p.name, hisTweetId: p.lastHis?.tweetId })))}
+          title="从队列最前的 10 人开始(他找过你的在前):选他一条帖子 → Gemma 草拟回复 → 你改 → 点赞 + 回复(不关注)">
+          开始互动(前 10 人)
+        </button>
       </div>
       {msg && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{msg}</div>}
+      {engaging && (
+        <div style={{ marginTop: 8 }}>
+          <AskRun mode="engage" wsId={wsId} queue={engaging} onPersonDone={load} onEnd={(d) => {
+            setEngaging(null);
+            setMsg(`这一批看完 ${d.length}/${engaging.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+            load();
+          }} />
+        </div>
+      )}
       {open && ov && (
         <div style={{ marginTop: 6, fontSize: 12, maxHeight: 300, overflow: 'auto' }}>
           {ov.queue.map((p) => (

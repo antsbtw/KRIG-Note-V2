@@ -46,3 +46,12 @@ describe('发出去算谁写的', () => {
     expect(replySourceOf(undefined, '自己写的')).toBe('human');
   });
 });
+
+describe('互动口吻(2026-10-22)', () => {
+  it('不求关、不提互关;范例标「回复」', () => {
+    const m = buildAskDraftPrompt({ examples: [{ tweet: 'a', reply: '确实' }], tweet: '今天 A 股大跌', person: {}, mode: 'engage' });
+    expect(m[0].content).toMatch(/不要求关注、不要提「互关」/);
+    expect(m[0].content).not.toMatch(/求互关/);
+    expect(m[1].content).toMatch(/我以前亲手写的回复/);
+  });
+});

@@ -144,3 +144,22 @@ describe('replyProblem', () => {
     expect(replyProblem('互关一起冲')).toBeNull();
   });
 });
+
+describe('⭐⭐ 互动模式(2026-10-22,蓝V互关第 3 件事:点赞 + 回复,不关注)', () => {
+  it('不去主页、不点关注、不写「我关注他」;动作留痕标「互动」;记进 x_engage(回他找我的那条 = his-message)', async () => {
+    const r = await runAsk({ ...input, mode: 'engage', reply: '说得对,这波确实超预期' });
+    expect(r).toMatchObject({ ok: true, liked: 'ok', replied: 'ok' });
+    expect(r.followed).toBeUndefined();
+    expect(h.calls).not.toContain('goto:x.profile');
+    expect(h.calls).not.toContain(`run:${X_SCRIPTS.follow}`);
+    expect(h.rels).toEqual([]);
+    expect(h.actions.map((a) => `${String(a.action)}:${String(a.reason).slice(0, 2)}`)).toEqual(['like:互动', 'reply:互动']);
+    expect(h.asks).toEqual([expect.objectContaining({ kind: 'his-message', reply: '说得对,这波确实超预期', liked: 'ok', replied: 'ok' })]);
+    expect(h.asks[0]).not.toHaveProperty('followed');
+  });
+  it('关注闸门不管互动(今天关注满了也能互动)', async () => {
+    h.gate = { allowed: false, reason: '今天已关注 30/30' };
+    const r = await runAsk({ ...input, mode: 'engage' });
+    expect(r.ok).toBe(true);
+  });
+});
