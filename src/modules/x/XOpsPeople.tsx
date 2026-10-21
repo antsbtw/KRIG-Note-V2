@@ -560,13 +560,18 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             <button
               key={g.id}
               type="button"
-              onClick={() => pickGroup(g.id)}
-              style={{ ...S.cell, ...(active ? S.cellActive : null) }}
+              /**
+               * ⚠️ 点完去掉焦点(2026-10-21 用户截图):再点一次回到「全部」后,按钮焦点的深底浅边还留着,
+               * 看着像这一格仍选着,下面列的却是全部 —— 「这个数据不对呀?」。选中只认蓝边浅蓝底 + 「已选」字样。
+               */
+              onClick={(e) => { pickGroup(g.id); e.currentTarget.blur(); }}
+              style={{ ...S.cell, ...(active ? S.cellActive : null), outline: 'none' }}
               title={active ? '再点一次回到全部' : `列出「${g.label}」的人`}
             >
               <span style={S.cellLabel}>{g.label}</span>
               <span style={S.cellNum}>{v ? v.total.toLocaleString() : '…'}</span>
               <span style={S.muted}>蓝V {v ? v.blue.toLocaleString() : '…'}</span>
+              {active && <span style={{ ...S.muted, color: 'var(--accent-bar, #6b9fff)' }}>已选 · 再点回到全部</span>}
               {g.id === 'none' && <span style={S.muted}>多为配方找到的</span>}
               {g.id === 'unknown' && <span style={S.muted}>推文没带关系标记</span>}
             </button>
