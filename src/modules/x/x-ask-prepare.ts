@@ -12,10 +12,18 @@ import { readPerson } from './x-people-repo';
 import { pickAskTweet, type AskPlan } from './x-ask-plan';
 import { followQueueStatus } from './x-follow-queue';
 import { readSettings } from './x-ops-actions-repo';
+import { accountForWrite } from './x-account-repo';
+import { writeRelations } from './x-user-repo';
 
 export type AskPrepared =
   | { readonly ok: false; readonly why: string }
-  | { readonly ok: true; readonly plan: AskPlan; readonly person: { restId: string; handle: string; name?: string; bio?: string; followers?: number; followsMe?: boolean } ; readonly ledgerProblem?: string };
+  | {
+    readonly ok: true; readonly plan: AskPlan;
+    readonly person: { restId: string; handle: string; name?: string; bio?: string; followers?: number; followsMe?: boolean };
+    readonly ledgerProblem?: string;
+    /** ⭐ 刚从 X 读到的「我和他」(他自己推文载荷里带的);没读到 = undefined */
+    readonly live?: { readonly following?: boolean; readonly followedBy?: boolean };
+  };
 
 /** 算法排除 —— 人 > AI > 算法:人或 AI 定过的不改 */
 const EXCLUDE_RULE_SQL = `UPDATE type::record('x_author', $rest_id) SET
@@ -39,6 +47,35 @@ export async function prepareAsk(wsId: string, account: string, restId: string, 
     'SELECT VALUE tweet_id FROM x_ask WHERE account = $a AND person = $p', { a: account, p: restId },
   );
   const revisit = (asked ?? []).length > 0 ? { avoidIds: new Set(asked) } : undefined;
+
+  /**
+   * ⭐⭐ 动手前核对现状(2026-10-21 用户:「准备发消息前要再确认用户的新状态,否则继续关注一个已经关注过的用户可不太好。」
+   * 截图 @luoyisidi:X 上已是 Following + Follows you,库里还当候选)。
+   * 用刚采到的他自己推文里 X 给的关系(following = 我关注他,followedBy = 他关注我),先写回库;
+   *  · 第一次求关:我已经关注他 → 不求关
+   *  · 再互动(我关注着、等他回关):他已经回关 → 不用再互动
+   */
+  const mine = r.records.find((t) => t.authorRestId === restId && (t.following !== undefined || t.followedBy !== undefined));
+  const live = mine ? { following: mine.following, followedBy: mine.followedBy } : undefined;
+  if (live) {
+    const acc = await accountForWrite(wcId);
+    if (acc.kind === 'ok') {
+      await writeRelations(acc, [{ person: restId, iFollow: live.following, followsMe: live.followedBy, observedAt: new Date().toISOString() }], 'ask-prepare')
+        .catch((e) => console.warn(`[x.ask] @${handle} 关系没写回:${e instanceof Error ? e.message : String(e)}`));
+    }
+  }
+  const stopWhy = !live ? undefined
+    : !revisit && live.following === true ? (live.followedBy === true ? '已经互关了(X 上刚看到)—— 不用求关' : '我已经关注他了(X 上刚看到),他还没回关 —— 不重复求关')
+      : revisit && live.followedBy === true ? '他已经回关了(X 上刚看到)—— 不用再互动'
+        : undefined;
+  if (stopWhy) {
+    console.log(`[x.ask] @${handle}:${stopWhy}`);
+    return {
+      ok: true, live, ledgerProblem: r.ledgerProblem,
+      plan: { kind: 'skip', recent: [], why: stopWhy, alreadyRelated: true },
+      person: { restId, handle, name: p?.display_name, bio: p?.bio, followers: p?.followers_count, followsMe: live?.followedBy },
+    };
+  }
   const plan = pickAskTweet(r.records, { restId, handle, bio: p?.bio, name: p?.display_name }, revisit);
   /**
    * ⚠️ 只有「采到了他的推文、账对得上、确实没求关」才排除;
@@ -49,7 +86,7 @@ export async function prepareAsk(wsId: string, account: string, restId: string, 
   }
   console.log(`[x.ask] @${handle}:${plan.kind === 'skip' ? `放弃 —— ${plan.why}` : `选推文 ${plan.tweet.id}(${plan.why})`}`);
   return {
-    ok: true, plan, ledgerProblem: r.ledgerProblem,
-    person: { restId, handle, name: p?.display_name, bio: p?.bio, followers: p?.followers_count, followsMe: p?.follows_me },
+    ok: true, plan, ledgerProblem: r.ledgerProblem, live,
+    person: { restId, handle, name: p?.display_name, bio: p?.bio, followers: p?.followers_count, followsMe: live?.followedBy ?? p?.follows_me },
   };
 }

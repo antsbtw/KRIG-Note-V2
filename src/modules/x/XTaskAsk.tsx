@@ -151,7 +151,14 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone }: {
         </div>
       )}
       {prep?.ok && prep.ledgerProblem && <div style={{ marginTop: 6, color: '#fbbf24' }}>⚠️ 这一页账没对上:{prep.ledgerProblem}</div>}
-      {plan?.kind === 'skip' && (
+      {plan?.kind === 'skip' && plan.alreadyRelated && (
+        <div style={{ marginTop: 6 }}>
+          <div style={{ color: '#5fc98a' }}>不求关:{plan.why}</div>
+          <div style={{ opacity: 0.7 }}>关系已按 X 上看到的写回库,他会从候选里消失(不算排除)</div>
+          <button type="button" style={{ marginTop: 6 }} onClick={() => next(`不求关:${plan.why}`)}>下一个</button>
+        </div>
+      )}
+      {plan?.kind === 'skip' && !plan.alreadyRelated && (
         <div style={{ marginTop: 6 }}>
           <div>放弃:{plan.why}</div>
           {plan.recent.length > 0 && prep?.ok && !prep.ledgerProblem

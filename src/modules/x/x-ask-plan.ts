@@ -20,7 +20,11 @@ export type AskPlan =
   | { readonly kind: 'bio-latest'; readonly tweet: AskTweet; readonly recent: readonly AskTweet[]; readonly why: string }
   /** 再互动(求关过、满 N 天没回关,人点「再互动」):他最新一条没留过言的推文 */
   | { readonly kind: 'other'; readonly tweet: AskTweet; readonly recent: readonly AskTweet[]; readonly why: string }
-  | { readonly kind: 'skip'; readonly recent: readonly AskTweet[]; readonly why: string };
+  | {
+    readonly kind: 'skip'; readonly recent: readonly AskTweet[]; readonly why: string;
+    /** ⭐ 不求关是因为 X 上刚看到关系已经是了(2026-10-21)—— 不算他没求关,不排除 */
+    readonly alreadyRelated?: true;
+  };
 
 /** 他自己发的、不是转发、不是置顶,按时间新→旧,取前 N */
 export function recentOwn(records: readonly TweetRecord[], restId: string, n = ASK_RECENT_N): TweetRecord[] {
