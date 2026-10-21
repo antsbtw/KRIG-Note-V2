@@ -92,9 +92,14 @@ describe('候选名单:点 = 跳主页,勾 = 选定(10-16 用户:「注意时点
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     const fn = F.slice(F.indexOf('const openInX'), F.indexOf('const toggle'));
     const guard = fn.indexOf('if (qs?.current)');
-    const go = fn.indexOf("op: 'goto'");
+    const busy = fn.indexOf('await xPageBusy(wcId)');
+    /** 2026-10-21 起跳转改为「去主页并读关系」(readProfileAndRefresh),读到已关注就从候选里拿掉 */
+    const go = fn.indexOf('await readProfileAndRefresh(');
     expect(guard).toBeGreaterThan(-1);
+    expect(go).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(go);
+    expect(busy).toBeLessThan(go);
+    expect(fn).toMatch(/if \(v\.rec\.following === true\) \{\s*setCands\(/);
   });
   it('认号:X 网页后登记好会再认一次', () => {
     const A = strip(read('src/modules/x/XAccountBadge.tsx'));

@@ -7,11 +7,12 @@
  */
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { getXHostState, subscribeXHost } from './x-host-registry';
-import { X_PAGE_NAME } from './x-pages';
+import { getXHostState, setXHostBusy, subscribeXHost } from './x-host-registry';
 import { AskRun, type AskWho } from './XTaskAsk';
 import { XPersonTimeline } from './XPersonTimeline';
 import { readProfileAndRefresh, unfollowOnce, xPageBusy } from './x-unfollow-run';
+
+const CHECK_BUSY = '任务:正在核对这个人';
 import type { AskStatus } from './x-follow-back';
 
 type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
@@ -130,8 +131,26 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
     const busy = await xPageBusy(wcId);
     if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
-    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: c.handle } });
-    setMsg(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
+    /**
+     * ⭐ 去他主页的同时读资料、把「我和他」的关系写回库(与运营人卡的「点人顺手核对」同一个函数)。
+     * 用户 10-21:「点击观察到已经互关过的推友,就应该移除这个列表吧?」—— 读到我已经关注他 → 从候选里拿掉,说清楚。
+     */
+    setXHostBusy(wcId, CHECK_BUSY);
+    let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
+    try {
+      v = await readProfileAndRefresh({ rest_id: c.rest_id, handle: c.handle }, wcId);
+    } finally {
+      setXHostBusy(wcId, null);
+    }
+    if (v.kind === 'miss') { setMsg(`跳过去了,但没读到他的关系:${v.text}`); return; }
+    if (v.rec.following === true) {
+      setCands((list) => (list ?? []).filter((x) => x.rest_id !== c.rest_id));
+      setPicked((ps) => { const n = new Set(ps); n.delete(c.rest_id); return n; });
+      setMsg(`@${c.handle} ${v.rec.followedBy === true ? '已经互关了' : '你已经关注他了(他还没回关)'} —— X 上刚看到,已从候选里拿掉`);
+      loadProg();
+      return;
+    }
+    setMsg(v.kind === 'same' ? null : `@${c.handle}:${v.text}`);
   };
   const toggle = (id: string): void => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   /**
