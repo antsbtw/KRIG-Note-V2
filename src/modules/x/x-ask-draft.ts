@@ -7,11 +7,12 @@
  * · 范例只取**你亲手写、发出去**的求关留言(x_ask.reply_source = human 且 replied = ok)+ 当时他那条帖子
  *   ⚠️ 账号上已有的回复是 Muse 自动回复,不算你的习惯(记忆 project-x-ask-reply-corpus);AI 原样发出去的也不进范例(免得学自己)
  * · 输出纯文本,不用 JSON 契约(记忆 project-x-reply-latency:语法约束采样空转慢;num_predict 会变静默截断 —— 都不用)
+ * · 关掉思考(think: false):Gemma 4 默认先写 ~1000 字思考,一条 30~80 秒;关掉 1~2 秒
  * · 校验不过就不填、说清为什么,不拿模板凑(fail loud)
  * · 只写中文:外语回复人审不出来(记忆 project-x-multilang-reply-risk)
  */
 import { getXDB } from '@storage/surreal/client';
-import { callOllama } from '@platform/main/local-llm/ollama-client';
+import { callOllamaChat } from '@platform/main/local-llm/ollama-client';
 
 export const ASK_DRAFT_MODEL = 'gemma4:12b';
 const MAX_EXAMPLES = 12;
@@ -79,9 +80,12 @@ export async function draftAskReply(input: {
   const t0 = Date.now();
   let raw: string;
   try {
-    raw = (await callOllama({
+    /**
+     * ⚠️ think: false —— Gemma 4 默认先思考:真机一条 30~80 秒(5 条里 3 条 90 秒超时);关掉 1~2 秒,质量差不多(2026-10-21 实测)
+     */
+    raw = (await callOllamaChat({
       model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person }),
-      temperature: 0.8, timeoutMs: 90_000, responseFormat: 'text',
+      think: false, temperature: 0.8, timeoutMs: 60_000,
     })).content;
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);

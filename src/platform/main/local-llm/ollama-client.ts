@@ -74,3 +74,44 @@ export async function callOllama(opts: OllamaCallOptions): Promise<OllamaRespons
 
   return { content };
 }
+
+/**
+ * ⭐ 走 Ollama 原生 /api/chat —— 能关掉「先思考」(2026-10-21)
+ *
+ * Gemma 4 默认开着思考:真机同一句求关留言,开着先写 ~1000 字思考、30 秒;关掉 1.4 秒,留言质量差不多。
+ * OpenAI 兼容接口传不了 think,所以短文本生成走这里。失败 throw(fail loud)。
+ */
+export async function callOllamaChat(opts: {
+  model: string;
+  messages: OllamaMessage[];
+  /** false = 不先思考(短文本生成用这个) */
+  think: boolean;
+  endpoint?: string;
+  timeoutMs?: number;
+  temperature?: number;
+}): Promise<OllamaResponse & { readonly evalCount?: number; readonly totalMs?: number }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
+  let response: Response;
+  try {
+    response = await fetch(`${opts.endpoint ?? 'http://localhost:11434'}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: opts.model, messages: opts.messages, stream: false, think: opts.think,
+        options: { temperature: opts.temperature ?? 0.2 },
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Ollama HTTP ${response.status}: ${text.slice(0, 200)}`);
+  }
+  const json = (await response.json()) as { message?: { content?: string }; eval_count?: number; total_duration?: number };
+  const content = json.message?.content;
+  if (typeof content !== 'string') throw new Error('Ollama /api/chat 回的没有 message.content');
+  return { content, evalCount: json.eval_count, totalMs: json.total_duration !== undefined ? Math.round(json.total_duration / 1e6) : undefined };
+}
