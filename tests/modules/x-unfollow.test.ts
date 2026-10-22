@@ -16,7 +16,7 @@ const S = {
   'unfollow.daily_cap': 50, 'unfollow.min_gap_sec': 20, 'collect.live_page_cap': 30,
   // ⚠️ 后台采集节奏(bg.*)2026-10-20 起不是设置了,由 x_pace 按限流自调
   // 2026-10-16 蓝V互关 M4:关注的节奏与回访天数
-  'follow.daily_cap': 30, 'follow.min_gap_sec': 60, 'follow.jitter_sec': 30, 'follow.revisit_days': 7,
+  'follow.daily_cap': 400, 'follow.min_gap_sec': 60, 'follow.jitter_sec': 30, 'follow.revisit_days': 7,
   // 2026-10-17 求关:连续 15 个歇 15 分钟(用户选的);准备时采他主页 2 页
   'follow.burst_size': 15, 'follow.burst_rest_min': 15, 'ask.collect_pages': 2,
   // 2026-10-19 第 4 阶段查回关:连续 30 个老关注者算追上(沿用 09-19 快速增量阈值);一次最多 20 页
@@ -69,8 +69,10 @@ describe('⭐⭐⭐ 关注闸门(10-17 改:没有「两次最小间隔」,连续
     expect(followGate(S, 15, broken, now).allowed).toBe(true);
   });
 
-  it('每日上限照旧', () => {
-    expect(followGate(S, 30, [], now)).toMatchObject({ allowed: false });
+  it('每日到 400(X 公布的每天关注上限)才提醒;默认是 400 不是 30(用户 10-22 目标每天新增 200~300 互关)', () => {
+    expect(followGate(S, 400, [], now)).toMatchObject({ allowed: false });
+    expect(followGate(S, 30, [], now).allowed).toBe(true);
+    expect(SETTING_DEFS.find((d) => d.key === 'follow.daily_cap')!.default).toBe(400);
   });
 });
 

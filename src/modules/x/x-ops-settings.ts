@@ -35,9 +35,10 @@ export const SETTING_DEFS: readonly SettingDef[] = [
    */
   /**
    * ⭐ 关注(2026-10-16,蓝V互关 M4)—— 用户:「勾一批,程序按节奏慢慢关」;上限/间隔同取关,是人可调的变量。
-   * 默认取保守(我的判断:X 对短时间大量关注比取关更敏感)。
+   * ⚠️ 只提醒不拦(用户 10-21)。默认 400 = X 公布的每个号每天关注上限(原来 30 是我拍的保守数)。
+   * 用户 10-22:「未来我每天新增的互关蓝友希望超过100人,希望达到200~300人才行。」—— 30 会天天误报。
    */
-  { key: 'follow.daily_cap', label: '每日关注上限', default: 30, min: 0, max: 400, unit: '个' },
+  { key: 'follow.daily_cap', label: '每日关注上限', default: 400, min: 0, max: 1000, unit: '个' },
   /**
    * ⚠️ 只管**关注队列**(后台一个个关)的节奏;不是 X 的限制,求关卡(人一次点一个)不受它管。
    * 用户 10-17:「这个提示不对的,x没有这个限制,只是15个关注后需要等待一段时间」—— 原来闸门拿它拦求关,提示还说得像平台限制。
@@ -110,7 +111,7 @@ export function localDayStart(now: Date): Date {
 export function followGate(s: OpsSettings, todayCount: number, recentDesc: readonly string[], now: Date): UnfollowGate {
   const cap = s['follow.daily_cap'];
   if (todayCount >= cap) {
-    return { allowed: false, reason: `今天已关注 ${todayCount} 个,超过平时的量 ${cap}(我们的设置,不是 X 的限制)—— 留意 X 有没有提示限制`, todayCount, cap };
+    return { allowed: false, reason: `今天已关注 ${todayCount} 个,到了 ${cap}(X 公布的每天关注上限约 400)—— 留意 X 有没有提示限制`, todayCount, cap };
   }
   const size = s['follow.burst_size'];
   const restMs = s['follow.burst_rest_min'] * 60_000;

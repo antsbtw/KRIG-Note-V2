@@ -16,7 +16,7 @@ const CHECK_BUSY = '任务:正在核对这个人';
 import type { AskStatus } from './x-follow-back';
 
 type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
-type Prog = { followedTotal: number; followedBack: number; revisit: Array<{ rest_id: string; handle: string; followedAt: string }>; revisitDays: number; today: number; cap: number };
+type Prog = { followedTotal: number; followedBack: number; revisit: Array<{ rest_id: string; handle: string; followedAt: string }>; revisitDays: number; today: number; cap: number; burst: number };
 type QItem = { restId: string; handle: string };
 type QDone = { restId: string; handle: string; at: string; state: 'followed' | 'already-following' | 'failed'; detail?: string };
 type QStatus = { waiting: number; next: QItem[]; current?: QItem; paused?: string; note?: string; nextAt: number; done: QDone[]; now: number };
@@ -37,6 +37,8 @@ const ago = (iso: string): string => {
 export function FollowStep({ wsId, candidates }: { wsId: string; candidates: number | undefined }): ReactElement {
   const [open, setOpen] = useState(false);
   const [prog, setProg] = useState<Prog | null>(null);
+  /** 一批勾几个 = 连续关注几个后要歇(用户 10-22:「一次最多15人就开始限流15分钟了」) */
+  const burst = prog?.burst ?? 15;
   const [qs, setQs] = useState<QStatus | null>(null);
   const [cands, setCands] = useState<Cand[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -180,7 +182,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     <div>
       <div>候选(蓝V · 我没关注 · 有互关倾向):{candidates ?? '…'} 人</div>
       <div style={{ marginTop: 4 }}>
-        今天已关注 {prog ? `${prog.today}/${prog.cap}` : '…'}
+        今天已关注 {prog ? prog.today : '…'}
         {' '}· 求关 {fs ? fs.statuses.length : '…'} 人:已回关 {n('back')} · 等待中 {n('waiting')}
         {' '}· 满 {fs?.revisitDays ?? 7} 天没回关 {n('overdue')}{n('unconfirmed') > 0 ? ` · 未确认 ${n('unconfirmed')}` : ''}
       </div>
@@ -216,8 +218,8 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
               <strong style={{ fontSize: 12 }}>候选名单</strong>
               <span style={{ fontSize: 12, opacity: 0.7 }}>{cands ? `${cands.length} 人(粉丝多的在前)` : '读取中…'}</span>
               <button type="button" style={{ fontSize: 11 }}
-                onClick={() => setPicked(new Set((cands ?? []).filter((c) => !queued.has(c.rest_id)).slice(0, prog ? Math.max(0, prog.cap - prog.today) : 10).map((c) => c.rest_id)))}
-                title="勾上今天还能关的数量">勾今天的量</button>
+                onClick={() => setPicked(new Set((cands ?? []).filter((c) => !queued.has(c.rest_id)).slice(0, burst).map((c) => c.rest_id)))}
+                title={`一批 ${burst} 人 —— 连续关注 ${burst} 个后 X 要歇约 15 分钟(用户 10-22)`}>勾 {burst} 人</button>
               <button type="button" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>全不选</button>
               <button type="button" disabled={picked.size === 0 || asking !== null} onClick={startAsk}>开始求关({picked.size} 人)</button>
             </div>

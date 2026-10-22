@@ -385,7 +385,7 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if ('reason' in acc) return failed(acc.reason);
           const gate = await readFollowGate(localDayStart(new Date()).toISOString());
           const prog = await readFollowProgress(acc.restId, gate.settings['follow.revisit_days']);
-          return { status: 'ok', value: { ...prog, today: gate.todayCount, cap: gate.cap } };
+          return { status: 'ok', value: { ...prog, today: gate.todayCount, cap: gate.cap, burst: gate.settings['follow.burst_size'] } };
         }
 
         case 'followCheckRun': {
