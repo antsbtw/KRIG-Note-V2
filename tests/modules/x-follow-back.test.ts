@@ -179,8 +179,9 @@ describe('人的互动时间线', () => {
 describe('再互动:选帖避开求关过的', () => {
   const rec = (id: string, text: string, at: string): TweetRecord => ({ id, text, createdAt: at, authorRestId: 'P' } as TweetRecord);
   const recs = [rec('3', '今天天气不错', '2026-10-24T00:00:00Z'), rec('2', '#互关 必回', '2026-10-23T00:00:00Z'), rec('1', '#蓝V互关', '2026-10-17T00:00:00Z')];
-  it('和互关相关、没留过言的优先;没有就最新一条;全留过言 → 放弃(等新帖)', () => {
-    expect(pickAskTweet(recs, { restId: 'P', handle: 'p' }, { avoidIds: new Set(['1']) })).toMatchObject({ kind: 'tweet', tweet: { id: '2' } });
+  it('⭐ 时间优先(用户 10-22):他最新一条没留过言的;全留过言 → 放弃(等新帖)', () => {
+    expect(pickAskTweet(recs, { restId: 'P', handle: 'p' }, { avoidIds: new Set(['1']) })).toMatchObject({ kind: 'other', tweet: { id: '3' } });
+    expect(pickAskTweet(recs, { restId: 'P', handle: 'p' }, { avoidIds: new Set(['3']) })).toMatchObject({ kind: 'tweet', tweet: { id: '2' } });
     expect(pickAskTweet(recs, { restId: 'P', handle: 'p' }, { avoidIds: new Set(['1', '2']) })).toMatchObject({ kind: 'other', tweet: { id: '3' } });
     expect(pickAskTweet(recs, { restId: 'P', handle: 'p' }, { avoidIds: new Set(['1', '2', '3']) }).kind).toBe('skip');
   });

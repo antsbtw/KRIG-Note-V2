@@ -10,6 +10,7 @@ import { xDataCall } from './x-data-types';
 import { getXHostState, setXHostBusy, subscribeXHost } from './x-host-registry';
 import { AskRun, type AskWho } from './XTaskAsk';
 import { XPersonTimeline } from './XPersonTimeline';
+import { XTabs } from './XTabs';
 import { readProfileAndRefresh, unfollowOnce, xPageBusy } from './x-unfollow-run';
 
 const CHECK_BUSY = '任务:正在核对这个人';
@@ -35,7 +36,8 @@ const ago = (iso: string): string => {
 };
 
 export function FollowStep({ wsId, candidates }: { wsId: string; candidates: number | undefined }): ReactElement {
-  const [open, setOpen] = useState(false);
+  /** ⭐ 用户 10-22「tab 中再包含 tab」:候选名单 / 求关名单 / 最近关注 */
+  const [sub, setSub] = useState<'cands' | 'asked' | 'recent'>('cands');
   const [prog, setProg] = useState<Prog | null>(null);
   /** 一批勾几个 = 连续关注几个后要歇(用户 10-22:「一次最多15人就开始限流15分钟了」) */
   const burst = prog?.burst ?? 15;
@@ -118,8 +120,8 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     return () => clearInterval(t);
   }, [loadQ]);
   const doneCount = qs?.done.length ?? 0;
-  useEffect(() => { if (doneCount > 0) { loadProg(); if (open) loadCands(); } }, [doneCount, loadProg, loadCands, open]);
-  useEffect(() => { if (open && cands === null) loadCands(); }, [open, cands, loadCands]);
+  useEffect(() => { if (doneCount > 0) { loadProg(); loadCands(); } }, [doneCount, loadProg, loadCands]);
+  useEffect(() => { if (cands === null) loadCands(); }, [cands, loadCands]);
 
   const queued = new Set([...(qs?.next ?? []).map((i) => i.restId), qs?.current?.restId].filter(Boolean) as string[]);
   /**
@@ -196,7 +198,6 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
       </div>
       <div style={{ marginTop: 4, fontSize: 12 }}>{qLine}</div>
       <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-        <button type="button" onClick={() => setOpen((o) => !o)}>{open ? '收起' : '去求关'}</button>
         {qs && (qs.waiting > 0 || qs.current) && (qs.paused
           ? <button type="button" onClick={() => void control('resume')}>继续</button>
           : <button type="button" onClick={() => void control('pause')}>暂停</button>)}
@@ -204,8 +205,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
       </div>
       {msg && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{msg}</div>}
 
-      {open && (
-        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {asking && (
             <AskRun wsId={wsId} queue={asking} onActed={loadProg} onPersonDone={loadCands} onEnd={(d) => {
               setAsking(null);
@@ -213,17 +213,18 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
               loadCands();
             }} />
           )}
+          <XTabs small active={sub} onChange={(id) => setSub(id as typeof sub)} items={[
+            { id: 'cands', label: `候选名单 ${cands ? cands.length : '…'}`, body: (
           <div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <strong style={{ fontSize: 12 }}>候选名单</strong>
-              <span style={{ fontSize: 12, opacity: 0.7 }}>{cands ? `${cands.length} 人(粉丝多的在前)` : '读取中…'}</span>
+              <span style={{ fontSize: 12, opacity: 0.7 }}>{cands ? '粉丝多的在前' : '读取中…'}</span>
               <button type="button" style={{ fontSize: 11 }}
                 onClick={() => setPicked(new Set((cands ?? []).filter((c) => !queued.has(c.rest_id)).slice(0, burst).map((c) => c.rest_id)))}
                 title={`一批 ${burst} 人 —— 连续关注 ${burst} 个后 X 要歇约 15 分钟(用户 10-22)`}>勾 {burst} 人</button>
               <button type="button" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>全不选</button>
               <button type="button" disabled={picked.size === 0 || asking !== null} onClick={startAsk}>开始求关({picked.size} 人)</button>
             </div>
-            <div style={{ maxHeight: 320, overflow: 'auto', marginTop: 6, fontSize: 12 }}>
+            <div style={{ marginTop: 6, fontSize: 12 }}>
               {(cands ?? []).map((c) => (
                 <div key={c.rest_id} style={{
                   display: 'flex', gap: 6, padding: '3px 0', borderBottom: '1px solid var(--border-color, #2a2a2a)',
@@ -244,21 +245,10 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
               ))}
             </div>
           </div>
-          {(qs?.done.length ?? 0) > 0 && (
-            <div>
-              <strong style={{ fontSize: 12 }}>最近关注</strong>
-              <div style={{ fontSize: 12, marginTop: 4 }}>
-                {qs!.done.map((d) => (
-                  <div key={`${d.restId}-${d.at}`} style={{ color: d.state === 'failed' ? '#f87171' : undefined }}>
-                    {new Date(d.at).toLocaleTimeString()} {STATE[d.state]} @{d.handle}{d.detail ? ` —— ${d.detail}` : ''}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+            ) },
+            { id: 'asked', label: `求关名单 ${fs ? fs.statuses.length : '…'}${n('overdue') > 0 ? ` · 满 ${fs?.revisitDays ?? 7} 天没回关 ${n('overdue')}` : ''}`, body: (
           <div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <strong style={{ fontSize: 12 }}>求关名单</strong>
               <span style={{ fontSize: 12, opacity: 0.7 }}>点名字看你们的往来</span>
               {unfPaused && <button type="button" style={{ fontSize: 11 }} onClick={() => { setUnfPaused(null); setMsg(null); }} title={unfPaused}>恢复取关</button>}
             </div>
@@ -302,8 +292,21 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
               })}
             </div>
           </div>
-        </div>
-      )}
+            ) },
+            { id: 'recent', label: `最近关注 ${qs?.done.length ?? 0}`, hidden: (qs?.done.length ?? 0) === 0, body: (
+            <div>
+              <strong style={{ fontSize: 12 }}>最近关注</strong>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                {qs!.done.map((d) => (
+                  <div key={`${d.restId}-${d.at}`} style={{ color: d.state === 'failed' ? '#f87171' : undefined }}>
+                    {new Date(d.at).toLocaleTimeString()} {STATE[d.state]} @{d.handle}{d.detail ? ` —— ${d.detail}` : ''}
+                  </div>
+                ))}
+              </div>
+            </div>
+            ) },
+          ]} />
+      </div>
     </div>
   );
 }

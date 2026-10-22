@@ -26,12 +26,15 @@ describe('任务 view', () => {
     expect(V).not.toMatch(/slotBinding/);
   });
 
-  it('⭐ 三件事都在;2 已接关注队列;还没做的 3 不放假按钮', () => {
+  it('⭐ 三件事各一个 tab(用户 10-22「上面一排 tab,里面再一排」);2 接求关,3 接互动', () => {
     const B = strip(read('src/modules/x/XTaskBlueMutual.tsx'));
     for (const t of ['找我还没关注的蓝V', '对有互关倾向的,互动求关', '已互关的蓝V,看互动情况']) expect(B).toContain(t);
-    const s2 = B.slice(B.indexOf('<Step n={2}'), B.indexOf('<Step n={3}'));
+    expect(B).toMatch(/<XTabs active=\{tab\}/);
+    const s2 = B.slice(B.indexOf("id: 'ask'"), B.indexOf("id: 'engage'"));
+    expect(s2.length).toBeGreaterThan(0);
     expect(s2).toMatch(/<FollowStep wsId=\{wsId\}/);
-    const s3 = B.slice(B.indexOf('<Step n={3}'), B.indexOf('function Step'));
+    const s3 = B.slice(B.indexOf("id: 'engage'"), B.indexOf('function Step'));
+    expect(s3).toMatch(/<EngageStep wsId=\{wsId\}/);
     expect(s3).not.toMatch(/<button/);
   });
 

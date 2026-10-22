@@ -18,6 +18,7 @@ import { ledgerLine, type PageLedgerRow } from './x-page-ledger';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import { FollowStep } from './XTaskFollow';
 import { EngageStep } from './XTaskEngage';
+import { XTabs } from './XTabs';
 
 type Overview = {
   lastFindAt?: string; found: number; foundBlue: number; foundBlueNotFollowed: number; candidates: number; mutualBlue: number;
@@ -37,6 +38,8 @@ export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
   const [finding, setFinding] = useState<string | null>(null);
   const [last, setLast] = useState<ScrollResult | null>(null);
   const [showLedger, setShowLedger] = useState(false);
+  /** ⭐ 用户 10-22 选「上面一排 tab,里面再一排」—— 三件事各一个 tab,不再一页往下滚 */
+  const [tab, setTab] = useState<'find' | 'ask' | 'engage'>('ask');
   const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
 
   const load = useCallback(() => {
@@ -73,7 +76,9 @@ export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
       <div style={{ fontSize: 15, fontWeight: 600 }}>蓝V互关</div>
       {err && <div style={{ color: '#f87171', fontSize: 12 }}>⚠️ {err}</div>}
 
-      <Step n={1} title="找我还没关注的蓝V">
+      <XTabs active={tab} onChange={(id) => setTab(id as typeof tab)} items={[
+        { id: 'find', label: `1 找蓝V${ov ? `(没关注 ${ov.foundBlueNotFollowed})` : ''}`, body: (
+      <Step title="找我还没关注的蓝V">
         <div>配方搜索 · 上次 {when(ov?.lastFindAt)} · 累计找到 {ov ? ov.foundBlue : '…'} 个蓝V,其中我没关注的 {ov ? ov.foundBlueNotFollowed : '…'} 个</div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
           <label style={{ fontSize: 12 }}>页数
@@ -95,23 +100,27 @@ export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
           </div>
         )}
       </Step>
-
-      <Step n={2} title="对有互关倾向的,互动求关">
+        ) },
+        { id: 'ask', label: `2 求关${ov ? `(候选 ${ov.candidates})` : ''}`, body: (
+      <Step title="对有互关倾向的,互动求关">
         <FollowStep wsId={wsId} candidates={ov?.candidates} />
       </Step>
-
-      <Step n={3} title="已互关的蓝V,看互动情况">
-        {/* ⭐ 2026-10-22:采互动 → 四组 → 互动队列(用户 10-22 选:回复和提及 / 和求关卡一样 / 他找过我的排最前) */}
+        ) },
+        { id: 'engage', label: `3 互动${ov ? `(互关蓝V ${ov.mutualBlue.toLocaleString()})` : ''}`, body: (
+      <Step title="已互关的蓝V,看互动情况">
+        {/* ⭐ 2026-10-22:刚互关 / 一周没互动由人挑(用户 10-22:「没有我选择的空间」) */}
         <EngageStep wsId={wsId} />
       </Step>
+        ) },
+      ]} />
     </div>
   );
 }
 
-function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }): ReactElement {
+function Step({ title, children }: { title: string; children: React.ReactNode }): ReactElement {
   return (
-    <div style={{ border: '1px solid var(--border-color, #333)', borderRadius: 6, padding: 10 }}>
-      <div style={{ fontWeight: 600, marginBottom: 6 }}>{n} {title}</div>
+    <div style={{ padding: '2px 2px 10px' }}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>{title}</div>
       <div style={{ fontSize: 13 }}>{children}</div>
     </div>
   );

@@ -16,6 +16,7 @@ import { xPageBusy } from './x-unfollow-run';
 import type { EngageOverview } from './x-engage-repo';
 import type { RecentPerson } from './x-engage';
 import { AskRun, type AskWho } from './XTaskAsk';
+import { XTabs } from './XTabs';
 
 const PAGE = 30;
 const date = (iso?: string): string => (iso ? new Date(iso).toLocaleDateString() : '');
@@ -29,6 +30,8 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const [picked, setPicked] = useState<ReadonlyMap<string, AskWho>>(new Map());
   /** ⭐ 正在过互动卡的这一批(你勾的人) */
   const [engaging, setEngaging] = useState<AskWho[] | null>(null);
+  /** ⭐ 用户 10-22「tab 中再包含 tab」:刚互关·没互动 / 刚互关·互动过 / 一周没互动 */
+  const [sub, setSub] = useState<'newUntouched' | 'newTouched' | 'quiet'>('newUntouched');
   const load = useCallback(() => {
     void xDataCall({ op: 'engageOverview', wsId, limit: quietLimit }).then((r) => { if (r.status === 'ok') setOv(r.value as EngageOverview); else setMsg(r.reason); });
   }, [wsId, quietLimit]);
@@ -94,10 +97,10 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const sinceNote = (p: RecentPerson): string =>
     p.mutualSince ? (p.mutualSince.firstSeen ? `${date(p.mutualSince.at)} 第一次采到就已互关(可能更早)` : `${date(p.mutualSince.at)} 成为互关`) : '';
 
-  const section = (title: string, hint: string, people: readonly RecentPerson[], note: (p: RecentPerson) => string, more?: ReactElement): ReactElement => (
-    <div style={{ marginTop: 10 }}>
-      <div><strong>{title}</strong> <span style={{ opacity: 0.7, fontSize: 12 }}>{hint}</span></div>
-      <div style={{ fontSize: 12, maxHeight: 320, overflow: 'auto', marginTop: 4 }}>
+  const section = (hint: string, people: readonly RecentPerson[], note: (p: RecentPerson) => string, more?: ReactElement): ReactElement => (
+    <div>
+      <div style={{ opacity: 0.7, fontSize: 12 }}>{hint}</div>
+      <div style={{ fontSize: 12, marginTop: 4 }}>
         {people.length === 0 ? <div style={{ opacity: 0.6 }}>没有</div> : people.map((p) => row(p, note(p)))}
         {more}
       </div>
@@ -124,7 +127,14 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
       {msg && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{msg}</div>}
       {viewNote && <div style={{ fontSize: 12, color: '#fbbf24' }}>{viewNote}</div>}
 
-      {engaging ? (
+      <div style={{ marginTop: 8, fontSize: 12 }}>
+        <button type="button" disabled={picked.size === 0 || engaging !== null} onClick={() => setEngaging([...picked.values()])}
+          title="逐个过互动卡:看他最近的帖子(在左边点开哪条就回哪条)→ Gemma 草拟 → 你改 → 点赞 + 回复(不关注)">
+          和选中的互动({picked.size} 人)
+        </button>
+        {picked.size > 0 && engaging === null && <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={() => setPicked(new Map())}>清空勾选</button>}
+      </div>
+      {engaging && (
         <div style={{ marginTop: 8 }}>
           <AskRun mode="engage" wsId={wsId} queue={engaging} onPersonDone={load} onEnd={(d) => {
             setEngaging(null);
@@ -133,24 +143,20 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
             load();
           }} />
         </div>
-      ) : ov && (
-        <>
-          <div style={{ marginTop: 8, fontSize: 12 }}>
-            <button type="button" disabled={picked.size === 0} onClick={() => setEngaging([...picked.values()])}
-              title="逐个过互动卡:看他最近的帖子(点了在左边看原帖)→ Gemma 草拟 → 你改 → 点赞 + 回复(不关注)">
-              和选中的互动({picked.size} 人)
-            </button>
-            {picked.size > 0 && <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={() => setPicked(new Map())}>清空勾选</button>}
-          </div>
-          {section(`刚互关 · 还没互动 ${ov.newUntouched.length}`, '7 天内成为互关,还没打过招呼', ov.newUntouched, sinceNote)}
-          {section(`刚互关 · 互动过 ${ov.newTouched.length}`, '7 天内成为互关,已经有来往', ov.newTouched, (p) => `${sinceNote(p)} · ${touchNote(p)}`)}
-          {section(`一周没互动 ${ov.quietTotal.toLocaleString()}`, `互关蓝V里这 7 天没有任何来往的(另有 ${ov.touchedCount} 人这周互动过,不列)· 库里有他最近帖子的在前`, ov.quiet, () => '这 7 天没互动',
-            ov.quietTotal > ov.quiet.length ? (
-              <button type="button" style={{ fontSize: 11, marginTop: 4 }} disabled={quietLimit >= 500} onClick={() => setQuietLimit((n) => Math.min(500, n + PAGE))}>
-                再看 {PAGE} 个(已列 {ov.quiet.length} / {ov.quietTotal.toLocaleString()})
-              </button>
-            ) : undefined)}
-        </>
+      )}
+      {ov && (
+        <div style={{ marginTop: 10 }}>
+          <XTabs small active={sub} onChange={(id) => setSub(id as typeof sub)} items={[
+            { id: 'newUntouched', label: `刚互关·没互动 ${ov.newUntouched.length}`, body: section('7 天内成为互关,还没打过招呼', ov.newUntouched, sinceNote) },
+            { id: 'newTouched', label: `刚互关·互动过 ${ov.newTouched.length}`, body: section('7 天内成为互关,已经有来往', ov.newTouched, (p) => `${sinceNote(p)} · ${touchNote(p)}`) },
+            { id: 'quiet', label: `一周没互动 ${ov.quietTotal.toLocaleString()}`, body: section(`互关蓝V里这 7 天没有任何来往的(另有 ${ov.touchedCount} 人这周互动过,不列)· 库里有他最近帖子的在前`, ov.quiet, () => '这 7 天没互动',
+              ov.quietTotal > ov.quiet.length ? (
+                <button type="button" style={{ fontSize: 11, marginTop: 4 }} disabled={quietLimit >= 500} onClick={() => setQuietLimit((n) => Math.min(500, n + PAGE))}>
+                  再看 {PAGE} 个(已列 {ov.quiet.length} / {ov.quietTotal.toLocaleString()})
+                </button>
+              ) : undefined) },
+          ]} />
+        </div>
       )}
     </div>
   );
