@@ -40,6 +40,7 @@ import { draftAskReply } from './x-ask-draft';
 import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
 import { prepareEngage } from './x-engage-prepare';
+import { readLeftTweet } from './x-left-tweet';
 import { loadEngageThread } from './x-engage-thread';
 import { listRelationJobs, startRelationTask } from './x-relation-task';
 import { readPaceViews } from './x-pace-repo';
@@ -483,6 +484,15 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           const busy = getXHostBusy(wcId);
           if (busy !== null) return failed(`X 网页正忙:${busy}`);
           return { status: 'ok', value: await loadEngageThread(wcId, acc.restId, p.restId, p.tweetId) };
+        }
+
+        case 'leftTweet': {
+          const wcId = getXHostState(p.wsId as string)?.wcId;
+          if (wcId === undefined) return failed('X 网页没开');
+          const busy = getXHostBusy(wcId);
+          if (busy !== null) return failed(`X 网页正忙:${busy}`);
+          const r = await readLeftTweet(wcId);
+          return r.ok ? { status: 'ok', value: r.tweet } : failed(r.why);
         }
 
         case 'engageCollect': {

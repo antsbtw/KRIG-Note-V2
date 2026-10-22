@@ -12,10 +12,11 @@ const t = (id: string, text: string, day: number, extra: Partial<TweetRecord> = 
 const he = { restId: 'he', handle: 'he' };
 
 describe('pickAskTweet', () => {
-  it('⭐ 最近推文里有互关相关的 → 用最新那条相关的', () => {
+  it('⭐⭐ 用户 10-22「回复推荐以时间顺序优先」:推文里有求关 → 求,但回的是他最新一条(不是最新那条相关的)', () => {
     const p = pickAskTweet([t('1', '今天天气好', 9), t('2', '#蓝V互关 关注必回', 8), t('3', '互关互关', 5)], he);
     expect(p.kind).toBe('tweet');
-    expect(p.kind !== 'skip' && p.tweet.id).toBe('2');
+    expect(p.kind !== 'skip' && p.tweet.id).toBe('1');
+    expect(p.why).toContain('最新一条');
     expect(p.recent.map((x) => x.id)).toEqual(['1', '2', '3']);
   });
 
@@ -41,15 +42,20 @@ describe('pickAskTweet', () => {
     expect(p.why).toContain('没采到');
   });
 
-  it('⚠️ 转发 / 置顶 / 别人的推文不算 —— 求关不能用别人的话', () => {
+  it('⚠️ 转发 / 别人的推文不算 —— 求关不能用别人的话', () => {
     const p = pickAskTweet([
       t('1', '#蓝V互关', 9, { retweetOfId: '99' }),
-      t('2', '#蓝V互关', 9, { pinned: true }),
       t('3', '#蓝V互关', 9, { authorRestId: 'other' }),
       t('4', '早安', 1),
     ], he);
     expect(p.kind).toBe('skip');
     expect(p.recent.map((x) => x.id)).toEqual(['4']);
+  });
+
+  it('⭐ 置顶也算,按它真实的发帖时间排(10-22 真机:置顶是 2 小时前刚发的,原来被排除没推)', () => {
+    const p = pickAskTweet([t('2', '终于到3000粉了', 9, { pinned: true }), t('4', '每天都互关点不满怎么办', 8), t('5', '老置顶', 1, { pinned: true })], he);
+    expect(p.kind !== 'skip' && p.tweet.id).toBe('2');
+    expect(p.recent.map((x) => x.id)).toEqual(['2', '4', '5']);
   });
 });
 

@@ -52,6 +52,9 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const [prep, setPrep] = useState<AskPrepared | null>(null);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState<AskTweet | null>(null);
+  /** ⭐ 你在左边挑的那条(用户 10-22:「看到一个帖子不错,我可以选择它,然后再由AI草拟留言。我来确认。」) */
+  const [leftPick, setLeftPick] = useState<{ id: string; note?: string } | null>(null);
+  const [leftLoading, setLeftLoading] = useState(false);
   const [draft, setDraft] = useState('');
   const [acting, setActing] = useState(false);
   const [result, setResult] = useState<AskRunResult | null>(null);
@@ -75,7 +78,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   useEffect(() => {
     if (!who) return;
     let alive = true;
-    setLoading(true); setPrep(null); setSel(null); setThread(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null); setViewNote(null);
+    setLoading(true); setPrep(null); setSel(null); setThread(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null); setViewNote(null); setLeftPick(null);
     const prepCall = mode === 'engage'
       ? xDataCall({ op: 'engagePrepare', wsId, restId: who.restId, handle: who.handle, hisTweetId: who.hisTweetId })
       : xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle });
@@ -161,7 +164,8 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   if (!who) return <div />;
   const plan = prep?.ok ? prep.plan : null;
   /** 换一条:相关的在前,再按时间 */
-  const pool = plan ? [...plan.recent.filter((t) => t.related), ...plan.recent.filter((t) => !t.related)] : [];
+  /** 换一条:按时间新→旧(用户 10-22:「回复推荐以时间顺序优先」) */
+  const pool = plan ? [...plan.recent] : [];
   const act = async (): Promise<void> => {
     if (!plan || plan.kind === 'skip' || !sel) return;
     setActing(true); setResult(null);
@@ -175,6 +179,19 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     /** ⭐ 成了就直接到下一个人(用户 10-17:「执行成功后,自动到下一个人,不要再停留在原来的蓝V用户了」);没成留在这儿给人看 */
     if (v.ok) { next(`✓ ${E ? '互动' : '求关'}完成(${stepLine(v, E)})${v.warning ? ` · ⚠️ ${v.warning}` : ''}`); return; }
     setResult(v);
+  };
+  /** 用左边 X 网页正在看的这条:读它(库里没有就补采)→ 选中 → 留言框清空让 Gemma 重新草拟 */
+  const useLeft = async (): Promise<void> => {
+    if (!who) return;
+    setLeftLoading(true); setViewNote(null);
+    const r = await xDataCall({ op: 'leftTweet', wsId });
+    setLeftLoading(false);
+    if (r.status === 'failed') { setViewNote(r.reason); return; }
+    const t = r.value as { id: string; text: string; createdAt?: string; url: string; authorRestId?: string; authorHandle?: string };
+    const other = t.authorRestId !== undefined && t.authorRestId !== who.restId;
+    setLeftPick({ id: t.id, note: other ? `这条是 @${t.authorHandle ?? '?'} 发的,不是 @${who.handle} —— 点赞 / 留言发在这条下面${E ? '' : `,关注的还是 @${who.handle}`}` : undefined });
+    setDraft(''); setAiText(undefined);
+    setSel({ id: t.id, text: t.text, createdAt: t.createdAt, url: t.url, related: false });
   };
   const cycle = (): void => {
     if (pool.length === 0) return;
@@ -247,14 +264,17 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
           <div style={{ padding: 8, background: 'var(--accent-bg, rgba(45,74,107,0.35))', borderRadius: 4, cursor: acting ? 'default' : 'pointer' }}
             onClick={() => { if (!acting) void showInX(sel.id); }} title="在左边 X 网页打开这条原帖(看上下文、图片、别人的回复)">
             <div style={{ opacity: 0.6 }}>
-              {E ? (sel.related ? '回他找你的这一条' : '回他这一条') : `用这条求关${sel.related ? '(和互关相关)' : '(他最新的原创)'}`}{sel.createdAt ? ` · ${new Date(sel.createdAt).toLocaleString()}` : ''}
+              {leftPick?.id === sel.id ? '你在左边挑的这条' : E ? (sel.related ? '回他找你的这一条' : '回他这一条') : `用这条求关${sel.related ? '(和互关相关)' : ''}`}{sel.createdAt ? ` · ${new Date(sel.createdAt).toLocaleString()}` : ''}
               {' · '}<span style={{ textDecoration: 'underline' }}>点一下在左边看原帖</span>
             </div>
             <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{sel.text}</div>
           </div>
+          {leftPick?.id === sel.id && leftPick.note && <div style={{ color: '#fbbf24' }}>{leftPick.note}</div>}
           {viewNote && <div style={{ color: '#fbbf24' }}>{viewNote}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={cycle}>换一条({pool.length} 条可选)</button>
+            <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={() => { setLeftPick(null); cycle(); }}>换一条({pool.length} 条可选)</button>
+            <button type="button" disabled={acting || result !== null || leftLoading} onClick={() => void useLeft()}
+              title="先在左边 X 网页点开你觉得不错的那条帖子,再点这里:回那一条,Gemma 对着它草拟">{leftLoading ? '读左边这条…' : '用左边这条'}</button>
             {/* ⭐ 用户 10-21:「对于那些跳过的…下一次就不要再列表进来了」→ 记成你排除的(人卡里能取消排除) */}
             <button type="button" disabled={acting} onClick={() => void skipPerson()}
               title={E ? '不和他互动,以后也不再进互动队列(记成你排除的;人卡里可以取消排除)' : '不求关他,以后也不再进候选(记成你排除的;人卡里可以取消排除)'}>跳过此人(以后不再出现)</button>

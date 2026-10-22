@@ -4,9 +4,10 @@
  * 用户 10-17:「我们应该采集这个人的前10条推文,分析完毕,选择一条和互关相关的,点赞、留言求关、关注。三个动作。」
  * 「如果没有求关,bio也没有求关,先放弃这个人。」
  * 规则:
- *  ① 他最近 10 条**自己发的**推文(不算转发、不算置顶)里,最新一条和互关相关的 → 用它
- *  ② 推文里没有、但 Bio / 名字里有求关 → 用他最新一条原创推文
- *  ③ 都没有 → 放弃这个人(说清原因)
+ *  ① 求不求关:他最近 10 条**自己发的**推文(不算转发)里有和互关相关的,或 Bio / 名字里有求关 → 求;都没有 → 放弃(说清原因)
+ *  ② 回哪条:**时间优先** —— 他最新的一条(用户 10-22:「建议回复推荐以时间顺序优先」;
+ *     原来先挑和互关相关的,真机推了一条 4 小时前的,他 2 小时前刚发的置顶新帖没推)
+ * ⚠️ 置顶也算(10-22 真机:他的置顶是 2 小时前刚发的);置顶的老帖按时间自然排在后面。
  */
 import { detectMutualIntent } from './x-mutual-intent';
 import type { TweetRecord } from './x-timeline-audit';
@@ -26,11 +27,11 @@ export type AskPlan =
     readonly alreadyRelated?: true;
   };
 
-/** 他自己发的、不是转发、不是置顶,按时间新→旧,取前 N */
+/** 他自己发的、不是转发,按时间新→旧,取前 N(置顶也算,按它真实的发帖时间排) */
 export function recentOwn(records: readonly TweetRecord[], restId: string, n = ASK_RECENT_N): TweetRecord[] {
   const seen = new Set<string>();
   return records
-    .filter((r) => r.authorRestId === restId && !r.retweetOfId && r.pinned !== true && r.id !== '' && !seen.has(r.id) && seen.add(r.id))
+    .filter((r) => r.authorRestId === restId && !r.retweetOfId && r.id !== '' && !seen.has(r.id) && seen.add(r.id))
     .sort((a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? ''))
     .slice(0, n);
 }
@@ -55,15 +56,17 @@ export function pickAskTweet(
   if (revisit) {
     const fresh = recent.filter((t) => !revisit.avoidIds.has(t.id));
     if (fresh.length === 0) return { kind: 'skip', recent, why: `最近 ${recent.length} 条都已经求关过 —— 等他发新帖再互动` };
-    const rel = fresh.find((t) => t.related);
-    if (rel) return { kind: 'tweet', tweet: rel, recent, why: `再互动:他最近和互关相关、还没留过言的推文:${rel.evidence ?? ''}` };
-    return { kind: 'other', tweet: fresh[0], recent, why: '再互动:他最新一条还没留过言的推文' };
+    return { kind: fresh[0].related ? 'tweet' : 'other', tweet: fresh[0], recent, why: '再互动:他最新一条还没留过言的推文' };
   }
+  /** ⭐ 时间优先:求关的依据(帖子 / Bio)决定求不求,回的是他最新一条 */
   const related = recent.find((t) => t.related);
-  if (related) return { kind: 'tweet', tweet: related, recent, why: `他最近和互关相关的推文:${related.evidence ?? ''}` };
+  if (related) {
+    const latest = recent[0];
+    return { kind: 'tweet', tweet: latest, recent, why: latest.related ? `他最新一条就和互关相关:${latest.evidence ?? ''}` : `他求关(${related.evidence ?? ''})—— 回他最新一条` };
+  }
   const bioHit = detectMutualIntent(person.bio, [], person.name);
   if (bioHit.hit) {
-    return { kind: 'bio-latest', tweet: recent[0], recent, why: `推文里没有,但${bioHit.where === 'name' ? '名字' : 'Bio'}里求关(${bioHit.evidence})—— 用他最新一条原创推文` };
+    return { kind: 'bio-latest', tweet: recent[0], recent, why: `推文里没有,但${bioHit.where === 'name' ? '名字' : 'Bio'}里求关(${bioHit.evidence})—— 回他最新一条` };
   }
   return { kind: 'skip', recent, why: `最近 ${recent.length} 条推文和 Bio 都没有求关 —— 先放弃这个人` };
 }

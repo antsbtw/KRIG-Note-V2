@@ -7,6 +7,8 @@
  * ⚠️ 只认白名单里的指令;一次只跑一个;X 网页忙 / 后台在跑就让路(由被调函数判)。
  * ⚠️ 定时器 unref + before-quit 停(记忆 project-graceful-shutdown)。
  */
+import { readLeftTweet } from './x-left-tweet';
+import { X_PAGE_NAME } from './x-pages';
 import { app } from 'electron';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -55,13 +57,15 @@ type RelationCmd = Sampling & { op: 'relationStart'; wsId: string; restId?: stri
 type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[]; mode?: 'ask' | 'engage' };
 /** 第 3 件事:采互动 / 看分组(与任务页同一个函数)—— 2026-10-22 */
 type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling & { op: 'engageOverview'; wsId: string })
-  | (Sampling & { op: 'engagePrepare'; wsId: string; restId: string; handle: string; hisTweetId?: string });
+  | (Sampling & { op: 'engagePrepare'; wsId: string; restId: string; handle: string; hisTweetId?: string })
+  /** 读左边正在看的这条;goto 给了就先让左边打开这条(模拟人点开) */
+  | (Sampling & { op: 'leftTweet'; wsId: string; goto?: string });
 type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
-  if (['engageCollect', 'engageOverview', 'engagePrepare'].includes(String((o as { op?: string })?.op))) {
+  if (['engageCollect', 'engageOverview', 'engagePrepare', 'leftTweet'].includes(String((o as { op?: string })?.op))) {
     if (typeof o.wsId !== 'string') return 'engage 指令要 wsId';
     return o as unknown as EngageCmd;
   }
@@ -174,6 +178,13 @@ async function tick(): Promise<void> {
         if (cmd.op === 'personTab') {
           console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
           out = await runPersonTab(cmd);
+        } else if (cmd.op === 'leftTweet') {
+          const wcId = getXHostState(cmd.wsId)?.wcId;
+          if (wcId === undefined) out = { ok: false, why: 'X 网页没开' };
+          else {
+            if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
+            out = await readLeftTweet(wcId);
+          }
         } else if (cmd.op === 'engageCollect') {
           out = await collectEngagement(cmd.wsId);
         } else if (cmd.op === 'engagePrepare') {
