@@ -88,13 +88,14 @@ describe('关注队列', () => {
     expect(Q.followQueueStatus(w).done[0].state).toBe('already-following');
   });
 
-  it('⭐⭐ 到了每日上限 → 暂停,一个都不点;X 网页忙 / 后台在采 → 让路;认不出号 → 暂停', async () => {
+  it('⭐⭐ 每日上限只提醒不暂停(用户 10-21);X 网页忙 / 后台在采 → 让路;认不出号 → 暂停', async () => {
     const w1 = ws();
-    h.gate = { allowed: false, reason: '今天已关注 30 个,到了上限 30', todayCount: 30, cap: 30, settings: {} };
+    h.gate = { allowed: false, reason: '今天已关注 30 个,超过平时的量 30', todayCount: 30, cap: 30, settings: { 'follow.min_gap_sec': 60, 'follow.jitter_sec': 0 } };
     Q.addToFollowQueue(w1, [{ restId: '1', handle: 'a' }]);
     await Q.followQueueTick();
-    expect(h.gotos).toEqual([]);
-    expect(Q.followQueueStatus(w1).paused).toContain('上限');
+    expect(h.gotos.length).toBe(1);
+    expect(Q.followQueueStatus(w1).paused).toBeUndefined();
+    h.gotos.length = 0;
 
     h.gate = { allowed: true, todayCount: 0, cap: 30, settings: { 'follow.min_gap_sec': 60, 'follow.jitter_sec': 0 } };
     const w2 = ws();

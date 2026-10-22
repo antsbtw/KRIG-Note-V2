@@ -101,14 +101,16 @@ export function localDayStart(now: Date): Date {
 }
 
 /**
- * ⭐⭐ 现在能不能关注 —— 每日上限 + 连续满 N 个歇 M 分钟(只算成功的)。
+ * ⭐⭐ 关注的量 —— 每日上限 + 连续满 N 个歇 M 分钟(只算成功的)。
  * @param recentDesc 最近几次成功关注的时间(新→旧,至少给 burst_size 条才判得出连续)
- * ⚠️ 这两条都是**我们自己的设置**,提示里要说清「可在设置里改」,别说得像 X 的限制。
+ * ⚠️ 这两条都是**我们自己的设置**,不是 X 的限制,提示里别说得像 X 的限制。
+ * ⚠️⚠️ 用户 10-21:「你不要给工作乱约束呀,我的任务我自己控制,有问题提示就好了。」——
+ *   人点的动作(求关卡 / 取关)allowed=false 也照做,只把 reason 当提醒显示;只有无人值守的关注队列拿 waitSec 来控节奏。
  */
 export function followGate(s: OpsSettings, todayCount: number, recentDesc: readonly string[], now: Date): UnfollowGate {
   const cap = s['follow.daily_cap'];
   if (todayCount >= cap) {
-    return { allowed: false, reason: `今天已关注 ${todayCount} 个,到了上限 ${cap}(我们的设置,可改)`, todayCount, cap };
+    return { allowed: false, reason: `今天已关注 ${todayCount} 个,超过平时的量 ${cap}(我们的设置,不是 X 的限制)—— 留意 X 有没有提示限制`, todayCount, cap };
   }
   const size = s['follow.burst_size'];
   const restMs = s['follow.burst_rest_min'] * 60_000;
@@ -119,7 +121,7 @@ export function followGate(s: OpsSettings, todayCount: number, recentDesc: reado
     if (streak >= size) {
       const waitSec = Math.ceil((ts[0] + restMs - now.getTime()) / 1000);
       const until = new Date(ts[0] + restMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      return { allowed: false, reason: `已连续关注 ${streak} 个,歇 ${s['follow.burst_rest_min']} 分钟(约 ${until} 可继续;我们的设置,可改)`, waitSec, todayCount, cap };
+      return { allowed: false, reason: `已连续关注 ${streak} 个,平时会歇 ${s['follow.burst_rest_min']} 分钟(约 ${until};我们的设置,不是 X 的限制)`, waitSec, todayCount, cap };
     }
   }
   return { allowed: true, todayCount, cap };
@@ -135,7 +137,7 @@ export type UnfollowGate = {
 };
 
 /**
- * ⭐⭐ 现在能不能取关 —— 每日上限 + 最小间隔。
+ * ⭐⭐ 取关的量 —— 每日上限 + 最小间隔。⚠️ 用户 10-21:只提醒不拦(见 followGate)。
  * 计数只算**成功**的取关(失败的不占额度,但失败会触发「异常即停」,见页面)。
  */
 export function unfollowGate(
@@ -144,13 +146,13 @@ export function unfollowGate(
   const cap = s['unfollow.daily_cap'];
   const gap = s['unfollow.min_gap_sec'];
   if (todayCount >= cap) {
-    return { allowed: false, reason: `今天已取关 ${todayCount} 个,到了上限 ${cap}(可在设置里改)`, todayCount, cap };
+    return { allowed: false, reason: `今天已取关 ${todayCount} 个,超过平时的量 ${cap}(我们的设置,不是 X 的限制)`, todayCount, cap };
   }
   if (lastAtIso !== undefined) {
     const since = (now.getTime() - Date.parse(lastAtIso)) / 1000;
     if (since < gap) {
       const waitSec = Math.ceil(gap - since);
-      return { allowed: false, reason: `离上次取关才 ${Math.floor(since)} 秒,最小间隔 ${gap} 秒`, waitSec, todayCount, cap };
+      return { allowed: false, reason: `离上次取关才 ${Math.floor(since)} 秒,平时间隔 ${gap} 秒(我们的设置)`, waitSec, todayCount, cap };
     }
   }
   return { allowed: true, todayCount, cap };

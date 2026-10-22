@@ -55,6 +55,8 @@ export type AskRunResult = {
   readonly replyId?: string;
   readonly failedStep?: 'like' | 'reply' | 'follow';
   readonly detail?: string;
+  /** 照做了,但超过了我们平时的量(每日上限 / 连续关注)—— 只提醒不拦(用户 10-21) */
+  readonly warning?: string;
 };
 
 const BUSY = '任务:正在求关';
@@ -82,11 +84,11 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   if (bgRunningOn(wcId) !== null) return { ok: false, blocked: '后台正在采' };
   if (followQueueStatus(p.wsId).current) return { ok: false, blocked: '关注队列正在动作' };
   const engage = p.mode === 'engage';
-  /** 关注闸门(每日上限 / 连续满 15 个歇 15 分钟)只管求关 —— 互动不关注 */
-  if (!engage) {
-    const gate = await readFollowGate(localDayStart(new Date()).toISOString());
-    if (!gate.allowed) return { ok: false, blocked: gate.reason };
-  }
+  /**
+   * 关注的量(每日上限 / 连续满 15 个歇 15 分钟)只管求关 —— 互动不关注。
+   * ⚠️⚠️ 用户 10-21:「我的任务我自己控制,有问题提示就好了」—— 超了照做,结果里带提醒,不拦
+   */
+  const warning = engage ? undefined : await readFollowGate(localDayStart(new Date()).toISOString()).then((g) => (g.allowed ? undefined : g.reason));
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') return { ok: false, blocked: `认不出登录的号:${account.reason}` };
 
@@ -94,7 +96,7 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   setXHostBusy(wcId, BUSY);
   const ports = webviewPorts(wcId);
   const reply = p.reply.trim();
-  const r: { -readonly [K in keyof AskRunResult]: AskRunResult[K] } = { ok: false };
+  const r: { -readonly [K in keyof AskRunResult]: AskRunResult[K] } = { ok: false, warning };
   const stop = (step: 'like' | 'reply' | 'follow', detail: string): void => { r.failedStep = step; r.detail = detail; };
   try {
     // ── 去那条推文 ──

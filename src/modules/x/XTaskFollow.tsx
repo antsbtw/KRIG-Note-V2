@@ -84,7 +84,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
       if (r.done || r.state === 'not-following') {
         /** 执行后核对:读回他主页把关系写进库 */
         const v = await readProfileAndRefresh(who, wcId);
-        setMsg(`@${s.handle} ${r.done ? '已取关' : '本来就没关注'} · 核对:${v.text}`);
+        setMsg(`@${s.handle} ${r.done ? '已取关' : '本来就没关注'} · 核对:${v.text}${r.warning ? ` · ⚠️ ${r.warning}` : ''}`);
       } else {
         setUnfPaused(`@${s.handle} ${r.detail}`);
         setMsg(`@${s.handle} 没取关成:${r.detail} —— 已暂停取关`);

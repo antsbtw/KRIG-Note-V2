@@ -38,7 +38,7 @@ export const UNFOLLOW_STATE_TEXT: Readonly<Record<string, string>> = {
 
 export type UnfollowOutcome =
   | { readonly blocked: string; readonly gate?: UnfollowGate }
-  | { readonly done: boolean; readonly state: string; readonly detail?: string; readonly gate: UnfollowGate };
+  | { readonly done: boolean; readonly state: string; readonly detail?: string; readonly gate: UnfollowGate; readonly warning?: string };
 
 /**
  * ⭐⭐ 取关一个人:闸门 → 让路 → 去他主页 → 点 Following → 确认 → 等按钮变回 Follow → 记动作(成败都记)。
@@ -50,7 +50,8 @@ export async function unfollowOnce(p: Who, wcId: number, busyLabel: string, reas
   const g = await xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() });
   if (g.status === 'failed') return { blocked: g.reason };
   const gate = g.value as UnfollowGate;
-  if (!gate.allowed) return { blocked: `没取关:${gate.reason}`, gate };
+  /** ⚠️⚠️ 用户 10-21:「我的任务我自己控制,有问题提示就好了」—— 超了平时的量照做,只带提醒 */
+  const warning = gate.allowed ? undefined : gate.reason;
 
   setXHostBusy(wcId, busyLabel);
   let result: { done: boolean; state: string; why?: string } = { done: false, state: 'error' };
@@ -72,7 +73,7 @@ export async function unfollowOnce(p: Who, wcId: number, busyLabel: string, reas
     op: 'logAction',
     entry: { action: 'unfollow', targetRestId: p.rest_id, targetHandle: p.handle, decidedBy: 'human', result: result.done ? 'ok' : 'failed', detail, reason, wsId },
   });
-  return { done: result.done, state: result.state, detail, gate };
+  return { done: result.done, state: result.state, detail, gate, warning };
 }
 
 export type VerifyOutcome =

@@ -85,10 +85,17 @@ describe('runAsk', () => {
     expect(h.asks).toEqual([expect.objectContaining({ account: 'ME', person: '42', tid: '123', reply: '早上好，互关一起冲！', rid: '999', liked: 'ok', replied: 'ok', followed: 'ok' })]);
   });
 
-  it('⭐⭐ 闸门没过 / 网页忙 / 认不出号 / 留言空 → 一个动作都不做', async () => {
-    h.gate = { allowed: false, reason: '今天已关注 30/30' };
-    expect((await runAsk(input)).blocked).toContain('30/30');
-    h.gate = { allowed: true }; h.busy = '操作台正在采集';
+  it('⭐⭐ 用户 10-21「我的任务我自己控制,有问题提示就好了」:关注超了平时的量 → 照做,只带提醒', async () => {
+    h.gate = { allowed: false, reason: '今天已关注 30 个,超过平时的量 30' };
+    const r = await runAsk(input);
+    expect(r.blocked).toBeUndefined();
+    expect(r.ok).toBe(true);
+    expect(r.followed).toBe('ok');
+    expect(r.warning).toContain('超过平时的量');
+  });
+
+  it('⭐⭐ 网页忙 / 认不出号 / 留言空 → 一个动作都不做', async () => {
+    h.busy = '操作台正在采集';
     expect((await runAsk(input)).blocked).toContain('正忙');
     h.busy = null; h.account = { kind: 'needIdentify', handle: 'x', reason: '登录的号变了' };
     expect((await runAsk(input)).blocked).toContain('认不出');

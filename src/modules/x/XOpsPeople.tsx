@@ -383,7 +383,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     loadGate();
 
     if (r.done) {
-      setFollowNote(null);
+      setFollowNote(r.warning ? `⚠️ 已取关 @${p.handle},提醒:${r.warning}` : null);
       /** ⑤ 取关后立刻核对 —— 读回他的主页,确认关系真变了再更新库(并按分组移出列表) */
       await runVerify(p);
     } else if (r.state === 'not-following') {

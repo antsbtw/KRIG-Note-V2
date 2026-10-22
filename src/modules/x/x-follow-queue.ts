@@ -75,16 +75,20 @@ async function step(ws: string, x: Queue): Promise<void> {
   const bg = bgRunningOn(wcId);
   if (bg !== null) { x.note = `让路:后台在采 @${bg.handle}`; return; }
   const gate = await readFollowGate(localDayStart(new Date()).toISOString());
+  /**
+   * 无人值守的队列:连续关注满了就歇(节奏,waitSec);
+   * ⚠️ 每日上限只提醒不暂停(用户 10-21:「我的任务我自己控制,有问题提示就好了」)
+   */
+  let heads: string | undefined;
   if (!gate.allowed) {
-    if (gate.waitSec !== undefined) { x.nextAt = Date.now() + gate.waitSec * 1000; x.note = gate.reason; }
-    else { x.paused = gate.reason; }
-    return;
+    if (gate.waitSec !== undefined) { x.nextAt = Date.now() + gate.waitSec * 1000; x.note = gate.reason; return; }
+    heads = gate.reason;
   }
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') { x.paused = `认不出登录的号:${account.reason} —— 已暂停`; return; }
 
   const item = x.items.shift()!;
-  x.current = item; x.note = undefined;
+  x.current = item; x.note = heads;
   setXHostBusy(wcId, BUSY);
   const ports = webviewPorts(wcId);
   let state: FollowDone['state'] = 'failed';

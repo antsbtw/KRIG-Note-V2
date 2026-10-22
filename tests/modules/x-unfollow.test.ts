@@ -60,6 +60,7 @@ describe('⭐⭐⭐ 关注闸门(10-17 改:没有「两次最小间隔」,连续
     expect(g.waitSec).toBe(13 * 60);
     expect(g.reason).toContain('连续关注 15 个');
     expect(g.reason).toContain('我们的设置');
+    expect(g.reason).not.toContain('可改');
   });
 
   it('歇够了 → 连续数清零,放行;中间断过 15 分钟的不算连续', () => {
@@ -75,10 +76,10 @@ describe('⭐⭐⭐ 关注闸门(10-17 改:没有「两次最小间隔」,连续
 
 describe('⭐⭐⭐ 取关闸门', () => {
   const now = new Date('2026-10-10T12:00:00Z');
-  it('到了每日上限就不许,并说清楚(可在设置里改)', () => {
+  it('到了每日上限 → allowed=false 带提醒(调用方只提醒不拦,用户 10-21)', () => {
     const g = unfollowGate(S, 50, undefined, now);
     expect(g.allowed).toBe(false);
-    expect(g.reason).toContain('上限 50');
+    expect(g.reason).toContain('平时的量 50');
     expect(unfollowGate({ ...S, 'unfollow.daily_cap': 60 }, 50, undefined, now).allowed).toBe(true);
   });
   it('离上次太近就不许,并给出还要等几秒', () => {
@@ -109,7 +110,7 @@ describe('⭐⭐⭐ 取关流程(页面)', () => {
     const order = [
       'await xPageBusy(wcId)',
       "op: 'unfollowGate'",
-      'if (!gate.allowed)',
+      'gate.allowed ? undefined : gate.reason',
       "op: 'goto'",
       'scriptId: X_SCRIPTS.unfollow',
       "op: 'logAction'",

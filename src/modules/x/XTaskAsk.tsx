@@ -173,7 +173,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     const v: AskRunResult = r.status === 'ok' ? (r.value as AskRunResult) : { ok: false, blocked: r.reason };
     onActed?.();
     /** ⭐ 成了就直接到下一个人(用户 10-17:「执行成功后,自动到下一个人,不要再停留在原来的蓝V用户了」);没成留在这儿给人看 */
-    if (v.ok) { next(`✓ ${E ? '互动' : '求关'}完成(${stepLine(v, E)})`); return; }
+    if (v.ok) { next(`✓ ${E ? '互动' : '求关'}完成(${stepLine(v, E)})${v.warning ? ` · ⚠️ ${v.warning}` : ''}`); return; }
     setResult(v);
   };
   const cycle = (): void => {
@@ -286,6 +286,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
             <div style={{ color: result.ok ? '#5fc98a' : '#f87171' }}>
               {result.blocked ? `没动手:${result.blocked}` : `${result.ok ? `✓ ${E ? '互动' : '求关'}完成` : '✗ 停在这一步'} —— ${stepLine(result, E)}`}
               {result.detail && <div>{result.detail}</div>}
+              {result.warning && <div style={{ color: '#e0b050' }}>⚠️ {result.warning}</div>}
             </div>
           )}
         </div>
