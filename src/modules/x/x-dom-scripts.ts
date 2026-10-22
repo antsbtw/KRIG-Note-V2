@@ -431,15 +431,24 @@ const REPLY_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
- * ⭐ 发送回复脚本正文。__NEEDLE__ = 回复正文里的字(只留字母 / 汉字 / 数字,前 16 个 —— X 把表情渲染成图片,
- * textContent 里没有);__ME__ = 我的 handle(小写)。
+ * ⭐ 发送回复脚本正文。__NEEDLE__ = 回复正文里的字和表情(只留字母 / 汉字 / 数字 / 表情,前 16 个);__ME__ = 我的 handle(小写)。
+ * ⚠️ X 把表情渲染成 <img alt="👍">,textContent 里没有 —— 页面这边用 textOf 把图片的 alt 按原位拼回去再比
+ * (用户 10-21:只回一个 👍 也是允许的,不能因为核对不了就禁掉)。
  * state:sent(带 replyId)/ unseen(框清空了但页面上没看到我的回复)/ no-button / disabled / not-sent / error
  */
 const SEND_REPLY_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
     try {
       var needle = __NEEDLE__, me = __ME__;
-      var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}]/gu, ''); };
+      var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, ''); };
+      var textOf = function (el) {
+        var out = '';
+        el.childNodes.forEach(function (n) {
+          if (n.nodeType === 3) out += n.nodeValue;
+          else if (n.nodeType === 1) out += n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : textOf(n);
+        });
+        return out;
+      };
       var waitFor = function (get, ms, then) {
         var t0 = Date.now();
         var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 250); };
@@ -449,7 +458,7 @@ const SEND_REPLY_SRC = String.raw`(function () {
         var arts = document.querySelectorAll('article[data-testid="tweet"]');
         for (var i = 0; i < arts.length; i++) {
           var tx = arts[i].querySelector('[data-testid="tweetText"]');
-          if (!tx || norm(tx.textContent).indexOf(needle) === -1) continue;
+          if (!tx || norm(textOf(tx)).indexOf(needle) === -1) continue;
           var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
           for (var j = 0; j < ts.length; j++) {
             var a = ts[j].closest('a');
@@ -470,16 +479,16 @@ const SEND_REPLY_SRC = String.raw`(function () {
         waitFor(mine, 15000, function (rid) {
           if (rid) { resolve({ state: 'sent', replyId: rid }); return; }
           var box = document.querySelector('[data-testid="tweetTextarea_0"]');
-          resolve({ state: box && norm(box.textContent) !== '' ? 'not-sent' : 'unseen' });
+          resolve({ state: box && norm(textOf(box)) !== '' ? 'not-sent' : 'unseen' });
         });
       });
     } catch (e) { resolve({ state: 'error', why: String(e) }); }
   });
 })();`;
 
-/** 回复正文里拿来认「这是我刚发的那条」的字 —— 与脚本里 norm 同一规则 */
+/** 回复正文里拿来认「这是我刚发的那条」的字和表情 —— 与脚本里 norm 同一规则(按字符截,不把表情截半) */
 export function replyNeedle(text: string): string {
-  return text.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 16);
+  return [...text.replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, '')].slice(0, 16).join('');
 }
 
 /** ⭐ 抽查脚本正文 —— String.raw:反斜杠原样保留 */

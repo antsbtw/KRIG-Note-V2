@@ -60,11 +60,12 @@ export type AskRunResult = {
 const BUSY = '任务:正在求关';
 const running = new Set<string>();
 
-/** 留言能不能发 —— 纯函数(空的 / 只有表情 / 太长 都不发) */
+/** 留言能不能发 —— 纯函数(空的 / 只有标点 / 太长 都不发) */
 export function replyProblem(text: string): string | null {
   const t = text.trim();
   if (t === '') return '留言是空的';
-  if (replyNeedle(t).length < 2) return '留言里至少要有两个字(只有表情的话没法核对发没发出去)';
+  /** 只有表情也能发(用户 10-21:回一个 👍 是允许的)—— 发送后靠图片 alt 核对;连表情都没有的(纯标点)才不发 */
+  if (replyNeedle(t) === '') return '留言里没有字也没有表情,发出去没法核对';
   if ([...t].length > 280) return '留言超过 280 字';
   return null;
 }

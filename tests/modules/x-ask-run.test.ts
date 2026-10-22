@@ -93,7 +93,7 @@ describe('runAsk', () => {
     h.busy = null; h.account = { kind: 'needIdentify', handle: 'x', reason: '登录的号变了' };
     expect((await runAsk(input)).blocked).toContain('认不出');
     h.account = { kind: 'ok', restId: 'ME', handle: 'antsBTW' };
-    expect((await runAsk({ ...input, reply: '🙏🙏' })).blocked).toContain('两个字');
+    expect((await runAsk({ ...input, reply: '!!' })).blocked).toContain('没有字也没有表情');
     expect(h.calls).toEqual([]);
     expect(h.actions).toEqual([]);
   });
@@ -139,7 +139,9 @@ describe('runAsk', () => {
 describe('replyProblem', () => {
   it('空 / 只有表情 / 超长 不发', () => {
     expect(replyProblem('  ')).toContain('空');
-    expect(replyProblem('🙏')).toContain('两个字');
+    expect(replyProblem('……!')).toContain('没有字也没有表情');
+    /** 用户 10-21:只回一个 👍 是允许的 */
+    expect(replyProblem('👍')).toBeNull();
     expect(replyProblem('好'.repeat(281))).toContain('280');
     expect(replyProblem('互关一起冲')).toBeNull();
   });

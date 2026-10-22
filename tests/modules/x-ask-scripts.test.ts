@@ -71,6 +71,25 @@ describe('发送回复脚本', () => {
     expect(await run(build(X_SCRIPTS.sendReply, { needle: replyNeedle('早上好，互关一起冲！'), me: 'antsbtw' }))).toEqual({ state: 'unseen' });
   }, 20000);
 
+  it('⭐⭐ 只回一个表情(X 渲染成图片)也能认出是我刚发的(用户 10-21)', async () => {
+    document.body.innerHTML = '<div data-testid="tweetTextarea_0">👍</div><button data-testid="tweetButtonInline"></button>';
+    document.querySelector('[data-testid="tweetButtonInline"]')!.addEventListener('click', () => {
+      document.querySelector('[data-testid="tweetTextarea_0"]')!.textContent = '';
+      document.body.append(article('antsBTW', '999', '<img alt="👍">'));
+    });
+    expect(replyNeedle('👍')).toBe('👍');
+    expect(await run(build(X_SCRIPTS.sendReply, { needle: replyNeedle('👍'), me: 'antsbtw' }))).toEqual({ state: 'sent', replyId: '999' });
+  });
+
+  it('只回表情:页面上我的回复是别的表情 → 不算(unseen)', async () => {
+    document.body.innerHTML = '<div data-testid="tweetTextarea_0">👍</div><button data-testid="tweetButtonInline"></button>';
+    document.querySelector('[data-testid="tweetButtonInline"]')!.addEventListener('click', () => {
+      document.querySelector('[data-testid="tweetTextarea_0"]')!.textContent = '';
+      document.body.append(article('antsBTW', '999', '<img alt="🙏">'));
+    });
+    expect((await run(build(X_SCRIPTS.sendReply, { needle: replyNeedle('👍'), me: 'antsbtw' }))).state).toBe('unseen');
+  }, 20000);
+
   it('别人发的同样的话不算是我的', async () => {
     setup(false);
     document.body.append(article('someone', '555', '早上好，互关一起冲！'));
