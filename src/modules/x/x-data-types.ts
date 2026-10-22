@@ -168,7 +168,9 @@ export type XDataInvoke =
   | { readonly op: 'engageOverview'; readonly wsId: string; readonly limit: number }
   | { readonly op: 'engageCollect'; readonly wsId: string }
   /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
-  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage' }
+  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage'; readonly context?: string }
+  /** ⭐ 互动卡换了一条 → 重新读那条的来龙去脉(找原帖;库里缺就开详情页补采) */
+  | { readonly op: 'engageThread'; readonly wsId: string; readonly restId: string; readonly tweetId: string }
   | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
   /**
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。

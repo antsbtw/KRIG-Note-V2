@@ -35,6 +35,8 @@ export function buildAskDraftPrompt(input: {
    * 回他找我的那一条时,就是回应他对我说的话
    */
   readonly mode?: 'ask' | 'engage';
+  /** ⭐ 对话上文(原帖 → 来回 → 要回的这条;2026-10-22)—— 有就附上,回复才接得上 */
+  readonly context?: string;
 }): Array<{ role: 'system' | 'user'; content: string }> {
   const engage = input.mode === 'engage';
   const sys = [
@@ -48,7 +50,8 @@ export function buildAskDraftPrompt(input: {
   ].join('\n');
   const shots = input.examples.map((e, i) => `例 ${i + 1}\n他的帖子:${clip(e.tweet, 120)}\n我的留言:${e.reply.trim()}`).join('\n\n');
   const who = [input.person.name ? `对方名字:${clip(input.person.name, 40)}` : '', input.person.bio ? `对方简介:${clip(input.person.bio, 120)}` : ''].filter(Boolean).join('\n');
-  const user = `${shots ? `下面是我以前亲手写的${engage ? '回复' : '求关留言'}:\n\n${shots}\n\n` : ''}现在要回复的帖子:\n${clip(input.tweet, 280)}\n${who}\n\n我的留言:`;
+  const ctx = input.context && input.context.trim() !== '' ? `这条帖子所在的对话(从原帖开始):\n${input.context.slice(0, 1500)}\n\n` : '';
+  const user = `${shots ? `下面是我以前亲手写的${engage ? '回复' : '求关留言'}:\n\n${shots}\n\n` : ''}${ctx}现在要回复的帖子:\n${clip(input.tweet, 280)}\n${who}\n\n我的留言:`;
   return [{ role: 'system', content: sys }, { role: 'user', content: user }];
 }
 
@@ -85,6 +88,7 @@ export async function draftAskReply(input: {
   readonly tweet: string;
   readonly person: { readonly name?: string; readonly bio?: string };
   readonly mode?: 'ask' | 'engage';
+  readonly context?: string;
 }): Promise<AskDraft> {
   const examples = await readAskExamples(input.account, input.mode ?? 'ask');
   const t0 = Date.now();
@@ -94,7 +98,7 @@ export async function draftAskReply(input: {
      * ⚠️ think: false —— Gemma 4 默认先思考:真机一条 30~80 秒(5 条里 3 条 90 秒超时);关掉 1~2 秒,质量差不多(2026-10-21 实测)
      */
     raw = (await callOllamaChat({
-      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode }),
+      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode, context: input.context }),
       think: false, temperature: 0.8, timeoutMs: 60_000,
     })).content;
   } catch (e) {

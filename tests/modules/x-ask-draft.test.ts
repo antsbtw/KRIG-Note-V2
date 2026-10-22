@@ -55,3 +55,10 @@ describe('互动口吻(2026-10-22)', () => {
     expect(m[1].content).toMatch(/我以前亲手写的回复/);
   });
 });
+
+describe('对话上文进提示词(2026-10-22)', () => {
+  it('有上下文就附上「从原帖开始」那一段', () => {
+    const m = buildAskDraftPrompt({ examples: [], tweet: '互相帮助互关互赞', person: {}, mode: 'engage', context: '[原帖] @x:蓝V互关接龙\n我:已关' });
+    expect(m[1].content).toMatch(/这条帖子所在的对话\(从原帖开始\):\n\[原帖\] @x:蓝V互关接龙/);
+  });
+});

@@ -40,6 +40,7 @@ import { draftAskReply } from './x-ask-draft';
 import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
 import { prepareEngage } from './x-engage-prepare';
+import { loadEngageThread } from './x-engage-thread';
 import { listRelationJobs, startRelationTask } from './x-relation-task';
 import { readPaceViews } from './x-pace-repo';
 import { prepareAsk } from './x-ask-prepare';
@@ -473,6 +474,17 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           return { status: 'ok', value: await prepareEngage(p.wsId, acc.restId, p.restId, p.handle, typeof p.hisTweetId === 'string' && p.hisTweetId !== '' ? p.hisTweetId : undefined) };
         }
 
+        case 'engageThread': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId)) return failed('[x.data] engageThread 要数字 id');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          const wcId = getXHostState(p.wsId as string)?.wcId;
+          if (wcId === undefined) return failed('X 网页没开');
+          const busy = getXHostBusy(wcId);
+          if (busy !== null) return failed(`X 网页正忙:${busy}`);
+          return { status: 'ok', value: await loadEngageThread(wcId, acc.restId, p.restId, p.tweetId) };
+        }
+
         case 'engageCollect': {
           if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] engageCollect 缺 wsId');
           const r = await collectEngagement(p.wsId);
@@ -484,7 +496,8 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (typeof p.tweetText !== 'string' || p.tweetText.trim() === '') return failed('[x.data] askDraft 缺他那条帖子的正文');
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
-          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode: p.mode === 'engage' ? 'engage' : 'ask' });
+          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode: p.mode === 'engage' ? 'engage' : 'ask',
+            context: typeof p.context === 'string' ? p.context : undefined });
           traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-ask-draft' : 'x-ask-draft-failed', pageId: 'x-data',
             detail: r.ok ? { ms: r.ms, examples: r.examples, text: r.text } : { why: r.why } });
           return { status: 'ok', value: r };

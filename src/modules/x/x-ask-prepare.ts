@@ -23,6 +23,8 @@ export type AskPrepared =
     readonly ledgerProblem?: string;
     /** ⭐ 刚从 X 读到的「我和他」(他自己推文载荷里带的);没读到 = undefined */
     readonly live?: { readonly following?: boolean; readonly followedBy?: boolean };
+    /** ⭐ 互动卡:选中那条的来龙去脉(原帖 → 来回 → 这条;2026-10-22) */
+    readonly thread?: import('./x-engage-thread-model').EngageThread & { readonly fetchNote?: string };
   };
 
 /** 算法排除 —— 人 > AI > 算法:人或 AI 定过的不改 */

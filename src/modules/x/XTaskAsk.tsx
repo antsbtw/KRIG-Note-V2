@@ -16,6 +16,7 @@ import { xDataCall } from './x-data-types';
 import { getXHostState } from './x-host-registry';
 import { X_PAGE_NAME } from './x-pages';
 import { xPageBusy } from './x-unfollow-run';
+import { threadForPrompt, type EngageThread } from './x-engage-thread-model';
 import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
 import type { AskRunResult, StepState } from './x-ask-run';
@@ -60,6 +61,12 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const [drafting, setDrafting] = useState(false);
   /** 点帖子没跳过去的原因 */
   const [viewNote, setViewNote] = useState<string | null>(null);
+  /**
+   * ⭐ 互动卡:选中那条的来龙去脉(原帖 → 来回 → 这条)。用户 10-22:「原帖是那个,第一轮互动是那些,第二轮互动是那些。
+   * 这样才完整。」「最好办法是找到这个互动帖子的原帖。」换了一条就重读。
+   */
+  const [thread, setThread] = useState<(EngageThread & { fetchNote?: string; forId: string }) | null>(null);
+  const [threadLoading, setThreadLoading] = useState(false);
   const [draftNote, setDraftNote] = useState<string | null>(null);
   const draftSeq = useRef(0);
   const who = queue[i];
@@ -68,7 +75,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   useEffect(() => {
     if (!who) return;
     let alive = true;
-    setLoading(true); setPrep(null); setSel(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null); setViewNote(null);
+    setLoading(true); setPrep(null); setSel(null); setThread(null); setDraft(''); setResult(null); setAiText(undefined); setDraftNote(null); setViewNote(null);
     const prepCall = mode === 'engage'
       ? xDataCall({ op: 'engagePrepare', wsId, restId: who.restId, handle: who.handle, hisTweetId: who.hisTweetId })
       : xDataCall({ op: 'askPrepare', wsId, restId: who.restId, handle: who.handle });
@@ -77,7 +84,10 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
       setLoading(false);
       const v: AskPrepared = r.status === 'ok' ? (r.value as AskPrepared) : { ok: false, why: r.reason };
       setPrep(v);
-      if (v.ok && v.plan.kind !== 'skip') setSel(v.plan.tweet);
+      if (v.ok && v.plan.kind !== 'skip') {
+        setSel(v.plan.tweet);
+        setThread(v.thread ? { ...v.thread, forId: v.plan.tweet.id } : { chain: [], gapAbove: true, later: [], forId: v.plan.tweet.id });
+      }
     });
     return () => { alive = false; };
   }, [wsId, who, mode]);
@@ -89,7 +99,8 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const requestDraft = useCallback(async (tweetText: string, force: boolean): Promise<void> => {
     const seq = ++draftSeq.current;
     setDrafting(true); setDraftNote(null);
-    const r = await xDataCall({ op: 'askDraft', wsId, tweetText, name: prep?.ok ? prep.person.name : undefined, bio: prep?.ok ? prep.person.bio : undefined, mode });
+    const r = await xDataCall({ op: 'askDraft', wsId, tweetText, name: prep?.ok ? prep.person.name : undefined, bio: prep?.ok ? prep.person.bio : undefined, mode,
+      context: E && threadRef.current ? threadForPrompt(threadRef.current) : undefined });
     if (seq !== draftSeq.current) return;
     setDrafting(false);
     const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number }) : { ok: false, why: r.reason };
@@ -99,12 +110,28 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     setDraftNote(`Gemma 草拟(照你写过的 ${v.examples ?? 0} 条范例,${Math.round((v.ms ?? 0) / 100) / 10} 秒)—— 不满意就改,改过的算你写的`);
   }, [wsId, prep, mode]);
   const aiTextRef = useRef<string | undefined>(undefined);
+  const threadRef = useRef<EngageThread | null>(null);
+  threadRef.current = thread;
   aiTextRef.current = aiText;
-  /** 选好 / 换了推文 → 自动草拟(留言框空着或还是上一版原稿时才填) */
+  /** 互动卡换了一条 → 重读那条的来龙去脉(找原帖) */
+  useEffect(() => {
+    if (!E || !sel || !who || thread?.forId === sel.id) return;
+    let alive = true;
+    setThreadLoading(true);
+    void xDataCall({ op: 'engageThread', wsId, restId: who.restId, tweetId: sel.id }).then((r) => {
+      if (!alive) return;
+      setThreadLoading(false);
+      if (r.status === 'ok') setThread({ ...(r.value as EngageThread & { fetchNote?: string }), forId: sel.id });
+      else setThread({ chain: [], gapAbove: true, later: [], fetchNote: `没读到这条的上下文:${r.reason}`, forId: sel.id });
+    });
+    return () => { alive = false; };
+  }, [E, sel, who, wsId, thread?.forId]);
+  /** 选好 / 换了推文 → 自动草拟(留言框空着或还是上一版原稿时才填);互动卡等上下文到了再拟 */
   useEffect(() => {
     if (!sel || !prep?.ok) return;
+    if (E && thread?.forId !== sel.id) return;
     void requestDraft(sel.text, false);
-  }, [sel, prep, requestDraft]);
+  }, [sel, prep, requestDraft, E, thread?.forId]);
 
   /** 左边 X 网页跳到这条原帖;X 网页忙(采集 / 求关在动手)就不跳,说出来 */
   const showInX = async (tweetId: string): Promise<void> => {
@@ -191,6 +218,31 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
       {plan && plan.kind !== 'skip' && sel && (
         <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ opacity: 0.75 }}>{plan.why}</div>
+          {E && (
+            <div style={{ padding: 8, border: '1px solid var(--border-color, #333)', borderRadius: 4 }}>
+              <div style={{ opacity: 0.7, marginBottom: 4 }}>
+                来龙去脉{threadLoading ? '(读取中,库里缺的会打开详情页补采…)' : ''}{thread?.fetchNote ? ` —— ⚠️ ${thread.fetchNote}` : ''}
+              </div>
+              {thread?.gapAbove && <div style={{ color: '#fbbf24' }}>⋯ 再往上没找到原帖</div>}
+              {thread?.chain.map((x, k) => (
+                <div key={x.id} onClick={() => { if (!acting) void showInX(x.id); }} title="在左边 X 网页打开这一条"
+                  style={{ cursor: 'pointer', padding: '3px 0 3px 6px', marginLeft: Math.min(k, 6) * 10, borderLeft: `2px solid ${x.isTarget ? '#4a90d9' : x.who === 'me' ? '#5fc98a' : 'var(--border-color, #444)'}` }}>
+                  <span style={{ opacity: 0.75 }}>
+                    {x.isRoot ? '【原帖】' : `第 ${k} 轮 · `}{x.who === 'me' ? '我' : x.who === 'him' ? `他 @${x.handle ?? who.handle}` : `@${x.handle ?? '别人'}`}
+                    {x.at ? ` · ${new Date(x.at).toLocaleString()}` : ''}{x.isTarget ? ' · ← 要回的这条' : ''}
+                  </span>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{x.text.length > 240 ? `${x.text.slice(0, 240)}…` : x.text}</div>
+                </div>
+              ))}
+              {(thread?.later.length ?? 0) > 0 && <div style={{ opacity: 0.7, marginTop: 4 }}>之后你们的来回</div>}
+              {thread?.later.map((x) => (
+                <div key={x.id} onClick={() => { if (!acting) void showInX(x.id); }} style={{ cursor: 'pointer', padding: '2px 0 2px 6px', borderLeft: `2px solid ${x.who === 'me' ? '#5fc98a' : 'var(--border-color, #444)'}` }}>
+                  <span style={{ opacity: 0.75 }}>{x.who === 'me' ? '我' : '他'}{x.at ? ` · ${new Date(x.at).toLocaleString()}` : ''}</span>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{x.text.slice(0, 200)}</div>
+                </div>
+              ))}
+            </div>
+          )}
           {/* ⭐ 点帖子 → 左边 X 网页打开这条原帖(用户 10-21:「点击截图中的帖子时,左边展示原帖在哪里,什么内容。这样我会更好的判断回复方法的。」) */}
           <div style={{ padding: 8, background: 'var(--accent-bg, rgba(45,74,107,0.35))', borderRadius: 4, cursor: acting ? 'default' : 'pointer' }}
             onClick={() => { if (!acting) void showInX(sel.id); }} title="在左边 X 网页打开这条原帖(看上下文、图片、别人的回复)">

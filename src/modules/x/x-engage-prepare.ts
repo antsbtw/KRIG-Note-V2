@@ -19,6 +19,7 @@ import { accountForWrite } from './x-account-repo';
 import { writeRelations } from './x-user-repo';
 import type { AskPrepared } from './x-ask-prepare';
 import type { TweetRecord } from './x-timeline-audit';
+import { loadEngageThread } from './x-engage-thread';
 
 /** 互动卡选哪条 —— 纯函数(导出给测试) */
 export function pickEngageTweet(
@@ -77,5 +78,7 @@ export async function prepareEngage(
   const his = hisTweetId && hisRows?.[0]?.text ? { tweetId: hisTweetId, text: hisRows[0].text, createdAt: hisRows[0].created_at ?? undefined } : undefined;
   const plan = pickEngageTweet(r.records, { restId, handle }, his, new Set(done ?? []));
   console.log(`[x.engage] @${handle}:${plan.kind === 'skip' ? `不互动 —— ${plan.why}` : `选推文 ${plan.tweet.id}(${plan.why})`}`);
-  return { ok: true, live, ledgerProblem: r.ledgerProblem, person, plan };
+  /** ⭐ 来龙去脉:找到这条互动所在对话的原帖(用户 10-22:「最好办法是找到这个互动帖子的原帖」) */
+  const thread = plan.kind === 'skip' ? undefined : await loadEngageThread(wcId, account, restId, plan.tweet.id);
+  return { ok: true, live, ledgerProblem: r.ledgerProblem, person, plan, thread };
 }
