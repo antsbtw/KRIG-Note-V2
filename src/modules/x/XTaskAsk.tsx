@@ -11,9 +11,10 @@
  *    如果不满意我再修改,如何?」→ 选好推文自动请 Gemma 4 12B 照你写过的范例草拟一句填进来,你改;可「换一版」。
  *    发出去时带上原稿:一字没改记 ai,改过记 human(只有 human 进范例库)。
  */
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { getXHostState } from './x-host-registry';
+import { getXHostState, subscribeXHost } from './x-host-registry';
+import { tweetIdOfUrl } from './x-tweet-url';
 import { X_PAGE_NAME } from './x-pages';
 import { xPageBusy } from './x-unfollow-run';
 import { threadForPrompt, type EngageThread } from './x-engage-thread-model';
@@ -180,14 +181,39 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     if (v.ok) { next(`✓ ${E ? '互动' : '求关'}完成(${stepLine(v, E)})${v.warning ? ` · ⚠️ ${v.warning}` : ''}`); return; }
     setResult(v);
   };
-  /** 用左边 X 网页正在看的这条:读它(库里没有就补采)→ 选中 → 留言框清空让 Gemma 重新草拟 */
-  const useLeft = async (): Promise<void> => {
+  /**
+   * ⭐⭐ 卡片跟着左边走(用户 10-22:「点击阅读,就代表着要回这个推文了。」)——
+   * 左边点开一条帖子(/status/<id>)就回这一条:他最近的帖子里有就直接选,没有就读它(库里没有会补采);
+   * 选中后留言框清空,Gemma 对着它重新草拟。动手中 / 已出结果 / 卡还没准备好 → 不跟。
+   * ⚠️ 只跟「这张卡准备好之后」左边的变化 —— 打开卡时左边停着的上一页不算(否则会抢到上一个人的帖子)。
+   */
+  const leftUrl = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.url ?? '');
+  const seenUrl = useRef<string | null>(null);
+  useEffect(() => { if (prep?.ok) seenUrl.current = leftUrl; else seenUrl.current = null; }, [prep]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!prep?.ok || prep.plan.kind === 'skip' || acting || result !== null || leftLoading) return;
+    if (seenUrl.current === null || leftUrl === seenUrl.current) return;
+    seenUrl.current = leftUrl;
+    const id = tweetIdOfUrl(leftUrl);
+    if (!id || id === sel?.id) return;
+    void followLeft(id);
+  }, [leftUrl, prep, acting, result, leftLoading, sel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const followLeft = async (id: string): Promise<void> => {
     if (!who) return;
+    const inPool = pool.find((t) => t.id === id);
+    if (inPool) {
+      setLeftPick({ id });
+      setDraft(''); setAiText(undefined);
+      setSel(inPool);
+      return;
+    }
     setLeftLoading(true); setViewNote(null);
     const r = await xDataCall({ op: 'leftTweet', wsId });
     setLeftLoading(false);
-    if (r.status === 'failed') { setViewNote(r.reason); return; }
+    if (r.status === 'failed') { setViewNote(`左边这条没读到:${r.reason}`); return; }
     const t = r.value as { id: string; text: string; createdAt?: string; url: string; authorRestId?: string; authorHandle?: string };
+    /** 读的时候左边又换了 —— 以最新的为准,这次作废 */
+    if (t.id !== tweetIdOfUrl(getXHostState(wsId)?.url ?? '')) return;
     const other = t.authorRestId !== undefined && t.authorRestId !== who.restId;
     setLeftPick({ id: t.id, note: other ? `这条是 @${t.authorHandle ?? '?'} 发的,不是 @${who.handle} —— 点赞 / 留言发在这条下面${E ? '' : `,关注的还是 @${who.handle}`}` : undefined });
     setDraft(''); setAiText(undefined);
@@ -270,11 +296,10 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
             <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{sel.text}</div>
           </div>
           {leftPick?.id === sel.id && leftPick.note && <div style={{ color: '#fbbf24' }}>{leftPick.note}</div>}
+          <div style={{ opacity: 0.6 }}>{leftLoading ? '读左边这条…' : '在左边点开哪条帖子,就回哪条(Gemma 对着它重新草拟)'}</div>
           {viewNote && <div style={{ color: '#fbbf24' }}>{viewNote}</div>}
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" disabled={pool.length < 2 || acting || result !== null} onClick={() => { setLeftPick(null); cycle(); }}>换一条({pool.length} 条可选)</button>
-            <button type="button" disabled={acting || result !== null || leftLoading} onClick={() => void useLeft()}
-              title="先在左边 X 网页点开你觉得不错的那条帖子,再点这里:回那一条,Gemma 对着它草拟">{leftLoading ? '读左边这条…' : '用左边这条'}</button>
             {/* ⭐ 用户 10-21:「对于那些跳过的…下一次就不要再列表进来了」→ 记成你排除的(人卡里能取消排除) */}
             <button type="button" disabled={acting} onClick={() => void skipPerson()}
               title={E ? '不和他互动,以后也不再进互动队列(记成你排除的;人卡里可以取消排除)' : '不求关他,以后也不再进候选(记成你排除的;人卡里可以取消排除)'}>跳过此人(以后不再出现)</button>

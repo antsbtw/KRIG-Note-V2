@@ -2,7 +2,8 @@
  * ⭐ 读「左边 X 网页正在看的这条帖子」—— 主进程(2026-10-22)
  *
  * 用户 10-22:「如果我在浏览中看到一个帖子不错,我可以选择它,然后再由AI草拟留言。我来确认。」
- * 求关卡 / 互动卡上点「用左边这条」:左边地址是 /status/<id> → 库里找这条;库里没有 → 打开详情页补采进库再读。
+ * 用户 10-22 又说:「点击阅读,就代表着要回这个推文了。」—— 卡片跟着左边走:左边点开哪条(/status/<id>)就回哪条,
+ * 库里找这条;库里没有 → 打开详情页补采进库再读。
  */
 import { webContents } from 'electron';
 import { getXDB } from '@storage/surreal/client';
@@ -10,17 +11,14 @@ import { webviewPorts } from './x-collect-ports';
 import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 import { auditTimelinePayload } from './x-timeline-audit';
 import { saveTweetPage } from './x-save-page';
+import { tweetIdOfUrl } from './x-tweet-url';
 
 export type LeftTweet = {
   readonly id: string; readonly text: string; readonly createdAt?: string;
   readonly authorRestId?: string; readonly authorHandle?: string; readonly url: string;
 };
 
-/** 地址里的推文 id(/<handle>/status/<id>,带 /photo/1 之类也认)—— 纯函数 */
-export function tweetIdOfUrl(url: string): string | null {
-  const m = /^https:\/\/(?:x|twitter)\.com\/[^/]+\/status\/(\d+)/.exec(url);
-  return m ? m[1] : null;
-}
+export { tweetIdOfUrl };
 
 async function readRow(id: string): Promise<LeftTweet | null> {
   const [rows] = await getXDB().query<[Array<{ text?: string; created_at?: string; author_rest_id?: string; author_handle?: string }>]>(

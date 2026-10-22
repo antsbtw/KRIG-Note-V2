@@ -6,7 +6,7 @@ vi.mock('electron', () => ({ webContents: { fromId: () => null } }));
 vi.mock('@storage/surreal/client', () => ({ getXDB: () => ({}) }));
 vi.mock('@modules/x/x-collect-ports', () => ({ webviewPorts: () => ({}) }));
 vi.mock('@modules/x/x-save-page', () => ({ saveTweetPage: async () => undefined }));
-import { tweetIdOfUrl } from '@modules/x/x-left-tweet';
+import { tweetIdOfUrl } from '@modules/x/x-tweet-url';
 
 describe('tweetIdOfUrl', () => {
   it('帖子页 / 带图片后缀 / twitter.com 都认', () => {
