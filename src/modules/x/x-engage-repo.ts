@@ -1,27 +1,36 @@
 /**
- * ⭐ 已互关蓝V的互动情况 —— 读库(2026-10-22)。分组在 x-engage.ts(纯函数)。
+ * ⭐ 已互关蓝V的互动情况 —— 读库(2026-10-22)。分组在 x-engage.ts(纯函数 buildRecentView)。
  */
 import { getXDB } from '@storage/surreal/client';
 import { PEOPLE_WITH_RELATION } from './x-account';
-import { ENGAGE_DAYS, countGroups, engageBases, engageCoverageDone, engageQueue, groupEngagement, type EngageCoverage, type EngageGroup, type EngageKey, type EngagePerson, type EngageTweet } from './x-engage';
+import { RECENT_DAYS, buildRecentView, engageBases, engageCoverageDone, recentCoverageGaps, touchesFromTweets, type EngageCoverage, type EngageKey, type EngageTweet, type MutualRow, type RecentPerson, type Touch } from './x-engage';
 
 export type EngageOverview = {
   readonly days: number;
   readonly mutualBlue: number;
-  readonly groups: Record<EngageGroup, number>;
   /** 三条搜索各自:上次采的时间 / 已覆盖到哪天 / 覆盖满 90 天没有 */
   readonly lastCollected: ReadonlyArray<{ readonly key: string; readonly label: string; readonly at?: string; readonly oldest?: string; readonly newest?: string; readonly done: boolean }>;
-  /** 队列前若干个(只有他对我在前) */
-  readonly queue: ReadonlyArray<EngagePerson & { readonly handle: string; readonly name?: string; readonly followers?: number }>;
-  readonly queueTotal: number;
+  /** 最近 7 天没采全的(空 = 「一周没互动」这张补集可信) */
+  readonly recentGaps: ReadonlyArray<{ readonly label: string; readonly why: string }>;
+  readonly newTouched: readonly RecentPerson[];
+  readonly newUntouched: readonly RecentPerson[];
+  /** 一周没互动:前 quietLimit 个 + 总数 */
+  readonly quiet: readonly RecentPerson[];
+  readonly quietTotal: number;
+  readonly touchedCount: number;
 };
 
-export async function readEngageOverview(account: string, handle: string, queueLimit: number, now = new Date()): Promise<EngageOverview> {
+export async function readEngageOverview(account: string, handle: string, quietLimit: number, now = new Date()): Promise<EngageOverview> {
   const db = getXDB();
-  const since = new Date(now.getTime() - ENGAGE_DAYS * 86_400_000).toISOString();
-  const [mutual, tweets] = await db.query<[
+  const since = new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString();
+  /** 他最近自己发的:多看一周(7 天里没发的,上一周发的也比没有强) */
+  const postSince = new Date(now.getTime() - 2 * RECENT_DAYS * 86_400_000).toISOString();
+  const [mutual, tweets, rel, eng, ask] = await db.query<[
     Array<{ rest_id: string; handle: string; display_name?: string; followers_count?: number }>,
     EngageTweet[],
+    Array<{ person: string; at: string; first_seen: boolean }>,
+    Array<{ person: string; at: string; tweet_id: string }>,
+    Array<{ person: string; at: string }>,
   ]>(
     `SELECT rest_id, handle, display_name, followers_count FROM ${PEOPLE_WITH_RELATION}
        WHERE i_follow = true AND follows_me = true AND is_blue_verified = true AND excluded != true;
@@ -30,21 +39,52 @@ export async function readEngageOverview(account: string, handle: string, queueL
        FROM x_tweet
        WHERE created_at >= type::datetime($since)
          AND ((author_rest_id = $acct AND (in_reply_to_user_id != NONE OR array::len(mention_ids ?? []) > 0))
-           OR (author_rest_id != $acct AND (in_reply_to_user_id = $acct OR $acct INSIDE mention_ids)));`,
+           OR (author_rest_id != $acct AND (in_reply_to_user_id = $acct OR $acct INSIDE mention_ids)));
+     SELECT person, <string> observed_at AS at, (from_i_follow = NONE OR from_follows_me = NONE) AS first_seen FROM x_relation_change
+       WHERE account = $acct AND observed_at >= type::datetime($since) AND to_i_follow = true AND to_follows_me = true
+         AND (from_i_follow != true OR from_follows_me != true)
+         -- ⚠️ 2026-10-16 关系改按号存时搬家写了 1736 条(source = migration),不是谁成了互关(10-22 真机:不排除「刚互关」冒出 1864 人)
+         AND source != 'migration';
+     SELECT person, <string> at AS at, tweet_id FROM x_engage WHERE account = $acct AND at >= type::datetime($since) AND (replied = 'ok' OR liked = 'ok');
+     SELECT person, <string> at AS at FROM x_ask WHERE account = $acct AND at >= type::datetime($since) AND (replied = 'ok' OR liked = 'ok' OR followed = 'ok');`,
     { acct: account, since },
   );
-  const people = groupEngagement(account, (mutual ?? []).map((m) => m.rest_id), tweets ?? []);
-  const info = new Map((mutual ?? []).map((m) => [m.rest_id, m]));
-  const queue = engageQueue(people, new Map((mutual ?? []).map((m) => [m.rest_id, m.followers_count ?? 0])));
+  const ids = (mutual ?? []).map((m) => m.rest_id);
+  const [posts] = await db.query<[Array<{ author_rest_id: string; tweet_id: string; text?: string; at: string }>]>(
+    `SELECT author_rest_id, tweet_id, text, <string> created_at AS at FROM x_tweet
+       WHERE created_at >= type::datetime($since) AND author_rest_id IN $ids AND in_reply_to_user_id = NONE AND retweet_of_id = NONE
+       ORDER BY at DESC`,
+    { since: postSince, ids },
+  );
+  const latest = new Map<string, { id: string; text?: string; at: string }>();
+  for (const p of posts ?? []) if (!latest.has(p.author_rest_id)) latest.set(p.author_rest_id, { id: p.tweet_id, text: p.text, at: p.at });
+  /** 成为互关:同一人多条取最近一条 */
+  const since2 = new Map<string, { at: string; firstSeen: boolean }>();
+  for (const r of rel ?? []) {
+    const cur = since2.get(r.person);
+    if (!cur || Date.parse(r.at) > Date.parse(cur.at)) since2.set(r.person, { at: r.at, firstSeen: r.first_seen === true });
+  }
+  const rows: MutualRow[] = (mutual ?? []).map((m) => ({ restId: m.rest_id, handle: m.handle, name: m.display_name, followers: m.followers_count, mutualSince: since2.get(m.rest_id) }));
+  const set = new Set(ids);
+  const touches: Touch[] = [
+    ...touchesFromTweets(account, set, tweets ?? []),
+    ...[...(eng ?? []), ...(ask ?? [])].filter((e) => set.has(e.person)).map((e) => ({ person: e.person, who: 'me' as const, at: e.at })),
+  ];
+  const view = buildRecentView(rows, touches, latest, now);
   const cov = await readEngageCoverage(handle);
-  const lastCollected = engageBases(handle).map((b) => ({ key: b.key, label: b.label, ...cov[b.key], done: engageCoverageDone(cov[b.key], now) }));
+  const bases = engageBases(handle);
+  const lastCollected = bases.map((b) => ({ key: b.key, label: b.label, ...cov[b.key], done: engageCoverageDone(cov[b.key], now) }));
+  const recentGaps = recentCoverageGaps(cov, now).map((g) => ({ label: bases.find((b) => b.key === g.key)!.label, why: g.why }));
   return {
-    days: ENGAGE_DAYS,
-    mutualBlue: people.length,
-    groups: countGroups(people),
+    days: RECENT_DAYS,
+    mutualBlue: rows.length,
     lastCollected,
-    queue: queue.slice(0, queueLimit).map((p) => ({ ...p, handle: info.get(p.restId)?.handle ?? p.restId, name: info.get(p.restId)?.display_name, followers: info.get(p.restId)?.followers_count })),
-    queueTotal: queue.length,
+    recentGaps,
+    newTouched: view.newTouched,
+    newUntouched: view.newUntouched,
+    quiet: view.quiet.slice(0, quietLimit),
+    quietTotal: view.quiet.length,
+    touchedCount: view.touchedCount,
   };
 }
 

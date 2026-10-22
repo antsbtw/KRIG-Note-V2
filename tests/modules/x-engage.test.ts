@@ -1,50 +1,76 @@
 /**
- * ⭐ 第 3 件事:已互关蓝V的互动四组 + 互动队列(2026-10-22)
- * 用户选:互动 = 回复和提及;「只有他对我」排最前;从没互动的进队列。
+ * ⭐ 第 3 件事:已互关蓝V的互动(2026-10-22 重做)
+ * 用户 10-22:刚互关的分「互动过 / 没互动」;一周没互动的 = 先采全最近 7 天,再对互关蓝V做补集。
  */
 import { describe, it, expect } from 'vitest';
-import { advanceCursor, countGroups, engageCollectDue, engageCoverageDone, engageQueue, groupEngagement, planEngageRuns, ENGAGE_PAGE_BUDGET } from '@modules/x/x-engage';
+import { advanceCursor, buildRecentView, engageCollectDue, engageCoverageDone, planEngageRuns, recentCoverageGaps, touchesFromTweets, ENGAGE_PAGE_BUDGET, type MutualRow } from '@modules/x/x-engage';
 
 const ME = 'ME';
 const t = (id: string, author: string, at: string, rel: { to?: string; mentions?: string[] }, text = '') =>
   ({ tweet_id: id, author_rest_id: author, created_at: at, in_reply_to_user_id: rel.to, mention_ids: rel.mentions, text });
 
-describe('四组', () => {
-  const mutual = ['A', 'B', 'C', 'D'];
-  const tweets = [
-    t('1', ME, '2026-10-01T00:00:00Z', { to: 'A' }),
-    t('2', 'A', '2026-10-02T00:00:00Z', { to: ME }),
-    t('3', ME, '2026-10-03T00:00:00Z', { mentions: ['B'] }),
-    t('4', 'C', '2026-10-04T00:00:00Z', { mentions: [ME] }, '谢谢关注'),
-    t('5', 'C', '2026-10-05T00:00:00Z', { to: ME }, '最近在忙啥'),
-    t('6', 'X', '2026-10-05T00:00:00Z', { to: ME }),
-    t('7', ME, '2026-10-06T00:00:00Z', { to: 'X' }),
-  ];
-  const g = groupEngagement(ME, mutual, tweets);
-  const by = Object.fromEntries(g.map((p) => [p.restId, p]));
-  it('回复 / 提及都算;不在互关蓝V里的人不算', () => {
-    expect(by.A.group).toBe('both');
-    expect(by.B.group).toBe('onlyMe');
-    expect(by.C.group).toBe('onlyHim');
-    expect(by.D.group).toBe('none');
-    expect(by.X).toBeUndefined();
-    expect(countGroups(g)).toEqual({ both: 1, onlyMe: 1, onlyHim: 1, none: 1 });
-  });
-  it('「只有他对我」记的是他最近那一条(互动卡要回它)', () => {
-    expect(by.C.lastHis).toMatchObject({ tweetId: '5', text: '最近在忙啥' });
+describe('互动从哪来', () => {
+  it('回复 / 提及两个方向都算;不在互关蓝V里的不算;我同一条又回又提到只算一次', () => {
+    const set = new Set(['A', 'B', 'C']);
+    const r = touchesFromTweets(ME, set, [
+      t('1', ME, '2026-10-20T00:00:00Z', { to: 'A', mentions: ['A'] }),
+      t('2', 'B', '2026-10-20T00:00:00Z', { mentions: [ME] }, '谢谢'),
+      t('3', 'X', '2026-10-20T00:00:00Z', { to: ME }),
+      t('4', ME, '2026-10-20T00:00:00Z', { to: 'X' }),
+    ]);
+    expect(r).toEqual([
+      { person: 'A', who: 'me', at: '2026-10-20T00:00:00Z' },
+      { person: 'B', who: 'him', at: '2026-10-20T00:00:00Z', tweetId: '2', text: '谢谢' },
+    ]);
   });
 });
 
-describe('队列', () => {
-  it('他找过我的最前(最近的在前),然后从没互动(粉丝多的在前);双向 / 只有我对他不进', () => {
-    const people = [
-      { restId: 'N1', group: 'none' as const }, { restId: 'N2', group: 'none' as const },
-      { restId: 'H1', group: 'onlyHim' as const, lastHis: { tweetId: 'a', at: '2026-10-01T00:00:00Z' } },
-      { restId: 'H2', group: 'onlyHim' as const, lastHis: { tweetId: 'b', at: '2026-10-09T00:00:00Z' } },
-      { restId: 'B', group: 'both' as const }, { restId: 'M', group: 'onlyMe' as const },
-    ];
-    const q = engageQueue(people, new Map([['N1', 10], ['N2', 500]]));
-    expect(q.map((p) => p.restId)).toEqual(['H2', 'H1', 'N2', 'N1']);
+describe('⭐⭐ 刚互关 / 一周没互动', () => {
+  const now = new Date('2026-10-22T12:00:00Z');
+  const row = (id: string, extra: Partial<MutualRow> = {}): MutualRow => ({ restId: id, handle: id.toLowerCase(), ...extra });
+  const rows = [
+    row('N1', { mutualSince: { at: '2026-10-21T00:00:00Z', firstSeen: false } }),
+    row('N2', { mutualSince: { at: '2026-10-20T00:00:00Z', firstSeen: true } }),
+    row('Q1', { followers: 10 }), row('Q2', { followers: 900 }), row('Q3', { followers: 5 }),
+    row('T1'), row('OLD'),
+  ];
+  const touches = [
+    { person: 'N2', who: 'me' as const, at: '2026-10-21T00:00:00Z' },
+    { person: 'T1', who: 'him' as const, at: '2026-10-21T00:00:00Z', tweetId: 'h1', text: '在吗' },
+    /** 8 天前的 —— 不在这周,OLD 算一周没互动 */
+    { person: 'OLD', who: 'me' as const, at: '2026-10-14T00:00:00Z' },
+  ];
+  const latest = new Map([['Q3', { id: 'p3', text: '新帖', at: '2026-10-21T00:00:00Z' }]]);
+  const v = buildRecentView(rows, touches, latest, now);
+  it('刚互关(7 天内)按互动过 / 没互动分开,新的在前', () => {
+    expect(v.newUntouched.map((p) => p.restId)).toEqual(['N1']);
+    expect(v.newTouched.map((p) => p.restId)).toEqual(['N2']);
+  });
+  it('⭐ 一周没互动 = 补集:这周有来往的不列(只计数);8 天前的互动不算这周;有最近帖子的在前,其余粉丝多的在前', () => {
+    expect(v.quiet.map((p) => p.restId)).toEqual(['Q3', 'Q2', 'Q1', 'OLD']);
+    expect(v.touchedCount).toBe(1);
+    expect(v.quiet[0].latestPost?.id).toBe('p3');
+  });
+  it('他找过我、我之后没回 → 记下那条(互动卡回它);我回过了就不算没回', () => {
+    const w = buildRecentView([row('T1')], [...touches, { person: 'T1', who: 'me' as const, at: '2026-10-21T05:00:00Z' }], new Map(), now);
+    expect(v.quiet.find((p) => p.restId === 'T1')).toBeUndefined();
+    expect(buildRecentView([row('T1', { mutualSince: { at: '2026-10-21T00:00:00Z', firstSeen: false } })], touches, new Map(), now).newTouched[0].unanswered?.tweetId).toBe('h1');
+    expect(w.touchedCount).toBe(1);
+    expect(buildRecentView([row('T1', { mutualSince: { at: '2026-10-21T00:00:00Z', firstSeen: false } })], [...touches, { person: 'T1', who: 'me' as const, at: '2026-10-21T05:00:00Z' }], new Map(), now).newTouched[0].unanswered).toBeUndefined();
+  });
+  it('⭐ 最近 7 天没采全 → 列出差在哪(补集不可信);采全且 24 小时内补过新的 → 空', () => {
+    const fresh = '2026-10-22T06:00:00Z';
+    expect(recentCoverageGaps({
+      mine: { oldest: '2026-10-18T00:00:00Z', newest: fresh, at: fresh },
+      toMe: { oldest: '2026-09-27T00:00:00Z', newest: fresh, at: '2026-10-20T00:00:00Z' },
+      mentionMe: {},
+    }, now)).toEqual([
+      { key: 'mine', why: '只采到 10-18,还差 10-15 ~ 10-18' },
+      { key: 'toMe', why: '超过 24 小时没补新的' },
+      { key: 'mentionMe', why: '还没采' },
+    ]);
+    const ok = { oldest: '2026-10-01T00:00:00Z', newest: fresh, at: fresh };
+    expect(recentCoverageGaps({ mine: ok, toMe: ok, mentionMe: ok }, now)).toEqual([]);
   });
 });
 

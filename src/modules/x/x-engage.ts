@@ -1,9 +1,9 @@
 /**
  * ⭐⭐ 蓝V互关第 3 件事:已互关的蓝V看互动情况 —— 纯函数(2026-10-22)
  *
- * 设计文档流程 B(用户 10-16「正确」):采互动 → 四组 → 「从没互动」进互动队列 → 挑他最近一条帖子回复 → 下轮复查。
- * 用户 10-22 选:互动 = 回复和提及(点赞 X 不给名单,不算);从没互动的走「和求关卡一样」(点赞 + 回复,不关注);
- *   「只有他对我」(他找过我、我没回)排在队列最前。
+ * 设计文档流程 B(用户 10-16「正确」):采互动 → 分组 → 挑他最近一条帖子回复 → 下轮复查。
+ * 用户 10-22 选:互动 = 回复和提及(点赞 X 不给名单,不算);互动走「和求关卡一样」(点赞 + 回复,不关注)。
+ * 10-22 重做:不再自动排队列,改成「刚互关 / 一周没互动」两张名单由人挑(见 buildRecentView)。
  */
 
 export const ENGAGE_DAYS = 90;
@@ -17,65 +17,129 @@ export type EngageTweet = {
   readonly mention_ids?: readonly string[];
 };
 
-export type EngageGroup = 'both' | 'onlyMe' | 'onlyHim' | 'none';
+/**
+ * ⭐⭐ 「最近一周」的互动视图(2026-10-22 重做)
+ *
+ * 用户 10-22:「互动有一个误区,就是找我最近互动的人再次互动,没有我选择的空间:
+ *  1、刚添加的好友 —— 互动过、没有互动过进行分类;
+ *  2、很久没有互动的好友 —— 找出来它最新的帖子,我要阅读并看看如何互动;
+ *  目的就是和蓝友们熟悉起来,并建立信任关系,为推广我们的产品做铺垫。」
+ * 同日:「至少采自己的一周互动结果,然后做补集,这样就只能找到那些互关的蓝V没有互动了。」
+ *
+ * 互动 = 这 7 天里:回复 / 提及(两个方向,x_tweet)+ 我在互动卡 / 求关卡动过手的(x_engage / x_ask)。
+ * 「刚互关」= 7 天内成为互关(x_relation_change)—— 天数是我定的,跟「一周」对齐。
+ */
+export const RECENT_DAYS = 7;
 
-export type EngagePerson = {
-  readonly restId: string;
-  readonly group: EngageGroup;
-  /** 我最近一次回复 / 提到他 */
-  readonly lastMine?: string;
-  /** 他最近一次回复 / 提到我(onlyHim 时互动卡就回这一条) */
-  readonly lastHis?: { readonly tweetId: string; readonly at?: string; readonly text?: string };
+/** 一次互动:谁对谁、什么时候;他对我的带推文(没回的话互动卡就回它) */
+export type Touch = {
+  readonly person: string;
+  readonly who: 'me' | 'him';
+  readonly at: string;
+  readonly tweetId?: string;
+  readonly text?: string;
 };
 
 /** 这条推文是不是「from 对 to」的互动:回复给他,或提到了他 */
 const touches = (t: EngageTweet, to: string): boolean => t.in_reply_to_user_id === to || (t.mention_ids ?? []).includes(to);
 
-/**
- * ⭐ 把互关蓝V分四组。
- * @param mutual   互关蓝V的数字 id(我关注他 ∧ 他关注我 ∧ 蓝V ∧ 没排除)
- * @param tweets   时间窗内:我发的、回复 / 提到别人的;以及别人发的、回复 / 提到我的
- */
-export function groupEngagement(me: string, mutual: readonly string[], tweets: readonly EngageTweet[]): EngagePerson[] {
-  const mine = new Map<string, string>();
-  const his = new Map<string, { tweetId: string; at?: string; text?: string }>();
-  const later = (a?: string, b?: string): boolean => Date.parse(a ?? '') > Date.parse(b ?? '');
-  const set = new Set(mutual);
+/** 回复 / 提及 → 互动(只留互关蓝V的) */
+export function touchesFromTweets(me: string, mutual: ReadonlySet<string>, tweets: readonly EngageTweet[]): Touch[] {
+  const out: Touch[] = [];
   for (const t of tweets) {
+    if (!t.created_at) continue;
     if (t.author_rest_id === me) {
-      for (const to of [t.in_reply_to_user_id, ...(t.mention_ids ?? [])]) {
-        if (!to || to === me || !set.has(to)) continue;
-        if (!mine.has(to) || later(t.created_at, mine.get(to))) mine.set(to, t.created_at ?? '');
+      for (const to of new Set([t.in_reply_to_user_id, ...(t.mention_ids ?? [])])) {
+        if (to && to !== me && mutual.has(to)) out.push({ person: to, who: 'me', at: t.created_at });
       }
-    } else if (set.has(t.author_rest_id) && touches(t, me)) {
-      const cur = his.get(t.author_rest_id);
-      if (!cur || later(t.created_at, cur.at)) his.set(t.author_rest_id, { tweetId: t.tweet_id, at: t.created_at, text: t.text });
+    } else if (mutual.has(t.author_rest_id) && touches(t, me)) {
+      out.push({ person: t.author_rest_id, who: 'him', at: t.created_at, tweetId: t.tweet_id, text: t.text });
     }
   }
-  return mutual.map((id) => {
-    const m = mine.get(id);
-    const h = his.get(id);
-    const group: EngageGroup = m !== undefined && h ? 'both' : m !== undefined ? 'onlyMe' : h ? 'onlyHim' : 'none';
-    return { restId: id, group, lastMine: m || undefined, lastHis: h };
-  });
+  return out;
 }
 
-export function countGroups(people: readonly EngagePerson[]): Record<EngageGroup, number> {
-  const c: Record<EngageGroup, number> = { both: 0, onlyMe: 0, onlyHim: 0, none: 0 };
-  for (const p of people) c[p.group] += 1;
-  return c;
+export type MutualRow = {
+  readonly restId: string; readonly handle: string; readonly name?: string; readonly followers?: number;
+  /**
+   * 什么时候成为互关(7 天内的才有)。firstSeen = 第一次采到他时就已经是互关(之前库里没他)——
+   * 可能更早就互关了,只是那天才采到;界面要说清,不能说成「那天互关的」
+   */
+  readonly mutualSince?: { readonly at: string; readonly firstSeen: boolean };
+};
+
+export type RecentPerson = MutualRow & {
+  /** 7 天内最近一次互动 */
+  readonly lastTouch?: Touch;
+  /** 他找过我、我之后还没回 —— 互动卡就回这一条 */
+  readonly unanswered?: { readonly tweetId: string; readonly text?: string; readonly at: string };
+  /** 库里他最近一条自己发的(不是回复 / 转发);库里没有就空 —— 点开互动卡会去他主页现采 */
+  readonly latestPost?: { readonly id: string; readonly text?: string; readonly at: string };
+};
+
+export type RecentView = {
+  /** 刚互关(7 天内):互动过 / 还没互动 */
+  readonly newTouched: RecentPerson[];
+  readonly newUntouched: RecentPerson[];
+  /** 不是刚互关、这 7 天没互动(补集):库里有最近帖子的在前(新的在前),其余粉丝多的在前 */
+  readonly quiet: RecentPerson[];
+  /** 不是刚互关、这 7 天互动过的人数(不列出,只计数) */
+  readonly touchedCount: number;
+};
+
+const ms = (iso?: string): number => Date.parse(iso ?? '') || 0;
+
+/** ⭐⭐ 分组 —— 纯函数 */
+export function buildRecentView(
+  rows: readonly MutualRow[], allTouches: readonly Touch[],
+  latest: ReadonlyMap<string, { id: string; text?: string; at: string }>, now: Date,
+): RecentView {
+  const since = now.getTime() - RECENT_DAYS * 86_400_000;
+  const byPerson = new Map<string, Touch[]>();
+  for (const t of allTouches) {
+    if (ms(t.at) < since) continue;
+    const l = byPerson.get(t.person) ?? [];
+    l.push(t);
+    byPerson.set(t.person, l);
+  }
+  const newTouched: RecentPerson[] = [];
+  const newUntouched: RecentPerson[] = [];
+  const quiet: RecentPerson[] = [];
+  let touchedCount = 0;
+  for (const r of rows) {
+    const ts = (byPerson.get(r.restId) ?? []).sort((a, b) => ms(b.at) - ms(a.at));
+    const lastMine = ts.find((t) => t.who === 'me');
+    const lastHis = ts.find((t) => t.who === 'him' && t.tweetId);
+    const unanswered = lastHis && (!lastMine || ms(lastHis.at) > ms(lastMine.at)) ? { tweetId: lastHis.tweetId!, text: lastHis.text, at: lastHis.at } : undefined;
+    const p: RecentPerson = { ...r, lastTouch: ts[0], unanswered, latestPost: latest.get(r.restId) };
+    const isNew = r.mutualSince !== undefined && ms(r.mutualSince.at) >= since;
+    if (isNew) (ts.length > 0 ? newTouched : newUntouched).push(p);
+    else if (ts.length === 0) quiet.push(p);
+    else touchedCount += 1;
+  }
+  const newest = (a: RecentPerson, b: RecentPerson): number => ms(b.mutualSince?.at) - ms(a.mutualSince?.at);
+  newTouched.sort(newest);
+  newUntouched.sort(newest);
+  quiet.sort((a, b) => (ms(b.latestPost?.at) - ms(a.latestPost?.at)) || ((b.followers ?? 0) - (a.followers ?? 0)));
+  return { newTouched, newUntouched, quiet, touchedCount };
 }
 
 /**
- * ⭐ 互动队列:「只有他对我」最前(他最近找我的在前),然后「从没互动」(粉丝多的在前)。
- * 已经双向 / 我找过他的不进队列(下轮复查他回没回应)。
+ * ⭐ 最近 7 天采全了没有 —— 「补集」只有在三条搜索都覆盖到 7 天前、且最近 24 小时采过时才可信
+ * (用户 10-22:「至少采自己的一周互动结果,然后做补集」)。没采全的列出来,界面要明说「没互动」会偏多。
  */
-export function engageQueue(people: readonly EngagePerson[], followers: ReadonlyMap<string, number>): EngagePerson[] {
-  const him = people.filter((p) => p.group === 'onlyHim')
-    .sort((a, b) => Date.parse(b.lastHis?.at ?? '') - Date.parse(a.lastHis?.at ?? ''));
-  const none = people.filter((p) => p.group === 'none')
-    .sort((a, b) => (followers.get(b.restId) ?? 0) - (followers.get(a.restId) ?? 0));
-  return [...him, ...none];
+export function recentCoverageGaps(
+  cov: Readonly<Record<EngageKey, { readonly oldest?: string; readonly newest?: string; readonly at?: string }>>, now: Date,
+): Array<{ readonly key: EngageKey; readonly why: string }> {
+  const since = day(new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString());
+  const out: Array<{ key: EngageKey; why: string }> = [];
+  for (const k of Object.keys(cov) as EngageKey[]) {
+    const c = cov[k];
+    if (!c.oldest || !c.newest) out.push({ key: k, why: '还没采' });
+    else if (day(c.oldest) > since) out.push({ key: k, why: `只采到 ${day(c.oldest).slice(5)},还差 ${since.slice(5)} ~ ${day(c.oldest).slice(5)}` });
+    else if (!c.at || now.getTime() - Date.parse(c.at) > 24 * 3600_000) out.push({ key: k, why: '超过 24 小时没补新的' });
+  }
+  return out;
 }
 
 export type EngageKey = 'mine' | 'toMe' | 'mentionMe';
