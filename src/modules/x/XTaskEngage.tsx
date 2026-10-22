@@ -36,12 +36,12 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
 
   const collect = async (): Promise<void> => {
     setCollecting(true);
-    setMsg('采互动:搜「我回复过谁 / 谁回复过我 / 谁提到过我」,先补齐最近 7 天(左边会跳到搜索页)…');
+    setMsg('采一段:先补新的,再补齐最近 7 天(左边会跳到搜索页)…');
     const r = await xDataCall({ op: 'engageCollect', wsId });
     setCollecting(false);
     if (r.status === 'failed') { setMsg(r.reason); return; }
-    const v = r.value as { runs: Array<{ label: string; pages: number; tweets: number; problem?: string }> };
-    setMsg(`采完:${v.runs.map((x) => `${x.label} ${x.tweets} 条${x.problem ? `(⚠️ ${x.problem})` : ''}`).join(' · ')}`);
+    const v = r.value as { runs: Array<{ label: string; pages: number; tweets: number; problem?: string }>; note?: string };
+    setMsg(`${v.runs.length > 0 ? `这一段:${v.runs.map((x) => `${x.label} ${x.tweets} 条${x.problem ? `(⚠️ ${x.problem})` : ''}`).join(' · ')}` : ''}${v.note ? ` ${v.note}` : ''}`);
     load();
   };
 
@@ -115,8 +115,11 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
             ⚠️ 最近 7 天还没采全,「一周没互动」会偏多:{ov.recentGaps.map((g) => `${g.label} ${g.why}`).join(';')}
           </div>
         )}
+        <div style={{ opacity: 0.7 }}>
+          自动采:没采全最近 7 天时每 15 分钟补一段,采全后每 3 小时补新的;每段只用剩下的搜索额度(给你自己搜留着),撞了限流 15 分钟后自动接着采
+        </div>
         互动数据上次采:{last ? new Date(last).toLocaleString() : '还没采过'}
-        {' '}<button type="button" style={{ fontSize: 11 }} disabled={collecting} onClick={() => void collect()}>{collecting ? '采集中…' : '采互动'}</button>
+        {' '}<button type="button" style={{ fontSize: 11 }} disabled={collecting} onClick={() => void collect()}>{collecting ? '采集中…' : '现在采一段'}</button>
       </div>
       {msg && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{msg}</div>}
       {viewNote && <div style={{ fontSize: 12, color: '#fbbf24' }}>{viewNote}</div>}

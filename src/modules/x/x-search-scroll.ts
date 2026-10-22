@@ -11,6 +11,7 @@
  * 每截获一页 SearchTimeline 就过一遍逐页账(清点 X 列的 → 逐条核对解出 → 存库并按 id 回读 → 判方向)。
  * ⚠️ 碰到 429 就停,不重试(异常即停);页数上限由调用方给,保证 15 分钟内远低于 ~50 次。
  */
+import { recordSearch } from './x-search-budget';
 import { webviewPorts } from './x-collect-ports';
 import { X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME, carriesTweets } from './x-pages';
 import { X_SCRIPTS } from './x-dom-scripts';
@@ -126,6 +127,8 @@ export async function collectSearchByScroll(input: SearchScrollInput): Promise<S
       .filter((it) => carriesTweets(it.url) && it.url.includes('/SearchTimeline'))
       .map((it) => it as typeof it & { at?: string });
     const rateLimited = searchPages.some((it) => it.status === 429);
+    /** ⭐ 记进搜索额度账本(配方搜索 / 采互动 / 操作台共用一个额度,x-search-budget.ts) */
+    recordSearch(searchPages.length, rateLimited);
     /** 按到达先后排成「第几页」 */
     const ok200 = searchPages.filter((it) => (it.status ?? 200) === 200)
       .sort((a, b) => String(a.at ?? '').localeCompare(String(b.at ?? '')));

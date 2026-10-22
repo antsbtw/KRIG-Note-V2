@@ -155,37 +155,61 @@ export function engageBases(handle: string): Array<{ readonly key: EngageKey; re
 }
 
 const day = (iso: string): string => iso.slice(0, 10);
-/** 一次采互动最多翻几页(三条合计)—— 搜索接口约 50 次 / 15 分钟(2026-10-22 真机第 50 页撞 429),留余量 */
-export const ENGAGE_PAGE_BUDGET = 45;
+/**
+ * ⭐⭐ 采互动的策略(2026-10-22 重做)
+ *
+ * 用户 10-22(一次采 45 页撞了限流):「要有策略吧,这是一个常规行为,经常要采集自己的每天互动的哦。」
+ * 事实:搜索约 50 页 / 15 分钟,配方搜索 / 操作台共用(x-search-budget.ts);我一天回复 100+ 条 ≈ 5~8 页。
+ * 策略(数字是我定的,不是用户定的):
+ *  · 小段多次:一段最多 SEGMENT_PAGES 页,且不超过账本里剩的额度(给你自己搜留 15 页)
+ *  · 先后:先补新的(接着上次最新那一秒,一般一两页就接上)→ 再补齐最近 7 天 → 有余量才往 90 天前补
+ *  · 撞了限流(429 或悄悄限流)→ 记账本,15 分钟后自动接着采,不等到明天
+ *  · 多久一段:最近 7 天没采全 → 每 15 分钟一段;采全了 → 每 3 小时补一次新的
+ */
+export const SEGMENT_PAGES = 25;
+/** 补新的每条最多翻几页 —— 结果到头就自己停,一般用不满 */
+const NEW_CAP = 15;
+export const RETRY_GAP_MS = 15 * 60_000;
+export const ROUTINE_GAP_MS = 3 * 3600_000;
+
+export type EngageRun = { readonly key: EngageKey; readonly label: string; readonly q: string; readonly pages: number; readonly kind: 'fresh' | 'new' | 'back'; readonly goal: 'recent' | 'deep' };
 
 /**
- * ⭐⭐ 这一次采哪些、各翻几页 —— 跨次续采(2026-10-22 真机:一次 20 页只覆盖到 11 天前,离 90 天差得远)。
- * · 没采过 → 从今天往回翻(since:90 天前)
- * · 采过 → 先补「上次之后新出的」(since:最新那天,页数少);还没覆盖到 90 天前 → 再从「最早那天」往更早翻(until:)
- * 三条合计不超过 ENGAGE_PAGE_BUDGET 页。
+ * ⭐⭐ 这一段的下一条搜索 —— 纯函数。一条跑完扣掉**实际**用的页数、更新边界后再问下一条
+ * (补新的给 NEW_CAP 只是上限,一般一两页就到头;按上限预先分配会把补齐 7 天的页数全占掉)。
+ * @param left  这一段还剩几页(账本额度,上限 SEGMENT_PAGES)
+ * @param done  这一段已经跑过的「key:kind」
+ * ⚠️ 接着上次的边界续采精确到秒(since_time / until_time,unix 秒,各重叠 1 秒不漏)——
+ *   按天的 since: / until: 会把边界那一整天重读一遍(2026-10-22 真机:我 10-18 一天回了 151 条,
+ *   「往更早翻」10 页全耗在 10-18 上,边界一步没动)。until_time 真机验过:最新一条正好停在边界那一秒。
  */
-export function planEngageRuns(handle: string, coverage: EngageCoverage, now: Date): Array<{ readonly key: EngageKey; readonly label: string; readonly q: string; readonly pages: number; readonly kind: 'fresh' | 'new' | 'back' }> {
+export function nextEngageRun(handle: string, coverage: EngageCoverage, now: Date, left: number, done: ReadonlySet<string>): EngageRun | null {
   const since = day(new Date(now.getTime() - ENGAGE_DAYS * 86_400_000).toISOString());
-  const runs: Array<{ key: EngageKey; label: string; q: string; pages: number; kind: 'fresh' | 'new' | 'back' }> = [];
+  const since7 = day(new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString());
+  const sec = (iso: string, d: number): number => Math.floor(Date.parse(iso) / 1000) + d;
+  const news: Array<Omit<EngageRun, 'pages'>> = [];
+  const mid: Array<Omit<EngageRun, 'pages'>> = [];
+  const deep: Array<Omit<EngageRun, 'pages'>> = [];
   for (const b of engageBases(handle)) {
     const c = coverage[b.key];
-    if (!c.newest || !c.oldest) { runs.push({ ...b, q: `${b.base} since:${since}`, pages: 0, kind: 'fresh' }); continue; }
-    /**
-     * ⚠️⚠️ 接着上次的边界续采要精确到秒(since_time / until_time,unix 秒,各重叠 1 秒不漏)——
-     * 原来用按天的 since: / until: 边界那天 +1,会把边界那一整天重读一遍(2026-10-22 真机:我 10-18 一天回了 151 条,
-     * 「往更早翻」10 页全耗在 10-18 上,边界一步没动,每天都卡在同一天)。until_time 真机验过:最新一条正好停在边界那一秒。
-     */
-    const sec = (iso: string, d: number): number => Math.floor(Date.parse(iso) / 1000) + d;
-    runs.push({ ...b, q: `${b.base} since_time:${sec(c.newest, -1)}`, pages: 0, kind: 'new' });
-    if (day(c.oldest) > since) runs.push({ ...b, q: `${b.base} since:${since} until_time:${sec(c.oldest, 1)}`, pages: 0, kind: 'back' });
+    if (!c.newest || !c.oldest) { mid.push({ ...b, q: `${b.base} since:${since}`, kind: 'fresh', goal: 'recent' }); continue; }
+    news.push({ ...b, q: `${b.base} since_time:${sec(c.newest, -1)}`, kind: 'new', goal: 'recent' });
+    if (day(c.oldest) > since) {
+      const back = { ...b, q: `${b.base} since:${since} until_time:${sec(c.oldest, 1)}`, kind: 'back' as const };
+      if (day(c.oldest) > since7) mid.push({ ...back, goal: 'recent' }); else deep.push({ ...back, goal: 'deep' });
+    }
   }
-  /** 预算:补新的每条 5 页(真机:我一天约 40 条回复 ≈ 2 页);其余平分给「从头采」和「往更早翻」 */
-  const fresh = runs.filter((r) => r.kind === 'new');
-  fresh.forEach((r) => { r.pages = 5; });
-  const deep = runs.filter((r) => r.kind !== 'new');
-  const left = ENGAGE_PAGE_BUDGET - fresh.length * 5;
-  deep.forEach((r) => { r.pages = Math.max(2, Math.floor(left / Math.max(deep.length, 1))); });
-  return runs;
+  const todo = (l: Array<Omit<EngageRun, 'pages'>>): Array<Omit<EngageRun, 'pages'>> => l.filter((r) => !done.has(`${r.key}:${r.kind}`));
+  const n = todo(news)[0];
+  if (n) return left >= 1 ? { ...n, pages: Math.min(NEW_CAP, left) } : null;
+  /** 从头采 / 补齐 7 天:剩下的平分 */
+  const m = todo(mid);
+  if (m.length > 0) { const p = Math.ceil(left / m.length); return p >= 2 ? { ...m[0], pages: p } : null; }
+  /** 7 天都齐了(这一段里也没有要补齐的)才往 90 天前补 */
+  if (mid.length > 0) return null;
+  const d = todo(deep);
+  if (d.length > 0) { const p = Math.ceil(left / d.length); return p >= 3 ? { ...d[0], pages: p } : null; }
+  return null;
 }
 
 /** 某条搜索已覆盖到 90 天前了吗 */
@@ -194,9 +218,21 @@ export function engageCoverageDone(c: { readonly oldest?: string }, now: Date): 
   return day(c.oldest) <= day(new Date(now.getTime() - ENGAGE_DAYS * 86_400_000).toISOString());
 }
 
-/** ⭐ 每天自动采互动该不该跑:任何一条没采过,或上次采距今满 24 小时(2026-10-22) */
-export function engageCollectDue(cov: Readonly<Record<EngageKey, { readonly at?: string }>>, now: number): boolean {
-  return (Object.values(cov) as Array<{ at?: string }>).some((c) => !c.at || now - Date.parse(c.at) >= 24 * 3600_000);
+/**
+ * ⭐ 定时器该不该现在采一段:撞过限流没过 15 分钟 / 额度不够一段 → 不采;
+ * 最近 7 天没采全 → 距上次尝试满 15 分钟就采;采全了 → 满 3 小时补一次新的。
+ */
+export function engageCollectDue(
+  cov: Readonly<Record<EngageKey, { readonly oldest?: string; readonly newest?: string; readonly at?: string }>>,
+  now: number, budget: { readonly freePages: number; readonly waitUntil?: number },
+): boolean {
+  if (budget.waitUntil !== undefined && budget.waitUntil > now) return false;
+  if (budget.freePages < 5) return false;
+  const tries = (Object.values(cov) as Array<{ at?: string }>).map((c) => Date.parse(c.at ?? '') || 0);
+  const last = Math.max(...tries);
+  if (tries.some((t) => t === 0)) return true;
+  const gap = recentCoverageGaps(cov, new Date(now)).some((g) => g.why !== '超过 24 小时没补新的') ? RETRY_GAP_MS : ROUTINE_GAP_MS;
+  return now - last >= gap;
 }
 
 export type EngageCursor = { readonly oldest?: string; readonly newest?: string };
@@ -209,7 +245,7 @@ export type EngageCursor = { readonly oldest?: string; readonly newest?: string 
  * · new(补新的):这次最旧接上了旧的最新(≤)才推进最新;没接上(页数不够 / 撞限流)→ 不动,下次再补(不留空档)
  * @param failed 这次出错 / 撞限流(一条没有不能当「没有更早的了」)
  */
-export function advanceCursor(cur: EngageCursor, run: { readonly kind: 'fresh' | 'new' | 'back'; readonly oldest?: string; readonly newest?: string; readonly failed: boolean }, now: Date): EngageCursor {
+export function advanceCursor(cur: EngageCursor, run: { readonly kind: 'fresh' | 'new' | 'back'; readonly oldest?: string; readonly newest?: string; readonly failed: boolean; readonly exhausted?: boolean }, now: Date): EngageCursor {
   const since = new Date(now.getTime() - ENGAGE_DAYS * 86_400_000).toISOString();
   const earlier = (a?: string, b?: string): boolean => a !== undefined && (b === undefined || Date.parse(a) < Date.parse(b));
   if (run.kind === 'fresh') {
@@ -218,9 +254,13 @@ export function advanceCursor(cur: EngageCursor, run: { readonly kind: 'fresh' |
   }
   if (run.kind === 'back') {
     if (!run.oldest) return run.failed ? cur : { ...cur, oldest: since };
+    /** 翻到头了(没出错、没限流,结果自己结束)→ 窗口里没有更早的了 */
+    if (run.exhausted && !run.failed) return { ...cur, oldest: since };
     return earlier(run.oldest, cur.oldest) ? { ...cur, oldest: run.oldest } : cur;
   }
   if (!run.newest || !run.oldest) return cur;
+  /** 补新的翻到头了(从上次那一秒起的全看完了)→ 不管接没接上那一条,最新都推到这次最新 */
+  if (run.exhausted && !run.failed) return cur.newest === undefined || Date.parse(run.newest) > Date.parse(cur.newest) ? { ...cur, newest: run.newest } : cur;
   return cur.newest !== undefined && Date.parse(run.oldest) <= Date.parse(cur.newest) && Date.parse(run.newest) > Date.parse(cur.newest)
     ? { ...cur, newest: run.newest } : cur;
 }

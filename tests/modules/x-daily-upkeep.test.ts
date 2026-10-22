@@ -32,7 +32,7 @@ vi.mock('@modules/x/x-relation-task', () => ({
   startRelationTask: async (_ws: string, _t: unknown, trigger: string) => { calls.push(`relation:${trigger}`); return { ok: true, jobId: 'J' }; },
 }));
 
-let engageCov: Record<string, { at?: string }> = { mine: {}, toMe: {}, mentionMe: {} };
+let engageCov: Record<string, { at?: string; oldest?: string; newest?: string }> = { mine: {}, toMe: {}, mentionMe: {} };
 vi.mock('@modules/x/x-engage-repo', () => ({ readEngageCoverage: async () => engageCov }));
 vi.mock('@modules/x/x-engage-collect', () => ({ collectEngagement: async () => { calls.push('engage'); return { ok: true, runs: [] }; } }));
 
@@ -58,8 +58,10 @@ describe('一轮只做一件:先查回关,再关系采集', () => {
   });
   it('三件都做过 → 什么都不做', async () => {
     lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
-    const at = '2026-10-22T10:00:00Z';
-    engageCov = { mine: { at }, toMe: { at }, mentionMe: { at } };
+    /** 最近 7 天已采全、刚补过新的 → 不到 3 小时不再采 */
+    const at = new Date(now - 60 * 60_000).toISOString();
+    const full = { oldest: '2026-10-01T00:00:00Z', newest: at, at };
+    engageCov = { mine: full, toMe: full, mentionMe: full };
     expect(await dailyUpkeepTick(now)).toBeNull();
     expect(calls).toEqual([]);
   });

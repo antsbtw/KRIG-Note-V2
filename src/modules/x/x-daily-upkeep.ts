@@ -4,7 +4,8 @@
  * · 查回关(用户 10-19 选「每天自动一次」):x-follow-check.ts
  * · 关系采集(用户 10-21「按照顺序做吧」第 1 件):每天顺带翻「我的关注」等三个名单(通常各一两页增量),
  *   候选里在 X 上直接关注过的人第二天就自动清掉;差得多会自己改全量并对账(策略同任务页)。
- * · 采互动(10-22,蓝V互关第 3 件事):三条搜索跨次续采,每天补一次,几天补满 90 天
+ * · 采互动(10-22,蓝V互关第 3 件事):小段多次 —— 最近 7 天没采全每 15 分钟一段,采全后每 3 小时补新的;
+ *   按搜索额度账本避开限流,撞了 15 分钟后自动接着采(策略见 x-engage.ts nextEngageRun)
  * 一个 X 网页一次只做一件:这一轮做了一件就收手,10 分钟后再看下一件。忙 / 后台在采 → 各自让路。
  * ⚠️ 常驻 timer:unref + before-quit 必须调 stopDailyUpkeep(记忆 project-graceful-shutdown)
  */
@@ -18,6 +19,7 @@ import { relationDailyDue } from './x-relation-plan';
 import { collectEngagement } from './x-engage-collect';
 import { readEngageCoverage } from './x-engage-repo';
 import { engageCollectDue } from './x-engage';
+import { searchBudget } from './x-search-budget';
 
 const TICK_MS = 10 * 60_000;
 let timer: NodeJS.Timeout | null = null;
@@ -41,9 +43,9 @@ export async function dailyUpkeepTick(now = Date.now()): Promise<string | null> 
         console.log(`[x.daily] ${wsId} 每天的关系采集:${r.ok ? `已开始(任务 ${r.jobId})` : `没开始:${r.why}(${TICK_MS / 60_000} 分钟后再看)`}`);
         return `relation:${wsId}`;
       }
-      if (engageCollectDue(await readEngageCoverage(acc.handle), now)) {
+      if (engageCollectDue(await readEngageCoverage(acc.handle), now, searchBudget(now))) {
         const r = await collectEngagement(wsId);
-        console.log(`[x.daily] ${wsId} 每天的采互动:${r.ok ? r.runs.map((x) => `${x.label} ${x.tweets} 条${x.problem ? `(${x.problem})` : ''}`).join(' · ') : r.why}`);
+        console.log(`[x.daily] ${wsId} 采互动一段:${r.ok ? `${r.runs.map((x) => `${x.label} ${x.tweets} 条${x.problem ? `(${x.problem})` : ''}`).join(' · ')}${r.note ? ` · ${r.note}` : ''}` : r.why}`);
         return `engage:${wsId}`;
       }
     }
