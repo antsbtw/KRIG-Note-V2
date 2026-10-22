@@ -17,7 +17,7 @@ import { MAX_HOPS, buildThread, type EngageThread, type ThreadRow } from './x-en
 export { buildThread, threadForPrompt, type EngageThread, type ThreadItem, type ThreadRow } from './x-engage-thread-model';
 
 const SELECT = `SELECT tweet_id, author_rest_id, author_handle, text, (IF created_at != NONE THEN <string> created_at ELSE NONE END) AS created_at,
-  in_reply_to, conversation_id FROM x_tweet`;
+  in_reply_to, conversation_id, in_reply_to_user_id, mention_ids FROM x_tweet`;
 
 async function readRows(ids: readonly string[], conv?: string): Promise<ThreadRow[]> {
   const [rows] = await getXDB().query<[ThreadRow[]]>(

@@ -10,6 +10,9 @@ export type ThreadRow = {
   readonly created_at?: string;
   readonly in_reply_to?: string;
   readonly conversation_id?: string;
+  /** 回复给谁 / 提到了谁(数字 id)—— 「之后的来回」只收我回他 / 提到他的 */
+  readonly in_reply_to_user_id?: string;
+  readonly mention_ids?: readonly string[];
 };
 
 export type ThreadItem = {
@@ -61,7 +64,11 @@ export function buildThread(targetId: string, rows: readonly ThreadRow[], me: st
   const t0 = Date.parse(target.created_at ?? '');
   const later = rows
     .filter((r) => conv && r.conversation_id === conv && !chainIds.has(r.tweet_id)
-      && (r.author_rest_id === me || r.author_rest_id === him) && Date.parse(r.created_at ?? '') > t0)
+      /**
+       * ⚠️ 只收「你们俩之间的」:他发的,或我回他 / 提到他的(真机:原帖是我的推广帖,同一对话里我回了一堆别人,不能算你们的来回)
+       */
+      && (r.author_rest_id === him || (r.author_rest_id === me && (r.in_reply_to_user_id === him || (r.mention_ids ?? []).includes(him))))
+      && Date.parse(r.created_at ?? '') > t0)
     .sort((a, b) => Date.parse(a.created_at ?? '') - Date.parse(b.created_at ?? ''))
     .map((r) => item(r, false));
   return { chain: up.reverse(), gapAbove, later };

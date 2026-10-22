@@ -4,18 +4,20 @@
 import { describe, it, expect } from 'vitest';
 import { buildThread, threadForPrompt } from '@modules/x/x-engage-thread-model';
 
-const row = (id: string, author: string, at: string, parent?: string, text = `t${id}`) =>
-  ({ tweet_id: id, author_rest_id: author, author_handle: author.toLowerCase(), text, created_at: at, in_reply_to: parent, conversation_id: 'R' });
+const row = (id: string, author: string, at: string, parent?: string, text = `t${id}`, toUser?: string) =>
+  ({ tweet_id: id, author_rest_id: author, author_handle: author.toLowerCase(), text, created_at: at, in_reply_to: parent, conversation_id: 'R', in_reply_to_user_id: toUser });
 
 describe('找原帖', () => {
   const rows = [
     row('R', 'OTHER', '2026-10-17T00:00:00Z', undefined, '原帖:蓝V互关接龙'),
     row('A', 'ME', '2026-10-17T01:00:00Z', 'R', '已关,互关互助'),
     row('B', 'HIM', '2026-10-18T00:00:00Z', 'A', '@antsBTW 互相帮助互关互赞'),
-    row('C', 'ME', '2026-10-19T00:00:00Z', 'B', '好的'),
+    row('C', 'ME', '2026-10-19T00:00:00Z', 'B', '好的', 'HIM'),
+    /** 真机:同一对话(我的推广帖)下我回别人的 —— 不是你们俩的来回 */
+    row('D', 'ME', '2026-10-19T02:00:00Z', 'X', '@other2 谢谢', 'OTHER2'),
     row('X', 'OTHER2', '2026-10-18T05:00:00Z', 'R', '别人的回复'),
   ];
-  it('原帖 → 我第 1 轮 → 他第 2 轮(要回的这条);之后我们的来回单列;别人的旁支不进', () => {
+  it('原帖 → 我第 1 轮 → 他第 2 轮(要回的这条);之后我们的来回单列;别人的旁支、我回别人的都不进', () => {
     const t = buildThread('B', rows, 'ME', 'HIM');
     expect(t.chain.map((x) => [x.id, x.who, x.isRoot, x.isTarget])).toEqual([
       ['R', 'other', true, false], ['A', 'me', false, false], ['B', 'him', false, true],
