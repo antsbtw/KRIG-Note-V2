@@ -170,9 +170,14 @@ export function planEngageRuns(handle: string, coverage: EngageCoverage, now: Da
   for (const b of engageBases(handle)) {
     const c = coverage[b.key];
     if (!c.newest || !c.oldest) { runs.push({ ...b, q: `${b.base} since:${since}`, pages: 0, kind: 'fresh' }); continue; }
-    runs.push({ ...b, q: `${b.base} since:${day(c.newest)}`, pages: 0, kind: 'new' });
-    /** ⚠️ until: 不含当天 → 用「最早那天 + 1」,与已覆盖的重叠一点,不漏那一天 */
-    if (day(c.oldest) > since) runs.push({ ...b, q: `${b.base} since:${since} until:${day(new Date(Date.parse(c.oldest) + 86_400_000).toISOString())}`, pages: 0, kind: 'back' });
+    /**
+     * ⚠️⚠️ 接着上次的边界续采要精确到秒(since_time / until_time,unix 秒,各重叠 1 秒不漏)——
+     * 原来用按天的 since: / until: 边界那天 +1,会把边界那一整天重读一遍(2026-10-22 真机:我 10-18 一天回了 151 条,
+     * 「往更早翻」10 页全耗在 10-18 上,边界一步没动,每天都卡在同一天)。until_time 真机验过:最新一条正好停在边界那一秒。
+     */
+    const sec = (iso: string, d: number): number => Math.floor(Date.parse(iso) / 1000) + d;
+    runs.push({ ...b, q: `${b.base} since_time:${sec(c.newest, -1)}`, pages: 0, kind: 'new' });
+    if (day(c.oldest) > since) runs.push({ ...b, q: `${b.base} since:${since} until_time:${sec(c.oldest, 1)}`, pages: 0, kind: 'back' });
   }
   /** 预算:补新的每条 5 页(真机:我一天约 40 条回复 ≈ 2 页);其余平分给「从头采」和「往更早翻」 */
   const fresh = runs.filter((r) => r.kind === 'new');

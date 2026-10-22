@@ -85,13 +85,13 @@ describe('采互动:跨次续采(2026-10-22 真机:一次 20 页只覆盖 11 天
     ]);
     expect(r.reduce((n, x) => n + x.pages, 0)).toBeLessThanOrEqual(ENGAGE_PAGE_BUDGET);
   });
-  it('采过但没到 90 天前 → 先补新的(少页),再 until: 最早那天往更早翻;到了就不再往回翻', () => {
+  it('⭐ 采过但没到 90 天前 → 先补新的(少页),再从最早那一秒往更早翻(精确到秒,10-22 真机:按天会把一天 151 条重读到卡死);到了就不再往回翻', () => {
     const cov = { mine: { oldest: '2026-10-10T13:00:00Z', newest: '2026-10-21T18:00:00Z' }, toMe: { oldest: '2026-07-20T00:00:00Z', newest: '2026-10-21T00:00:00Z' }, mentionMe: {} };
     const r = planEngageRuns('antsbtw', cov, now);
     expect(r.map((x) => [x.kind, x.q])).toEqual([
-      ['new', 'from:antsbtw filter:replies since:2026-10-21'],
-      ['back', 'from:antsbtw filter:replies since:2026-07-24 until:2026-10-11'],
-      ['new', 'to:antsbtw since:2026-10-21'],
+      ['new', 'from:antsbtw filter:replies since_time:1792605599'],
+      ['back', 'from:antsbtw filter:replies since:2026-07-24 until_time:1791637201'],
+      ['new', 'to:antsbtw since_time:1792540799'],
       ['fresh', '@antsbtw -from:antsbtw since:2026-07-24'],
     ]);
     expect(r.filter((x) => x.kind === 'new').every((x) => x.pages === 5)).toBe(true);
