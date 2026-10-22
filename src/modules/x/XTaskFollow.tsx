@@ -297,7 +297,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
             <div>
               <strong style={{ fontSize: 12 }}>最近关注</strong>
               <div style={{ fontSize: 12, marginTop: 4 }}>
-                {qs!.done.map((d) => (
+                {(qs?.done ?? []).map((d) => (
                   <div key={`${d.restId}-${d.at}`} style={{ color: d.state === 'failed' ? '#f87171' : undefined }}>
                     {new Date(d.at).toLocaleTimeString()} {STATE[d.state]} @{d.handle}{d.detail ? ` —— ${d.detail}` : ''}
                   </div>

@@ -22,7 +22,23 @@ function Page(): ReactElement {
   ] });
 }
 
+function Boom(): ReactElement { throw new Error('读了空的队列'); }
+
 describe('XTabs', () => {
+  it('⭐ 一个 tab 渲染出错只坏这一块,别的 tab 照常(10-22 真机:整窗白屏)', () => {
+    const el = document.createElement('div');
+    document.body.append(el);
+    const err = console.error;
+    console.error = () => undefined;
+    act(() => { createRoot(el).render(h(XTabs, { active: 'a', onChange: () => undefined, items: [
+      { id: 'a', label: 'A', body: h('span', { 'data-testid': 'ok' }, 'ok') },
+      { id: 'b', label: 'B', body: h(Boom) },
+    ] })); });
+    console.error = err;
+    expect(el.querySelector('[data-testid="ok"]')?.textContent).toBe('ok');
+    expect(el.textContent).toContain('这一块出错了:读了空的队列');
+  });
+
   it('切走再切回来,里面的状态还在;hidden 的 tab 不出现', () => {
     const el = document.createElement('div');
     document.body.append(el);

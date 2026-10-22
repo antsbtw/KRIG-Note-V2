@@ -5,7 +5,28 @@
  * 而不是一个页面往下滚动。」选了「上面一排 tab,里面再一排」。
  * ⚠️ 没选中的 tab 只是藏起来、不卸载 —— 求关卡 / 互动卡过到一半切走再切回来,进度还在。
  */
-import type { ReactElement, ReactNode } from 'react';
+import { Component, type ReactElement, type ReactNode } from 'react';
+
+/**
+ * ⚠️ 一个 tab 里渲染出错只坏这一块,不把整个窗口拖成白屏(2026-10-22 真机:「最近关注」读了空的队列状态,整窗白屏)。
+ * 出错要大声说出来(写在这块里 + console.error),不是悄悄藏掉。
+ */
+class TabBoundary extends Component<{ children: ReactNode; name: string }, { error: Error | null }> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error): { error: Error } { return { error }; }
+  componentDidCatch(error: Error): void { console.error(`[x.tabs] 「${this.props.name}」这块出错:`, error); }
+  render(): ReactNode {
+    if (this.state.error) {
+      return (
+        <div style={{ color: '#f87171', fontSize: 12 }}>
+          ⚠️ 这一块出错了:{this.state.error.message}
+          {' '}<button type="button" style={{ fontSize: 11 }} onClick={() => this.setState({ error: null })}>重试</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 export type TabItem = { readonly id: string; readonly label: ReactNode; readonly body: ReactNode; readonly hidden?: boolean };
 
@@ -34,7 +55,7 @@ export function XTabs({ items, active, onChange, small = false }: {
         })}
       </div>
       {shown.map((t) => (
-        <div key={t.id} role="tabpanel" style={{ display: t.id === cur ? 'block' : 'none' }}>{t.body}</div>
+        <div key={t.id} role="tabpanel" style={{ display: t.id === cur ? 'block' : 'none' }}><TabBoundary name={t.id}>{t.body}</TabBoundary></div>
       ))}
     </div>
   );
