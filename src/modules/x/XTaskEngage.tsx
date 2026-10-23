@@ -170,6 +170,7 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
       )}
       {ov && (
         <div style={{ marginTop: 10 }}>
+          {ov.deferred > 0 && <div style={{ opacity: 0.6, fontSize: 12 }}>另有 {ov.deferred} 人最近放一放过,{ov.deferDays} 天内不列</div>}
           <XTabs small active={sub} onChange={(id) => setSub(id as typeof sub)} items={[
             { id: 'newUntouched', label: `刚互关·没互动 ${ov.newUntouched.length}`, body: section('7 天内成为互关,还没打过招呼', ov.newUntouched, sinceNote) },
             { id: 'newTouched', label: `刚互关·互动过 ${ov.newTouched.length}`, body: section('7 天内成为互关,已经有来往', ov.newTouched, (p) => `${sinceNote(p)} · ${touchNote(p)}`) },

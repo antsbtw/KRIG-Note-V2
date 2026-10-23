@@ -3,6 +3,7 @@
  */
 import { getXDB } from '@storage/surreal/client';
 import { PEOPLE_WITH_RELATION } from './x-account';
+import { DEFER_DAYS, readDeferred } from './x-defer-repo';
 import { RECENT_DAYS, buildRecentView, engageBases, engageCoverageDone, recentCoverageGaps, touchesFromTweets, type EngageCoverage, type EngageKey, type EngageTweet, type MutualRow, type RecentPerson, type Touch } from './x-engage';
 
 export type EngageOverview = {
@@ -18,6 +19,9 @@ export type EngageOverview = {
   readonly quiet: readonly RecentPerson[];
   readonly quietTotal: number;
   readonly touchedCount: number;
+  /** 最近放一放的(不列,过几天自动回来) */
+  readonly deferred: number;
+  readonly deferDays: number;
 };
 
 export async function readEngageOverview(account: string, handle: string, quietLimit: number, now = new Date()): Promise<EngageOverview> {
@@ -64,7 +68,9 @@ export async function readEngageOverview(account: string, handle: string, quietL
     const cur = since2.get(r.person);
     if (!cur || Date.parse(r.at) > Date.parse(cur.at)) since2.set(r.person, { at: r.at, firstSeen: r.first_seen === true });
   }
-  const rows: MutualRow[] = (mutual ?? []).map((m) => ({ restId: m.rest_id, handle: m.handle, name: m.display_name, followers: m.followers_count, mutualSince: since2.get(m.rest_id) }));
+  /** ⭐ 最近放一放过的先不列(用户 10-23:「否则不是重复的勾选它?」) */
+  const deferred = new Set(await readDeferred(account, 'engage', now));
+  const rows: MutualRow[] = (mutual ?? []).filter((m) => !deferred.has(m.rest_id)).map((m) => ({ restId: m.rest_id, handle: m.handle, name: m.display_name, followers: m.followers_count, mutualSince: since2.get(m.rest_id) }));
   const set = new Set(ids);
   const touches: Touch[] = [
     ...touchesFromTweets(account, set, tweets ?? []),
@@ -77,7 +83,7 @@ export async function readEngageOverview(account: string, handle: string, quietL
   const recentGaps = recentCoverageGaps(cov, now).map((g) => ({ label: bases.find((b) => b.key === g.key)!.label, why: g.why }));
   return {
     days: RECENT_DAYS,
-    mutualBlue: rows.length,
+    mutualBlue: (mutual ?? []).length,
     lastCollected,
     recentGaps,
     newTouched: view.newTouched,
@@ -85,6 +91,8 @@ export async function readEngageOverview(account: string, handle: string, quietL
     quiet: view.quiet.slice(0, quietLimit),
     quietTotal: view.quiet.length,
     touchedCount: view.touchedCount,
+    deferred: (mutual ?? []).filter((m) => deferred.has(m.rest_id)).length,
+    deferDays: DEFER_DAYS,
   };
 }
 

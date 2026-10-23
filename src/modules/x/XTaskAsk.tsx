@@ -184,6 +184,13 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     next('跳过(以后不再出现;人卡里可取消排除)');
   };
 
+  /** ⭐ 先放一放:记下来,这几天不再列他(用户 10-23);记不上就留在这儿说清楚,不假装放了 */
+  const deferThis = async (): Promise<void> => {
+    if (!who) return;
+    const r = await xDataCall({ op: 'deferPerson', wsId, restId: who.restId, mode, tweetId: sel?.id });
+    if (r.status === 'failed') { setViewNote(`没记上「放一放」:${r.reason}`); return; }
+    next(`先放一放(${(r.value as { days: number }).days} 天内不再列出)`);
+  };
   const next = (outcome: string): void => {
     const d = [...done, { who: who!, outcome }];
     setDone(d);
@@ -389,8 +396,8 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
             </button>
             <button type="button" disabled={acting}
               title={result ? '' : '这次先不处理他,下次还会在候选里'}
-              onClick={() => next(result ? (result.ok ? `✓ ${E ? '互动' : '求关'}完成(${stepLine(result, E)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : `先放一放 · 推文 ${sel.id}`)}>
-              {result ? '下一个' : '先放一放(下次还会出现)'}
+              onClick={() => (result ? next(result.ok ? `✓ ${E ? '互动' : '求关'}完成(${stepLine(result, E)})` : `✗ ${result.blocked ?? result.detail ?? '没做完'}`) : void deferThis())}>
+              {result ? '下一个' : '先放一放(过几天再出现)'}
             </button>
           </div>
           {result && (

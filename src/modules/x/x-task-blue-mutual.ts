@@ -6,6 +6,7 @@
  *   1 找我还没关注的蓝V   2 对有互关倾向的互动求关   3 已互关的蓝V看互动情况
  * 这里给每件事「做到哪了」的数字;关系按**当前号**算(1.2.27)。
  */
+import { readDeferred } from './x-defer-repo';
 import { getXDB } from '@storage/surreal/client';
 import { PEOPLE_WITH_RELATION } from './x-account';
 
@@ -36,10 +37,10 @@ export async function readBlueMutualOverview(account: string): Promise<BlueMutua
     SELECT count() AS n,
       count(is_blue_verified = true) AS blue,
       count(is_blue_verified = true AND i_follow != true) AS blueNot,
-      count(is_blue_verified = true AND i_follow != true AND mutual_intent = true AND excluded != true) AS cand
+      count(is_blue_verified = true AND i_follow != true AND mutual_intent = true AND excluded != true AND rest_id NOTINSIDE $deferred) AS cand
       FROM ${PEOPLE_WITH_RELATION} WHERE array::len(array::intersect(found_via_recipes ?? [], $recipes)) > 0 GROUP ALL;
     SELECT count() AS n FROM ${PEOPLE_WITH_RELATION} WHERE is_blue_verified = true AND i_follow = true AND follows_me = true GROUP ALL;`,
-  { acct: account, recipes: [...BLUE_MUTUAL_RECIPES] });
+  { acct: account, recipes: [...BLUE_MUTUAL_RECIPES], deferred: await readDeferred(account, 'ask') });
   const f = found?.[0];
   return {
     lastFindAt: last?.[0]?.at,
@@ -48,9 +49,9 @@ export async function readBlueMutualOverview(account: string): Promise<BlueMutua
   };
 }
 
-/** 候选的条件:配方找到的 · 蓝V · 我没关注 · 有互关倾向 · 没排除 */
+/** 候选的条件:配方找到的 · 蓝V · 我没关注 · 有互关倾向 · 没排除 · 最近没放一放(用户 10-23) */
 const CAND_WHERE = `array::len(array::intersect(found_via_recipes ?? [], $recipes)) > 0
-  AND is_blue_verified = true AND i_follow != true AND mutual_intent = true AND excluded != true`;
+  AND is_blue_verified = true AND i_follow != true AND mutual_intent = true AND excluded != true AND rest_id NOTINSIDE $deferred`;
 
 export type Candidate = {
   readonly rest_id: string; readonly handle: string; readonly display_name?: string; readonly avatar?: string;
@@ -63,7 +64,7 @@ export async function readCandidates(account: string, limit: number): Promise<Ca
   const [rows] = await getXDB().query<[Candidate[]]>(
     `SELECT rest_id, handle, display_name, avatar, followers_count, follows_me, mutual_intent_evidence, mutual_intent_source
        FROM ${PEOPLE_WITH_RELATION} WHERE ${CAND_WHERE} ORDER BY followers_count DESC LIMIT $limit`,
-    { acct: account, recipes: [...BLUE_MUTUAL_RECIPES], limit },
+    { acct: account, recipes: [...BLUE_MUTUAL_RECIPES], limit, deferred: await readDeferred(account, 'ask') },
   );
   return rows ?? [];
 }

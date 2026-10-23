@@ -1766,6 +1766,32 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐ 1.2.39 —— 先放一放 x_defer(2026-10-23)
+ * 用户 10-23:「近期已经放一放的,就先不要列表在下面了吧,否则不是重复的勾选它?」
+ * 一次放一放一行(只追加);名单只藏「最近 DEFER_DAYS 天放一放过」的人,过了自动回来。求关 / 互动各算各的。
+ */
+const X_SCHEMA_1_2_39 = `
+DEFINE TABLE IF NOT EXISTS x_defer SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account  ON x_defer TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person   ON x_defer TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS mode     ON x_defer TYPE string ASSERT $value INSIDE ['ask', 'engage'];
+DEFINE FIELD IF NOT EXISTS tweet_id ON x_defer TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at       ON x_defer TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_defer ON x_defer FIELDS account, mode, at;
+`;
+
+export async function x_migration_1_2_39(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_39);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_defer');
+  if (!('person' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.39] x_defer 没建起来');
+  console.log('[x-schema 1.2.39] 先放一放 x_defer');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.39', appliedAt = $now, description = '先放一放 x_defer'`,
+    { rid: new RecordId('schema_version', '1.2.39'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.38 —— 你对 AI 草稿的点评 x_draft_note(2026-10-22)
  * 用户 10-22:「在回复框增加一个我对AI回复提出要求的窗口(点评),要求AI如何调整回复的内容、语气等。
  *  达到训练AI或者通过AI来找到我想要的回复方法。」

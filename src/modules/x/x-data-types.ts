@@ -173,6 +173,8 @@ export type XDataInvoke =
       readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean } }
   /** 你对 AI 草稿的长期要求:列出 / 停掉 / 恢复 */
   | { readonly op: 'draftRules'; readonly wsId: string; readonly mode: 'ask' | 'engage' }
+  /** 先放一放:这几天别再列他(用户 10-23) */
+  | { readonly op: 'deferPerson'; readonly wsId: string; readonly restId: string; readonly mode: 'ask' | 'engage'; readonly tweetId?: string }
   | { readonly op: 'draftRuleActive'; readonly wsId: string; readonly id: string; readonly active: boolean }
   /** ⭐ 互动卡换了一条 → 重新读那条的来龙去脉(找原帖;库里缺就开详情页补采) */
   | { readonly op: 'engageThread'; readonly wsId: string; readonly restId: string; readonly tweetId: string }

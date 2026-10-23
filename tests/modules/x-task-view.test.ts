@@ -69,6 +69,19 @@ describe('任务 view', () => {
     expect((fl.match(/await overrule\(/g) ?? []).length).toBe(2);
   });
 
+  it('⭐ 先放一放要记下来(用户 10-23「近期已经放一放的,就先不要列表在下面了吧」):记上了才走,候选 / 互动名单都滤掉', () => {
+    const A = strip(read('src/modules/x/XTaskAsk.tsx'));
+    const fn = A.slice(A.indexOf('const deferThis'), A.indexOf('const next'));
+    expect(fn).toMatch(/op: 'deferPerson', wsId, restId: who\.restId, mode/);
+    expect(fn.indexOf("if (r.status === 'failed')")).toBeLessThan(fn.indexOf('next('));
+    expect(A).toMatch(/: void deferThis\(\)\)\}>/);
+    const B = strip(read('src/modules/x/x-task-blue-mutual.ts'));
+    expect((B.match(/rest_id NOTINSIDE \$deferred/g) ?? []).length).toBe(2);
+    expect((B.match(/deferred: await readDeferred\(account, 'ask'\)/g) ?? []).length).toBe(2);
+    const R = strip(read('src/modules/x/x-engage-repo.ts'));
+    expect(R).toMatch(/\.filter\(\(m\) => !deferred\.has\(m\.rest_id\)\)/);
+  });
+
   it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */

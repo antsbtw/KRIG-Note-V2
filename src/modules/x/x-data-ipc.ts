@@ -41,6 +41,7 @@ import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
 import { prepareEngage } from './x-engage-prepare';
 import { readLeftTweet } from './x-left-tweet';
+import { DEFER_DAYS, recordDefer } from './x-defer-repo';
 import { loadEngageThread } from './x-engage-thread';
 import { listRelationJobs, startRelationTask } from './x-relation-task';
 import { readPaceViews } from './x-pace-repo';
@@ -500,6 +501,14 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           const r = await collectEngagement(p.wsId);
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-engage-collect', pageId: 'x-data', detail: r });
           return r.ok ? { status: 'ok', value: r } : failed(r.why);
+        }
+
+        case 'deferPerson': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] deferPerson 要数字 id');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          await recordDefer(acc.restId, p.restId, p.mode === 'engage' ? 'engage' : 'ask', typeof p.tweetId === 'string' && p.tweetId !== '' ? p.tweetId : undefined);
+          return { status: 'ok', value: { days: DEFER_DAYS } };
         }
 
         case 'draftRules': {
