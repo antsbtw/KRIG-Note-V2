@@ -55,6 +55,20 @@ describe('任务 view', () => {
     expect(E).toMatch(/onClick=\{\(\) => void openPerson\(p\)\}/);
   });
 
+  it('⭐⭐ 平台判「放弃」不是最后仲裁:点开他的帖子 = 拉回来(用户 10-23)—— 先撤销排除成功,才换成用这条', () => {
+    const A = strip(read('src/modules/x/XTaskAsk.tsx'));
+    expect(A).toMatch(/\(prep\.plan\.kind === 'skip' && prep\.plan\.alreadyRelated\)/);
+    const fn = A.slice(A.indexOf('const overrule'), A.indexOf('const followLeft'));
+    expect(fn.length).toBeGreaterThan(200);
+    const i1 = fn.indexOf("op: 'setExcluded', restId: who.restId, excluded: false");
+    const i2 = fn.indexOf("if (r.status === 'failed')");
+    const i3 = fn.indexOf("setPrep({ ...prep, plan: { kind: 'other', tweet");
+    expect(i1).toBeGreaterThan(-1);
+    expect(i1 < i2 && i2 < i3).toBe(true);
+    const fl = A.slice(A.indexOf('const followLeft'), A.indexOf('const cycle'));
+    expect((fl.match(/await overrule\(/g) ?? []).length).toBe(2);
+  });
+
   it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */

@@ -220,17 +220,30 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const seenUrl = useRef<string | null>(null);
   useEffect(() => { if (prep?.ok) seenUrl.current = leftUrl; else seenUrl.current = null; }, [prep]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (!prep?.ok || prep.plan.kind === 'skip' || acting || result !== null || leftLoading) return;
+    /** ⭐ 「放弃」也跟(用户 10-23:「平台做出判断后,如果我想拉回来,点击对方的推文就可以了。而不是平台作为最后的仲裁者。」);只有 X 上已经是关系了才不跟 */
+    if (!prep?.ok || (prep.plan.kind === 'skip' && prep.plan.alreadyRelated) || acting || result !== null || leftLoading) return;
     if (seenUrl.current === null || leftUrl === seenUrl.current) return;
     seenUrl.current = leftUrl;
     const id = tweetIdOfUrl(leftUrl);
     if (!id || id === sel?.id) return;
     void followLeft(id);
   }, [leftUrl, prep, acting, result, leftLoading, sel?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * ⭐ 推翻「放弃」:平台判了放弃,你点开他的帖子 = 你要拉回来 —— 撤销这次排除(记成你的决定,算法以后不再改它),
+   * 卡片换成用这条求关 / 互动
+   */
+  const overrule = async (tweet: AskTweet): Promise<boolean> => {
+    if (!who || !prep?.ok || prep.plan.kind !== 'skip') return true;
+    const r = await xDataCall({ op: 'setExcluded', restId: who.restId, excluded: false, reason: `${E ? '互动' : '求关'}时你拉回来的(推翻「放弃」)` });
+    if (r.status === 'failed') { setViewNote(`没能撤销排除:${r.reason} —— 先没换`); return false; }
+    setPrep({ ...prep, plan: { kind: 'other', tweet, recent: prep.plan.recent, why: `你推翻了「放弃」(${prep.plan.why})—— 用你点开的这条${E ? '互动' : '求关'},已撤销排除` } });
+    return true;
+  };
   const followLeft = async (id: string): Promise<void> => {
     if (!who) return;
     const inPool = pool.find((t) => t.id === id);
     if (inPool) {
+      if (!(await overrule(inPool))) return;
       setLeftPick({ id });
       setDraft(''); setAiText(undefined);
       setSel(inPool);
@@ -245,8 +258,10 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     if (t.id !== tweetIdOfUrl(getXHostState(wsId)?.url ?? '')) return;
     const other = t.authorRestId !== undefined && t.authorRestId !== who.restId;
     setLeftPick({ id: t.id, note: other ? `这条是 @${t.authorHandle ?? '?'} 发的,不是 @${who.handle} —— 点赞 / 留言发在这条下面${E ? '' : `,关注的还是 @${who.handle}`}` : undefined });
+    const picked: AskTweet = { id: t.id, text: t.text, createdAt: t.createdAt, url: t.url, related: false };
+    if (!(await overrule(picked))) return;
     setDraft(''); setAiText(undefined);
-    setSel({ id: t.id, text: t.text, createdAt: t.createdAt, url: t.url, related: false });
+    setSel(picked);
   };
   const cycle = (): void => {
     if (pool.length === 0) return;
@@ -284,6 +299,7 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
           {E ? <div style={{ opacity: 0.7 }}>没排除 —— 下次他发了新帖再看</div> : plan.recent.length > 0 && prep?.ok && !prep.ledgerProblem
             ? <div style={{ opacity: 0.7 }}>已记成「算法排除」,不再出现在候选里(人可以在人卡里取消排除)</div>
             : <div style={{ opacity: 0.7 }}>没排除 —— 是我们没采到,不算他没求关</div>}
+          <div style={{ opacity: 0.7, color: '#9ecbff' }}>{leftLoading ? '读左边这条…' : `不同意?在左边点开他的一条帖子,就用那条${E ? '互动' : '求关'}(撤销这次排除)`}</div>
           <button type="button" style={{ marginTop: 6 }} onClick={() => next(`放弃:${plan.why}`)}>下一个</button>
         </div>
       )}
