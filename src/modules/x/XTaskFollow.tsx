@@ -11,6 +11,7 @@ import { getXHostState, setXHostBusy, subscribeXHost } from './x-host-registry';
 import { AskRun, type AskWho } from './XTaskAsk';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XTabs } from './XTabs';
+import { X_PAGE_NAME } from './x-pages';
 import { readProfileAndRefresh, unfollowOnce, xPageBusy } from './x-unfollow-run';
 
 const CHECK_BUSY = '任务:正在核对这个人';
@@ -156,6 +157,21 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     }
     setMsg(v.kind === 'same' ? null : `@${c.handle}:${v.text}`);
   };
+  /**
+   * ⭐ 求关名单里点名字:展开你们的往来 + 左边跳到他的主页(用户 10-23:「这个card,点击后应该自动跳转到这个用户的profile吧?」)。
+   * 收起不跳;X 网页忙就不跳并说清。只看不核对 —— 他已经被关注了,不走候选那条「核对后从候选拿掉」。
+   */
+  const openAsked = async (x: AskStatus): Promise<void> => {
+    const opening = lineOf !== x.person;
+    setLineOf(opening ? x.person : null);
+    if (!opening) return;
+    if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
+    if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
+    const busy = await xPageBusy(wcId);
+    if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
+    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: x.handle } });
+    if (go.status === 'failed') setMsg(`没跳到 @${x.handle} 的主页:${(go as { reason?: string }).reason ?? '?'}`);
+  };
   const toggle = (id: string): void => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   /**
    * ⚠️ 10-17 撤掉「关注选中的 N 人」:只关注不求关 = 对方不回关(用户原话「莫名其妙关注,不求互关」)。
@@ -267,7 +283,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
                     {list.map((x) => (
                       <div key={x.person}>
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '2px 0' }}>
-                          <span style={{ cursor: 'pointer', flex: 1, minWidth: 0 }} onClick={() => setLineOf((v) => (v === x.person ? null : x.person))}>
+                          <span style={{ cursor: 'pointer', flex: 1, minWidth: 0 }} onClick={() => void openAsked(x)} title="展开你们的往来,左边跳到他的主页">
                             {lineOf === x.person ? '▾' : '▸'} @{x.handle} · 求关 {x.askDays} 天
                             {x.status === 'back' && (x.alreadyBefore ? ' · 求关前就关注你了'
                               : x.backBetween ? ` · 在 ${new Date(x.backBetween.from ?? x.askedAt).toLocaleDateString()} ~ ${new Date(x.backBetween.to).toLocaleDateString()} 之间回关` : '')}

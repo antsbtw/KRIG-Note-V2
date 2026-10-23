@@ -38,6 +38,16 @@ describe('任务 view', () => {
     expect(s3).not.toMatch(/<button/);
   });
 
+  it('⭐ 求关名单点名字:展开往来 + 左边跳他主页(用户 10-23);收起不跳;忙就不跳', () => {
+    const F = strip(read('src/modules/x/XTaskFollow.tsx'));
+    const fn = F.slice(F.indexOf('const openAsked'), F.indexOf('const toggle'));
+    expect(fn.length).toBeGreaterThan(200);
+    const at = (x: string): number => { const i = fn.indexOf(x); expect(i, x).toBeGreaterThan(-1); return i; };
+    expect([at('if (!opening) return;'), at('await xPageBusy(wcId)'), at('name: X_PAGE_NAME.profile, params: { handle: x.handle }')]).toEqual(
+      [at('if (!opening) return;'), at('await xPageBusy(wcId)'), at('name: X_PAGE_NAME.profile, params: { handle: x.handle }')].sort((a, b) => a - b));
+    expect(F).toMatch(/onClick=\{\(\) => void openAsked\(x\)\}/);
+  });
+
   it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */
