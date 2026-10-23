@@ -10,9 +10,9 @@
  */
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { getXHostState } from './x-host-registry';
 import { X_PAGE_NAME } from './x-pages';
-import { xPageBusy } from './x-unfollow-run';
+import { readProfileAndRefresh, xPageBusy } from './x-unfollow-run';
+import { getXHostState, setXHostBusy } from './x-host-registry';
 import type { EngageOverview } from './x-engage-repo';
 import type { RecentPerson } from './x-engage';
 import { AskRun, type AskWho } from './XTaskAsk';
@@ -58,6 +58,30 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
     setViewNote(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
   };
 
+  /**
+   * ⭐ 点名字:左边跳到他主页,同时读他主页上的关系写回库、刷新名单(用户 10-23:「这些数据要点开后要及时更新,
+   * 否则就会列表错误」)—— 已经不是互关了就从名单里掉出去,说清楚
+   */
+  const openPerson = async (p: RecentPerson): Promise<void> => {
+    const wcId = getXHostState(wsId)?.wcId;
+    if (wcId === undefined) { setViewNote('X 网页没开'); return; }
+    const busy = await xPageBusy(wcId);
+    if (busy !== null) { setViewNote(`${busy},没跳转(跳走会打断)`); return; }
+    setXHostBusy(wcId, '任务:正在核对这个人');
+    let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
+    try {
+      v = await readProfileAndRefresh({ rest_id: p.restId, handle: p.handle }, wcId);
+    } finally {
+      setXHostBusy(wcId, null);
+    }
+    if (v.kind === 'miss') { setViewNote(`@${p.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
+    const still = v.rec.following === true && v.rec.followedBy === true;
+    setViewNote(still ? (v.kind === 'same' ? null : `@${p.handle}:${v.text}`)
+      : `@${p.handle} 已经不是互关了(X 上刚看到:${v.rec.following ? '我关注他' : '我没关注他'} · ${v.rec.followedBy ? '他关注我' : '他没关注我'})—— 已从名单拿掉`);
+    if (!still) setPicked((cur) => { const m = new Map(cur); m.delete(p.restId); return m; });
+    if (v.kind !== 'same') load();
+  };
+
   const toggle = (p: RecentPerson): void => {
     setPicked((cur) => {
       const m = new Map(cur);
@@ -71,7 +95,7 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
     <div key={p.restId} style={{ display: 'flex', gap: 6, padding: '4px 0', borderBottom: '1px solid var(--border-color, #2a2a2a)' }}>
       <input type="checkbox" checked={picked.has(p.restId)} disabled={engaging !== null} onChange={() => toggle(p)} style={{ marginTop: 3 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ cursor: 'pointer' }} title="在左边看他的主页" onClick={() => void show('profile', { handle: p.handle })}>
+        <span style={{ cursor: 'pointer' }} title="在左边看他的主页" onClick={() => void openPerson(p)}>
           <strong>{p.name ?? p.handle}</strong> <span style={{ textDecoration: 'underline' }}>@{p.handle}</span>
         </span>
         {p.followers !== undefined && <span style={{ opacity: 0.6 }}> · 粉丝 {p.followers.toLocaleString()}</span>}

@@ -38,14 +38,21 @@ describe('任务 view', () => {
     expect(s3).not.toMatch(/<button/);
   });
 
-  it('⭐ 求关名单点名字:展开往来 + 左边跳他主页(用户 10-23);收起不跳;忙就不跳', () => {
+  it('⭐ 点名字 = 跳他主页 + 核对关系写回库 + 刷新名单(用户 10-23:「点开后要及时更新,否则就会列表错误」);收起不跳;忙就不跳', () => {
+    const order = (fn: string, steps: string[]): void => {
+      expect(fn.length).toBeGreaterThan(200);
+      const at = steps.map((x) => { const i = fn.indexOf(x); expect(i, x).toBeGreaterThan(-1); return i; });
+      expect(at).toEqual([...at].sort((a, b) => a - b));
+    };
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
-    const fn = F.slice(F.indexOf('const openAsked'), F.indexOf('const toggle'));
-    expect(fn.length).toBeGreaterThan(200);
-    const at = (x: string): number => { const i = fn.indexOf(x); expect(i, x).toBeGreaterThan(-1); return i; };
-    expect([at('if (!opening) return;'), at('await xPageBusy(wcId)'), at('name: X_PAGE_NAME.profile, params: { handle: x.handle }')]).toEqual(
-      [at('if (!opening) return;'), at('await xPageBusy(wcId)'), at('name: X_PAGE_NAME.profile, params: { handle: x.handle }')].sort((a, b) => a - b));
+    order(F.slice(F.indexOf('const openAsked'), F.indexOf('const toggle')),
+      ['if (!opening) return;', 'await xPageBusy(wcId)', 'await readProfileAndRefresh({ rest_id: x.person, handle: x.handle }, wcId)', 'loadFs();', 'setLineRev(']);
     expect(F).toMatch(/onClick=\{\(\) => void openAsked\(x\)\}/);
+    expect(F).toMatch(/<XPersonTimeline wsId=\{wsId\} restId=\{x.person\} rev=\{lineRev\} \/>/);
+    const E = strip(read('src/modules/x/XTaskEngage.tsx'));
+    order(E.slice(E.indexOf('const openPerson'), E.indexOf('const toggle')),
+      ['await xPageBusy(wcId)', 'await readProfileAndRefresh({ rest_id: p.restId, handle: p.handle }, wcId)', 'load();']);
+    expect(E).toMatch(/onClick=\{\(\) => void openPerson\(p\)\}/);
   });
 
   it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {

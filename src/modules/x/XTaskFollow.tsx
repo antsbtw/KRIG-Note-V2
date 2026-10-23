@@ -11,7 +11,6 @@ import { getXHostState, setXHostBusy, subscribeXHost } from './x-host-registry';
 import { AskRun, type AskWho } from './XTaskAsk';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XTabs } from './XTabs';
-import { X_PAGE_NAME } from './x-pages';
 import { readProfileAndRefresh, unfollowOnce, xPageBusy } from './x-unfollow-run';
 
 const CHECK_BUSY = '任务:正在核对这个人';
@@ -56,6 +55,8 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   const [checking, setChecking] = useState(false);
   /** 点了哪个人名 —— 就地展开他的时间线 */
   const [lineOf, setLineOf] = useState<string | null>(null);
+  /** 点开核对后让往来重读一遍 */
+  const [lineRev, setLineRev] = useState(0);
   /** ⭐ 异常即停:任务页取关失败一次就停,人看过原因点「恢复」才继续(与运营取关同规矩) */
   const [unfPaused, setUnfPaused] = useState<string | null>(null);
   const [unfDoing, setUnfDoing] = useState<string | null>(null);
@@ -158,8 +159,9 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     setMsg(v.kind === 'same' ? null : `@${c.handle}:${v.text}`);
   };
   /**
-   * ⭐ 求关名单里点名字:展开你们的往来 + 左边跳到他的主页(用户 10-23:「这个card,点击后应该自动跳转到这个用户的profile吧?」)。
-   * 收起不跳;X 网页忙就不跳并说清。只看不核对 —— 他已经被关注了,不走候选那条「核对后从候选拿掉」。
+   * ⭐ 求关名单里点名字:展开你们的往来 + 左边跳到他的主页(用户 10-23:「这个card,点击后应该自动跳转到这个用户的profile吧?」),
+   * 同时读他主页上的关系写回库、刷新名单和往来(用户 10-23:「这些数据要点开后要及时更新,否则就会列表错误」——
+   * 他刚回关了,名单还挂在「等待中」)。收起不跳;X 网页忙就不跳并说清。
    */
   const openAsked = async (x: AskStatus): Promise<void> => {
     const opening = lineOf !== x.person;
@@ -169,8 +171,18 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
     const busy = await xPageBusy(wcId);
     if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
-    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: x.handle } });
-    if (go.status === 'failed') setMsg(`没跳到 @${x.handle} 的主页:${(go as { reason?: string }).reason ?? '?'}`);
+    setXHostBusy(wcId, CHECK_BUSY);
+    let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
+    try {
+      v = await readProfileAndRefresh({ rest_id: x.person, handle: x.handle }, wcId);
+    } finally {
+      setXHostBusy(wcId, null);
+    }
+    if (v.kind === 'miss') { setMsg(`@${x.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
+    setMsg(v.kind === 'same' ? null : `@${x.handle}:${v.text}${v.rec.followedBy === true && x.status !== 'back' ? ' —— 他已经回关了' : ''}`);
+    /** 关系写回库了 → 名单重算、往来重读 */
+    loadFs(); loadProg();
+    setLineRev((n) => n + 1);
   };
   const toggle = (id: string): void => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   /**
@@ -300,7 +312,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
                             </>
                           )}
                         </div>
-                        {lineOf === x.person && <div style={{ margin: '2px 0 6px 14px' }}><XPersonTimeline wsId={wsId} restId={x.person} /></div>}
+                        {lineOf === x.person && <div style={{ margin: '2px 0 6px 14px' }}><XPersonTimeline wsId={wsId} restId={x.person} rev={lineRev} /></div>}
                       </div>
                     ))}
                   </div>
