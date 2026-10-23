@@ -91,6 +91,17 @@ describe('任务 view', () => {
     expect(E).toMatch(/onClick=\{pickBatch\}/);
   });
 
+  it('⭐⭐ 和选中的互动 = 先过一轮(用户 10-23):逐个看 2 小时内动静 → 有的进卡,没的记放一放,没看成的照样进卡', () => {
+    const E = strip(read('src/modules/x/XTaskEngage.tsx'));
+    const fn = E.slice(E.indexOf('const startEngage'), E.indexOf('const pickBatch'));
+    expect(fn.length).toBeGreaterThan(300);
+    const at = (x: string): number => { const i = fn.indexOf(x); expect(i, x).toBeGreaterThan(-1); return i; };
+    expect(at("op: 'engageScreen'") < at("op: 'deferPerson', wsId, restId: w.restId, mode: 'engage'")).toBe(true);
+    expect(fn).toMatch(/if \(r\.status === 'failed'\) \{ unknown\.push\(w\); continue; \}/);
+    expect(fn).toMatch(/const run = \[\.\.\.active, \.\.\.unknown\];/);
+    expect(E).toMatch(/onClick=\{\(\) => void startEngage\(\)\}/);
+  });
+
   it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */

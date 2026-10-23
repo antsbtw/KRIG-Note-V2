@@ -8,7 +8,7 @@
  *  · 一周没互动 —— 先把自己最近 7 天的互动采全,再对互关蓝V做补集(用户:「至少采自己的一周互动结果,然后做补集」)
  *  点名字 → 左边看他主页;点帖子 → 左边看这条;勾选 → 「和选中的互动」逐个过互动卡。
  */
-import { useCallback, useEffect, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { X_PAGE_NAME } from './x-pages';
 import { readProfileAndRefresh, xPageBusy } from './x-unfollow-run';
@@ -32,6 +32,9 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const [picked, setPicked] = useState<ReadonlyMap<string, AskWho>>(new Map());
   /** ⭐ 正在过互动卡的这一批(你勾的人) */
   const [engaging, setEngaging] = useState<AskWho[] | null>(null);
+  /** ⭐ 互动前先过一轮(用户 10-23):逐个采主页看 2 小时内有没有动静 */
+  const [screening, setScreening] = useState<{ i: number; total: number; who?: string } | null>(null);
+  const stopScreen = useRef(false);
   /** ⭐ 用户 10-22「tab 中再包含 tab」:刚互关·没互动 / 刚互关·互动过 / 一周没互动 */
   const [sub, setSub] = useState<'newUntouched' | 'newTouched' | 'quiet'>('newUntouched');
   const load = useCallback(() => {
@@ -82,6 +85,37 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
       : `@${p.handle} 已经不是互关了(X 上刚看到:${v.rec.following ? '我关注他' : '我没关注他'} · ${v.rec.followedBy ? '他关注我' : '他没关注我'})—— 已从名单拿掉`);
     if (!still) setPicked((cur) => { const m = new Map(cur); m.delete(p.restId); return m; });
     if (v.kind !== 'same') load();
+  };
+
+  /**
+   * ⭐⭐ 「和选中的互动」= 先过一轮再进卡(用户 10-23:「应该是我勾选15人后,自动先过一轮最新的用户推文,
+   * 然后再筛选出那些近期有发推的人,没有的就先放一放。」)
+   * · 逐个采他主页最新一页 → 2 小时内有动静 → 进互动卡;没动静 → 记「放一放」(3 天内不列)
+   * · 没采到(网页忙 / 去不到主页)→ 不放一放,照样进卡(卡上会再采一次)—— 是我们没看到,不算他没动静
+   */
+  const startEngage = async (): Promise<void> => {
+    const list = [...picked.values()];
+    if (list.length === 0) return;
+    stopScreen.current = false;
+    const active: AskWho[] = []; const quiet: string[] = []; const unknown: AskWho[] = [];
+    const hisAtOf = new Map([...(ov?.newUntouched ?? []), ...(ov?.newTouched ?? []), ...(ov?.quiet ?? [])].map((p) => [p.restId, p.unanswered?.at]));
+    for (const [i, w] of list.entries()) {
+      if (stopScreen.current) { unknown.push(...list.slice(i)); break; }
+      setScreening({ i: i + 1, total: list.length, who: w.handle });
+      const r = await xDataCall({ op: 'engageScreen', wsId, restId: w.restId, handle: w.handle, hisAt: hisAtOf.get(w.restId) });
+      if (r.status === 'failed') { unknown.push(w); continue; }
+      const v = r.value as { active: boolean; why?: string };
+      if (v.active) { active.push(w); continue; }
+      const d = await xDataCall({ op: 'deferPerson', wsId, restId: w.restId, mode: 'engage' });
+      if (d.status === 'failed') unknown.push(w); else quiet.push(w.handle);
+    }
+    setScreening(null);
+    setPicked(new Map());
+    const run = [...active, ...unknown];
+    setMsg(`过了一轮 ${list.length} 人:2 小时内有动静 ${active.length} 人${unknown.length > 0 ? ` · 没看成 ${unknown.length} 人(照样进卡)` : ''}`
+      + `${quiet.length > 0 ? ` · 没动静 ${quiet.length} 人已放一放(${ov?.deferDays ?? 3} 天内不列):@${quiet.join(' @')}` : ''}${run.length === 0 ? ' —— 这一批没有要互动的' : ''}`);
+    load();
+    if (run.length > 0) setEngaging(run);
   };
 
   /** ⭐ 批量勾:当前打开的那张名单,从上往下再勾 BATCH 个还没勾的 */
@@ -167,11 +201,17 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
       {viewNote && <div style={{ fontSize: 12, color: '#fbbf24' }}>{viewNote}</div>}
 
       <div style={{ marginTop: 8, fontSize: 12 }}>
-        <button type="button" disabled={picked.size === 0 || engaging !== null} onClick={() => setEngaging([...picked.values()])}
-          title="逐个过互动卡:看他最近的帖子(在左边点开哪条就回哪条)→ Gemma 草拟 → 你改 → 点赞 + 回复(不关注)">
+        <button type="button" disabled={picked.size === 0 || engaging !== null || screening !== null} onClick={() => void startEngage()}
+          title="先自动过一轮他们的主页:2 小时内有发推的进互动卡,没动静的先放一放;再逐个过卡 → Gemma 草拟 → 你改 → 点赞 + 回复(不关注)">
           和选中的互动({picked.size} 人)
         </button>
-        {ov && engaging === null && (
+        {screening && (
+          <span style={{ marginLeft: 6 }}>
+            先过一轮:{screening.i}/{screening.total} @{screening.who}(看他 2 小时内有没有发推,左边会跳)
+            {' '}<button type="button" style={{ fontSize: 11 }} onClick={() => { stopScreen.current = true; }}>停,剩下的直接进卡</button>
+          </span>
+        )}
+        {ov && engaging === null && screening === null && (
           <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={pickBatch}
             title={`从当前这张名单从上往下,再勾 ${BATCH} 个还没勾的(用户 10-23:「这里一样可以批量勾选吧」)`}>勾 {BATCH} 人</button>
         )}

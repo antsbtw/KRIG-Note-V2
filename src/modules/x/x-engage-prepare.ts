@@ -59,6 +59,23 @@ export function pickEngageTweet(
   return { kind: 'other', tweet: t, recent, why: originals[0] ? '他最近一条原创 —— 接住他说的事' : '他最近没有原创,用他最新的一条回复' };
 }
 
+/**
+ * ⭐⭐ 先过一轮:采他主页最新一页,看 2 小时内有没有动静(用户 10-23:「应该是我勾选15人后,自动先过一轮最新的用户推文,
+ * 然后再筛选出那些近期有发推的人,没有的就先放一放。」)—— 调用方一个一个调、显示进度;没动静的由调用方记「放一放」。
+ */
+export async function screenEngage(wsId: string, restId: string, handle: string, hisAt?: string): Promise<{ ok: false; why: string } | { ok: true; active: boolean; why?: string }> {
+  const wcId = getXHostState(wsId)?.wcId;
+  if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
+  const busy = getXHostBusy(wcId);
+  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
+  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
+  const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: 1, attempt: 1 });
+  if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };
+  const a = activeWithin(r.records, restId, hisAt, new Date());
+  console.log(`[x.engage] 筛 @${handle}:${a.active ? '2 小时内有动静' : a.why}`);
+  return a.active ? { ok: true, active: true } : { ok: true, active: false, why: a.why };
+}
+
 export async function prepareEngage(
   wsId: string, account: string, restId: string, handle: string, hisTweetId?: string,
 ): Promise<AskPrepared> {

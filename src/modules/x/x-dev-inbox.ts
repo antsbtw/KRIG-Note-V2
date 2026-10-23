@@ -24,7 +24,7 @@ import { startRelationTask } from './x-relation-task';
 import { draftAskReply } from './x-ask-draft';
 import { collectEngagement } from './x-engage-collect';
 import { readEngageOverview } from './x-engage-repo';
-import { prepareEngage } from './x-engage-prepare';
+import { prepareEngage, screenEngage } from './x-engage-prepare';
 import { readWsAccount } from './x-account-repo';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
@@ -59,13 +59,14 @@ type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[]; mod
 type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling & { op: 'engageOverview'; wsId: string })
   | (Sampling & { op: 'engagePrepare'; wsId: string; restId: string; handle: string; hisTweetId?: string })
   /** 读左边正在看的这条;goto 给了就先让左边打开这条(模拟人点开) */
-  | (Sampling & { op: 'leftTweet'; wsId: string; goto?: string });
+  | (Sampling & { op: 'leftTweet'; wsId: string; goto?: string })
+  | (Sampling & { op: 'engageScreen'; wsId: string; restId: string; handle: string });
 type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
-  if (['engageCollect', 'engageOverview', 'engagePrepare', 'leftTweet'].includes(String((o as { op?: string })?.op))) {
+  if (['engageCollect', 'engageOverview', 'engagePrepare', 'leftTweet', 'engageScreen'].includes(String((o as { op?: string })?.op))) {
     if (typeof o.wsId !== 'string') return 'engage 指令要 wsId';
     return o as unknown as EngageCmd;
   }
@@ -185,6 +186,8 @@ async function tick(): Promise<void> {
             if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
             out = await readLeftTweet(wcId);
           }
+        } else if (cmd.op === 'engageScreen') {
+          out = await screenEngage(cmd.wsId, cmd.restId, cmd.handle);
         } else if (cmd.op === 'engageCollect') {
           out = await collectEngagement(cmd.wsId);
         } else if (cmd.op === 'engagePrepare') {

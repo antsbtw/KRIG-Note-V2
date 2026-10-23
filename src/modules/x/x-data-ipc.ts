@@ -39,7 +39,7 @@ import { readPersonLists } from './x-list-member-repo';
 import { draftAskReply, readDraftRules, setDraftRuleActive } from './x-ask-draft';
 import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
-import { prepareEngage } from './x-engage-prepare';
+import { prepareEngage, screenEngage } from './x-engage-prepare';
 import { readLeftTweet } from './x-left-tweet';
 import { DEFER_DAYS, recordDefer } from './x-defer-repo';
 import { loadEngageThread } from './x-engage-thread';
@@ -467,6 +467,12 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if ('reason' in acc) return failed(acc.reason);
           const ws = await readWsAccount(p.wsId as string);
           return { status: 'ok', value: await readEngageOverview(acc.restId, ws?.handle ?? '', p.limit) };
+        }
+
+        case 'engageScreen': {
+          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '') return failed('[x.data] engageScreen 要数字 id + handle');
+          const r = await screenEngage(p.wsId as string, p.restId, p.handle, typeof p.hisAt === 'string' ? p.hisAt : undefined);
+          return r.ok ? { status: 'ok', value: r } : failed(r.why);
         }
 
         case 'engagePrepare': {

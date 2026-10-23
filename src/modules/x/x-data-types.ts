@@ -173,6 +173,8 @@ export type XDataInvoke =
       readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean } }
   /** 你对 AI 草稿的长期要求:列出 / 停掉 / 恢复 */
   | { readonly op: 'draftRules'; readonly wsId: string; readonly mode: 'ask' | 'engage' }
+  /** 互动前先过一轮:他 2 小时内有没有动静(用户 10-23) */
+  | { readonly op: 'engageScreen'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly hisAt?: string }
   /** 先放一放:这几天别再列他(用户 10-23) */
   | { readonly op: 'deferPerson'; readonly wsId: string; readonly restId: string; readonly mode: 'ask' | 'engage'; readonly tweetId?: string }
   | { readonly op: 'draftRuleActive'; readonly wsId: string; readonly id: string; readonly active: boolean }
