@@ -82,6 +82,15 @@ describe('任务 view', () => {
     expect(R).toMatch(/\.filter\(\(m\) => !deferred\.has\(m\.rest_id\)\)/);
   });
 
+  it('互动名单也能「勾 15 人」(用户 10-23):按当前打开的那张名单,跳过已勾的', () => {
+    const E = strip(read('src/modules/x/XTaskEngage.tsx'));
+    const fn = E.slice(E.indexOf('const pickBatch'), E.indexOf('const toggle'));
+    expect(fn).toMatch(/sub === 'newUntouched' \? ov\.newUntouched : sub === 'newTouched' \? ov\.newTouched : ov\.quiet/);
+    expect(fn).toMatch(/\.filter\(\(x\) => !m\.has\(x\.restId\)\)\.slice\(0, BATCH\)/);
+    expect(E).toMatch(/const BATCH = 15;/);
+    expect(E).toMatch(/onClick=\{pickBatch\}/);
+  });
+
   it('⭐⭐ 2 求关(10-17 改):勾选 → 逐个人出求关卡;不再「勾了就直接关注」', () => {
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */

@@ -19,6 +19,8 @@ import { AskRun, type AskWho } from './XTaskAsk';
 import { XTabs } from './XTabs';
 
 const PAGE = 30;
+/** 一批勾几个 —— 和求关一样 15(用户 10-22:「一次最多15人就开始限流15分钟了」) */
+const BATCH = 15;
 const date = (iso?: string): string => (iso ? new Date(iso).toLocaleDateString() : '');
 
 export function EngageStep({ wsId }: { wsId: string }): ReactElement {
@@ -80,6 +82,19 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
       : `@${p.handle} 已经不是互关了(X 上刚看到:${v.rec.following ? '我关注他' : '我没关注他'} · ${v.rec.followedBy ? '他关注我' : '他没关注我'})—— 已从名单拿掉`);
     if (!still) setPicked((cur) => { const m = new Map(cur); m.delete(p.restId); return m; });
     if (v.kind !== 'same') load();
+  };
+
+  /** ⭐ 批量勾:当前打开的那张名单,从上往下再勾 BATCH 个还没勾的 */
+  const pickBatch = (): void => {
+    if (!ov) return;
+    const list = sub === 'newUntouched' ? ov.newUntouched : sub === 'newTouched' ? ov.newTouched : ov.quiet;
+    setPicked((cur) => {
+      const m = new Map(cur);
+      for (const p of list.filter((x) => !m.has(x.restId)).slice(0, BATCH)) {
+        m.set(p.restId, { restId: p.restId, handle: p.handle, name: p.name, hisTweetId: p.unanswered?.tweetId });
+      }
+      return m;
+    });
   };
 
   const toggle = (p: RecentPerson): void => {
@@ -156,6 +171,10 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
           title="逐个过互动卡:看他最近的帖子(在左边点开哪条就回哪条)→ Gemma 草拟 → 你改 → 点赞 + 回复(不关注)">
           和选中的互动({picked.size} 人)
         </button>
+        {ov && engaging === null && (
+          <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={pickBatch}
+            title={`从当前这张名单从上往下,再勾 ${BATCH} 个还没勾的(用户 10-23:「这里一样可以批量勾选吧」)`}>勾 {BATCH} 人</button>
+        )}
         {picked.size > 0 && engaging === null && <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={() => setPicked(new Map())}>清空勾选</button>}
       </div>
       {engaging && (
