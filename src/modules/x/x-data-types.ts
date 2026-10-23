@@ -168,7 +168,12 @@ export type XDataInvoke =
   | { readonly op: 'engageOverview'; readonly wsId: string; readonly limit: number }
   | { readonly op: 'engageCollect'; readonly wsId: string }
   /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
-  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage'; readonly context?: string }
+  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage'; readonly context?: string;
+      /** ⭐ 按你的点评改上一版;keep = 以后都这样(2026-10-22) */
+      readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean } }
+  /** 你对 AI 草稿的长期要求:列出 / 停掉 / 恢复 */
+  | { readonly op: 'draftRules'; readonly wsId: string; readonly mode: 'ask' | 'engage' }
+  | { readonly op: 'draftRuleActive'; readonly wsId: string; readonly id: string; readonly active: boolean }
   /** ⭐ 互动卡换了一条 → 重新读那条的来龙去脉(找原帖;库里缺就开详情页补采) */
   | { readonly op: 'engageThread'; readonly wsId: string; readonly restId: string; readonly tweetId: string }
   /** 左边 X 网页正在看的这条帖子(用户 10-22:「看到一个帖子不错,我可以选择它,然后再由AI草拟留言」) */

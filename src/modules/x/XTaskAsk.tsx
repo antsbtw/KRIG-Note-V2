@@ -72,6 +72,23 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const [thread, setThread] = useState<(EngageThread & { fetchNote?: string; forId: string }) | null>(null);
   const [threadLoading, setThreadLoading] = useState(false);
   const [draftNote, setDraftNote] = useState<string | null>(null);
+  /**
+   * ⭐ 点评(用户 10-22:「在回复框增加一个我对AI回复提出要求的窗口(点评),要求AI如何调整回复的内容、语气等。
+   *  达到训练AI或者通过AI来找到我想要的回复方法」)—— 写一句怎么改 → Gemma 按它改这一版;
+   *  勾「以后都这样」= 成为长期要求,以后每次草拟都带上(下面列出来,可停用)
+   */
+  const [critique, setCritique] = useState('');
+  const [keepRule, setKeepRule] = useState(false);
+  const [rules, setRules] = useState<Array<{ id: string; note: string }>>([]);
+  const loadRules = useCallback(() => {
+    void xDataCall({ op: 'draftRules', wsId, mode }).then((r) => { if (r.status === 'ok') setRules(r.value as Array<{ id: string; note: string }>); });
+  }, [wsId, mode]);
+  useEffect(() => { loadRules(); }, [loadRules]);
+  const stopRule = async (id: string): Promise<void> => {
+    const r = await xDataCall({ op: 'draftRuleActive', wsId, id, active: false });
+    if (r.status === 'failed') { setDraftNote(`没停用:${r.reason}`); return; }
+    loadRules();
+  };
   const draftSeq = useRef(0);
   const who = queue[i];
   const E = mode === 'engage';
@@ -100,19 +117,28 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
    * ⭐ 请 Gemma 草拟一句(对着当前选中的推文)。后发的请求盖掉先发的(换推文 / 换一版连点时只认最后一次)。
    * ⚠️ 你已经动手改了留言,就不再自动覆盖 —— 只有你点「换一版」才换。
    */
-  const requestDraft = useCallback(async (tweetText: string, force: boolean): Promise<void> => {
+  const requestDraft = useCallback(async (tweetText: string, force: boolean, revise?: { previous: string; note: string; keep: boolean }): Promise<void> => {
     const seq = ++draftSeq.current;
     setDrafting(true); setDraftNote(null);
     const r = await xDataCall({ op: 'askDraft', wsId, tweetText, name: prep?.ok ? prep.person.name : undefined, bio: prep?.ok ? prep.person.bio : undefined, mode,
-      context: E && threadRef.current ? threadForPrompt(threadRef.current) : undefined });
+      context: E && threadRef.current ? threadForPrompt(threadRef.current) : undefined, revise });
     if (seq !== draftSeq.current) return;
     setDrafting(false);
-    const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number }) : { ok: false, why: r.reason };
+    const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number; rules?: number; noteProblem?: string }) : { ok: false, why: r.reason };
     if (!v.ok || !v.text) { setDraftNote(`Gemma 没草拟成:${v.why ?? '?'} —— 你直接写也行,或点「换一版」再试`); return; }
     setAiText(v.text);
     setDraft((cur) => (force || cur.trim() === '' || cur === aiTextRef.current ? v.text! : cur));
-    setDraftNote(`Gemma 草拟(照你写过的 ${v.examples ?? 0} 条范例,${Math.round((v.ms ?? 0) / 100) / 10} 秒)—— 不满意就改,改过的算你写的`);
-  }, [wsId, prep, mode]);
+    setDraftNote(`Gemma ${revise ? '按点评改好了' : '草拟'}(照你写过的 ${v.examples ?? 0} 条范例${v.rules ? ` · 长期要求 ${v.rules} 条` : ''},${Math.round((v.ms ?? 0) / 100) / 10} 秒)—— 不满意就改或再点评,改过的算你写的`
+      + `${v.noteProblem ? ` · ⚠️ 这次点评没记上:${v.noteProblem}` : ''}`);
+    if (revise) { setCritique(''); setKeepRule(false); if (revise.keep) loadRules(); }
+  }, [wsId, prep, mode, loadRules]);
+  /** 按点评改:改的是框里现在这一版(你动过就按你的改) */
+  const reviseDraft = (): void => {
+    if (!sel || critique.trim() === '') return;
+    const previous = draft.trim() || aiText || '';
+    if (previous === '') { setDraftNote('框里还没有留言,先让 Gemma 草拟一版或自己写一句,再点评'); return; }
+    void requestDraft(sel.text, true, { previous, note: critique.trim(), keep: keepRule });
+  };
   const aiTextRef = useRef<string | undefined>(undefined);
   const threadRef = useRef<EngageThread | null>(null);
   threadRef.current = thread;
@@ -315,6 +341,22 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
             placeholder={drafting ? 'Gemma 正在草拟…' : E ? '写给他的回复' : '写给他的求关留言'} style={{ width: '100%', boxSizing: 'border-box' }} />
           {aiText !== undefined && draft.trim() !== '' && draft.trim() !== aiText.trim() && (
             <div style={{ opacity: 0.55 }}>已改过 —— 发出去记成你写的(会进范例库);Gemma 原稿:{aiText}</div>
+          )}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input value={critique} onChange={(e) => setCritique(e.target.value)} disabled={drafting || acting || result?.ok === true}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) reviseDraft(); }}
+              placeholder="点评:告诉 Gemma 怎么改(更口语 / 别评价,问他一句 / 短一点 / 加点幽默…)" style={{ flex: 1, minWidth: 0 }} />
+            <label style={{ fontSize: 11, whiteSpace: 'nowrap' }} title="勾上 = 这条成为长期要求,以后每次草拟都照做(下面能停用)">
+              <input type="checkbox" checked={keepRule} onChange={(e) => setKeepRule(e.target.checked)} /> 以后都这样
+            </label>
+            <button type="button" style={{ fontSize: 11 }} disabled={drafting || acting || result?.ok === true || critique.trim() === ''} onClick={reviseDraft}>按点评重拟</button>
+          </div>
+          {rules.length > 0 && (
+            <div style={{ opacity: 0.7, fontSize: 11 }}>
+              长期要求({E ? '互动' : '求关'}):{rules.map((r, i) => (
+                <span key={r.id}>{i > 0 ? ' · ' : ''}{r.note} <button type="button" style={{ fontSize: 10 }} onClick={() => void stopRule(r.id)} title="停用这条(记录还留着)">停用</button></span>
+              ))}
+            </div>
           )}
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button type="button" disabled={acting || draft.trim() === '' || result?.ok === true} onClick={() => void act()}

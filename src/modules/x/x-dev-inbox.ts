@@ -54,7 +54,7 @@ type FollowCheckCmd = Sampling & { op: 'followCheck'; wsId: string };
 /** 关系采集(与任务页「读现状并开始」同一个函数)—— 2026-10-20 */
 type RelationCmd = Sampling & { op: 'relationStart'; wsId: string; restId?: string; handle?: string };
 /** 求关留言草拟(与求关卡同一个函数)—— 2026-10-21;tweets 一次试几条 */
-type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[]; mode?: 'ask' | 'engage' };
+type DraftCmd = Sampling & { op: 'askDraft'; wsId: string; tweets: string[]; mode?: 'ask' | 'engage'; revise?: { previous: string; note: string; keep: boolean } };
 /** 第 3 件事:采互动 / 看分组(与任务页同一个函数)—— 2026-10-22 */
 type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling & { op: 'engageOverview'; wsId: string })
   | (Sampling & { op: 'engagePrepare'; wsId: string; restId: string; handle: string; hisTweetId?: string })
@@ -198,7 +198,7 @@ async function tick(): Promise<void> {
           if (!acc?.restId) out = { ok: false, why: '认不出号' };
           else {
             const drafts = [];
-            for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {}, mode: cmd.mode }) });
+            for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {}, mode: cmd.mode, revise: cmd.revise }) });
             out = { ok: true, drafts };
           }
         } else if (cmd.op === 'relationStart') {

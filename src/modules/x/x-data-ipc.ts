@@ -36,7 +36,7 @@ import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-fol
 import { checkFollowBack, followCheckRunning } from './x-follow-check';
 import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
 import { readPersonLists } from './x-list-member-repo';
-import { draftAskReply } from './x-ask-draft';
+import { draftAskReply, readDraftRules, setDraftRuleActive } from './x-ask-draft';
 import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
 import { prepareEngage } from './x-engage-prepare';
@@ -502,12 +502,29 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           return r.ok ? { status: 'ok', value: r } : failed(r.why);
         }
 
+        case 'draftRules': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readDraftRules(acc.restId, p.mode === 'engage' ? 'engage' : 'ask') };
+        }
+
+        case 'draftRuleActive': {
+          if (typeof p.id !== 'string' || p.id === '' || typeof p.active !== 'boolean') return failed('[x.data] draftRuleActive 要 id + active');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          await setDraftRuleActive(acc.restId, p.id, p.active);
+          return { status: 'ok', value: true };
+        }
+
         case 'askDraft': {
           if (typeof p.tweetText !== 'string' || p.tweetText.trim() === '') return failed('[x.data] askDraft 缺他那条帖子的正文');
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
+          const rv = p.revise as { previous?: unknown; note?: unknown; keep?: unknown } | undefined;
+          if (rv !== undefined && (typeof rv.previous !== 'string' || typeof rv.note !== 'string' || rv.note.trim() === '')) return failed('[x.data] 点评要上一版 + 点评内容');
           const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode: p.mode === 'engage' ? 'engage' : 'ask',
-            context: typeof p.context === 'string' ? p.context : undefined });
+            context: typeof p.context === 'string' ? p.context : undefined,
+            revise: rv ? { previous: rv.previous as string, note: (rv.note as string).trim(), keep: rv.keep === true } : undefined });
           traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-ask-draft' : 'x-ask-draft-failed', pageId: 'x-data',
             detail: r.ok ? { ms: r.ms, examples: r.examples, text: r.text } : { why: r.why } });
           return { status: 'ok', value: r };

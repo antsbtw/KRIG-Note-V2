@@ -62,3 +62,16 @@ describe('对话上文进提示词(2026-10-22)', () => {
     expect(m[1].content).toMatch(/这条帖子所在的对话\(从原帖开始\):\n\[原帖\] @x:蓝V互关接龙/);
   });
 });
+
+describe('⭐ 点评(用户 10-22:「增加一个我对AI回复提出要求的窗口(点评)」)', () => {
+  it('长期要求进系统提示、写明优先于范例口吻;没有就不出现', () => {
+    const m = buildAskDraftPrompt({ examples: [], tweet: 'x', person: {}, rules: ['别说教', '多用问句'] });
+    expect(m[0].content).toMatch(/他的长期要求\(一定照做,和上面的口吻冲突时以这里为准\):\n1\. 别说教\n2\. 多用问句/);
+    expect(buildAskDraftPrompt({ examples: [], tweet: 'x', person: {} })[0].content).not.toMatch(/长期要求/);
+  });
+  it('按点评改:带上一版 + 点评,结尾要「改好的留言」;模型回的前缀会被剥掉', () => {
+    const m = buildAskDraftPrompt({ examples: [], tweet: '今天想上3000', person: {}, revise: { previous: '加油!', note: '问他一句怎么涨的' } });
+    expect(m[1].content).toMatch(/上一版留言:加油!\n他对上一版的点评\(照着改\):问他一句怎么涨的\n\n改好的留言:$/);
+    expect(cleanAskDraft('改好的留言:你是怎么涨这么快的?')).toEqual({ text: '你是怎么涨这么快的?' });
+  });
+});

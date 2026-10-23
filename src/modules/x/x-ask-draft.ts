@@ -10,6 +10,9 @@
  * · 关掉思考(think: false):Gemma 4 默认先写 ~1000 字思考,一条 30~80 秒;关掉 1~2 秒
  * · 校验不过就不填、说清为什么,不拿模板凑(fail loud)
  * · 只写中文:外语回复人审不出来(记忆 project-x-multilang-reply-risk)
+ * · ⭐ 点评(2026-10-22,用户:「在回复框增加一个我对AI回复提出要求的窗口(点评),要求AI如何调整回复的内容、语气等」):
+ *   这一次按点评改上一版(revise);勾「以后都这样」的点评成长期要求,每次草拟都带上(rules,优先于范例口吻)。
+ *   每次点评都记进 x_draft_note(改前 / 点评 / 改后),留着以后让 AI 从中找你想要的回复方法。
  */
 import { getXDB } from '@storage/surreal/client';
 import { callOllamaChat } from '@platform/main/local-llm/ollama-client';
@@ -37,6 +40,10 @@ export function buildAskDraftPrompt(input: {
   readonly mode?: 'ask' | 'engage';
   /** ⭐ 对话上文(原帖 → 来回 → 要回的这条;2026-10-22)—— 有就附上,回复才接得上 */
   readonly context?: string;
+  /** ⭐ 你的长期要求(勾了「以后都这样」的点评)—— 优先于范例的口吻 */
+  readonly rules?: readonly string[];
+  /** ⭐ 按点评改上一版 */
+  readonly revise?: { readonly previous: string; readonly note: string };
 }): Array<{ role: 'system' | 'user'; content: string }> {
   const engage = input.mode === 'engage';
   const sys = [
@@ -47,18 +54,20 @@ export function buildAskDraftPrompt(input: {
     '规矩:只写中文;不超过 40 个字;不要 @ 任何人;不要链接;不要话题标签;不要编造你不知道的事(不提具体数字、产品、承诺);',
     '可以接住对方帖子里的一句话再求关;可以带一个表情,也可以不带。',
     '只输出这一条留言本身,不要引号,不要解释,不要前缀。',
+    ...(input.rules && input.rules.length > 0 ? [`他的长期要求(一定照做,和上面的口吻冲突时以这里为准):\n${input.rules.map((r, i) => `${i + 1}. ${r.trim()}`).join('\n')}`] : []),
   ].join('\n');
   const shots = input.examples.map((e, i) => `例 ${i + 1}\n他的帖子:${clip(e.tweet, 120)}\n我的留言:${e.reply.trim()}`).join('\n\n');
   const who = [input.person.name ? `对方名字:${clip(input.person.name, 40)}` : '', input.person.bio ? `对方简介:${clip(input.person.bio, 120)}` : ''].filter(Boolean).join('\n');
   const ctx = input.context && input.context.trim() !== '' ? `这条帖子所在的对话(从原帖开始):\n${input.context.slice(0, 1500)}\n\n` : '';
-  const user = `${shots ? `下面是我以前亲手写的${engage ? '回复' : '求关留言'}:\n\n${shots}\n\n` : ''}${ctx}现在要回复的帖子:\n${clip(input.tweet, 280)}\n${who}\n\n我的留言:`;
+  const revise = input.revise ? `\n\n上一版留言:${input.revise.previous.trim()}\n他对上一版的点评(照着改):${input.revise.note.trim()}\n\n改好的留言:` : '\n\n我的留言:';
+  const user = `${shots ? `下面是我以前亲手写的${engage ? '回复' : '求关留言'}:\n\n${shots}\n\n` : ''}${ctx}现在要回复的帖子:\n${clip(input.tweet, 280)}\n${who}${revise}`;
   return [{ role: 'system', content: sys }, { role: 'user', content: user }];
 }
 
 /** 模型回来的文字收拾一下 + 校验;不合格回原因 —— 纯函数 */
 export function cleanAskDraft(raw: string): { readonly text: string } | { readonly problem: string } {
   let t = raw.trim().split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '';
-  t = t.replace(/^(我的留言|留言|回复)\s*[:：]\s*/, '').replace(/^["“「『'`]+|["”」』'`]+$/g, '').trim();
+  t = t.replace(/^(改好的留言|我的留言|留言|回复)\s*[:：]\s*/, '').replace(/^["“「『'`]+|["”」』'`]+$/g, '').trim();
   if (t === '') return { problem: '模型回了空的' };
   if ([...t].length > MAX_CHARS) return { problem: `太长了(${[...t].length} 字)` };
   if (/@\w/.test(t)) return { problem: '带了 @(求关留言不 @ 人)' };
@@ -79,8 +88,41 @@ export async function readAskExamples(account: string, mode: 'ask' | 'engage' = 
   return (rows ?? []).map((r) => ({ tweet: r.tweet_text, reply: r.reply_text }));
 }
 
+/** ⭐ 长期要求(勾了「以后都这样」且还生效的),先到的在前 */
+export async function readDraftRules(account: string, mode: 'ask' | 'engage'): Promise<Array<{ id: string; note: string; at: string }>> {
+  const [rows] = await getXDB().query<[Array<{ id: string; note: string; at: string }>]>(
+    `SELECT <string> record::id(id) AS id, note, <string> at AS at FROM x_draft_note WHERE account = $a AND mode = $m AND keep = true AND active = true ORDER BY at ASC`,
+    { a: account, m: mode },
+  );
+  return rows ?? [];
+}
+
+/** 记一次点评(只追加);写不上就抛,不假装记住了 */
+export async function recordDraftNote(n: {
+  readonly account: string; readonly mode: 'ask' | 'engage'; readonly note: string; readonly keep: boolean;
+  readonly tweet: string; readonly before?: string; readonly after?: string;
+}): Promise<void> {
+  const [rows] = await getXDB().query<[unknown[]]>(
+    `CREATE x_draft_note SET account = $a, mode = $m, note = $note, keep = $keep, active = $keep, tweet_text = $t,
+       draft_before = $b, draft_after = $af, at = time::now()`,
+    { a: n.account, m: n.mode, note: n.note, keep: n.keep, t: n.tweet, b: n.before, af: n.after },
+  );
+  if (!rows || rows.length !== 1) throw new Error('[x.ask-draft] 点评没记上');
+}
+
+/** 停掉 / 恢复一条长期要求(行不删,留痕) */
+export async function setDraftRuleActive(account: string, id: string, active: boolean): Promise<void> {
+  const [rows] = await getXDB().query<[unknown[]]>(
+    `UPDATE type::record('x_draft_note', $id) SET active = $v WHERE account = $a AND keep = true`,
+    { id, v: active, a: account },
+  );
+  if (!rows || rows.length !== 1) throw new Error('[x.ask-draft] 没找到这条长期要求');
+}
+
 export type AskDraft =
-  | { readonly ok: true; readonly text: string; readonly examples: number; readonly ms: number; readonly model: string }
+  | { readonly ok: true; readonly text: string; readonly examples: number; readonly ms: number; readonly model: string;
+      /** 长期要求几条;这次的点评没记上的原因(草稿照给,但要说出来) */
+      readonly rules?: number; readonly noteProblem?: string }
   | { readonly ok: false; readonly why: string };
 
 export async function draftAskReply(input: {
@@ -89,8 +131,14 @@ export async function draftAskReply(input: {
   readonly person: { readonly name?: string; readonly bio?: string };
   readonly mode?: 'ask' | 'engage';
   readonly context?: string;
+  /** ⭐ 按点评改上一版;keep = 以后都这样(成长期要求) */
+  readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean };
 }): Promise<AskDraft> {
-  const examples = await readAskExamples(input.account, input.mode ?? 'ask');
+  const mode = input.mode ?? 'ask';
+  const examples = await readAskExamples(input.account, mode);
+  /** 这次勾了「以后都这样」:先记下,这一次就当长期要求用(不重复写进 revise) */
+  if (input.revise?.keep) await recordDraftNote({ account: input.account, mode, note: input.revise.note, keep: true, tweet: input.tweet, before: input.revise.previous });
+  const rules = (await readDraftRules(input.account, mode)).map((r) => r.note);
   const t0 = Date.now();
   let raw: string;
   try {
@@ -98,7 +146,8 @@ export async function draftAskReply(input: {
      * ⚠️ think: false —— Gemma 4 默认先思考:真机一条 30~80 秒(5 条里 3 条 90 秒超时);关掉 1~2 秒,质量差不多(2026-10-21 实测)
      */
     raw = (await callOllamaChat({
-      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode, context: input.context }),
+      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode, context: input.context, rules,
+        revise: input.revise ? { previous: input.revise.previous, note: input.revise.note } : undefined }),
       think: false, temperature: 0.8, timeoutMs: 60_000,
     })).content;
   } catch (e) {
@@ -111,6 +160,12 @@ export async function draftAskReply(input: {
     console.warn(`[x.ask-draft] 草稿不合格:${c.problem} —— 原文「${clip(raw, 80)}」`);
     return { ok: false, why: `草稿不合格:${c.problem}` };
   }
-  console.log(`[x.ask-draft] ${ms}ms · 范例 ${examples.length} 条 · 「${c.text}」`);
-  return { ok: true, text: c.text, examples: examples.length, ms, model: ASK_DRAFT_MODEL };
+  console.log(`[x.ask-draft] ${ms}ms · 范例 ${examples.length} 条 · 长期要求 ${rules.length} 条${input.revise ? ` · 按点评「${clip(input.revise.note, 30)}」改` : ''} · 「${c.text}」`);
+  /** 只改这一次的点评:记下改前 / 改后(长期要求上面已经记过) */
+  let noteProblem: string | undefined;
+  if (input.revise && !input.revise.keep) {
+    await recordDraftNote({ account: input.account, mode, note: input.revise.note, keep: false, tweet: input.tweet, before: input.revise.previous, after: c.text })
+      .catch((e) => { noteProblem = e instanceof Error ? e.message : String(e); console.warn(`[x.ask-draft] 点评没记上:${noteProblem}`); });
+  }
+  return { ok: true, text: c.text, examples: examples.length, ms, model: ASK_DRAFT_MODEL, rules: rules.length, noteProblem };
 }

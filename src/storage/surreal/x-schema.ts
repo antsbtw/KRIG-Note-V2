@@ -1766,6 +1766,38 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.38 —— 你对 AI 草稿的点评 x_draft_note(2026-10-22)
+ * 用户 10-22:「在回复框增加一个我对AI回复提出要求的窗口(点评),要求AI如何调整回复的内容、语气等。
+ *  达到训练AI或者通过AI来找到我想要的回复方法。」
+ * 一次点评一行(只追加):对着哪条帖子、改之前的草稿、你的点评、改之后的草稿。
+ * keep = 「以后都这样」→ 成为长期要求,每次草拟都带上;active = 还生效(你可以停掉,行不删,留痕)。
+ */
+const X_SCHEMA_1_2_38 = `
+DEFINE TABLE IF NOT EXISTS x_draft_note SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account    ON x_draft_note TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS mode       ON x_draft_note TYPE string ASSERT $value INSIDE ['ask', 'engage'];
+DEFINE FIELD IF NOT EXISTS note       ON x_draft_note TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS keep       ON x_draft_note TYPE bool;
+DEFINE FIELD IF NOT EXISTS active     ON x_draft_note TYPE bool;
+DEFINE FIELD IF NOT EXISTS tweet_text ON x_draft_note TYPE string;
+DEFINE FIELD IF NOT EXISTS draft_before ON x_draft_note TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS draft_after  ON x_draft_note TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at         ON x_draft_note TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_draft_note ON x_draft_note FIELDS account, mode;
+`;
+
+export async function x_migration_1_2_38(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_38);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_draft_note');
+  if (!('note' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.38] x_draft_note 没建起来');
+  console.log('[x-schema 1.2.38] 你对 AI 草稿的点评 x_draft_note');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.38', appliedAt = $now, description = '你对 AI 草稿的点评 x_draft_note'`,
+    { rid: new RecordId('schema_version', '1.2.38'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.37 —— 互动记录 x_engage(2026-10-22,蓝V互关第 3 件事)
  * 已互关的蓝V,一次互动一行(只追加):回他哪条 → 我回了什么 → 点赞 / 回复结果。和 x_ask(求关)分开:
  * 求关留言和日常互动口吻不同,范例库与「原样通过率」各算各的(设计文档 §3:放手按场景分开统计)。
