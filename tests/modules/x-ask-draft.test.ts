@@ -11,7 +11,7 @@ describe('提示词', () => {
       examples: [{ tweet: '#蓝V互关 交朋友', reply: '已关,互关互助!' }, { tweet: '浇一个', reply: '活人来啦,互浇一个?' }],
       tweet: '玩X做好三件事情 #蓝v互关', person: { name: 'Jesse', bio: '我们的目标是星辰大海' },
     });
-    expect(m[0].content).toMatch(/只写中文/);
+    expect(m[0].content).toMatch(/默认写中文,他的要求\(下面的长期要求或点评\)指定了别的语言就用那种语言/);
     expect(m[0].content).toMatch(/不要 @/);
     expect(m[1].content).toContain('已关,互关互助!');
     expect(m[1].content).toContain('活人来啦,互浇一个?');
@@ -32,7 +32,7 @@ describe('草稿收拾 + 校验', () => {
   });
   it.each([
     ['', /空/], ['好'.repeat(61), /太长/], ['已关 @abc', /@/], ['看这个 https://t.co/x', /链接/],
-    ['互关 #蓝V互关', /话题/], ['Followed back, nice to meet you!', /不是中文/],
+    ['互关 #蓝V互关', /话题/], 
   ])('不合格:%s', (raw, re) => {
     const r = cleanAskDraft(raw);
     expect('problem' in r && r.problem).toMatch(re);
@@ -67,11 +67,19 @@ describe('⭐ 点评(用户 10-22:「增加一个我对AI回复提出要求的�
   it('长期要求进系统提示、写明优先于范例口吻;没有就不出现', () => {
     const m = buildAskDraftPrompt({ examples: [], tweet: 'x', person: {}, rules: ['别说教', '多用问句'] });
     expect(m[0].content).toMatch(/他的长期要求\(一定照做,和上面的口吻冲突时以这里为准\):\n1\. 别说教\n2\. 多用问句/);
-    expect(buildAskDraftPrompt({ examples: [], tweet: 'x', person: {} })[0].content).not.toMatch(/长期要求/);
+    expect(buildAskDraftPrompt({ examples: [], tweet: 'x', person: {} })[0].content).not.toMatch(/他的长期要求\(/);
   });
   it('按点评改:带上一版 + 点评,结尾要「改好的留言」;模型回的前缀会被剥掉', () => {
     const m = buildAskDraftPrompt({ examples: [], tweet: '今天想上3000', person: {}, revise: { previous: '加油!', note: '问他一句怎么涨的' } });
     expect(m[1].content).toMatch(/上一版留言:加油!\n他对上一版的点评\(照着改\):问他一句怎么涨的\n\n改好的留言:$/);
     expect(cleanAskDraft('改好的留言:你是怎么涨这么快的?')).toEqual({ text: '你是怎么涨这么快的?' });
+  });
+});
+
+describe('⭐ 外语(用户 10-22:「让它用英文回复,怎么都是中文?」)', () => {
+  it('英文草稿不再被拒;英文按词算长短(62 个字母不算长),太长才拒', () => {
+    expect(cleanAskDraft('That look on his face is priceless, he totally forgot how to dog!')).toEqual({ text: 'That look on his face is priceless, he totally forgot how to dog!' });
+    expect(cleanAskDraft(Array.from({ length: 50 }, () => 'word').join(' '))).toEqual({ problem: '太长了(50 个词)' });
+    expect(cleanAskDraft('好'.repeat(61))).toEqual({ problem: '太长了(61 字)' });
   });
 });

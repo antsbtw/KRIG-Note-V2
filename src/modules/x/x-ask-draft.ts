@@ -9,17 +9,23 @@
  * · 输出纯文本,不用 JSON 契约(记忆 project-x-reply-latency:语法约束采样空转慢;num_predict 会变静默截断 —— 都不用)
  * · 关掉思考(think: false):Gemma 4 默认先写 ~1000 字思考,一条 30~80 秒;关掉 1~2 秒
  * · 校验不过就不填、说清为什么,不拿模板凑(fail loud)
- * · 只写中文:外语回复人审不出来(记忆 project-x-multilang-reply-risk)
+ * · 默认写中文;你要求别的语言(点评 / 长期要求)就用那种语言 —— 用户 10-22:「让它用英文回复,怎么都是中文?」
+ *   原来写死「只写中文」+ 校验拒收非中文,你的点评压不过。⚠️ 外语草稿必须回译成中文给你看(记忆 project-x-multilang-reply-risk:
+ *   外语会编清单外承诺,人审不出来)—— 回译失败也要说出来
  * · ⭐ 点评(2026-10-22,用户:「在回复框增加一个我对AI回复提出要求的窗口(点评),要求AI如何调整回复的内容、语气等」):
  *   这一次按点评改上一版(revise);勾「以后都这样」的点评成长期要求,每次草拟都带上(rules,优先于范例口吻)。
  *   每次点评都记进 x_draft_note(改前 / 点评 / 改后),留着以后让 AI 从中找你想要的回复方法。
  */
 import { getXDB } from '@storage/surreal/client';
 import { callOllamaChat } from '@platform/main/local-llm/ollama-client';
+import { googleTranslate } from '@platform/main/learning/providers/google-translate';
 
 export const ASK_DRAFT_MODEL = 'gemma4:12b';
 const MAX_EXAMPLES = 12;
-const MAX_CHARS = 60;
+/** 中文按字、外文按词算长短(英文一句 62 个字母不算长 —— 10-22 真机「太长了(62 字)」) */
+const MAX_CJK_CHARS = 60;
+const MAX_WORDS = 45;
+const CJK = /[一-鿿]/;
 
 export type AskExample = { readonly tweet: string; readonly reply: string };
 
@@ -51,7 +57,7 @@ export function buildAskDraftPrompt(input: {
       ? '你替一个中文 X(推特)蓝V用户回复他已经互相关注的朋友的帖子,目的是保持往来、让对方愿意聊下去。接住对方帖子里说的事回应,不要求关注、不要提「互关」。'
       : '你替一个中文 X(推特)蓝V用户写「求互关」的回复。他在别人和互关相关的帖子下面留言,目的是让对方回关他。',
     engage ? '口语、短、真诚,一两句话;可以附和、追问一句、或说说自己的看法。' : '照他自己写过的留言的口气和长短来写:口语、短、真诚,一两句话。',
-    '规矩:只写中文;不超过 40 个字;不要 @ 任何人;不要链接;不要话题标签;不要编造你不知道的事(不提具体数字、产品、承诺);',
+    '规矩:默认写中文,他的要求(下面的长期要求或点评)指定了别的语言就用那种语言;中文不超过 40 个字,外文不超过 30 个词;不要 @ 任何人;不要链接;不要话题标签;不要编造你不知道的事(不提具体数字、产品、承诺);',
     '可以接住对方帖子里的一句话再求关;可以带一个表情,也可以不带。',
     '只输出这一条留言本身,不要引号,不要解释,不要前缀。',
     ...(input.rules && input.rules.length > 0 ? [`他的长期要求(一定照做,和上面的口吻冲突时以这里为准):\n${input.rules.map((r, i) => `${i + 1}. ${r.trim()}`).join('\n')}`] : []),
@@ -69,11 +75,12 @@ export function cleanAskDraft(raw: string): { readonly text: string } | { readon
   let t = raw.trim().split('\n').map((l) => l.trim()).filter(Boolean)[0] ?? '';
   t = t.replace(/^(改好的留言|我的留言|留言|回复)\s*[:：]\s*/, '').replace(/^["“「『'`]+|["”」』'`]+$/g, '').trim();
   if (t === '') return { problem: '模型回了空的' };
-  if ([...t].length > MAX_CHARS) return { problem: `太长了(${[...t].length} 字)` };
+  if (CJK.test(t) ? [...t].length > MAX_CJK_CHARS : t.split(/\s+/).length > MAX_WORDS) {
+    return { problem: CJK.test(t) ? `太长了(${[...t].length} 字)` : `太长了(${t.split(/\s+/).length} 个词)` };
+  }
   if (/@\w/.test(t)) return { problem: '带了 @(求关留言不 @ 人)' };
   if (/https?:\/\/|t\.co\/|www\./i.test(t)) return { problem: '带了链接' };
   if (/#\S/.test(t)) return { problem: '带了话题标签' };
-  if (!/[一-鿿]/.test(t)) return { problem: '不是中文(外语留言你审不出来,不填)' };
   return { text: t };
 }
 
@@ -122,7 +129,9 @@ export async function setDraftRuleActive(account: string, id: string, active: bo
 export type AskDraft =
   | { readonly ok: true; readonly text: string; readonly examples: number; readonly ms: number; readonly model: string;
       /** 长期要求几条;这次的点评没记上的原因(草稿照给,但要说出来) */
-      readonly rules?: number; readonly noteProblem?: string }
+      readonly rules?: number; readonly noteProblem?: string;
+      /** 外语草稿的中文意思(回译);回译失败给原因 */
+      readonly meaning?: string; readonly meaningProblem?: string }
   | { readonly ok: false; readonly why: string };
 
 export async function draftAskReply(input: {
@@ -136,9 +145,11 @@ export async function draftAskReply(input: {
 }): Promise<AskDraft> {
   const mode = input.mode ?? 'ask';
   const examples = await readAskExamples(input.account, mode);
-  /** 这次勾了「以后都这样」:先记下,这一次就当长期要求用(不重复写进 revise) */
-  if (input.revise?.keep) await recordDraftNote({ account: input.account, mode, note: input.revise.note, keep: true, tweet: input.tweet, before: input.revise.previous });
-  const rules = (await readDraftRules(input.account, mode)).map((r) => r.note);
+  /**
+   * 这次勾了「以后都这样」:这一次就当长期要求用;**草稿成了才记成长期要求**
+   * (10-22 真机:先记后拟,草稿被拒时要求已经存下,人以为没生效又点了两次 → 三条长期要求)
+   */
+  const rules = [...(await readDraftRules(input.account, mode)).map((r) => r.note), ...(input.revise?.keep ? [input.revise.note] : [])];
   const t0 = Date.now();
   let raw: string;
   try {
@@ -161,11 +172,18 @@ export async function draftAskReply(input: {
     return { ok: false, why: `草稿不合格:${c.problem}` };
   }
   console.log(`[x.ask-draft] ${ms}ms · 范例 ${examples.length} 条 · 长期要求 ${rules.length} 条${input.revise ? ` · 按点评「${clip(input.revise.note, 30)}」改` : ''} · 「${c.text}」`);
-  /** 只改这一次的点评:记下改前 / 改后(长期要求上面已经记过) */
+  /** 记下这次点评:改前 / 点评 / 改后;勾了「以后都这样」的从此成长期要求 */
   let noteProblem: string | undefined;
-  if (input.revise && !input.revise.keep) {
-    await recordDraftNote({ account: input.account, mode, note: input.revise.note, keep: false, tweet: input.tweet, before: input.revise.previous, after: c.text })
+  if (input.revise) {
+    await recordDraftNote({ account: input.account, mode, note: input.revise.note, keep: input.revise.keep, tweet: input.tweet, before: input.revise.previous, after: c.text })
       .catch((e) => { noteProblem = e instanceof Error ? e.message : String(e); console.warn(`[x.ask-draft] 点评没记上:${noteProblem}`); });
   }
-  return { ok: true, text: c.text, examples: examples.length, ms, model: ASK_DRAFT_MODEL, rules: rules.length, noteProblem };
+  /** ⭐ 外语草稿:回译成中文给你看(人工确认在外语上成立的前提) */
+  let meaning: string | undefined;
+  let meaningProblem: string | undefined;
+  if (!CJK.test(c.text)) {
+    const tr = await googleTranslate(c.text, 'zh-CN');
+    if (tr?.text) meaning = tr.text; else meaningProblem = '没回译成中文(Google 翻译没回)—— 发之前自己看懂它';
+  }
+  return { ok: true, text: c.text, examples: examples.length, ms, model: ASK_DRAFT_MODEL, rules: rules.length, noteProblem, meaning, meaningProblem };
 }

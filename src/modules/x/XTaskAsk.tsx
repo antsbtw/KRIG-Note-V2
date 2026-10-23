@@ -78,6 +78,8 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
    *  勾「以后都这样」= 成为长期要求,以后每次草拟都带上(下面列出来,可停用)
    */
   const [critique, setCritique] = useState('');
+  /** 外语草稿的中文意思(回译)—— 跟着 Gemma 原稿走 */
+  const [meaning, setMeaning] = useState<{ forText: string; text?: string; problem?: string } | null>(null);
   const [keepRule, setKeepRule] = useState(false);
   const [rules, setRules] = useState<Array<{ id: string; note: string }>>([]);
   const loadRules = useCallback(() => {
@@ -124,9 +126,10 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
       context: E && threadRef.current ? threadForPrompt(threadRef.current) : undefined, revise });
     if (seq !== draftSeq.current) return;
     setDrafting(false);
-    const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number; rules?: number; noteProblem?: string }) : { ok: false, why: r.reason };
+    const v = r.status === 'ok' ? (r.value as { ok: boolean; text?: string; why?: string; ms?: number; examples?: number; rules?: number; noteProblem?: string; meaning?: string; meaningProblem?: string }) : { ok: false, why: r.reason };
     if (!v.ok || !v.text) { setDraftNote(`Gemma 没草拟成:${v.why ?? '?'} —— 你直接写也行,或点「换一版」再试`); return; }
     setAiText(v.text);
+    setMeaning(v.meaning || v.meaningProblem ? { forText: v.text, text: v.meaning, problem: v.meaningProblem } : null);
     setDraft((cur) => (force || cur.trim() === '' || cur === aiTextRef.current ? v.text! : cur));
     setDraftNote(`Gemma ${revise ? '按点评改好了' : '草拟'}(照你写过的 ${v.examples ?? 0} 条范例${v.rules ? ` · 长期要求 ${v.rules} 条` : ''},${Math.round((v.ms ?? 0) / 100) / 10} 秒)—— 不满意就改或再点评,改过的算你写的`
       + `${v.noteProblem ? ` · ⚠️ 这次点评没记上:${v.noteProblem}` : ''}`);
@@ -341,6 +344,11 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
             placeholder={drafting ? 'Gemma 正在草拟…' : E ? '写给他的回复' : '写给他的求关留言'} style={{ width: '100%', boxSizing: 'border-box' }} />
           {aiText !== undefined && draft.trim() !== '' && draft.trim() !== aiText.trim() && (
             <div style={{ opacity: 0.55 }}>已改过 —— 发出去记成你写的(会进范例库);Gemma 原稿:{aiText}</div>
+          )}
+          {meaning && draft.trim() === meaning.forText.trim() && (
+            <div style={{ color: meaning.text ? '#9ecbff' : '#fbbf24' }}>
+              {meaning.text ? `中文意思(回译):${meaning.text}` : `⚠️ ${meaning.problem}`}
+            </div>
           )}
           <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
             <input value={critique} onChange={(e) => setCritique(e.target.value)} disabled={drafting || acting || result?.ok === true}
