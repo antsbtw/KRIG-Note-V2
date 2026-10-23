@@ -21,6 +21,24 @@ import type { AskPrepared } from './x-ask-prepare';
 import type { TweetRecord } from './x-timeline-audit';
 import { loadEngageThread } from './x-engage-thread';
 
+/**
+ * ⭐ 他最近有没有动静 —— 纯函数(导出给测试)
+ * 用户 10-23:「应该增加一个规则,就是这些用户最近几个小时有更新,我们才和他互动,否则几天不更新的,互动没有意义呀。定2个小时如何?」
+ * 动静 = 他主页上自己发的(原创 / 回复别人,置顶按真实时间;转发不算)+ 他找我的那条。超过 2 小时 → 建议先不互动
+ * (只是建议:卡片「放弃」后你在左边点开他的帖子照样能拉回来)。
+ */
+export const ENGAGE_ACTIVE_HOURS = 2;
+export function activeWithin(
+  records: readonly TweetRecord[], restId: string, hisAt: string | undefined, now: Date, hours = ENGAGE_ACTIVE_HOURS,
+): { readonly active: true } | { readonly active: false; readonly why: string } {
+  const times = [...records.filter((r) => r.authorRestId === restId && !r.retweetOfId).map((r) => r.createdAt), hisAt]
+    .map((t) => Date.parse(t ?? '')).filter((t) => Number.isFinite(t));
+  const latest = times.length > 0 ? Math.max(...times) : undefined;
+  if (latest !== undefined && now.getTime() - latest <= hours * 3600_000) return { active: true };
+  const ago = latest === undefined ? '主页上没采到他发的帖子' : `最近一条是 ${Math.round((now.getTime() - latest) / 3600_000)} 小时前`;
+  return { active: false, why: `他最近 ${hours} 小时没动静(${ago})—— 先不互动,互动了他也看不到` };
+}
+
 /** 互动卡选哪条 —— 纯函数(导出给测试) */
 export function pickEngageTweet(
   records: readonly TweetRecord[], person: { readonly restId: string; readonly handle: string },
@@ -76,7 +94,10 @@ export async function prepareEngage(
     { a: account, p: restId, h: hisTweetId ?? '' },
   );
   const his = hisTweetId && hisRows?.[0]?.text ? { tweetId: hisTweetId, text: hisRows[0].text, createdAt: hisRows[0].created_at ?? undefined } : undefined;
-  const plan = pickEngageTweet(r.records, { restId, handle }, his, new Set(done ?? []));
+  const picked = pickEngageTweet(r.records, { restId, handle }, his, new Set(done ?? []));
+  /** ⭐ 2 小时内没动静 → 建议先不互动(用户 10-23 定 2 小时);人可推翻 */
+  const act = picked.kind === 'skip' ? undefined : activeWithin(r.records, restId, his?.createdAt, new Date());
+  const plan = act && !act.active ? { kind: 'skip' as const, recent: picked.recent, why: act.why } : picked;
   console.log(`[x.engage] @${handle}:${plan.kind === 'skip' ? `不互动 —— ${plan.why}` : `选推文 ${plan.tweet.id}(${plan.why})`}`);
   /** ⭐ 来龙去脉:找到这条互动所在对话的原帖(用户 10-22:「最好办法是找到这个互动帖子的原帖」) */
   const thread = plan.kind === 'skip' ? undefined : await loadEngageThread(wcId, account, restId, plan.tweet.id);
