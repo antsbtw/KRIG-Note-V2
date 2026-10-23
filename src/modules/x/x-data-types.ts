@@ -161,22 +161,30 @@ export type XDataInvoke =
       /** Gemma 原稿(用了草拟才有) */
       readonly aiText?: string;
       /** engage = 已互关的日常互动(点赞 + 回复,不关注,记 x_engage) */
-      readonly mode?: 'ask' | 'engage' }
+      readonly mode?: 'ask' | 'engage' | 'vpn' }
   /** ⭐ 互动卡准备(2026-10-22):采他主页、核对还是不是互关、选一条(他找过我就回那条) */
   | { readonly op: 'engagePrepare'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly hisTweetId?: string }
   /** ⭐ 第 3 件事(2026-10-22):已互关蓝V的互动四组 + 互动队列;采互动(三条搜索,最近 90 天) */
   | { readonly op: 'engageOverview'; readonly wsId: string; readonly limit: number }
   | { readonly op: 'engageCollect'; readonly wsId: string }
   /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
-  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage'; readonly context?: string;
+  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage' | 'vpn'; readonly context?: string;
+      /** 回复求助要知道是哪条(按它的配方打试用链接的来源标识) */
+      readonly tweetId?: string;
       /** ⭐ 按你的点评改上一版;keep = 以后都这样(2026-10-22) */
       readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean } }
   /** 你对 AI 草稿的长期要求:列出 / 停掉 / 恢复 */
-  | { readonly op: 'draftRules'; readonly wsId: string; readonly mode: 'ask' | 'engage' }
+  | { readonly op: 'draftRules'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn' }
+  /** ⭐ 任务「VPN求助」(2026-10-23):找一轮 / 判断 / 名单 / 推翻 / 回复卡准备 */
+  | { readonly op: 'vpnFind'; readonly wsId: string }
+  | { readonly op: 'vpnJudge'; readonly wsId: string; readonly limit: number }
+  | { readonly op: 'vpnOverview'; readonly wsId: string }
+  | { readonly op: 'vpnHuman'; readonly wsId: string; readonly tweetId: string; readonly human: 'accept' | 'reject' }
+  | { readonly op: 'vpnPrepare'; readonly wsId: string; readonly tweetId: string }
   /** 互动前先过一轮:他 2 小时内有没有动静(用户 10-23) */
   | { readonly op: 'engageScreen'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly hisAt?: string }
   /** 先放一放:这几天别再列他(用户 10-23) */
-  | { readonly op: 'deferPerson'; readonly wsId: string; readonly restId: string; readonly mode: 'ask' | 'engage'; readonly tweetId?: string }
+  | { readonly op: 'deferPerson'; readonly wsId: string; readonly restId: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly tweetId?: string }
   | { readonly op: 'draftRuleActive'; readonly wsId: string; readonly id: string; readonly active: boolean }
   /** ⭐ 互动卡换了一条 → 重新读那条的来龙去脉(找原帖;库里缺就开详情页补采) */
   | { readonly op: 'engageThread'; readonly wsId: string; readonly restId: string; readonly tweetId: string }

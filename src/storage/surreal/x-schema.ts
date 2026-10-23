@@ -1766,6 +1766,69 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.40 —— 任务「VPN求助」(2026-10-23)
+ * 用户 10-23:「下面再完成VPN求助配方这个任务?和蓝V互关类似了,先找到VPN的求助贴,再筛选有价值的,然后再草拟回复对方的方法。」
+ * 用户选:先帮忙再带链接 · 只回 24 小时内的 · Gemma 先判、我抽看推翻。
+ * · x_vpn_post:配方找到的一条求助帖一行(id = 推文 id)—— Gemma 的判断 + 你的推翻 + 回没回
+ * · x_vpn_reply:回复一次一行(只追加)—— 也是「回复求助」的范例库,和求关 / 互动分开
+ * · x_draft_note / x_defer 的 mode 加上 vpn(点评 / 放一放按任务分开)
+ */
+const X_SCHEMA_1_2_40 = `
+DEFINE TABLE IF NOT EXISTS x_vpn_post SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account        ON x_vpn_post TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_id       ON x_vpn_post TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS recipe         ON x_vpn_post TYPE string;
+DEFINE FIELD IF NOT EXISTS author_rest_id ON x_vpn_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS author_handle  ON x_vpn_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS posted_at      ON x_vpn_post TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS found_at       ON x_vpn_post TYPE datetime;
+-- Gemma:worth / direction(out 出海 · in 回国 · none)/ reason / translation / model / ms
+DEFINE FIELD IF NOT EXISTS verdict        ON x_vpn_post TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS judged_at      ON x_vpn_post TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS judge_error    ON x_vpn_post TYPE option<string>;
+-- 你的推翻:accept = 值得回 / reject = 不值得
+DEFINE FIELD IF NOT EXISTS human          ON x_vpn_post TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['accept', 'reject'];
+DEFINE FIELD IF NOT EXISTS human_at       ON x_vpn_post TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS replied_at     ON x_vpn_post TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_vpn_post ON x_vpn_post FIELDS account, found_at;
+
+DEFINE TABLE IF NOT EXISTS x_vpn_reply SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_vpn_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person        ON x_vpn_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person_handle ON x_vpn_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_vpn_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_vpn_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_text    ON x_vpn_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_source  ON x_vpn_reply TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reply_id      ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS liked         ON x_vpn_reply TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS replied       ON x_vpn_reply TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS failed_step   ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS failed_detail ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at            ON x_vpn_reply TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_vpn_reply ON x_vpn_reply FIELDS account, at;
+
+DEFINE FIELD OVERWRITE mode ON x_draft_note TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
+DEFINE FIELD OVERWRITE mode ON x_defer TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
+`;
+
+export async function x_migration_1_2_40(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_40);
+  const [a, b, c] = await db.query<[{ fields?: Record<string, string> }, { fields?: Record<string, string> }, { fields?: Record<string, string> }]>(
+    'INFO FOR TABLE x_vpn_post; INFO FOR TABLE x_vpn_reply; INFO FOR TABLE x_draft_note;',
+  );
+  if (!('verdict' in (a?.fields ?? {})) || !('reply_text' in (b?.fields ?? {}))) throw new Error('[x-schema 1.2.40] x_vpn_post / x_vpn_reply 没建起来');
+  if (!String(c?.fields?.mode ?? '').includes('vpn')) throw new Error('[x-schema 1.2.40] x_draft_note.mode 没加上 vpn');
+  console.log('[x-schema 1.2.40] 任务「VPN求助」x_vpn_post / x_vpn_reply');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.40', appliedAt = $now, description = '任务「VPN求助」x_vpn_post / x_vpn_reply'`,
+    { rid: new RecordId('schema_version', '1.2.40'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐ 1.2.39 —— 先放一放 x_defer(2026-10-23)
  * 用户 10-23:「近期已经放一放的,就先不要列表在下面了吧,否则不是重复的勾选它?」
  * 一次放一放一行(只追加);名单只藏「最近 DEFER_DAYS 天放一放过」的人,过了自动回来。求关 / 互动各算各的。

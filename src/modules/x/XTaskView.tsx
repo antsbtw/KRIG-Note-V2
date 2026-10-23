@@ -12,13 +12,16 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { XAccountBadge } from './XAccountBadge';
 import { BlueMutualTask } from './XTaskBlueMutual';
 import { RelationTask } from './XTaskRelation';
+import { VpnHelpTask } from './XTaskVpn';
 
 /** ⚠️ 任务清单 —— 标签与 id 同在一处 */
-type TaskId = 'blue-mutual' | 'relation';
+type TaskId = 'blue-mutual' | 'relation' | 'vpn-help';
 const TASKS: ReadonlyArray<{ id: TaskId; label: string }> = [
   { id: 'blue-mutual', label: '蓝V互关' },
   /** ⭐ 2026-10-20 用户:「在任务中添加一个"关系采集"这样的完整任务吧」 */
   { id: 'relation', label: '关系采集' },
+  /** ⭐ 2026-10-23 用户:「下面再完成VPN求助配方这个任务?和蓝V互关类似了」 */
+  { id: 'vpn-help', label: 'VPN求助' },
 ];
 
 export function XTaskView({ workspaceId, slot }: ViewComponentProps): ReactElement {
@@ -56,6 +59,7 @@ export function XTaskView({ workspaceId, slot }: ViewComponentProps): ReactEleme
         <div style={S.body}>
           {task === 'blue-mutual' && <BlueMutualTask key={accountKey} wsId={workspaceId} />}
           {task === 'relation' && <RelationTask key={accountKey} wsId={workspaceId} />}
+          {task === 'vpn-help' && <VpnHelpTask key={accountKey} wsId={workspaceId} />}
         </div>
       </div>
     </div>

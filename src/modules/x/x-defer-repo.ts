@@ -7,7 +7,7 @@ import { getXDB } from '@storage/surreal/client';
 
 export const DEFER_DAYS = 3;
 
-export async function recordDefer(account: string, person: string, mode: 'ask' | 'engage', tweetId?: string): Promise<void> {
+export async function recordDefer(account: string, person: string, mode: 'ask' | 'engage' | 'vpn', tweetId?: string): Promise<void> {
   const [rows] = await getXDB().query<[unknown[]]>(
     'CREATE x_defer SET account = $a, person = $p, mode = $m, tweet_id = $t, at = time::now()',
     { a: account, p: person, m: mode, t: tweetId },
@@ -16,7 +16,7 @@ export async function recordDefer(account: string, person: string, mode: 'ask' |
 }
 
 /** 最近 DEFER_DAYS 天放一放过的人(数字 id) */
-export async function readDeferred(account: string, mode: 'ask' | 'engage', now = new Date()): Promise<string[]> {
+export async function readDeferred(account: string, mode: 'ask' | 'engage' | 'vpn', now = new Date()): Promise<string[]> {
   const since = new Date(now.getTime() - DEFER_DAYS * 86_400_000).toISOString();
   const [rows] = await getXDB().query<[string[]]>(
     'SELECT VALUE person FROM x_defer WHERE account = $a AND mode = $m AND at >= type::datetime($since)',

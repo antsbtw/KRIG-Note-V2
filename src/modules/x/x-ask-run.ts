@@ -41,7 +41,7 @@ export type AskRunInput = {
    * ⭐ engage = 已互关的蓝V日常互动(2026-10-22,蓝V互关第 3 件事):点赞 + 回复,**不关注**、不走关注闸门,记进 x_engage;
    * 不给 = 求关(点赞 + 留言 + 关注,记进 x_ask)
    */
-  readonly mode?: 'ask' | 'engage';
+  readonly mode?: 'ask' | 'engage' | 'vpn';
 };
 
 export type StepState = 'ok' | 'already' | 'unseen' | 'failed';
@@ -83,7 +83,10 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   if (busy !== null) return { ok: false, blocked: `X 网页正忙:${busy}` };
   if (bgRunningOn(wcId) !== null) return { ok: false, blocked: '后台正在采' };
   if (followQueueStatus(p.wsId).current) return { ok: false, blocked: '关注队列正在动作' };
-  const engage = p.mode === 'engage';
+  /** engage / vpn 都只点赞 + 回复,不关注;vpn = 回复求助(2026-10-23),记进 x_vpn_reply */
+  const engage = p.mode === 'engage' || p.mode === 'vpn';
+  const vpn = p.mode === 'vpn';
+  const label = vpn ? '回复求助' : engage ? '互动' : '求关';
   /**
    * 关注的量(每日上限 / 连续满 15 个歇 15 分钟)只管求关 —— 互动不关注。
    * ⚠️⚠️ 用户 10-21:「我的任务我自己控制,有问题提示就好了」—— 超了照做,结果里带提醒,不拦
@@ -108,7 +111,7 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
     r.liked = lk?.state === 'liked' ? 'ok' : lk?.state === 'already-liked' ? 'already' : 'failed';
     if (r.liked !== 'already') {
       await appendAction({ action: 'like', targetRestId: p.restId, targetHandle: p.handle, decidedBy: 'human',
-        result: r.liked === 'ok' ? 'ok' : 'failed', reason: `${engage ? '互动' : '求关'} · 推文 ${p.tweetId}`, detail: r.liked === 'failed' ? lk?.state : undefined, wsId: p.wsId });
+        result: r.liked === 'ok' ? 'ok' : 'failed', reason: `${label} · 推文 ${p.tweetId}`, detail: r.liked === 'failed' ? lk?.state : undefined, wsId: p.wsId });
     }
     if (r.liked === 'failed') { stop('like', `点赞没成:${lk?.state ?? '无返回'}${lk?.why ? `(${lk.why})` : ''}`); return r; }
 
@@ -130,7 +133,7 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
     r.replied = sent?.state === 'sent' ? 'ok' : sent?.state === 'unseen' ? 'unseen' : 'failed';
     r.replyId = sent?.replyId;
     await appendAction({ action: 'reply', targetRestId: p.restId, targetHandle: p.handle, decidedBy: 'human',
-      result: r.replied === 'failed' ? 'failed' : 'ok', reason: `${engage ? '互动' : '求关'} · 推文 ${p.tweetId}`,
+      result: r.replied === 'failed' ? 'failed' : 'ok', reason: `${label} · 推文 ${p.tweetId}`,
       detail: r.replied === 'ok' ? `回复 ${r.replyId}:${reply}` : `${sent?.state ?? '无返回'}:${reply}`, wsId: p.wsId });
     if (r.replied !== 'ok') {
       /** ⚠️ unseen(框清空了、页面上没看到)也停:说不清发没发出去,不能接着关注假装都成了 */
@@ -164,8 +167,8 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   } finally {
     setXHostBusy(wcId, null);
     running.delete(p.wsId);
-    await (engage ? recordEngage(account.restId, p, reply, r) : recordAsk(account.restId, p, reply, r))
-      .catch((e) => console.error(`[x.ask] ${engage ? 'x_engage' : 'x_ask'} 没写上`, e));
+    await (vpn ? recordVpn(account.restId, p, reply, r) : engage ? recordEngage(account.restId, p, reply, r) : recordAsk(account.restId, p, reply, r))
+      .catch((e) => console.error(`[x.ask] ${vpn ? 'x_vpn_reply' : engage ? 'x_engage' : 'x_ask'} 没写上`, e));
     console.log(`[x.ask] @${p.handle} 推文 ${p.tweetId}:赞 ${r.liked ?? '-'} · 留言 ${r.replied ?? '-'} · 关注 ${r.followed ?? '-'}${r.detail ? ` —— ${r.detail}` : ''}`);
   }
 }
@@ -211,6 +214,23 @@ async function recordEngage(account: string, p: AskRunInput, reply: string, r: A
     },
   );
   if (!rows || rows.length !== 1) throw new Error('CREATE x_engage 没返回行');
+}
+
+/** 回复求助一次一行(只追加);回复真发出去了 → 这条求助帖记「回过了」,名单里不再列 */
+async function recordVpn(account: string, p: AskRunInput, reply: string, r: AskRunResult): Promise<void> {
+  const db = getXDB();
+  const [rows] = await db.query<[unknown[]]>(
+    `CREATE x_vpn_reply SET account = $account, person = $person, person_handle = $handle, tweet_id = $tid, tweet_text = $ttext,
+       reply_text = $reply, reply_source = $src, ai_text = $ai, reply_id = $rid,
+       liked = $liked, replied = $replied, failed_step = $fstep, failed_detail = $fdetail, ws_id = $ws, at = time::now() RETURN id`,
+    {
+      account, person: p.restId, handle: p.handle, tid: p.tweetId, ttext: p.tweetText, reply,
+      src: replySourceOf(p.aiText, reply), ai: p.aiText,
+      rid: r.replyId, liked: dbState(r.liked), replied: dbState(r.replied), fstep: r.failedStep, fdetail: r.detail, ws: p.wsId,
+    },
+  );
+  if (!rows || rows.length !== 1) throw new Error('CREATE x_vpn_reply 没返回行');
+  if (r.replied === 'ok') await db.query(`UPDATE type::record('x_vpn_post', $id) SET replied_at = time::now()`, { id: p.tweetId });
 }
 
 /** ⭐ 发出去的留言算谁写的:和 Gemma 原稿一字不差(去掉首尾空白)= ai;改过 / 没用草稿 = human(只有 human 进范例库) */

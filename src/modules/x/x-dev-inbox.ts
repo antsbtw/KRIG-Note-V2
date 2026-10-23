@@ -8,6 +8,9 @@
  * ⚠️ 定时器 unref + before-quit 停(记忆 project-graceful-shutdown)。
  */
 import { readLeftTweet } from './x-left-tweet';
+import { findVpnPosts, judgeVpnPosts, pruneVpnPosts, readVpnOverview } from './x-vpn-run';
+import { getXDB } from '@storage/surreal/client';
+import { replyLangOf, vpnLink } from './x-vpn-help';
 import { X_PAGE_NAME } from './x-pages';
 import { app } from 'electron';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -60,13 +63,16 @@ type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling 
   | (Sampling & { op: 'engagePrepare'; wsId: string; restId: string; handle: string; hisTweetId?: string })
   /** 读左边正在看的这条;goto 给了就先让左边打开这条(模拟人点开) */
   | (Sampling & { op: 'leftTweet'; wsId: string; goto?: string })
-  | (Sampling & { op: 'engageScreen'; wsId: string; restId: string; handle: string });
+  | (Sampling & { op: 'engageScreen'; wsId: string; restId: string; handle: string })
+  | (Sampling & { op: 'vpnFind'; wsId: string }) | (Sampling & { op: 'vpnJudge'; wsId: string; limit: number })
+  | (Sampling & { op: 'vpnOverview'; wsId: string }) | (Sampling & { op: 'vpnDraft'; wsId: string; tweetId: string })
+  | (Sampling & { op: 'vpnPrune'; wsId: string });
 type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd;
 
 function validate(c: unknown): Cmd | string {
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
-  if (['engageCollect', 'engageOverview', 'engagePrepare', 'leftTweet', 'engageScreen'].includes(String((o as { op?: string })?.op))) {
+  if (['engageCollect', 'engageOverview', 'engagePrepare', 'leftTweet', 'engageScreen', 'vpnFind', 'vpnJudge', 'vpnOverview', 'vpnDraft', 'vpnPrune'].includes(String((o as { op?: string })?.op))) {
     if (typeof o.wsId !== 'string') return 'engage 指令要 wsId';
     return o as unknown as EngageCmd;
   }
@@ -185,6 +191,24 @@ async function tick(): Promise<void> {
           else {
             if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
             out = await readLeftTweet(wcId);
+          }
+        } else if (cmd.op === 'vpnFind') {
+          out = await findVpnPosts(cmd.wsId);
+        } else if (cmd.op === 'vpnPrune') {
+          const acc = await readWsAccount(cmd.wsId);
+          out = acc?.restId ? await pruneVpnPosts(acc.restId) : { ok: false, why: '认不出号' };
+        } else if (cmd.op === 'vpnJudge' || cmd.op === 'vpnOverview' || cmd.op === 'vpnDraft') {
+          const acc = await readWsAccount(cmd.wsId);
+          if (!acc?.restId) out = { ok: false, why: '认不出号' };
+          else if (cmd.op === 'vpnJudge') out = await judgeVpnPosts(acc.restId, cmd.limit);
+          else if (cmd.op === 'vpnOverview') out = await readVpnOverview(acc.restId);
+          else {
+            const [post, tw] = await getXDB().query<[Array<{ recipe?: string; verdict?: { direction?: 'out' | 'in' | 'none' } }>, Array<{ text?: string }>]>(
+              `SELECT recipe, verdict FROM type::record('x_vpn_post', $id); SELECT text FROM x_tweet WHERE tweet_id = $id;`, { id: cmd.tweetId });
+            const text = tw?.[0]?.text ?? '';
+            const lang = replyLangOf(text);
+            out = await draftAskReply({ account: acc.restId, tweet: text, person: {}, mode: 'vpn',
+              vpn: { link: vpnLink(lang, acc.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction } });
           }
         } else if (cmd.op === 'engageScreen') {
           out = await screenEngage(cmd.wsId, cmd.restId, cmd.handle);

@@ -41,6 +41,10 @@ import { readEngageOverview } from './x-engage-repo';
 import { collectEngagement } from './x-engage-collect';
 import { prepareEngage, screenEngage } from './x-engage-prepare';
 import { readLeftTweet } from './x-left-tweet';
+import { getXDB } from '@storage/surreal/client';
+import { findVpnPosts, judgeVpnPosts, prepareVpn, readVpnOverview, setVpnHuman } from './x-vpn-run';
+import { replyLangOf, vpnLink } from './x-vpn-help';
+import type { ReplyLang } from '@shared/types/x-reply-types';
 import { DEFER_DAYS, recordDefer } from './x-defer-repo';
 import { loadEngageThread } from './x-engage-thread';
 import { listRelationJobs, startRelationTask } from './x-relation-task';
@@ -60,6 +64,9 @@ const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
  * ⭐⭐ 读关系要知道看哪个号(1.2.27)—— 这个 ws 记的登录号的数字 id。
  * ⚠️ 没认出来就**明说**,不退回「全库那份」(那正是互相覆盖的老问题)。
  */
+/** 卡片的三种模式:求关 / 互动 / 回复求助 —— 其余一律当求关 */
+const modeOf = (m: unknown): 'ask' | 'engage' | 'vpn' => (m === 'engage' || m === 'vpn' ? m : 'ask');
+
 async function accountOfWs(wsId: unknown): Promise<{ restId: string } | { reason: string }> {
   if (typeof wsId !== 'string' || wsId === '') return { reason: '[x.data] 缺 wsId —— 关系按号存,不知道看哪个号' };
   const a = await readWsAccount(wsId);
@@ -469,6 +476,39 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           return { status: 'ok', value: await readEngageOverview(acc.restId, ws?.handle ?? '', p.limit) };
         }
 
+        case 'vpnFind': {
+          const r = await findVpnPosts(p.wsId as string);
+          return r.ok ? { status: 'ok', value: r } : failed(r.why);
+        }
+
+        case 'vpnJudge': {
+          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 50) return failed('[x.data] vpnJudge 的 limit 要 1–50');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await judgeVpnPosts(acc.restId, p.limit) };
+        }
+
+        case 'vpnOverview': {
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await readVpnOverview(acc.restId) };
+        }
+
+        case 'vpnHuman': {
+          if (typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId) || (p.human !== 'accept' && p.human !== 'reject')) return failed('[x.data] vpnHuman 要推文 id + accept/reject');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          await setVpnHuman(acc.restId, p.tweetId, p.human);
+          return { status: 'ok', value: true };
+        }
+
+        case 'vpnPrepare': {
+          if (typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId)) return failed('[x.data] vpnPrepare 要推文 id');
+          const acc = await accountOfWs(p.wsId);
+          if ('reason' in acc) return failed(acc.reason);
+          return { status: 'ok', value: await prepareVpn(p.wsId as string, acc.restId, p.tweetId) };
+        }
+
         case 'engageScreen': {
           if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '') return failed('[x.data] engageScreen 要数字 id + handle');
           const r = await screenEngage(p.wsId as string, p.restId, p.handle, typeof p.hisAt === 'string' ? p.hisAt : undefined);
@@ -513,14 +553,14 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] deferPerson 要数字 id');
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
-          await recordDefer(acc.restId, p.restId, p.mode === 'engage' ? 'engage' : 'ask', typeof p.tweetId === 'string' && p.tweetId !== '' ? p.tweetId : undefined);
+          await recordDefer(acc.restId, p.restId, modeOf(p.mode), typeof p.tweetId === 'string' && p.tweetId !== '' ? p.tweetId : undefined);
           return { status: 'ok', value: { days: DEFER_DAYS } };
         }
 
         case 'draftRules': {
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readDraftRules(acc.restId, p.mode === 'engage' ? 'engage' : 'ask') };
+          return { status: 'ok', value: await readDraftRules(acc.restId, modeOf(p.mode)) };
         }
 
         case 'draftRuleActive': {
@@ -537,7 +577,19 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if ('reason' in acc) return failed(acc.reason);
           const rv = p.revise as { previous?: unknown; note?: unknown; keep?: unknown } | undefined;
           if (rv !== undefined && (typeof rv.previous !== 'string' || typeof rv.note !== 'string' || rv.note.trim() === '')) return failed('[x.data] 点评要上一版 + 点评内容');
-          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode: p.mode === 'engage' ? 'engage' : 'ask',
+          const mode = modeOf(p.mode);
+          /** ⭐ 回复求助:试用链接(按这条帖子的配方打来源标识)/ 语言 / 方向 —— 从名单里这条读 */
+          let vpn: { link: string; lang: ReplyLang; direction?: 'out' | 'in' | 'none' } | undefined;
+          if (mode === 'vpn') {
+            if (typeof p.tweetId !== 'string' || p.tweetId === '') return failed('[x.data] 回复求助草拟要 tweetId');
+            const me = await readWsAccount(p.wsId as string);
+            if (!me?.handle) return failed('认不出登录的号');
+            const [post] = await getXDB().query<[Array<{ recipe?: string; verdict?: { direction?: 'out' | 'in' | 'none' } }>]>(
+              `SELECT recipe, verdict FROM type::record('x_vpn_post', $id)`, { id: p.tweetId });
+            const lang = replyLangOf(p.tweetText);
+            vpn = { link: vpnLink(lang, me.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction };
+          }
+          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode, vpn,
             context: typeof p.context === 'string' ? p.context : undefined,
             revise: rv ? { previous: rv.previous as string, note: (rv.note as string).trim(), keep: rv.keep === true } : undefined });
           traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-ask-draft' : 'x-ask-draft-failed', pageId: 'x-data',
@@ -551,7 +603,7 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           const r = await runAsk({ wsId: p.wsId, restId: p.restId, handle: p.handle, tweetId: p.tweetId,
             tweetText: p.tweetText, pickKind: p.pickKind, reply: p.reply,
             aiText: typeof p.aiText === 'string' && p.aiText !== '' ? p.aiText : undefined,
-            mode: p.mode === 'engage' ? 'engage' : 'ask' });
+            mode: modeOf(p.mode) });
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-run', pageId: 'x-data',
             detail: { handle: p.handle, tweetId: p.tweetId, ok: r.ok, blocked: r.blocked, liked: r.liked, replied: r.replied,
               followed: r.followed, failedStep: r.failedStep, detail: r.detail } });

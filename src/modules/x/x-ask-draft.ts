@@ -19,6 +19,8 @@
 import { getXDB } from '@storage/surreal/client';
 import { callOllamaChat } from '@platform/main/local-llm/ollama-client';
 import { googleTranslate } from '@platform/main/learning/providers/google-translate';
+import { buildVpnReplyPrompt, cleanVpnDraft } from './x-vpn-help';
+import type { ReplyLang } from '@shared/types/x-reply-types';
 
 export const ASK_DRAFT_MODEL = 'gemma4:12b';
 const MAX_EXAMPLES = 12;
@@ -43,7 +45,7 @@ export function buildAskDraftPrompt(input: {
    * ⭐ engage = 对已经互关的朋友日常互动(2026-10-22):接住他说的话回应,**不求关、不提互关**;
    * 回他找我的那一条时,就是回应他对我说的话
    */
-  readonly mode?: 'ask' | 'engage';
+  readonly mode?: 'ask' | 'engage' | 'vpn';
   /** ⭐ 对话上文(原帖 → 来回 → 要回的这条;2026-10-22)—— 有就附上,回复才接得上 */
   readonly context?: string;
   /** ⭐ 你的长期要求(勾了「以后都这样」的点评)—— 优先于范例的口吻 */
@@ -85,8 +87,9 @@ export function cleanAskDraft(raw: string): { readonly text: string } | { readon
 }
 
 /** 范例:你亲手写、发出去的(最新的在前)—— 求关取 x_ask,互动取 x_engage(两种口吻各学各的) */
-export async function readAskExamples(account: string, mode: 'ask' | 'engage' = 'ask'): Promise<AskExample[]> {
-  const table = mode === 'engage' ? 'x_engage' : 'x_ask';
+export async function readAskExamples(account: string, mode: 'ask' | 'engage' | 'vpn' = 'ask'): Promise<AskExample[]> {
+  /** 三种口吻各学各的:求关 x_ask / 互动 x_engage / 回复求助 x_vpn_reply */
+  const table = mode === 'engage' ? 'x_engage' : mode === 'vpn' ? 'x_vpn_reply' : 'x_ask';
   const [rows] = await getXDB().query<[Array<{ tweet_text: string; reply_text: string; at: string }>]>(
     `SELECT tweet_text, reply_text, <string> at AS at FROM ${table}
        WHERE account = $a AND reply_source = 'human' AND replied = 'ok' AND reply_text != '' ORDER BY at DESC LIMIT $n`,
@@ -96,7 +99,7 @@ export async function readAskExamples(account: string, mode: 'ask' | 'engage' = 
 }
 
 /** ⭐ 长期要求(勾了「以后都这样」且还生效的),先到的在前 */
-export async function readDraftRules(account: string, mode: 'ask' | 'engage'): Promise<Array<{ id: string; note: string; at: string }>> {
+export async function readDraftRules(account: string, mode: 'ask' | 'engage' | 'vpn'): Promise<Array<{ id: string; note: string; at: string }>> {
   const [rows] = await getXDB().query<[Array<{ id: string; note: string; at: string }>]>(
     `SELECT <string> record::id(id) AS id, note, <string> at AS at FROM x_draft_note WHERE account = $a AND mode = $m AND keep = true AND active = true ORDER BY at ASC`,
     { a: account, m: mode },
@@ -106,7 +109,7 @@ export async function readDraftRules(account: string, mode: 'ask' | 'engage'): P
 
 /** 记一次点评(只追加);写不上就抛,不假装记住了 */
 export async function recordDraftNote(n: {
-  readonly account: string; readonly mode: 'ask' | 'engage'; readonly note: string; readonly keep: boolean;
+  readonly account: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly note: string; readonly keep: boolean;
   readonly tweet: string; readonly before?: string; readonly after?: string;
 }): Promise<void> {
   const [rows] = await getXDB().query<[unknown[]]>(
@@ -138,12 +141,15 @@ export async function draftAskReply(input: {
   readonly account: string;
   readonly tweet: string;
   readonly person: { readonly name?: string; readonly bio?: string };
-  readonly mode?: 'ask' | 'engage';
+  readonly mode?: 'ask' | 'engage' | 'vpn';
   readonly context?: string;
   /** ⭐ 按点评改上一版;keep = 以后都这样(成长期要求) */
   readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean };
+  /** ⭐ 回复求助(mode = vpn,2026-10-23):试用链接(逐字、带来源标识)/ 语言 / 他要出去还是回国 */
+  readonly vpn?: { readonly link: string; readonly lang: ReplyLang; readonly direction?: 'out' | 'in' | 'none' };
 }): Promise<AskDraft> {
   const mode = input.mode ?? 'ask';
+  if (mode === 'vpn' && !input.vpn) return { ok: false, why: '回复求助缺试用链接' };
   const examples = await readAskExamples(input.account, mode);
   /**
    * 这次勾了「以后都这样」:这一次就当长期要求用;**草稿成了才记成长期要求**
@@ -157,15 +163,19 @@ export async function draftAskReply(input: {
      * ⚠️ think: false —— Gemma 4 默认先思考:真机一条 30~80 秒(5 条里 3 条 90 秒超时);关掉 1~2 秒,质量差不多(2026-10-21 实测)
      */
     raw = (await callOllamaChat({
-      model: ASK_DRAFT_MODEL, messages: buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode, context: input.context, rules,
-        revise: input.revise ? { previous: input.revise.previous, note: input.revise.note } : undefined }),
+      model: ASK_DRAFT_MODEL,
+      messages: mode === 'vpn' && input.vpn
+        ? buildVpnReplyPrompt({ tweet: input.tweet, lang: input.vpn.lang, link: input.vpn.link, direction: input.vpn.direction, context: input.context, examples, rules,
+          revise: input.revise ? { previous: input.revise.previous, note: input.revise.note } : undefined })
+        : buildAskDraftPrompt({ examples, tweet: input.tweet, person: input.person, mode: input.mode, context: input.context, rules,
+          revise: input.revise ? { previous: input.revise.previous, note: input.revise.note } : undefined }),
       think: false, temperature: 0.8, timeoutMs: 60_000,
     })).content;
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
     return { ok: false, why: /model.*not found|404/i.test(why) ? `本机还没装 ${ASK_DRAFT_MODEL}(ollama pull ${ASK_DRAFT_MODEL})` : `Gemma 没回:${why}` };
   }
-  const c = cleanAskDraft(raw);
+  const c = mode === 'vpn' && input.vpn ? cleanVpnDraft(raw, input.vpn.link) : cleanAskDraft(raw);
   const ms = Date.now() - t0;
   if ('problem' in c) {
     console.warn(`[x.ask-draft] 草稿不合格:${c.problem} —— 原文「${clip(raw, 80)}」`);
