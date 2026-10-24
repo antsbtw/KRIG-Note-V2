@@ -241,3 +241,14 @@ DDL 在临时内存库实测(加字段 + 真写一行读回)。
 - 真机发现 1 个:认号时网页没开被 identifyAccount 判成 failed(别的能力都是 refused)→ 能力加 preflight,已修(32596977)。
 - ⚠️ 巡检走执行器这条**真机没验到**:回归时三件事已经从收件箱做过,巡检到点都不需要做(一行不打,也对)。单测覆盖(含被拒接着看下一件);
   明天自然到点后用 `flow.calls.recent { caller: 'timer' }` 看。
+
+### 第 3 步第 3b 批 采集流水线(10 个)+ 执行器「带锁进来」—— 2026-10-24 ✅ Windows 测试机真机过(带锁那条待界面触发)
+
+- 执行器 `Need.reuse`:界面先占住网页再请主进程干活时带 token —— 只核对是持有者(不是 refused),不申请,不替它放。
+- `x-capabilities-collect.ts`:搜索截获 / 人卡采主页 / 停止采集 / 刷新资料 / 存推文 / 存人 / 核对落库 / 抽查轮询(probe)/ 抽查查库 / 扫互关倾向。
+- `x-save-batch.ts`:存推文 / 存人 / 记账本一份(原样从 IPC 搬出);核对落库不再绕回 IPC。搜索函数只接受带锁调用(ownToken 必填)。
+- IPC switch 只剩 12 个:对外动作 3(askRun / followQueueAdd / followQueueControl)/ AI 2(vpnJudge / askDraft)/ 底座 4(syncHost / pageAcquire / pageRelease / pageBusy)/ 界面流程上报 3(log*)。
+- 真机:搜索截获、采主页(不带锁 → 自己占自己放)都跑通;编的 token → refused「带来的锁不是它现在的持有者」;模拟操作台占着 → 搜索让路;
+  采主页中别人被拒(锁上「采 @antsbtw x.profile」);老收件箱 searchScroll 指令走执行器;抽查 / 扫互关倾向(7813 人)/ 停止采集 ok;空记录 / 有人没 listSource → invalid;锁对账 ✓。
+- ⚠️ 「带锁进来」**真机没验到**:要从界面发起(人卡「采推文」/ 操作台「采这一页」),收件箱拿不到界面的锁;靠单测(含编的 token 被拒的真机验证)。
+  用户下次在人卡点采推文后,`flow.calls.recent { capability: 'x.person.collectTab', caller: 'ui' }` 看。
