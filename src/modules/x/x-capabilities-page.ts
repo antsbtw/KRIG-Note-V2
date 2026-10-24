@@ -21,6 +21,7 @@ import { collectEngagementWith } from './x-engage-collect';
 import { followQueueStatus } from './x-follow-queue';
 import { webviewPorts } from './x-collect-ports';
 import { X_PAGE_NAME } from './x-pages';
+import { getXHostState } from './x-host-registry';
 
 const input = <I extends O>(def: Parameters<typeof xCap<I>>[1]): void => xCap('input', def);
 const control = <I extends O>(def: Parameters<typeof xCap<I>>[1]): void => xCap('control', def);
@@ -31,6 +32,8 @@ export function registerXPageCapabilities(): void {
   control({
     id: 'x.account.identify', describe: '认出这个 X 网页登录的是哪个号(handle + 数字 id);要拿数字 id 时会开一次自己的主页',
     inputDoc: WS, parse: (o) => ({ wsId: str(o, 'wsId') }),
+    /** 网页没开 = 没动手(refused),和别的能力一致(2026-10-24 Windows 真机:原来 identifyAccount 判成 failed) */
+    preflight: (i) => (getXHostState(i.wsId) ? null : 'X 网页没开,认不了号'),
     run: async (i) => {
       const r = await identifyAccount(i.wsId);
       traceRecorder.lifecycle({

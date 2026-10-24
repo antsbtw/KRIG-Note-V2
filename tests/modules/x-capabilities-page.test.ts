@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   heldAs: [] as Array<[string, string | null]>,
   ret: {} as Record<string, unknown>,
   queueBusy: false,
+  noHost: false,
   /** 采互动被调那一刻,带进来的 token 是不是正持有网页 */
   tokenHeld: null as boolean | null,
 }));
@@ -26,7 +27,7 @@ vi.mock('@storage/surreal/client', () => ({
   getXDB: () => ({ query: async () => [[]] }),
 }));
 vi.mock('@platform/main/web-capability/wiring/runtime', () => ({ traceRecorder: { lifecycle: () => undefined } }));
-vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7, url: '' }), listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
+vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => (h.noHost ? null : { wcId: 7, url: '' }), listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
 
 /** 「干活」函数:记参数 + 记下此刻网页锁上写着什么,回 h.ret[name] */
 const work = (name: string, dflt: unknown) => async (...a: unknown[]): Promise<unknown> => {
@@ -78,7 +79,7 @@ const PAGE: Row[] = [
 
 beforeEach(() => {
   _resetLocks();
-  h.rows.length = 0; h.calls.length = 0; h.heldAs.length = 0; h.ret = {}; h.queueBusy = false;
+  h.rows.length = 0; h.calls.length = 0; h.heldAs.length = 0; h.ret = {}; h.queueBusy = false; h.noHost = false;
   h.account = { wsId: 'ws-1', handle: 'me', restId: 'ME' };
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -171,6 +172,10 @@ describe('认号(例外:不声明占网页)', () => {
     expect(await execute('x.account.identify', ws, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused', why: '等它空了再认' });
     h.ret.identifyAccount = { status: 'failed', reason: '找不到数字 id' };
     expect(await execute('x.account.identify', ws, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'failed' });
+    /** 网页没开 = 没动手(2026-10-24 Windows 真机:原来判成 failed),不去调 identifyAccount */
+    h.noHost = true; h.heldAs.length = 0;
+    expect(await execute('x.account.identify', ws, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused', why: 'X 网页没开,认不了号' });
+    expect(h.heldAs).toEqual([]);
   });
 });
 
