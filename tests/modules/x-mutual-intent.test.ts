@@ -116,7 +116,9 @@ describe('接线(M1 + M2)', () => {
   const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
   it('IPC 有 scan / set 两个 op,页面真的调;迁移 1.2.29 / 1.2.30 已登记', () => {
     const IPC = read('src/modules/x/x-data-ipc.ts');
-    expect(IPC).toMatch(/case 'scanMutualIntent': \{\s*const r = await scanMutualIntent\(\);/);
+    /** 2026-10-24 scanMutualIntent 迁到能力 x.intent.scan(x-capabilities-collect.ts) */
+    expect(capOfOp(IPC, 'scanMutualIntent')).toBe('x.intent.scan');
+    expect(capBlock('x.intent.scan')).toMatch(/const r = await scanMutualIntent\(\);/);
     /** 2026-10-24 setMutualIntent 迁到能力 x.person.setMutualIntent(x-capabilities-write.ts) */
     expect(capOfOp(IPC, 'setMutualIntent')).toBe('x.person.setMutualIntent');
     expect(capBlock('x.person.setMutualIntent')).toMatch(/await setMutualIntent\(i\.restId, i\.value\)/);

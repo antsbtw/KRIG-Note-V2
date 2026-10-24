@@ -189,6 +189,37 @@ describe('⭐ 状态轮询(用户 10-24:「全记,只留 7 天」)', () => {
   });
 });
 
+describe('⭐ 带着锁进来(界面已经占住网页,再请主进程干活 —— 第 3 步 3b)', () => {
+  const reuse = cap.defineCapability<{ token?: string }, string | null>({
+    id: 'demo.reuse', kind: 'input', describe: '带锁进来(测试用)', inputDoc: {},
+    parse: (raw) => ({ token: (raw as { token?: string })?.token }),
+    prepare: async (i) => ({ needs: [{ resource: 'page:7', purpose: '演示', label: '测试网页', reuse: i.token }], ctx: undefined }),
+    run: async () => lock.lockHolder('page:7')?.purpose ?? null,
+  });
+  it('带来的 token 正持有 → 不再申请、照常跑、跑完不替它放', async () => {
+    const mine = lock.acquireLock('page:7', '界面:人卡采主页', 'ui');
+    if (!mine.ok) throw new Error('应拿到');
+    const r = await cap.execute(reuse.id, { token: mine.token }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: '界面:人卡采主页' });
+    expect(lock.holdsLock(mine.token, 'page:7')).toBe(true);
+    lock.releaseLock(mine.token);
+  });
+  it('带来的 token 不是持有者(过期 / 别人的 / 编的)→ refused,别人的锁不动', async () => {
+    const other = lock.acquireLock('page:7', '任务:查回关', 'timer');
+    if (!other.ok) throw new Error('应拿到');
+    const r = await cap.execute(reuse.id, { token: 'page:7#假的' }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'refused' });
+    if (!r.ok) expect(r.why).toContain('带来的锁');
+    expect(lock.lockHolder('page:7')?.token).toBe(other.token);
+    lock.releaseLock(other.token);
+  });
+  it('不带 token → 自己申请、跑完放', async () => {
+    const r = await cap.execute(reuse.id, {}, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: '演示' });
+    expect(lock.lockHolder('page:7')).toBeNull();
+  });
+});
+
 describe('能力目录(给 AI 读)', () => {
   it('列得出 id / kind / describe / inputDoc', () => {
     expect(cap.listCapabilities()).toContainEqual({ id: 'demo.double', kind: 'input', describe: '把 n 翻倍(测试用)', inputDoc: { n: '整数 0–100' } });

@@ -6,6 +6,7 @@
  * ⚠️ SQL 在真库上的行为本文件证明不了 —— 交付前在临时库演练。
  */
 import { describe, it, expect } from 'vitest';
+import { saveFnBody } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { authorsFromTweets, buildAuthorUpsert, TWEET_AUTHOR_FIELDS } from '@modules/x/x-tweet-authors';
@@ -97,14 +98,15 @@ describe('「互不关注」与「关系不明」', () => {
 });
 
 describe('接线', () => {
-  const IPC = read('src/modules/x/x-data-ipc.ts');
-  const body = IPC.slice(IPC.indexOf("case 'saveTweets':"), IPC.indexOf("case 'saveUsers':"));
+  /** 2026-10-24 存推文搬到 x-save-batch.ts saveTweetBatch(能力 x.tweet.save) */
+  void read;
+  const body = saveFnBody('saveTweetBatch');
 
   it('⭐⭐⭐ 存推文后顺带写作者,对回配方名,并记账(否则对账差出这批新人)', () => {
     expect(body.length).toBeGreaterThan(500);
-    expect(body).toMatch(/recipeNameForQuery\(p\.ctx\?\.searchRecipe, recipes\)/);
+    expect(body).toMatch(/recipeNameForQuery\(ctx\?\.searchRecipe, recipes\)/);
     /** ⭐ 1.2.27:作者的关系是采集网页登录的号看到的 —— 先认号,再按号写 */
-    expect(body).toMatch(/const account = await accountForWrite\(p\.ctx\?\.wcId\);\s*const a = await saveTweetAuthors\(p\.records, recipeName, account\)/);
+    expect(body).toMatch(/const account = await accountForWrite\(ctx\?\.wcId\);\s*const a = await saveTweetAuthors\(records, recipeName, account\)/);
     expect(body).toMatch(/kind: 'users', source: 'tweet-authors'/);
   });
 
@@ -112,7 +114,8 @@ describe('接线', () => {
     const i = body.indexOf('await saveTweetAuthors');
     const tryAt = body.lastIndexOf('try {', i);
     expect(tryAt, '写作者不在 try 里').toBeGreaterThan(-1);
-    const catchBody = body.slice(body.indexOf('} catch (e) {', i), body.indexOf("return { status: 'ok', value: r };", i));
+    const catchBody = body.slice(body.indexOf('} catch (e) {', i), body.indexOf('return { ...r, stats', i));
+    expect(catchBody.length).toBeGreaterThan(30);
     expect(catchBody).toMatch(/traceRecorder\.lifecycle/);
     expect(catchBody).not.toMatch(/return failed/);
   });

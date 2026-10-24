@@ -21,7 +21,7 @@
  *
  * ⚠️ 只在主进程用(模块级登记表每进程一份)。renderer 经各模块的 IPC 调。
  */
-import { acquireLock, releaseLock } from '../flow/resource-lock';
+import { acquireLock, holdsLock, releaseLock } from '../flow/resource-lock';
 import { recordCall } from '../flow/flow-run-repo';
 
 export type CapabilityKind = 'input' | 'control' | 'output';
@@ -35,7 +35,14 @@ export type CapResult<T> =
  * 要占的资源(如 `page:<wcId>`);purpose 给被拒的人看;
  * label = 被拒时怎么称呼这个资源(如「X 网页」)—— 平台不认识业务,由模块给,不给就用资源键
  */
-export type Need = { readonly resource: string; readonly purpose: string; readonly label?: string };
+export type Need = {
+  readonly resource: string; readonly purpose: string; readonly label?: string;
+  /**
+   * 调用方已经占着这个资源(界面先占住网页、再请主进程干活):带上它的 token。
+   * 执行器只核对它真是现在的持有者(不是就 refused),不再申请,跑完也不替它放。
+   */
+  readonly reuse?: string;
+};
 
 export type Prepared<C> = { readonly refused: string } | { readonly needs?: readonly Need[]; readonly ctx: C };
 
@@ -125,9 +132,11 @@ export async function execute(
   let input: unknown;
   let subjectRef: string | undefined;
   const held = new Map<string, string>();
+  /** 带进来的锁:用,但不放 */
+  const reused = new Set<string>();
 
   const finish = async (r: CapResult<unknown>, output?: Record<string, unknown>): Promise<CapResult<unknown>> => {
-    for (const token of [...held.values()].reverse()) releaseLock(token);
+    for (const token of [...held.values()].reverse()) if (!reused.has(token)) releaseLock(token);
     held.clear();
     const durationMs = Date.now() - t0;
     const tail = r.ok ? '' : ` —— ${r.why}`;
@@ -158,6 +167,14 @@ export async function execute(
   if ('refused' in prep) return finish({ ok: false, kind: 'refused', why: prep.refused, callId });
 
   for (const n of prep.needs ?? []) {
+    if (n.reuse !== undefined) {
+      if (!holdsLock(n.reuse, n.resource)) {
+        return finish({ ok: false, kind: 'refused', why: `${n.label ?? `${n.resource} `}正忙:带来的锁不是它现在的持有者(超时被收回 / 已放 / 拿错了)—— 没动手`, callId });
+      }
+      held.set(n.resource, n.reuse);
+      reused.add(n.reuse);
+      continue;
+    }
     const a = acquireLock(n.resource, n.purpose, opts.caller);
     if (!a.ok) {
       const why = `${n.label ?? `${n.resource} `}正忙:${a.why}`;

@@ -6,6 +6,7 @@
  * 旧测试只放一个 bottom 游标,搜索翻页往错方向翻了两周没被抓到。
  */
 import { describe, it, expect } from 'vitest';
+import { capBlock } from './_x-ipc-wiring';
 import { directionWrong, pageProblem } from '@modules/x/x-page-ledger';
 import { censusByManual as censusPage } from '@modules/x/x-manual';
 import { runCollect, isChronological, type RunDeps } from '@modules/x/x-collect-run';
@@ -165,11 +166,11 @@ describe('⭐⭐⭐ runCollect 逐页账:对上才往下翻;对不上重采一�
 describe('接线', () => {
   const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
   it('savePageVerify 复用 saveTweets / saveUsers 分支后按 id 回读;操作台每页调它;报告有逐页账', () => {
-    const IPC = read('src/modules/x/x-data-ipc.ts');
-    const body = IPC.slice(IPC.indexOf("case 'savePageVerify':"), IPC.indexOf('default:', IPC.indexOf("case 'savePageVerify':")));
+    /** 2026-10-24 迁到能力 x.page.saveVerify:直接调存库那一份(不再绕回 IPC) */
+    const body = capBlock('x.page.saveVerify');
     expect(body.length).toBeGreaterThan(200);
-    expect(body).toMatch(/await handle\(\{ op: 'saveTweets', records: tweets, ctx: p\.tweetCtx \}\)/);
-    expect(body).toMatch(/await handle\(\{ op: 'saveUsers', records: users, ctx: p\.userCtx \}\)/);
+    expect(body).toMatch(/await saveTweetBatch\(i\.tweets, i\.tweetCtx\)/);
+    expect(body).toMatch(/await saveUserBatch\(i\.users, i\.userCtx\)/);
     expect(body).toMatch(/existingTweetIds\(/);
     expect(body).toMatch(/existingUserIds\(/);
     expect(read('src/modules/x/XConsole.tsx')).toMatch(/savePage: async \(\{ tweets, users \}\) => \{[\s\S]{0,600}op: 'savePageVerify'/);
@@ -189,7 +190,8 @@ describe('⭐⭐⭐ 操作台搜索页走滚动截获(2026-10-16 真机 30 页�
     expect(branch).toMatch(/ownToken: lock\.token/);
     /** 分支在 runCollect 之前,且 return 掉 —— 不会两条路都跑 */
     expect(i).toBeLessThan(C.indexOf('const run = await runCollect({'));
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/p\.wantPages > 40\) return failed/);
+    /** 2026-10-24 页数上限在能力 x.search.scroll 的参数校验里 */
+    expect(capBlock('x.search.scroll')).toMatch(/wantPages: int\(o, 'wantPages', 1, 40\)/);
     /** 带来的 token 必须真是这个网页现在的持有者(过期 / 别的网页的锁不能混进来) */
     expect(read('src/modules/x/x-search-scroll.ts')).toMatch(/if \(!holdsPage\(input\.ownToken, wcId\)\) return/);
   });

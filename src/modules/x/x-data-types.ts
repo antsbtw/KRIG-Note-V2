@@ -225,6 +225,8 @@ export type XDataInvoke =
       /** 范围起点 ISO;不给 = 全部 */
       readonly start?: string;
       readonly pageCap: number; readonly attempt: number;
+      /** ⭐ 界面已占住网页(人卡采主页):带上它的锁,能力执行器只核对、不再申请(Module5-04 第 3 步 3b) */
+      readonly ownToken?: string;
     }
   /** 正在跑的那次采集的最新一句进度(renderer 每秒问一次);没在跑回 null */
   | { readonly op: 'personCollectProgress'; readonly wcId: number }

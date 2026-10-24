@@ -247,6 +247,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
               start: start?.toISOString(),
               pageCap: settingsRef.current?.['collect.live_page_cap'] ?? LIVE_PAGE_CAP,
               attempt,
+              /** ⭐ 带着上面占住的锁进去(主进程能力只核对、不再申请) */
+              ownToken: lock.token,
             });
           } finally {
             done = true;

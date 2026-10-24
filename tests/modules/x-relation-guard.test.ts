@@ -9,7 +9,7 @@
  * 所以写入侧另有**行为**断言:拿带关系的载荷调纯函数,看 SQL 里有没有关系字段。
  */
 import { describe, it, expect } from 'vitest';
-import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
+import { capBlock, capOfOp, ipcHandles, readCapBlock, saveFnBody } from './_x-ipc-wiring';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildAuthorUpsert } from '@modules/x/x-tweet-authors';
@@ -114,9 +114,11 @@ describe('⭐⭐ 接线:写要认号,读要按号', () => {
   };
 
   it('写:saveUsers / saveTweets(作者)/ refreshPerson 都按采集网页认号', () => {
-    expect(caseBody('saveUsers')).toMatch(/saveUsers\(p\.records, p\.ctx, await accountForWrite\(p\.ctx\.wcId\)\)/);
-    expect(caseBody('saveTweets')).toMatch(/accountForWrite\(p\.ctx\?\.wcId\)/);
-    expect(caseBody('refreshPerson')).toMatch(/refreshPerson\(rec, await accountForWrite\(p\.wcId\)\)/);
+    /** 2026-10-24 三个都迁走:存人 / 存推文在 x-save-batch.ts,刷新资料在能力 x.person.refresh */
+    void caseBody;
+    expect(saveFnBody('saveUserBatch')).toMatch(/saveUsers\(records, ctx, await accountForWrite\(ctx\.wcId\)\)/);
+    expect(saveFnBody('saveTweetBatch')).toMatch(/accountForWrite\(ctx\?\.wcId\)/);
+    expect(capBlock('x.person.refresh')).toMatch(/refreshPerson\(rec, await accountForWrite\(i\.wcId\)\)/);
   });
 
   it('读:概览 / 列表 / 人卡 / 朋友圈 / 状态页都先拿这个 ws 的号,没有就明说', () => {

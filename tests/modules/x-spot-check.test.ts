@@ -3,6 +3,7 @@
  * 用户:「在左边x的原图增加关联方法,增加一个右键菜单,由用户抽查好了…如果没有,代表着没有成功采集」
  */
 import { describe, it, expect, vi } from 'vitest';
+import { capBlock, ipcHandles } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -50,8 +51,10 @@ describe('抽查', async () => {
     expect(read('src/modules/x/XWebView.tsx')).toMatch(/bus\.slot\.openRight\(X_OPS_VIEW_ID\)/);
     expect(read('src/modules/x/XOpsView.tsx')).toMatch(/<XSpotCard wsId=\{workspaceId\} \/>/);
     const IPC = read('src/modules/x/x-data-ipc.ts');
-    expect(IPC).toMatch(/case 'spotCheckPoll':/);
-    expect(IPC).toMatch(/lookupSpot\(acc\?\.restId \?\? '', \{ kind: p\.kind, tweetId: p\.tweetId, handle: p\.handle \}\)/);
+    /** 2026-10-24 两个都迁到能力 x.spot.poll / x.spot.lookup */
+    expect(ipcHandles(IPC, 'spotCheckPoll')).toBe(true);
+    expect(ipcHandles(IPC, 'spotCheckLookup')).toBe(true);
+    expect(capBlock('x.spot.lookup')).toMatch(/lookupSpot\(\(await readWsAccount\(i\.wsId\)\)\?\.restId \?\? '', \{ kind: i\.kind, tweetId: i\.tweetId, handle: i\.handle \}\)/);
   });
 });
 

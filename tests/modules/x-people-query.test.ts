@@ -5,7 +5,7 @@
  * 这里钉:分组口径、事实只从三标记来、身份按 rest_id、用户输入走参数、接线不断。
  */
 import { describe, it, expect } from 'vitest';
-import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
+import { capBlock, capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -428,7 +428,8 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
     const btn = PAGE.slice(PAGE.indexOf('onCancelCollect={'), PAGE.indexOf('onCancelCollect={') + 300);
     expect(btn, '停止按钮没通知主进程 —— 翻页停不住').toMatch(/op: 'cancelPersonCollect', wcId/);
     expect(MAIN, '主进程没把停止标记接给 runCollect').toMatch(/cancelled: \(\) => ctl\.cancelled/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'cancelPersonCollect':[\s\S]{0,120}cancelPersonCollect\(p\.wcId\)/);
+    /** 2026-10-24 迁到能力 x.person.cancelCollect */
+    expect(capBlock('x.person.cancelCollect')).toMatch(/cancelPersonCollect\(i\.wcId\)/);
   });
 
   it('⭐ 推文走 saveTweets(作者顺带进人表),来源记成哪一页', () => {

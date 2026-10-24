@@ -16,7 +16,6 @@ import { replyLangOf, vpnLink } from './x-vpn-help';
 import { app } from 'electron';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { collectSearchByScroll } from './x-search-scroll';
 import { collectPersonTab } from './x-person-collect';
 import { getXHostState } from './x-host-registry';
 import { acquirePage, releasePage } from './x-page-lock';
@@ -249,7 +248,7 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
       out = await runUserList(cmd);
     } else {
       console.log(`[x.dev] 执行 ${next}:${cmd.op}「${cmd.q.slice(0, 40)}」最多 ${cmd.wantPages} 页`);
-      out = await collectSearchByScroll({ ...cmd, ownToken: undefined, caller: 'inbox' });
+      out = await execute('x.search.scroll', { wsId: cmd.wsId, q: cmd.q, f: cmd.f, wantPages: cmd.wantPages, maxMs: cmd.maxMs, recipeName: cmd.recipeName }, { caller: 'inbox' });
     }
   } finally {
     sampling?.stop();

@@ -27,12 +27,12 @@ export function ipcHandles(ipc: string, op: string): boolean {
  * 找不到 = ''(调用方断言长度,免得假绿)
  */
 export function capBlock(id: string): string {
-  for (const f of ['src/modules/x/x-capabilities-read.ts', 'src/modules/x/x-capabilities-write.ts']) {
+  for (const f of ['src/modules/x/x-capabilities-read.ts', 'src/modules/x/x-capabilities-write.ts', 'src/modules/x/x-capabilities-page.ts', 'src/modules/x/x-capabilities-collect.ts']) {
     const src = read(f);
     const i = src.indexOf(`id: '${id}'`);
     if (i < 0) continue;
     const rest = src.slice(i);
-    const j = rest.search(/\n {2}(read|write)\(\{/);
+    const j = rest.search(/\n {2}(read|write|input|control)\(\{/);
     return j < 0 ? rest : rest.slice(0, j);
   }
   return '';
@@ -40,3 +40,12 @@ export function capBlock(id: string): string {
 /** 改库文件全文(看共用的小函数,如 jobOrRefuse) */
 export const WRITE_CAPS_SRC = (): string => read('src/modules/x/x-capabilities-write.ts');
 export const readCapBlock = capBlock;
+
+/** 存库那一份(x-save-batch.ts,2026-10-24 从 IPC 搬出)里某个导出函数的函数体;找不到 = '' */
+export function saveFnBody(name: string): string {
+  const src = read('src/modules/x/x-save-batch.ts');
+  const i = src.indexOf(`export async function ${name}(`);
+  if (i < 0) return '';
+  const j = src.indexOf('\nexport ', i + 10);
+  return src.slice(i, j < 0 ? undefined : j);
+}

@@ -2,6 +2,7 @@
  * ⭐⭐ 一批推文的统计(用户 10-16:「我们需要统计的是采集到的推文数,发推文的用户数,以及用户特征」)
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, saveFnBody } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { summarizeBatch, statsLine } from '@modules/x/x-batch-stats';
@@ -41,10 +42,13 @@ describe('显示名也是依据(10-16 真机明细:「米丽（蓝V互关）」�
 describe('接线', () => {
   it('saveTweets 算统计、留痕、回给页面;操作台显示', () => {
     const IPC = readFileSync(join(process.cwd(), 'src/modules/x/x-data-ipc.ts'), 'utf8');
-    const body = IPC.slice(IPC.indexOf("case 'saveTweets':"), IPC.indexOf("case 'saveUsers':"));
-    expect(body).toMatch(/const stats = summarizeBatch\(p\.records\);/);
-    expect(body).toMatch(/source: p\.ctx\?\.source \?\? '\(empty\)',\s*stats,/);
-    expect(body).toMatch(/value: \{ \.\.\.r, stats, statsLine: statsLine\(stats\) \}/);
+    /** 2026-10-24 存推文搬到 x-save-batch.ts saveTweetBatch(能力 x.tweet.save);IPC 只剩对照表 */
+    expect(capOfOp(IPC, 'saveTweets')).toBe('x.tweet.save');
+    const body = saveFnBody('saveTweetBatch');
+    expect(body.length).toBeGreaterThan(200);
+    expect(body).toMatch(/const stats = summarizeBatch\(records\);/);
+    expect(body).toMatch(/source: ctx\?\.source \?\? '\(empty\)', stats,/);
+    expect(body).toMatch(/return \{ \.\.\.r, stats, statsLine: statsLine\(stats\) \}/);
     expect(readFileSync(join(process.cwd(), 'src/modules/x/XConsole.tsx'), 'utf8')).toMatch(/setStep\(`本批:\$\{v\.statsLine\}`\s*\+ \(leak && leak\.seen > leak\.captured \? ` ｜ \$\{completenessLine\(leak\)\}` : ''\)\);/);
   });
 });

@@ -7,6 +7,7 @@
  * SQL 语义已在临时库验过(回关 / 改名 / 旧观察不改 / 一致)。
  */
 import { describe, it, expect } from 'vitest';
+import { capBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -127,7 +128,10 @@ describe('接线', () => {
 
   it('⭐ refreshPerson:契约 + handler;新人记账', () => {
     expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'refreshPerson'/);
-    const body = IPC.slice(IPC.indexOf("case 'refreshPerson':"), IPC.indexOf("case 'refreshPerson':") + 1200);
+    /** 2026-10-24 迁到能力 x.person.refresh */
+    void IPC;
+    const body = capBlock('x.person.refresh');
+    expect(body.length).toBeGreaterThan(200);
     expect(body).toMatch(/source: 'profile-refresh'/);
     expect(body).toMatch(/if \(d\.isNew\)/);
   });

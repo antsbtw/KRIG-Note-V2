@@ -5,7 +5,7 @@
 import { defineCapability, type Caller, type CapabilityKind } from '@platform/main/capability/capability';
 import { readWsAccount } from './x-account-repo';
 import type { Need } from '@platform/main/capability/capability';
-import { getXHostState } from './x-host-registry';
+import { getXHostState, listXHostStates } from './x-host-registry';
 import { pageResource } from './x-page-lock';
 import { DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, type PeopleFilter } from './x-people-query';
 
@@ -60,10 +60,16 @@ export function xCap<I extends O>(kind: CapabilityKind, def: {
   readonly account?: boolean;
   /** 要占这个 ws 的 X 网页:返回写在锁上的用途(被拒的人看得见) */
   readonly page?: (i: I) => string;
+  /** 参数给的是 wcId(界面直接给网页)而不是 wsId:按它找网页 */
+  readonly pageWc?: (i: I) => number;
+  /** 调用方已经占着网页(界面先占住再请主进程干活):它的 token;执行器只核对、不放 */
+  readonly reuse?: (i: I) => string | undefined;
   /** 额外的前提(如「关注队列正在动作」);返回原因 = refused */
   readonly preflight?: (i: I) => Promise<string | null> | string | null;
   readonly probe?: boolean;
   readonly subject?: (i: I) => string | undefined;
+  /** 记录里的输出摘要(输出很大时给;不给 = 原样,太大只记字段名) */
+  readonly summarize?: (out: unknown) => Record<string, unknown>;
   /** acc 只在 account: true 时有;page 只在声明了 page 时有 */
   readonly run: (i: I, acc: Acc, page: HeldPage, caller: Caller) => Promise<unknown> | unknown;
 }): void {
@@ -75,6 +81,7 @@ export function xCap<I extends O>(kind: CapabilityKind, def: {
     describe: def.describe,
     inputDoc: def.inputDoc,
     probe: def.probe,
+    summarize: def.summarize,
     parse: (raw) => {
       try {
         return def.parse(raw && typeof raw === 'object' ? (raw as O) : {});
@@ -94,9 +101,10 @@ export function xCap<I extends O>(kind: CapabilityKind, def: {
         const why = def.preflight ? await def.preflight(i) : null;
         if (why !== null) return { refused: why };
         if (!def.page) return { ctx: { acc } };
-        const p = pageNeed(i.wsId as string, def.page(i));
+        const p = def.pageWc ? pageNeedWc(def.pageWc(i), def.page(i)) : pageNeed(i.wsId as string, def.page(i));
         if ('refused' in p) return p;
-        return { needs: [p.need], ctx: { acc, wcId: p.wcId } };
+        const reuse = def.reuse?.(i);
+        return { needs: [reuse === undefined ? p.need : { ...p.need, reuse }], ctx: { acc, wcId: p.wcId } };
       }
       : undefined,
     run: async (i, ctx) => {
@@ -114,3 +122,9 @@ export function pageNeed(wsId: string, purpose: string): { wcId: number; need: N
   return { wcId, need: { resource: pageResource(wcId), purpose, label: 'X 网页' } };
 }
 
+
+/** 占某个 X 网页(界面直接给 wcId)—— 必须是登记过的 X 网页 */
+export function pageNeedWc(wcId: number, purpose: string): { wcId: number; need: Need } | { refused: string } {
+  if (wcId < 0 || ![...listXHostStates().values()].some((st) => st.wcId === wcId)) return { refused: wcId < 0 ? 'X 网页没开' : `X 网页 wc#${wcId} 没开 / 没登记` };
+  return { wcId, need: { resource: pageResource(wcId), purpose, label: 'X 网页' } };
+}

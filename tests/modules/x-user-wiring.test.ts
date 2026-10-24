@@ -15,7 +15,7 @@
  * ⚠️ 本文件证明「每一环都在且对得上」,**不是**「点了真会采到人」——那要真机。
  */
 import { describe, it, expect } from 'vitest';
-import { capBlock, capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
+import { capBlock, capOfOp, ipcHandles, readCapBlock, saveFnBody } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { X_USER_LIST_PAGES, PAGE_PARAMS } from '@modules/x/x-pages';
 
@@ -114,25 +114,24 @@ describe('一个入口:采到人就存', () => {
   });
 
   it('⭐⭐⭐ IPC 拒收空 listSource —— 它会永久留在人的档案里', () => {
-    const i = IPC.indexOf("case 'saveUsers':");
-    expect(i).toBeGreaterThan(-1);
-    const body = IPC.slice(i, IPC.indexOf("case 'delete':", i));
+    /** 2026-10-24 迁到能力 x.user.save:空 listSource 在参数校验里拒(invalid) */
+    const body = capBlock('x.user.save');
     expect(body.length).toBeGreaterThan(200);
-    expect(body).toMatch(/listSource !== 'string' \|\| p\.ctx\.listSource\.trim\(\) === ''/);
-    expect(body).toMatch(/return failed\(/);
+    expect(body).toMatch(/listSource !== 'string' \|\| ctx\.listSource\.trim\(\) === ''/);
+    expect(body).toMatch(/throw new Bad\(/);
   });
 
   it('⭐⭐⭐ 契约与 handler 两边都有 saveUsers', () => {
     /** ⚠️ 契约有、handler 没有 = 点了静默回「不认识的 op」 */
     expect(TYPES).toMatch(/op: 'saveUsers'/);
-    expect(IPC).toMatch(/case 'saveUsers':/);
+    expect(ipcHandles(IPC, 'saveUsers')).toBe(true);
     /** ⚠️ 同一行还会 import 别的(saveTweetAuthors)—— 钉「saveUsers 从 repo 来」,不钉整行字面 */
-    expect(IPC).toMatch(/import \{[^}]*\bsaveUsers\b[^}]*\} from '\.\/x-user-repo'/);
+    expect(require('node:fs').readFileSync(require('node:path').join(process.cwd(), 'src/modules/x/x-save-batch.ts'), 'utf8')).toMatch(/import \{[^}]*\bsaveUsers\b[^}]*\} from '\.\/x-user-repo'/);
   });
 
   it('⭐⭐ 落库结果落盘 —— 不然「报了 N 条库里 0 行」只能去猜', () => {
-    const i = IPC.indexOf("case 'saveUsers':");
-    const body = IPC.slice(i, IPC.indexOf("case 'delete':", i));
+    const body = saveFnBody('saveUserBatch');
+    expect(body.length).toBeGreaterThan(200);
     expect(body).toMatch(/traceRecorder\.lifecycle\(/);
     expect(body).toMatch(/x-save-users-ok/);
     expect(body).toMatch(/x-save-users-incomplete/);
