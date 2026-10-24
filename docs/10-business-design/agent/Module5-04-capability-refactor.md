@@ -129,7 +129,7 @@ type Result<T> =
 | 步 | 做什么 | 判据 |
 |---|---|---|
 | 1 ✅(10-23,Windows 测试机真机回归全过,见 step1-regression) | **资源锁**;4 个准备函数在采主页时上锁;`syncBusy` 退役;后台 `runningWc` 并入 | 测试:查回关持锁时操作台申请 → refused,且查回关的锁没被放掉;卡片准备期间巡检到点 → 让路 |
-| 2 | **能力契约 + 执行器 + 统一结果 + `krig_flow`**;先接 3 个形状差最大的:`x.engage.prepare`(占网页)、`x.vpn.find`(花搜索额度)、`x.engage.overview`(纯读库) | 三个入口各调一次,检查 / 锁 / 记录 / 结果一致;`flow_step_run` 有行(含 refused) |
+| 2 ✅(10-24,Windows 测试机真机全过,见 §7) | **能力契约 + 执行器 + 统一结果 + `krig_flow`**;先接 3 个形状差最大的:`x.engage.prepare`(占网页)、`x.vpn.find`(花搜索额度)、`x.engage.overview`(纯读库) | 三个入口各调一次,检查 / 锁 / 记录 / 结果一致;`flow_step_run` 有行(含 refused) |
 | 3 | **按批迁移其余能力**(读库类 → 采集类 → 输出类);收件箱改成「调任意能力」(白名单退役);定时器改走执行器 | x-data-ipc 的 switch 只剩转发;收件箱能调目录里任意能力 |
 | 4 | **流程搬回主进程**:取关(+ 异常即停)、点人核对、互动前过一轮、求助帖判断循环、找蓝V+扫倾向、采主页重试、卡片流程 | 界面组件里没有 `webDomInvoke` 直调和能力循环 |
 | 5 | **合并重复**:关注 / 取关 / 刷新资料各留一份;采集账写法统一 | grep 只剩一份实现 |
@@ -182,3 +182,26 @@ type Result<T> =
 **留痕 + 对账(10-23 补)**:锁的占住 / 放掉 / 拒绝各打一行 `[lock]`;`node scripts/lock-report.mjs` 自动对账
 (有没有两个任务同时占、有没有占了不放);体检报告多了 `x.page-lock`。
 **真机回归**按 [Module5-04-step1-regression.md](Module5-04-step1-regression.md) 做 —— 用户只需重启 app 照常用,对账由 AI 读日志。
+
+### 第 2 步 能力契约 + 执行器 + 统一结果 + krig_flow —— 2026-10-24 ✅ 完成
+
+**做了什么**
+- 平台层 `src/platform/main/capability/capability.ts`(不认识 X):`defineCapability / listCapabilities / execute`。
+  固定顺序:校验 → 前提检查(prepare)→ 占锁(needs)→ run → 放锁 → `recordCall` → 统一结果(ok / refused / failed / invalid)。
+  run 里没做成 `throw capFailed(why)`、不该做 `throw capRefused(why)`;别的异常算 failed 并响。被拒时资源叫什么由模块给(Need.label)。
+- `krig_flow` 1.1.0:`flow_step_run` 加 `caller / call_id`;单次调用 run_id = call_id、seq = 1、step_type = 能力类别。写仍只在 `flow-run-repo.ts`。
+- X:`src/modules/x/x-capabilities.ts` 登记 `x.engage.prepare`(占网页)、`x.vpn.find`(认号 + 额度 + 配方 + 整轮占网页,搜索带同一把锁 ownToken)、
+  `x.engage.overview`(纯读库)。旧 `prepareEngage / findVpnPosts` 删除,只剩「只干活」的 `prepareEngageOn / findVpnPostsWith`。
+- 入口:IPC 三个 op 只转发(`fromCap` 把统一结果转成 renderer 现在认的形状 —— 过渡);收件箱老 op 也走执行器,新增 `call`(调任意能力)/ `capabilities`(列目录)。
+- 平台能力 `flow.calls.recent`:按能力 / 调用方 / 结果读最近的调用 —— AI 自己回看「系统跑了什么」。
+
+**测试**:执行器 11 条 + X 三能力 11 条;注入 7 种违规各自变红(不放锁 / 被拒不记录 / 不查额度 / 搜索不带锁 / IPC 又自己认号 / 准备不占网页 / 没配方仍占网页);
+DDL 在临时内存库实测(加字段 + 真写一行读回)。
+
+**真机(Windows 测试机,2026-10-24)**:迁移 1.1.0 在真库跑成功;经收件箱 8 种调用结果都对;`flow.calls.recent` 读回 8 行,一次不少,含 refused / failed / invalid;锁对账 ✓。
+真机发现并修了两处:没配方时先占网页才失败 → 改成 refused 不占网页;采互动的搜索锁上记 main → 带上真实调用方(巡检 = timer)。
+
+**没覆盖 / 留给后面**
+- 界面(ui)这条入口真机没点到(AI 点不了界面),靠单测 + 接线守卫;用户下次正常用互动卡后用 `flow.calls.recent` 看有没有 caller = ui 的行。
+- renderer 还认旧 IPC 形状(`fromCap` 过渡);第 3 步铺开时一起改成认统一结果。
+- 定时器还没走执行器(这三个能力都不在定时器上),第 3 步改。
