@@ -5,6 +5,7 @@
  * 页面上的点击是否真的点对,只有真机验得出(脚本自己的逻辑在 x-dom-scripts.test 里用假页面跑过)。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -141,7 +142,7 @@ describe('⭐⭐⭐ 取关流程(页面)', () => {
     const IPC = read('src/modules/x/x-data-ipc.ts');
     for (const op of ['opsSettings', 'setOpsSetting', 'unfollowGate', 'logAction']) {
       expect(TYPES).toMatch(new RegExp(`op: '${op}'`));
-      expect(IPC).toMatch(new RegExp(`case '${op}':`));
+      expect(ipcHandles(IPC, op), op).toBe(true);
     }
     expect(read('src/storage/migrations/x-runner.ts')).toMatch(/version: '1\.2\.24'[\s\S]{0,200}up: x_migration_1_2_24/);
   });

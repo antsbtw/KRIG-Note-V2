@@ -7,6 +7,7 @@
  * 这里钉的是**纯逻辑**与**接线**。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -157,7 +158,7 @@ describe('账本接线', () => {
 
   it('⭐ opsStatus 契约有、handler 也有', () => {
     expect(TYPES).toMatch(/op: 'opsStatus'/);
-    expect(IPC).toMatch(/case 'opsStatus':/);
+    expect(ipcHandles(IPC, 'opsStatus')).toBe(true);
   });
 
   it('⭐⭐ 迁移 1.2.19 登记进了 runner(只写 schema 不登记 = 表永远不建)', () => {

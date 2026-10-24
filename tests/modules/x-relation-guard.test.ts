@@ -9,6 +9,7 @@
  * 所以写入侧另有**行为**断言:拿带关系的载荷调纯函数,看 SQL 里有没有关系字段。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildAuthorUpsert } from '@modules/x/x-tweet-authors';
@@ -119,10 +120,17 @@ describe('⭐⭐ 接线:写要认号,读要按号', () => {
   });
 
   it('读:概览 / 列表 / 人卡 / 朋友圈 / 状态页都先拿这个 ws 的号,没有就明说', () => {
+    /**
+     * 2026-10-24 这五个迁到读库能力(x-capabilities-read.ts):认号在执行器的前提检查里(account: true),
+     * 认出的号是 run 的第二个参数 a;号没认出三个入口都 refused 同一句话 —— 行为见 x-capabilities-read.test.ts
+     */
     for (const op of ['peopleOverview', 'queryPeople', 'personDetail', 'friendCircle', 'opsStatus']) {
-      const b = caseBody(op);
-      expect(b, `${op} 没按号读`).toMatch(/const acc = await accountOfWs\(p\.wsId\);\s*if \('reason' in acc\) return failed\(acc\.reason\);/);
-      expect(b).toMatch(/acc\.restId/);
+      const id = capOfOp(IPC, op);
+      expect(id, `${op} 没迁到能力`).toBeDefined();
+      const b = readCapBlock(id!);
+      expect(b.length, id).toBeGreaterThan(40);
+      expect(b, `${op} 没按号读`).toMatch(/account: true/);
+      expect(b).toMatch(/a\.restId/);
     }
   });
 

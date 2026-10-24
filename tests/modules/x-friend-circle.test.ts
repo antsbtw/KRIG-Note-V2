@@ -3,6 +3,7 @@
  * 用户:「主要是观察这个用户主要和哪些用户互动，找到它的朋友圈。」
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeCircle, looksChinese, CIRCLE_WEIGHTS } from '@modules/x/x-friend-circle';
@@ -69,7 +70,7 @@ describe('接线', () => {
   });
   it('⭐ friendCircle:契约 + handler;人卡调用;渲染端不引 main 侧的 repo', () => {
     expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'friendCircle'/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'friendCircle':/);
+    expect(ipcHandles(read('src/modules/x/x-data-ipc.ts'), 'friendCircle')).toBe(true);
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
     expect(PAGE).toMatch(/op: 'friendCircle', wsId, restId, limit: 30/);
     expect(PAGE).not.toContain("from './x-people-repo'");

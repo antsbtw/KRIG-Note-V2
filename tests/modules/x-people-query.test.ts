@@ -5,6 +5,7 @@
  * 这里钉:分组口径、事实只从三标记来、身份按 rest_id、用户输入走参数、接线不断。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -101,7 +102,7 @@ describe('人卡与接线', () => {
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
     for (const op of ['peopleOverview', 'queryPeople', 'personDetail']) {
       expect(TYPES, `契约缺 ${op}`).toMatch(new RegExp(`op: '${op}'`));
-      expect(IPC, `handler 缺 ${op}`).toMatch(new RegExp(`case '${op}':`));
+      expect(ipcHandles(IPC, op), `handler 缺 ${op}`).toBe(true);
       expect(PAGE, `页面没调 ${op}`).toMatch(new RegExp(`op: '${op}'`));
     }
   });

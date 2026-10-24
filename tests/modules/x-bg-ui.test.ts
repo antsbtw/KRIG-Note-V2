@@ -7,6 +7,7 @@
  * ③ 主进程收到后真写进自己的登记表 ④ bg* op 调的是 repo、暂停/恢复先读后写。
  */
 import { readFileSync } from 'node:fs';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -91,13 +92,15 @@ describe('接线守卫', () => {
       expect(s.length).toBeGreaterThan(30);
       return s;
     };
-    expect(seg("case 'bgCreateJob':", "case 'bgListJobs':")).toMatch(/await createJob\(/);
-    expect(seg("case 'bgCreateJob':", "case 'bgListJobs':")).toMatch(/isBgRange\(/);
-    expect(seg("case 'bgListJobs':", "case 'bgPauseJob':")).toMatch(/await listJobs\(/);
+    expect(seg("case 'bgCreateJob':", "case 'bgPauseJob':")).toMatch(/await createJob\(/);
+    expect(seg("case 'bgCreateJob':", "case 'bgPauseJob':")).toMatch(/isBgRange\(/);
+    /** 2026-10-24 bgListJobs 迁到能力 x.bg.jobs(x-capabilities-read.ts) */
+    expect(capOfOp(ipc, 'bgListJobs')).toBe('x.bg.jobs');
+    expect(readCapBlock('x.bg.jobs')).toMatch(/await listJobs\(/);
     const pr = seg("case 'bgPauseJob':", "case 'bgCancelJob':");
     expect(pr.indexOf('await readJob(')).toBeGreaterThan(-1);
     expect(pr.indexOf('await readJob(')).toBeLessThan(pr.indexOf('setJobStatus('));
-    expect(seg("case 'bgCancelJob':", "case 'opsSettings':")).toMatch(/await deleteJob\(/);
+    expect(seg("case 'bgCancelJob':", "case 'setOpsSetting':")).toMatch(/await deleteJob\(/);
   });
 
   it('⭐ 人卡三个手动动作都先占住网页(主进程的锁 —— 后台在采也在这把锁上),被占着就不动', () => {

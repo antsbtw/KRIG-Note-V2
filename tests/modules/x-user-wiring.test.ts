@@ -15,6 +15,7 @@
  * ⚠️ 本文件证明「每一环都在且对得上」,**不是**「点了真会采到人」——那要真机。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { X_USER_LIST_PAGES, PAGE_PARAMS } from '@modules/x/x-pages';
 
@@ -302,10 +303,11 @@ describe('一个入口:采到人就存', () => {
   it('⭐⭐⭐ IPC 三个游标 op 都要有 handler —— 契约有、handler 没有 = 静默失败', () => {
     for (const op of ['readCursor', 'saveCursor', 'clearCursor']) {
       expect(TYPES, `契约里缺 ${op}`).toMatch(new RegExp(`op: '${op}'`));
-      expect(IPC, `handler 里缺 ${op} —— 点了会回「不认识的 op」`)
-        .toMatch(new RegExp(`case '${op}':`));
+      expect(ipcHandles(IPC, op), `handler 里缺 ${op} —— 点了会回「不认识的 op」`).toBe(true);
     }
-    expect(IPC).toContain("import { readCursor, saveCursor, clearCursor } from './x-cursor-repo'");
+    /** 2026-10-24 readCursor 迁到能力 x.cursor.read;写的两个还在 IPC */
+    expect(IPC).toContain("import { saveCursor, clearCursor } from './x-cursor-repo'");
+    expect(readCapBlock('x.cursor.read')).toMatch(/readCursor\(i\.scope\)/);
   });
 
   it('⭐⭐⭐ 到头了不许续 —— 带着到底的游标去续只会白跑一趟', () => {
