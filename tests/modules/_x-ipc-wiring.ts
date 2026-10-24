@@ -22,11 +22,21 @@ export function ipcHandles(ipc: string, op: string): boolean {
   return ipc.includes(`case '${op}':`) || capOfOp(ipc, op) !== undefined;
 }
 
-/** 读库能力的登记块(x-capabilities-read.ts 里 `read({ id: '<id>', … })` 那一段) */
-export function readCapBlock(id: string): string {
-  const src = read('src/modules/x/x-capabilities-read.ts');
-  const i = src.indexOf(`id: '${id}'`);
-  if (i < 0) return '';
-  const j = src.indexOf('\n  read({', i);
-  return src.slice(i, j < 0 ? undefined : j);
+/**
+ * 能力的登记块:x-capabilities-read.ts(`read({ id: '<id>', … })`)/ x-capabilities-write.ts(`write({ … })`)里那一段。
+ * 找不到 = ''(调用方断言长度,免得假绿)
+ */
+export function capBlock(id: string): string {
+  for (const f of ['src/modules/x/x-capabilities-read.ts', 'src/modules/x/x-capabilities-write.ts']) {
+    const src = read(f);
+    const i = src.indexOf(`id: '${id}'`);
+    if (i < 0) continue;
+    const rest = src.slice(i);
+    const j = rest.search(/\n {2}(read|write)\(\{/);
+    return j < 0 ? rest : rest.slice(0, j);
+  }
+  return '';
 }
+/** 改库文件全文(看共用的小函数,如 jobOrRefuse) */
+export const WRITE_CAPS_SRC = (): string => read('src/modules/x/x-capabilities-write.ts');
+export const readCapBlock = capBlock;

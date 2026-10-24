@@ -7,7 +7,7 @@
  * ③ 主进程收到后真写进自己的登记表 ④ bg* op 调的是 repo、暂停/恢复先读后写。
  */
 import { readFileSync } from 'node:fs';
-import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
+import { capBlock, capOfOp, ipcHandles, readCapBlock, WRITE_CAPS_SRC } from './_x-ipc-wiring';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,15 +92,25 @@ describe('接线守卫', () => {
       expect(s.length).toBeGreaterThan(30);
       return s;
     };
-    expect(seg("case 'bgCreateJob':", "case 'bgPauseJob':")).toMatch(/await createJob\(/);
-    expect(seg("case 'bgCreateJob':", "case 'bgPauseJob':")).toMatch(/isBgRange\(/);
+    /** 2026-10-24 bg* 改库 op 迁到能力 x.bg.*(x-capabilities-write.ts);IPC 只剩对照表 */
+    void seg;
+    const create = capBlock('x.bg.createJob');
+    expect(create.length).toBeGreaterThan(100);
+    expect(create).toMatch(/await createJob\(/);
+    expect(create).toMatch(/isBgRange\(/);
     /** 2026-10-24 bgListJobs 迁到能力 x.bg.jobs(x-capabilities-read.ts) */
     expect(capOfOp(ipc, 'bgListJobs')).toBe('x.bg.jobs');
     expect(readCapBlock('x.bg.jobs')).toMatch(/await listJobs\(/);
-    const pr = seg("case 'bgPauseJob':", "case 'bgCancelJob':");
-    expect(pr.indexOf('await readJob(')).toBeGreaterThan(-1);
-    expect(pr.indexOf('await readJob(')).toBeLessThan(pr.indexOf('setJobStatus('));
-    expect(seg("case 'bgCancelJob':", "case 'setOpsSetting':")).toMatch(/await deleteJob\(/);
+    /** 暂停 / 继续:先 jobOrRefuse(里面 await readJob)再 setJobStatus */
+    const jr = WRITE_CAPS_SRC().slice(WRITE_CAPS_SRC().indexOf('async function jobOrRefuse'));
+    expect(jr.slice(0, 200)).toMatch(/await readJob\(id\)/);
+    for (const id of ['x.bg.pauseJob', 'x.bg.resumeJob']) {
+      const b = capBlock(id);
+      expect(b.indexOf('await jobOrRefuse('), id).toBeGreaterThan(-1);
+      expect(b.indexOf('await jobOrRefuse('), id).toBeLessThan(b.indexOf('setJobStatus('));
+    }
+    expect(capBlock('x.bg.cancelJob')).toMatch(/await deleteJob\(/);
+    for (const op of ['bgCreateJob', 'bgPauseJob', 'bgResumeJob', 'bgCancelJob']) expect(capOfOp(ipc, op), op).toMatch(/^x\.bg\./);
   });
 
   it('⭐ 人卡三个手动动作都先占住网页(主进程的锁 —— 后台在采也在这把锁上),被占着就不动', () => {
@@ -158,11 +168,13 @@ describe('⭐⭐ 后台「此刻在不在跑」提示(用户 10-14)', () => {
 
   it('建任务 / 恢复后马上看一次(不干等 120 秒)', () => {
     const ipc = strip(read('src/modules/x/x-data-ipc.ts'));
-    const create = ipc.slice(ipc.indexOf("case 'bgCreateJob':"), ipc.indexOf("case 'bgStatus':"));
+    /** 2026-10-24 迁到能力 x.bg.createJob / x.bg.resumeJob */
+    void ipc;
+    const create = capBlock('x.bg.createJob');
     expect(create.length).toBeGreaterThan(100);
     expect(create).toMatch(/kickBgRunner\(\)/);
-    const resume = ipc.slice(ipc.indexOf("await setJobStatus(p.id, 'queued')"), ipc.indexOf("case 'bgCancelJob':"));
-    expect(resume).toMatch(/kickBgRunner\(\)/);
+    const resume = capBlock('x.bg.resumeJob');
+    expect(resume.slice(resume.indexOf("await setJobStatus(i.id, 'queued')"))).toMatch(/kickBgRunner\(\)/);
   });
 
   it('运营顶栏挂了提示', () => {

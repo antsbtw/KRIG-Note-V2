@@ -12,7 +12,9 @@
 import { defineCapability, capFailed, type Need, type Prepared } from '@platform/main/capability/capability';
 import { getXHostState } from './x-host-registry';
 import { pageResource } from './x-page-lock';
-import { registerXReadCapabilities, wsAccount } from './x-capabilities-read';
+import { registerXReadCapabilities } from './x-capabilities-read';
+import { registerXWriteCapabilities } from './x-capabilities-write';
+import { wsAccount } from './x-capabilities-common';
 import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
 import { findVpnPostsWith } from './x-vpn-run';
@@ -47,6 +49,8 @@ export function registerXCapabilities(): void {
   registered = true;
   /** 第 3 步第 1 批:26 个读库能力(x-capabilities-read.ts) */
   registerXReadCapabilities();
+  /** 第 3 步第 2 批:15 个改库能力(x-capabilities-write.ts) */
+  registerXWriteCapabilities();
 
   defineCapability<{ wsId: string; restId: string; handle: string; hisTweetId?: string }, unknown, { wcId: number; acc: Acc }>({
     id: X_CAP.engagePrepare,

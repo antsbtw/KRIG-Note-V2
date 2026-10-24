@@ -9,23 +9,19 @@
  */
 
 import { ipcMain, webContents, type WebContents } from 'electron';
-import {
-  listAllRecipes, upsertRecipe, deleteRecipe,
-} from '@platform/main/db/search-recipe-repo';
+import { listAllRecipes } from '@platform/main/db/search-recipe-repo';
 import { recipeNameForQuery } from './x-recipe-query';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { existingTweetIds, saveTweets } from './x-tweet-repo';
 import { existingUserIds, saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
-import { saveCursor, clearCursor } from './x-cursor-repo';
+
 import { appendCollectLog, type CollectLogEntry } from './x-collect-log-repo';
-import {
-  scanMutualIntent, setExcluded, setMutualIntent, setTags,
-} from './x-people-repo';
-import { appendAction, writeSetting } from './x-ops-actions-repo';
+import { scanMutualIntent } from './x-people-repo';
+import { appendAction } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 import { clearXHostState, getXHostState, setXHostState } from './x-host-registry';
-import { kickBgRunner } from './x-bg-runner';
+
 import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
 import { revokeLocks } from '@platform/main/flow/resource-lock';
 import { execute, type CapResult } from '@platform/main/capability/capability';
@@ -37,25 +33,22 @@ import { collectSearchByScroll } from './x-search-scroll';
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
 import { checkFollowBack } from './x-follow-check';
 
-import { draftAskReply, setDraftRuleActive } from './x-ask-draft';
+import { draftAskReply } from './x-ask-draft';
 
 import { collectEngagement } from './x-engage-collect';
 import { screenEngage } from './x-engage-prepare';
 import { readLeftTweet } from './x-left-tweet';
 import { getXDB } from '@storage/surreal/client';
-import { judgeVpnPosts, prepareVpn, setVpnHuman } from './x-vpn-run';
+import { judgeVpnPosts, prepareVpn } from './x-vpn-run';
 import { replyLangOf, vpnLink } from './x-vpn-help';
 import type { ReplyLang } from '@shared/types/x-reply-types';
-import { DEFER_DAYS, recordDefer } from './x-defer-repo';
+
 import { loadEngageThread } from './x-engage-thread';
 import { startRelationTask } from './x-relation-task';
 
 import { prepareAsk } from './x-ask-prepare';
 import { runAsk } from './x-ask-run';
 
-import { createJob, deleteJob, readJob, setJobStatus } from './x-bg-job-repo';
-import { isBgRange } from './x-bg-job';
-import type { TimelineRange } from './x-person-timeline';
 import { cancelPersonCollect, collectPersonTab, tracePersonProgress } from './x-person-collect';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
@@ -123,7 +116,7 @@ function trackSenderLock(sender: WebContents, token: string): void {
 }
 
 /**
- * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步第 1 批)
+ * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步第 1、2 批)
  * 校验 / 认号 / 额度 / 占网页 / 留记录都在执行器;这里只转发,caller = ui。renderer 的 op 名不变。
  */
 const CAP_OF_OP: Readonly<Record<string, string>> = {
@@ -156,6 +149,22 @@ const CAP_OF_OP: Readonly<Record<string, string>> = {
   engagePrepare: 'x.engage.prepare',
   engageOverview: 'x.engage.overview',
   vpnFind: 'x.vpn.find',
+  // 第 3 步第 2 批:改自己的库
+  upsert: 'x.recipe.upsert',
+  delete: 'x.recipe.delete',
+  saveCursor: 'x.cursor.save',
+  clearCursor: 'x.cursor.clear',
+  setExcluded: 'x.person.setExcluded',
+  setTags: 'x.person.setTags',
+  vpnHuman: 'x.vpn.mark',
+  deferPerson: 'x.person.defer',
+  draftRuleActive: 'x.draft.setRuleActive',
+  setMutualIntent: 'x.person.setMutualIntent',
+  bgCreateJob: 'x.bg.createJob',
+  bgPauseJob: 'x.bg.pauseJob',
+  bgResumeJob: 'x.bg.resumeJob',
+  bgCancelJob: 'x.bg.cancelJob',
+  setOpsSetting: 'x.settings.write',
 };
 
 /**
@@ -173,19 +182,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
       const capId = CAP_OF_OP[(p as { op?: string })?.op ?? ''];
       if (capId) return fromCap(await execute(capId, p, { caller: 'ui' }));
       switch (p?.op) {
-        case 'upsert': {
-          const r = p.recipe;
-          /**
-           * ⚠️ fail loud:名字空的配方在列表里是一行空白,
-           * 人既认不出也删不掉(`feedback-fail-loud-no-fallback`:
-           * 别兜底成「未命名」—— 那会把「填错了」变成「看起来正常」)。
-           */
-          if (!r || typeof r.name !== 'string' || r.name.trim() === '') {
-            return failed('[x.recipe] 配方必须有名字');
-          }
-          return { status: 'ok', value: await upsertRecipe(r) };
-        }
-
         /**
          * ⭐⭐⭐ **采到的推文落库** —— 2026-10-05。
          * ⚠️ 返回 `inserted / updated / failed` 原样回去 ——
@@ -336,29 +332,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
          * ⚠️ scope 为空要拒收:那会让所有名单共用一个断点,
          * A 名单的游标被 B 续采,而那种错在数据里看不出来。
          */
-        case 'saveCursor': {
-          if (typeof p.cursor?.scope !== 'string' || p.cursor.scope.trim() === '') {
-            return failed('[x.data] saveCursor 缺 scope');
-          }
-          await saveCursor(p.cursor);
-          return { status: 'ok', value: { saved: p.cursor.scope } };
-        }
-
-        case 'clearCursor': {
-          if (typeof p.scope !== 'string' || p.scope.trim() === '') {
-            return failed('[x.data] clearCursor 缺 scope');
-          }
-          await clearCursor(p.scope);
-          return { status: 'ok', value: { cleared: p.scope } };
-        }
-
-        case 'delete':
-          if (!p.recipeId) return failed('[x.recipe] delete 缺 recipeId');
-          await deleteRecipe(p.recipeId);
-          return { status: 'ok', value: { deleted: p.recipeId } };
-
-        /** ⭐⭐ 运营 → 状态(2026-10-07)—— 只读 */
-
         /** ⭐⭐ 认号(1.2.27)—— 结果三态原样回去,pending/failed 的原因给人看 */
         case 'identifyAccount': {
           if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] identifyAccount 缺 wsId');
@@ -371,25 +344,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
         }
 
         /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
-        case 'setExcluded':
-          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.excluded !== 'boolean') {
-            return failed('[x.data] setExcluded 要 restId(数字 id)和 excluded(true/false)');
-          }
-          await setExcluded(p.restId, p.excluded, typeof p.reason === 'string' && p.reason !== '' ? p.reason : undefined);
-          /** ⭐ 人的决定也留痕 —— 以后回头看「我排除过谁、何时」不用猜 */
-          console.log(`[x.people] ${p.excluded ? '排除' : '取消排除'} ${p.restId}${p.reason ? `(${p.reason})` : ''}`);
-          return { status: 'ok', value: { restId: p.restId, excluded: p.excluded } };
-
-        case 'setTags': {
-          if (typeof p.restId !== 'string' || p.restId === '' || !Array.isArray(p.tags)
-            || p.tags.some((t) => typeof t !== 'string')) {
-            return failed('[x.data] setTags 要 restId(数字 id)和 tags(字符串数组)');
-          }
-          const tags = await setTags(p.restId, p.tags);
-          console.log(`[x.people] 标签 ${p.restId} → ${tags.length > 0 ? tags.join('、') : '(清空)'}`);
-          return { status: 'ok', value: tags };
-        }
-
         case 'followCheckRun': {
           if (typeof p.wsId !== 'string') return failed('[x.data] followCheckRun 缺 wsId');
           const r = await checkFollowBack(p.wsId, 'manual');
@@ -430,14 +384,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
           return { status: 'ok', value: await judgeVpnPosts(acc.restId, p.limit) };
-        }
-
-        case 'vpnHuman': {
-          if (typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId) || (p.human !== 'accept' && p.human !== 'reject')) return failed('[x.data] vpnHuman 要推文 id + accept/reject');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          await setVpnHuman(acc.restId, p.tweetId, p.human);
-          return { status: 'ok', value: true };
         }
 
         case 'vpnPrepare': {
@@ -482,22 +428,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           const r = await collectEngagement(p.wsId);
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-engage-collect', pageId: 'x-data', detail: r });
           return r.ok ? { status: 'ok', value: r } : failed(r.why);
-        }
-
-        case 'deferPerson': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] deferPerson 要数字 id');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          await recordDefer(acc.restId, p.restId, modeOf(p.mode), typeof p.tweetId === 'string' && p.tweetId !== '' ? p.tweetId : undefined);
-          return { status: 'ok', value: { days: DEFER_DAYS } };
-        }
-
-        case 'draftRuleActive': {
-          if (typeof p.id !== 'string' || p.id === '' || typeof p.active !== 'boolean') return failed('[x.data] draftRuleActive 要 id + active');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          await setDraftRuleActive(acc.restId, p.id, p.active);
-          return { status: 'ok', value: true };
         }
 
         case 'askDraft': {
@@ -580,14 +510,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: r };
         }
 
-        case 'setMutualIntent':
-          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.value !== 'boolean') {
-            return failed('[x.data] setMutualIntent 要 restId(数字 id)和 value(true/false)');
-          }
-          await setMutualIntent(p.restId, p.value);
-          console.log(`[x.people] 人标互关倾向 ${p.restId} → ${p.value ? '有' : '无'}`);
-          return { status: 'ok', value: { restId: p.restId, value: p.value } };
-
         /**
          * ⭐⭐⭐ renderer 的 X 网页登记同步进主进程(`x-host-sync.ts`)—— 后台 runner 靠它。
          * ⚠️ webview 销毁时主进程自己清掉:窗口直接关掉时 renderer 来不及发「卸了」,
@@ -630,57 +552,8 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: pageBusy(p.wcId) };
 
         /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 只做校验 + 调 repo */
-        case 'bgCreateJob': {
-          if (typeof p.restId !== 'string' || p.restId === '' || typeof p.handle !== 'string' || p.handle === '') {
-            return failed('[x.data] bgCreateJob 要 restId(数字 id)和 handle');
-          }
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] bgCreateJob 缺 wsId —— 任务属于发起的号');
-          /** ⚠️ month 当场采,不进后台;别的字符串一律拒(别兜底成 all) */
-          if (!isBgRange(p.range as TimelineRange)) return failed(`[x.data] bgCreateJob 范围只接 halfYear/year/all,收到 ${String(p.range)}`);
-          if (p.kind !== undefined && p.kind !== 'lists') return failed(`[x.data] bgCreateJob 的 kind 只接 lists,收到 ${String(p.kind)}`);
-          if (p.kind === 'lists' && p.range !== 'all') return failed('[x.data] 名单任务的范围只能是 all(名单没有时间范围)');
-          const r = await createJob({ restId: p.restId, handle: p.handle, wsId: p.wsId, range: p.range as 'halfYear' | 'year' | 'all', kind: p.kind });
-          traceRecorder.lifecycle({
-            layer: 'web.net', event: 'x-bg-job-create', pageId: 'x-data',
-            detail: { id: r.id, created: r.created, handle: p.handle, range: p.range, kind: p.kind ?? 'timeline', wsId: p.wsId },
-          });
-          kickBgRunner();
-          return { status: 'ok', value: r };
-        }
-
         /** ⭐⭐ 此刻状态(运营顶栏 / 人卡「在不在跑」)+ 这个号各状态任务数 */
-        case 'bgPauseJob':
-        case 'bgResumeJob': {
-          if (typeof p.id !== 'string' || p.id === '') return failed(`[x.data] ${p.op} 缺 id`);
-          /**
-           * ⚠️ 先读:UPSERT 对不存在的 id 会**建出一条残行**(只有 status),
-           * 而终态(done/failed)也不许被暂停/恢复改回去 —— 都要明说。
-           */
-          const job = await readJob(p.id);
-          if (!job) return failed(`[x.data] ${p.op}:任务 ${p.id} 不存在(可能已取消)`);
-          if (p.op === 'bgPauseJob') {
-            if (job.status !== 'queued' && job.status !== 'running') return failed(`[x.data] 任务是「${job.status}」,不能暂停`);
-            await setJobStatus(p.id, 'paused');
-          } else {
-            if (job.status !== 'paused') return failed(`[x.data] 任务是「${job.status}」,不是暂停状态`);
-            await setJobStatus(p.id, 'queued');
-            kickBgRunner();
-          }
-          return { status: 'ok', value: { id: p.id } };
-        }
-
-        case 'bgCancelJob': {
-          if (typeof p.id !== 'string' || p.id === '') return failed('[x.data] bgCancelJob 缺 id');
-          await deleteJob(p.id);
-          return { status: 'ok', value: { id: p.id } };
-        }
-
         /** ⭐ 运营设置 / 取关闸门 / 动作记录(2026-10-10) */
-        case 'setOpsSetting':
-          await writeSetting(p.key, p.value);
-          console.log(`[x.ops] 设置 ${p.key} = ${p.value}`);
-          return { status: 'ok', value: { key: p.key, value: p.value } };
-
         case 'logAction': {
           const e = p.entry;
           if (!e || e.action !== 'unfollow' || !e.targetRestId || !e.targetHandle

@@ -4,6 +4,7 @@
  * 误判样本都来自真库(10-16 查)。
  */
 import { describe, it, expect } from 'vitest';
+import { capBlock, capOfOp } from './_x-ipc-wiring';
 import {
   detectMutualIntent, planIntentRuleWrite, evidenceText, SEARCH_TERMS_ZH, SEARCH_TERMS_EN,
 } from '@modules/x/x-mutual-intent';
@@ -116,7 +117,9 @@ describe('接线(M1 + M2)', () => {
   it('IPC 有 scan / set 两个 op,页面真的调;迁移 1.2.29 / 1.2.30 已登记', () => {
     const IPC = read('src/modules/x/x-data-ipc.ts');
     expect(IPC).toMatch(/case 'scanMutualIntent': \{\s*const r = await scanMutualIntent\(\);/);
-    expect(IPC).toMatch(/case 'setMutualIntent':[\s\S]{0,300}await setMutualIntent\(p\.restId, p\.value\)/);
+    /** 2026-10-24 setMutualIntent 迁到能力 x.person.setMutualIntent(x-capabilities-write.ts) */
+    expect(capOfOp(IPC, 'setMutualIntent')).toBe('x.person.setMutualIntent');
+    expect(capBlock('x.person.setMutualIntent')).toMatch(/await setMutualIntent\(i\.restId, i\.value\)/);
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
     expect(PAGE).toMatch(/op: 'scanMutualIntent'/);
     expect(PAGE).toMatch(/op: 'setMutualIntent', restId: p\.rest_id, value/);
