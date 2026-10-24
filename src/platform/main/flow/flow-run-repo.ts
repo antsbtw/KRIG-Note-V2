@@ -187,7 +187,7 @@ export async function listCalls(q: {
   if (q.caller) where.push('caller = $caller');
   if (q.status) where.push('status = $status');
   const res = await getFlowDB().query<[Array<Record<string, unknown>>]>(
-    `SELECT call_id, capability, caller, status, reasoning, subject_ref, duration_ms, <string> created_at AS created_at, input, output
+    `SELECT call_id, capability, caller, status, reasoning, subject_ref, duration_ms, keep_days, <string> created_at AS created_at, input, output
        FROM flow_step_run WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT $limit`,
     { limit: q.limit, capability: q.capability, caller: q.caller, status: q.status },
   );

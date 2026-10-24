@@ -14,7 +14,7 @@ export function registerFlowCapabilities(): void {
   defineCapability<{ limit: number; capability?: string; caller?: string; status?: string }, unknown>({
     id: 'flow.calls.recent',
     kind: 'input',
-    describe: '最近的能力调用记录(谁调的、调了什么、结果、没做成的原因、耗时),新的在前',
+    describe: '最近的能力调用记录(谁调的、调了什么、结果、没做成的原因、耗时、只留几天),新的在前',
     inputDoc: {
       limit: '最多几条,1–200,默认 20',
       capability: '可选:只看这个能力',
