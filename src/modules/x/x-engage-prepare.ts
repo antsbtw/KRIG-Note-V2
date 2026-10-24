@@ -80,22 +80,12 @@ export async function screenEngage(wsId: string, restId: string, handle: string,
   return a.active ? { ok: true, active: true } : { ok: true, active: false, why: a.why };
 }
 
-export async function prepareEngage(
-  wsId: string, account: string, restId: string, handle: string, hisTweetId?: string,
-): Promise<AskPrepared> {
-  const wcId = getXHostState(wsId)?.wcId;
-  if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
-  /** ⭐⭐ 采主页 + 读来龙去脉期间占住 X 网页(Module5-04 §1.3 bug 2) */
-  const lock = acquirePage(wcId, `互动卡:准备 @${handle}`, 'ui');
-  if (!lock.ok) return lock;
-  try {
-    return await prepareEngageOn(wcId, account, restId, handle, hisTweetId);
-  } finally {
-    releasePage(lock.token);
-  }
-}
-
-async function prepareEngageOn(wcId: number, account: string, restId: string, handle: string, hisTweetId?: string): Promise<AskPrepared> {
+/**
+ * ⭐⭐ 互动卡准备 —— 只干活(Module5-04 第 2 步):前提检查(认号 / 网页开没开)和占网页由能力 `x.engage.prepare`
+ * 的执行器做(x-capabilities.ts),调用方一律 `execute(X_CAP.engagePrepare, …)`。
+ * ⚠️ 调这里之前必须已经占住 wcId 这个网页(采主页 + 读来龙去脉期间别人不能带走,Module5-04 §1.3 bug 2)。
+ */
+export async function prepareEngageOn(wcId: number, account: string, restId: string, handle: string, hisTweetId?: string): Promise<AskPrepared> {
   const { settings } = await readSettings();
   const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: settings['ask.collect_pages'], attempt: 1 });
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };

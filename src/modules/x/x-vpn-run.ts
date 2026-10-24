@@ -7,7 +7,6 @@ import { callOllamaChat } from '@platform/main/local-llm/ollama-client';
 import { listAllRecipes } from '@platform/main/db/search-recipe-repo';
 import { recipeToQuery } from './x-recipe-query';
 import { collectSearchByScroll } from './x-search-scroll';
-import { readWsAccount } from './x-account-repo';
 import { recordSearch, searchBudget } from './x-search-budget';
 import { getXHostState } from './x-host-registry';
 import { acquirePage, releasePage } from './x-page-lock';
@@ -31,12 +30,11 @@ export type VpnFindResult = {
 /**
  * ⭐ 找一轮:库里的四条 VPN 配方,各搜最近 24 小时(配方原样,时间窗按任务定的 24 小时)→ 新帖登记进 x_vpn_post。
  * 按搜索额度账本分页数;撞限流(含悄悄限流)就停,15 分钟后再来(记账本)。
+ * ⭐⭐ 只干活(Module5-04 第 2 步):认号 / 额度 / 占网页由能力 `x.vpn.find` 的执行器做(x-capabilities.ts);
+ * 整轮期间网页一直占着,每次搜索带着同一把锁(ownToken)进去 —— 原来每条配方各占各的,两条之间别人能插进来。
  */
-export async function findVpnPosts(wsId: string): Promise<{ ok: false; why: string } | ({ ok: true } & VpnFindResult)> {
-  const acc = await readWsAccount(wsId);
-  if (!acc?.restId) return { ok: false, why: `${wsId} 还没认出登录的号` };
+export async function findVpnPostsWith(wsId: string, account: string, ownToken: string): Promise<{ ok: false; why: string } | ({ ok: true } & VpnFindResult)> {
   const budget = searchBudget();
-  if (budget.waitUntil !== undefined) return { ok: true, runs: [], note: `刚撞过限流,${new Date(budget.waitUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 后再找` };
   const all = await listAllRecipes();
   const recipes = VPN_RECIPES.map((n) => all.find((r) => r.name === n)).filter((r): r is NonNullable<typeof r> => r !== undefined);
   const missing = VPN_RECIPES.filter((n) => !all.some((r) => r.name === n));
@@ -48,13 +46,13 @@ export async function findVpnPosts(wsId: string): Promise<{ ok: false; why: stri
     if (want < 1) { runs.push({ recipe: r.name, pages: 0, tweets: 0, added: 0, problem: '搜索额度不够,下次再找' }); continue; }
     const q = recipeToQuery({ ...r, sinceHours: VPN_FRESH_HOURS }, Date.now());
     if (q.problems.length > 0) { runs.push({ recipe: r.name, pages: 0, tweets: 0, added: 0, problem: `配方有问题:${q.problems.join(';')}` }); continue; }
-    const s = await collectSearchByScroll({ wsId, q: q.q, f: q.resultType, wantPages: want, maxMs: 4 * 60_000, recipeName: r.name });
+    const s = await collectSearchByScroll({ wsId, q: q.q, f: q.resultType, wantPages: want, maxMs: 4 * 60_000, recipeName: r.name, ownToken });
     const pages = s.totals?.pages ?? 0;
     left -= Math.max(pages, 1);
     const bottom = (s.harvest as { reachedBottom?: boolean } | undefined)?.reachedBottom === true;
     const throttled = s.ok && !s.rateLimited && bottom && pages <= 1 && want > 1 && (s.totals?.xTweets ?? 0) >= FULL_PAGE;
     if (throttled) recordSearch(0, true);
-    const added = s.ok ? await registerPosts(acc.restId, r.name, q.q, r.keywords ?? [], r.template === 'help-wanted' ? r.helpSignals ?? [] : []) : 0;
+    const added = s.ok ? await registerPosts(account, r.name, q.q, r.keywords ?? [], r.template === 'help-wanted' ? r.helpSignals ?? [] : []) : 0;
     const problem = !s.ok ? s.why : s.rateLimited ? '撞了限流' : throttled ? '疑似悄悄限流' : undefined;
     runs.push({ recipe: r.name, pages, tweets: s.totals?.uniqueTweets ?? 0, added, problem });
     console.log(`[x.vpn] 找帖「${r.name}」${pages}/${want} 页 ${s.totals?.uniqueTweets ?? 0} 条 · 新登记 ${added}${problem ? ` —— ${problem}` : ''}`);

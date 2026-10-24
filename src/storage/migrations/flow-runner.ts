@@ -7,7 +7,7 @@
 
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { flow_migration_1_0_0 } from '../surreal/flow-schema';
+import { flow_migration_1_0_0, flow_migration_1_1_0 } from '../surreal/flow-schema';
 
 interface FlowMigration {
   version: string;
@@ -20,6 +20,11 @@ const FLOW_MIGRATIONS: FlowMigration[] = [
     version: '1.0.0',
     description: 'Flow execution records (run + step, with caller provenance)',
     up: flow_migration_1_0_0,
+  },
+  {
+    version: '1.1.0',
+    description: 'Capability calls in flow_step_run (caller / call_id)',
+    up: flow_migration_1_1_0,
   },
 ];
 

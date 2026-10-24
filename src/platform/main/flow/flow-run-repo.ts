@@ -87,6 +87,50 @@ export async function recordStep(
 }
 
 /**
+ * ⭐⭐ 记一次能力调用(Module5-04 第 2 步)—— 执行器每次调用都调,含被拒 / 参数不对 / 失败的。
+ * 不属于某条流程:run_id = call_id、seq = 1。
+ * ⚠️ 写不进去不拦业务,但要响(console.error)—— 「记录是空的」会被误读成「没跑过」。
+ */
+export async function recordCall(c: {
+  readonly callId: string;
+  readonly runId?: string;
+  readonly capability: string;
+  readonly kind: string;
+  readonly caller: string;
+  readonly status: 'ok' | 'refused' | 'failed' | 'invalid';
+  readonly why?: string;
+  readonly input?: Record<string, unknown>;
+  readonly output?: Record<string, unknown>;
+  readonly subjectRef?: string;
+  readonly durationMs: number;
+}): Promise<void> {
+  try {
+    await getFlowDB().query(
+      `CREATE flow_step_run SET
+         run_id = $runId, seq = 1, step_id = $capability, step_type = $stepType,
+         capability = $capability, input = $input, output = $output,
+         status = $status, reasoning = $reasoning, subject_ref = $subjectRef,
+         duration_ms = $durationMs, caller = $caller, call_id = $callId, created_at = time::now()`,
+      {
+        runId: c.runId ?? c.callId,
+        capability: c.capability,
+        stepType: c.kind,
+        input: c.input,
+        output: c.output,
+        status: c.status,
+        reasoning: c.why,
+        subjectRef: c.subjectRef,
+        durationMs: Math.max(0, Math.round(c.durationMs)),
+        caller: c.caller,
+        callId: c.callId,
+      },
+    );
+  } catch (err) {
+    console.error(`[flow-repo] ⚠️ 能力调用没记上(不拦业务)${c.capability} ${c.status} #${c.callId}:${String(err)}`);
+  }
+}
+
+/**
  * 收一条 run。
  *
  * ⚠️ `status` 由**调用方**汇总给出,这里不替它算 ——

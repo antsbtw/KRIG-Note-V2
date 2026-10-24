@@ -128,3 +128,33 @@ export async function flow_migration_1_0_0(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.0.0'), now: Date.now() },
   );
 }
+
+/**
+ * ⭐⭐ 1.1.0(2026-10-23,Module5-04 第 2 步)—— 能力调用也进 flow_step_run:一次调用一行。
+ *
+ * - `caller`:谁发起的 —— 'ui' | 'timer' | 'inbox' | 'ai'(界面 / 定时器 / 开发收件箱 / AI)
+ * - `call_id`:这一次调用的 id(统一结果里的 callId)。不属于某条流程的单次调用:run_id = call_id、seq = 1
+ * - 能力调用的 status 用执行器那套词:'ok' | 'refused'(没动手)| 'failed'(做了没成)| 'invalid'(参数不对);
+ *   step_type 记能力类别 'input' | 'control' | 'output'。⚠️ 与旧编排(flow-runner.ts)的 fetch/judge… 不是同一层,按 caller 是否为空分得开。
+ */
+const FLOW_SCHEMA_1_1_0 = `
+DEFINE FIELD IF NOT EXISTS caller  ON flow_step_run TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS call_id ON flow_step_run TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_step_call   ON flow_step_run FIELDS call_id;
+DEFINE INDEX IF NOT EXISTS idx_step_caller ON flow_step_run FIELDS caller;
+`;
+
+export async function flow_migration_1_1_0(db: Surreal): Promise<void> {
+  await db.query(FLOW_SCHEMA_1_1_0);
+  /** fail loud:字段真的加上了吗(单条 DDL 出错整段被拒收,启动不报错) */
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE flow_step_run');
+  const fields = info?.[0]?.fields ?? {};
+  for (const f of ['caller', 'call_id']) {
+    if (!(f in fields)) throw new Error(`[flow-schema 1.1.0] 加字段失败:flow_step_run.${f} 不在 INFO FOR TABLE 里 —— 能力调用的记录会丢 caller / call_id`);
+  }
+  console.log('[flow-schema 1.1.0] flow_step_run 加了 caller / call_id(能力调用一次一行)');
+  await db.query(
+    `UPSERT $rid SET version = '1.1.0', appliedAt = $now, description = 'Capability calls in flow_step_run (caller / call_id)'`,
+    { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
+  );
+}

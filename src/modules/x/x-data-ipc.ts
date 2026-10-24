@@ -29,6 +29,8 @@ import { clearXHostState, getXHostState, setXHostState } from './x-host-registry
 import { bgRunnerStatus, kickBgRunner } from './x-bg-runner';
 import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
 import { revokeLocks } from '@platform/main/flow/resource-lock';
+import { execute, type CapResult } from '@platform/main/capability/capability';
+import { X_CAP } from './x-capabilities';
 import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
@@ -39,12 +41,12 @@ import { checkFollowBack, followCheckRunning } from './x-follow-check';
 import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
 import { readPersonLists } from './x-list-member-repo';
 import { draftAskReply, readDraftRules, setDraftRuleActive } from './x-ask-draft';
-import { readEngageOverview } from './x-engage-repo';
+
 import { collectEngagement } from './x-engage-collect';
-import { prepareEngage, screenEngage } from './x-engage-prepare';
+import { screenEngage } from './x-engage-prepare';
 import { readLeftTweet } from './x-left-tweet';
 import { getXDB } from '@storage/surreal/client';
-import { findVpnPosts, judgeVpnPosts, prepareVpn, readVpnOverview, setVpnHuman } from './x-vpn-run';
+import { judgeVpnPosts, prepareVpn, readVpnOverview, setVpnHuman } from './x-vpn-run';
 import { replyLangOf, vpnLink } from './x-vpn-help';
 import type { ReplyLang } from '@shared/types/x-reply-types';
 import { DEFER_DAYS, recordDefer } from './x-defer-repo';
@@ -122,6 +124,14 @@ function trackSenderLock(sender: WebContents, token: string): void {
     for (const t of mine) lockOwnerByToken.delete(t);
     if (mine.size > 0) revokeLocks((h) => mine.has(h.token), `申请它的窗口(wc#${id})关掉了,没来得及放`);
   });
+}
+
+/**
+ * 能力层的统一结果 → 现在 renderer 认的 IPC 形状(过渡:renderer 还没改成认 refused / failed / invalid)。
+ * 没成的一律 failed(why),why 原样 —— 界面显示的话和原来一样。
+ */
+function fromCap(r: CapResult<unknown>): XDataResult {
+  return r.ok ? { status: 'ok', value: r.value } : failed(r.why);
 }
 
 /** ⭐ 单入口 —— savePageVerify 复用 saveTweets / saveUsers 分支,不另写一份存库流程 */
@@ -489,18 +499,12 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: r };
         }
 
-        case 'engageOverview': {
-          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 500) return failed('[x.data] engageOverview 的 limit 要 1–500');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          const ws = await readWsAccount(p.wsId as string);
-          return { status: 'ok', value: await readEngageOverview(acc.restId, ws?.handle ?? '', p.limit) };
-        }
+        /** ⭐⭐ 已迁到能力层(Module5-04 第 2 步):校验 / 认号 / 额度 / 占网页 / 留记录都在执行器,这里只转发 */
+        case 'engageOverview':
+          return fromCap(await execute(X_CAP.engageOverview, { wsId: p.wsId, limit: p.limit }, { caller: 'ui' }));
 
-        case 'vpnFind': {
-          const r = await findVpnPosts(p.wsId as string);
-          return r.ok ? { status: 'ok', value: r } : failed(r.why);
-        }
+        case 'vpnFind':
+          return fromCap(await execute(X_CAP.vpnFind, { wsId: p.wsId }, { caller: 'ui' }));
 
         case 'vpnJudge': {
           if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 50) return failed('[x.data] vpnJudge 的 limit 要 1–50');
@@ -536,12 +540,8 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return r.ok ? { status: 'ok', value: r } : failed(r.why);
         }
 
-        case 'engagePrepare': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '') return failed('[x.data] engagePrepare 要数字 id + handle');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await prepareEngage(p.wsId, acc.restId, p.restId, p.handle, typeof p.hisTweetId === 'string' && p.hisTweetId !== '' ? p.hisTweetId : undefined) };
-        }
+        case 'engagePrepare':
+          return fromCap(await execute(X_CAP.engagePrepare, { wsId: p.wsId, restId: p.restId, handle: p.handle, hisTweetId: p.hisTweetId }, { caller: 'ui' }));
 
         case 'engageThread': {
           if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId)) return failed('[x.data] engageThread 要数字 id');

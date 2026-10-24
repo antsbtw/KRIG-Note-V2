@@ -40,11 +40,13 @@ describe('⭐ 2 小时内有动静才互动(用户 10-23:「几天不更新的,�
   });
 });
 
-describe('接线:prepareEngage 真的用了 2 小时这道检查', () => {
+describe('接线:prepareEngageOn(互动卡准备,2026-10-23 起由能力 x.engage.prepare 调)真的用了 2 小时这道检查', () => {
   it('选完帖子 → activeWithin → 没动静就换成 skip', async () => {
     const { readFileSync } = await import('node:fs');
     const src = readFileSync('src/modules/x/x-engage-prepare.ts', 'utf-8');
-    const body = src.slice(src.indexOf('export async function prepareEngage'));
+    const at = src.indexOf('export async function prepareEngageOn(');
+    expect(at).toBeGreaterThan(-1);
+    const body = src.slice(at);
     const i1 = body.indexOf('const picked = pickEngageTweet(');
     const i2 = body.indexOf('activeWithin(r.records, restId, his?.createdAt, new Date())');
     const i3 = body.indexOf("act && !act.active ? { kind: 'skip' as const");

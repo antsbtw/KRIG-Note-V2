@@ -29,6 +29,7 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock('@storage/surreal/client', () => ({
+  getFlowDB: () => ({ query: async () => [[]] }),
   getXDB: () => ({
     query: async (sql: string) => {
       if (sql.includes("type::record('x_vpn_post'")) return [[{ author_rest_id: '42', author_handle: 'he' }], [{ text: '求个梯子' }]];
@@ -92,7 +93,16 @@ const lock = await import('@platform/main/flow/resource-lock');
 const { acquirePage, releasePage, pageBusy } = await import('@modules/x/x-page-lock');
 const { checkFollowBack } = await import('@modules/x/x-follow-check');
 const { prepareAsk } = await import('@modules/x/x-ask-prepare');
-const { prepareEngage, screenEngage } = await import('@modules/x/x-engage-prepare');
+const { screenEngage } = await import('@modules/x/x-engage-prepare');
+/** ⭐ 2026-10-23 第 2 步:互动卡准备迁到能力层 —— 占网页由执行器做(x.engage.prepare) */
+const { execute } = await import('@platform/main/capability/capability');
+const { registerXCapabilities, X_CAP } = await import('@modules/x/x-capabilities');
+registerXCapabilities();
+/** 统一结果 → 旧形状(ok + why),下面的断言照旧 */
+const prepareEngage = async (ws: string, _acc: string, restId: string, handle: string): Promise<unknown> => {
+  const r = await execute(X_CAP.engagePrepare, { wsId: ws, restId, handle }, { caller: 'ui' });
+  return r.ok ? r.value : { ok: false, why: r.why };
+};
 const { prepareVpn } = await import('@modules/x/x-vpn-run');
 const { dailyUpkeepTick } = await import('@modules/x/x-daily-upkeep');
 const { tickOnce, _resetBgRunner } = await import('@modules/x/x-bg-runner');

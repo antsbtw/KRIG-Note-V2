@@ -8,7 +8,9 @@
  * ⚠️ 定时器 unref + before-quit 停(记忆 project-graceful-shutdown)。
  */
 import { readLeftTweet } from './x-left-tweet';
-import { findVpnPosts, judgeVpnPosts, pruneVpnPosts, readVpnOverview } from './x-vpn-run';
+import { judgeVpnPosts, pruneVpnPosts, readVpnOverview } from './x-vpn-run';
+import { execute, listCapabilities } from '@platform/main/capability/capability';
+import { X_CAP } from './x-capabilities';
 import { getXDB } from '@storage/surreal/client';
 import { replyLangOf, vpnLink } from './x-vpn-help';
 import { X_PAGE_NAME } from './x-pages';
@@ -26,8 +28,7 @@ import { checkFollowBack } from './x-follow-check';
 import { startRelationTask } from './x-relation-task';
 import { draftAskReply } from './x-ask-draft';
 import { collectEngagement } from './x-engage-collect';
-import { readEngageOverview } from './x-engage-repo';
-import { prepareEngage, screenEngage } from './x-engage-prepare';
+import { screenEngage } from './x-engage-prepare';
 import { readWsAccount } from './x-account-repo';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
@@ -67,9 +68,15 @@ type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling 
   | (Sampling & { op: 'vpnFind'; wsId: string }) | (Sampling & { op: 'vpnJudge'; wsId: string; limit: number })
   | (Sampling & { op: 'vpnOverview'; wsId: string }) | (Sampling & { op: 'vpnDraft'; wsId: string; tweetId: string })
   | (Sampling & { op: 'vpnPrune'; wsId: string });
+/**
+ * ⭐⭐ 调能力目录里任意一个能力(Module5-04 第 2 步)—— 走执行器(校验 / 前提 / 占锁 / 留记录 / 统一结果),caller = inbox。
+ * capabilities = 列出目录(给 AI 读:id / kind / describe / inputDoc)。
+ */
+type CallCmd = Sampling & { op: 'call'; capability: string; input?: Record<string, unknown> };
+type CapsCmd = Sampling & { op: 'capabilities' };
 /** 占住 X 网页一段时间(模拟有人在用)—— 资源锁回归 */
 type HoldPageCmd = Sampling & { op: 'holdPage'; wsId: string; ms: number; purpose?: string };
-type SingleCmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd | HoldPageCmd;
+type SingleCmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd | HoldPageCmd | CallCmd | CapsCmd;
 /** 同时跑 2–4 条(不能套 parallel);第 i 条晚 i × staggerMs 开跑 */
 type ParallelCmd = Sampling & { op: 'parallel'; cmds: SingleCmd[]; staggerMs?: number };
 type Cmd = SingleCmd | ParallelCmd;
@@ -88,6 +95,14 @@ function validate(c: unknown): Cmd | string {
     }
     return { op: 'parallel', cmds: subs, staggerMs: top.staggerMs as number | undefined };
   }
+  if (top?.op === 'call') {
+    const c = top as { capability?: unknown; input?: unknown };
+    if (typeof c.capability !== 'string' || c.capability === '') return 'call 要 capability(能力 id,如 x.engage.prepare)';
+    if (c.input !== undefined && (typeof c.input !== 'object' || c.input === null || Array.isArray(c.input))) return 'call 的 input 要是对象';
+    /** ⚠️ 参数对不对由执行器校验(invalid 也会留记录),这里不重复 */
+    return top as unknown as CallCmd;
+  }
+  if (top?.op === 'capabilities') return top as unknown as CapsCmd;
   if (top?.op === 'holdPage') {
     if (typeof top.wsId !== 'string') return 'holdPage 要 wsId';
     if (!Number.isInteger(top.ms) || (top.ms as number) < 1000 || (top.ms as number) > 15 * 60_000) return 'holdPage 的 ms 要 1000–900000';
@@ -182,6 +197,11 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
   let out: unknown;
   if (cmd.op === 'parallel') return runParallel(cmd, next);
   if (cmd.op === 'holdPage') return runHoldPage(cmd);
+  if (cmd.op === 'call') {
+    console.log(`[x.dev] 执行 ${next}:call ${cmd.capability}`);
+    return execute(cmd.capability, cmd.input ?? {}, { caller: 'inbox' });
+  }
+  if (cmd.op === 'capabilities') return { ok: true, capabilities: listCapabilities() };
   const sampling = cmd.sample ? startSampling(cmd.sample) : undefined;
   try {
     if (cmd.op === 'personTab') {
@@ -204,7 +224,7 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
         }
       }
     } else if (cmd.op === 'vpnFind') {
-      out = await findVpnPosts(cmd.wsId);
+      out = await execute(X_CAP.vpnFind, { wsId: cmd.wsId }, { caller: 'inbox' });
     } else if (cmd.op === 'vpnPrune') {
       const acc = await readWsAccount(cmd.wsId);
       out = acc?.restId ? await pruneVpnPosts(acc.restId) : { ok: false, why: '认不出号' };
@@ -226,11 +246,9 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
     } else if (cmd.op === 'engageCollect') {
       out = await collectEngagement(cmd.wsId);
     } else if (cmd.op === 'engagePrepare') {
-      const acc = await readWsAccount(cmd.wsId);
-      out = acc?.restId ? await prepareEngage(cmd.wsId, acc.restId, cmd.restId, cmd.handle, cmd.hisTweetId) : { ok: false, why: '认不出号' };
+      out = await execute(X_CAP.engagePrepare, { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle, hisTweetId: cmd.hisTweetId }, { caller: 'inbox' });
     } else if (cmd.op === 'engageOverview') {
-      const acc = await readWsAccount(cmd.wsId);
-      out = acc?.restId ? await readEngageOverview(acc.restId, acc.handle, 10) : { ok: false, why: '认不出号' };
+      out = await execute(X_CAP.engageOverview, { wsId: cmd.wsId, limit: 10 }, { caller: 'inbox' });
     } else if (cmd.op === 'askDraft') {
       const acc = await readWsAccount(cmd.wsId);
       if (!acc?.restId) out = { ok: false, why: '认不出号' };
