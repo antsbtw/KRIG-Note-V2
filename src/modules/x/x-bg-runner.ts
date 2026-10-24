@@ -14,11 +14,13 @@
  *    不停 → 吊住事件循环 → Ctrl+C 不退)。`stopBgRunner` 导出给 index.ts;timer `unref()`。
  * 2. **同 ws 串行**(x_task 注释:同一任务跨 ws 并行=很强的自动化信号)。
  *    `runningWs` 按 ws 锁;跨 ws 可并行(用户拍板「按 ws 各一个并行」)。
- * 3. **你在手动操作该 ws 时让路**:`isDue` 看 wsBusy(getXHostBusy)。
+ * 3. **你在手动操作该 ws 时让路**:`isDue` 看 wsBusy(X 网页有没有人占着,x-page-lock);
+ *    开跑时自己也占住这个网页 —— 别人(查回关 / 卡片准备 / 操作台)申请会被拒,不用再单独问「后台在不在采」。
  * 4. 失败即停:一段 failed → job 标 failed 留原因,不自动重试(异常即停铁律)。
  */
 
-import { getXHostState, getXHostBusy } from './x-host-registry';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, pageBusy, releasePage } from './x-page-lock';
 import { activeJobsForWs, wsWithActiveJobs, readJob, saveJob } from './x-bg-job-repo';
 import { BG_LIST_TABS, describeProgress, isDue, kindOf, nextTab, type BgJob, type BgListTab } from './x-bg-job';
 import { readPace as readPaceState, recordPaceOutcome } from './x-pace-repo';
@@ -40,16 +42,6 @@ const DEFAULTS = {
 let timer: ReturnType<typeof setInterval> | null = null;
 /** ⭐ 同 ws 串行:正在跑一段的 ws 锁在这里,下一轮 tick 跳过它 */
 const runningWs = new Set<string>();
-/**
- * ⭐ 后台此刻正在用哪个 webview 采谁 —— 人手动操作(核对/采一个月/取关)前先问(IPC bgBusy)。
- * ⚠️ 不写进 x-host-registry 的「忙」:那份由 renderer 同步过来,会被覆盖掉。
- */
-const runningWc = new Map<number, { handle: string; jobId: string }>();
-
-export function bgRunningOn(wcId: number): { handle: string; jobId: string } | null {
-  return runningWc.get(wcId) ?? null;
-}
-
 /**
  * ⭐⭐ 「此刻」状态 —— 给运营顶栏 / 人卡的「在不在跑」提示(用户 10-14:「应该有一个任务是否在执行的提示,
  * 否则都不知道是否已经启动任务」)。
@@ -242,28 +234,35 @@ export async function tickOnce(
       waitNoteByWs.set(wsId, '这个号的 X 网页没开,等它开');
       continue;
     }
-    const wsBusy = getXHostBusy(host.wcId) !== null;
+    const busyBy = pageBusy(host.wcId);
+    const wsBusy = busyBy !== null;
     const jobs = await activeJobsForWs(wsId);
     // 挑第一个到期的
     const gaps = new Map<string, number>();
     for (const j of jobs) gaps.set(j.id, (await readPaceState(paceKeyOf(j))).gapSec);
     const due = jobs.find((j) => isDue(j, { now, wsBusy, segmentGapSec: gaps.get(j.id) ?? 120 }).due);
     if (!due) {
-      if (wsBusy && jobs.length > 0) console.log(`[x.bg] ${wsId} 让路:X 网页正忙(${getXHostBusy(host.wcId)})`);
+      if (wsBusy && jobs.length > 0) console.log(`[x.bg] ${wsId} 让路:X 网页正忙(${busyBy})`);
       const first = jobs[0];
       if (first) waitNoteByWs.set(wsId, isDue(first, { now, wsBusy, segmentGapSec: gaps.get(first.id) ?? 120 }).why);
       continue;
     }
+    /** ⭐⭐ 占住这个网页(原 runningWc 并进 x-page-lock):查完 isDue 到这里之间被人抢了 → 这一轮让路 */
+    const lock = acquirePage(host.wcId, `后台正在采 @${due.handle}(可在人卡暂停)`, 'timer');
+    if (!lock.ok) {
+      console.log(`[x.bg] ${wsId} 让路:${lock.why}`);
+      waitNoteByWs.set(wsId, `让路:${lock.why}`);
+      continue;
+    }
     console.log(`[x.bg] ${wsId} 开跑一段:@${due.handle} ${due.range}(${due.id})`);
     runningWs.add(wsId);
-    runningWc.set(host.wcId, { handle: due.handle, jobId: due.id });
     waitNoteByWs.delete(wsId);
     liveByWs.set(wsId, { jobId: due.id, handle: due.handle, range: due.range, wcId: host.wcId, startedAt: Date.now(), msg: '开始这一段…' });
     try {
       await drive(wsId, host.wcId, due);
     } finally {
       runningWs.delete(wsId);
-      runningWc.delete(host.wcId);
+      releasePage(lock.token);
       liveByWs.delete(wsId);
     }
   }
@@ -354,7 +353,6 @@ export function kickBgRunner(delayMs = 3000): void {
 export function _resetBgRunner(): void {
   stopBgRunner();
   runningWs.clear();
-  runningWc.clear();
   liveByWs.clear();
   waitNoteByWs.clear();
 }

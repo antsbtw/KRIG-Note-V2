@@ -13,8 +13,8 @@
 import { webviewPorts } from './x-collect-ports';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, pageBusy, releasePage } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
 import { appendAction, readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
@@ -70,10 +70,8 @@ export function followQueueStatus(ws: string): {
 async function step(ws: string, x: Queue): Promise<void> {
   const wcId = getXHostState(ws)?.wcId;
   if (wcId === undefined) { x.note = 'X 网页没开 —— 等它打开'; return; }
-  const busy = getXHostBusy(wcId);
+  const busy = pageBusy(wcId);
   if (busy !== null) { x.note = `让路:${busy}`; return; }
-  const bg = bgRunningOn(wcId);
-  if (bg !== null) { x.note = `让路:后台在采 @${bg.handle}`; return; }
   const gate = await readFollowGate(localDayStart(new Date()).toISOString());
   /**
    * 无人值守的队列:连续关注满了就歇(节奏,waitSec);
@@ -87,9 +85,11 @@ async function step(ws: string, x: Queue): Promise<void> {
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') { x.paused = `认不出登录的号:${account.reason} —— 已暂停`; return; }
 
+  /** ⭐⭐ 占住 X 网页(x-page-lock);上面问过之后被人抢了 → 这一步让路,人不出队 */
+  const lock = acquirePage(wcId, BUSY, 'timer');
+  if (!lock.ok) { x.note = `让路:${lock.why}`; return; }
   const item = x.items.shift()!;
   x.current = item; x.note = heads;
-  setXHostBusy(wcId, BUSY);
   const ports = webviewPorts(wcId);
   let state: FollowDone['state'] = 'failed';
   let detail: string | undefined;
@@ -105,7 +105,7 @@ async function step(ws: string, x: Queue): Promise<void> {
   } catch (e) {
     detail = `关注出错:${e instanceof Error ? e.message : String(e)}`;
   } finally {
-    setXHostBusy(wcId, null);
+    releasePage(lock.token);
     x.current = undefined;
   }
   const at = new Date().toISOString();

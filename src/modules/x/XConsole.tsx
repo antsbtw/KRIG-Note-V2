@@ -56,7 +56,7 @@ import { buildRunReport, completenessLine } from './x-run-report';
 import { statsLine } from './x-batch-stats';
 import { ledgerLine } from './x-page-ledger';
 import { recipeToQuery } from './x-recipe-query';
-import { setXHostBusy } from './x-host-registry';
+import { acquireXPage, releaseXPage } from './x-unfollow-run';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
 
@@ -217,14 +217,13 @@ export function XConsole(
    */
   const [running, setRunning] = useState(false);
   /**
-   * ⭐ 采集中登记「X 网页正忙」—— 运营的人页点人会让 X 网页跳到他主页,
+   * ⭐ 采集中占住 X 网页(主进程的锁,x-page-lock)—— 运营的人页点人会让 X 网页跳到他主页,
    * 采集途中跳走会打断采集(2026-10-08)。
+   * ⚠️⚠️ 2026-10-23 起开采前先申请、被占着就不开采:原来是 useEffect 里直接写「忙」,
+   * 会盖掉后台查回关的忙、结束时再清掉(Module5-04 §1.3 bug 1)。申请 / 放锁在下面「采这一页」的 onClick 里。
+   * 被占着 → 不开采,在按钮旁说出是谁占着(lockNote)。
    */
-  useEffect(() => {
-    if (wcId == null || !running) return;
-    setXHostBusy(wcId, '操作台正在采集');
-    return () => setXHostBusy(wcId, null);
-  }, [wcId, running]);
+  const [lockNote, setLockNote] = useState<string | null>(null);
   /** ⭐ 采够几页就停 —— 用户 2026-10-03:「每次采集 10 页」 */
   const [pagesWanted, setPagesWanted] = useState('10');
   const [report, setReport] = useState<HarvestReport | null>(null);
@@ -813,6 +812,9 @@ export function XConsole(
                   /** ⚠️ 不看 busy:这**就是**那个长操作 */
                   disabled={wcId == null || running}
                   onClick={async () => {
+                    const lock = await acquireXPage(wcId!, '操作台正在采集');
+                    if (!lock.ok) { setLockNote(`没开采:${lock.why}`); return; }
+                    setLockNote(null);
                     setRunning(true);
                     setReport(null);
                     setScrollDone(null);
@@ -857,7 +859,7 @@ export function XConsole(
                           f: origin.params.f === 'top' ? 'top' : 'latest',
                           wantPages: Math.min(Math.max(Number(pagesWanted) || 10, 1), 40),
                           maxMs: 10 * 60_000,
-                          ownBusy: '操作台正在采集',
+                          ownToken: lock.token,
                         });
                         setLog((l) => [{ at: new Date().toLocaleTimeString(), label: '滚动截获', result: sr }, ...l].slice(0, 50));
                         if (sr.status === 'failed') { setStep(`滚动截获失败:${sr.reason}`); return; }
@@ -1313,6 +1315,7 @@ export function XConsole(
                         if (w.status === 'ok') setAuditFile((w.value as { file: string }).file);
                       }
                     } finally {
+                      await releaseXPage(lock.token);
                       setRunning(false);
                     }
                   }}
@@ -1321,6 +1324,7 @@ export function XConsole(
                 >
                   {running ? '采集中…' : '采这一页'}
                 </button>
+                {lockNote && <strong style={{ color: '#d88' }}>{lockNote}</strong>}
                 {/*
                   ⭐⭐⭐ **开采前先说清楚「这是哪个名单」** —— 2026-10-07。
                   ⚠️⚠️ 用户连着三次采到了同一个名单(following),

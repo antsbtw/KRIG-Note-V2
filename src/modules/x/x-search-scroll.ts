@@ -15,8 +15,8 @@ import { recordSearch } from './x-search-budget';
 import { webviewPorts } from './x-collect-ports';
 import { X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME, carriesTweets } from './x-pages';
 import { X_SCRIPTS } from './x-dom-scripts';
-import { getXHostBusy, getXHostState, listXHostStates, setXHostBusy } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState, listXHostStates } from './x-host-registry';
+import { acquirePage, holdsPage, releasePage } from './x-page-lock';
 import { auditTimelinePayload, type TweetRecord } from './x-timeline-audit';
 import { ledgerFor, pageTimes, type RunHarvest } from './x-collect-run';
 import { manualSummary, pageProblem, type PageLedgerRow } from './x-page-ledger';
@@ -66,8 +66,13 @@ export type SearchScrollInput = {
   readonly wsId?: string;
   /** 直接给 X 网页(操作台用) */
   readonly wcId?: number;
-  /** 调用方自己登记的「忙」(操作台跑的时候自己标了忙)—— 是它就不让路 */
-  readonly ownBusy?: string;
+  /**
+   * 调用方已经占住了这个 X 网页(操作台跑的时候自己申请了锁)—— 带着那把锁的 token 进来,就不再申请。
+   * ⚠️ token 不是这个网页现在的持有者 → 拒(不能拿过期 / 别的网页的锁混进来)
+   */
+  readonly ownToken?: string;
+  /** 谁发起的(留在锁上,被拒的人看得见):ui / timer / inbox …;不给 = main */
+  readonly caller?: string;
   readonly q: string;
   /** latest(按时间)/ top(热门)—— 默认 latest */
   readonly f?: 'latest' | 'top';
@@ -93,18 +98,20 @@ export type SearchScrollReport = {
   readonly reportFile?: string;
 };
 
-const BUSY = '开发测试:滚动采搜索';
+const BUSY = '滚动采搜索';
 
 export async function collectSearchByScroll(input: SearchScrollInput): Promise<SearchScrollReport> {
   const wcId = input.wcId ?? (input.wsId ? getXHostState(input.wsId)?.wcId : undefined);
   if (wcId === undefined) return { ok: false, why: `${input.wsId ?? '?'} 的 X 网页没开`, rateLimited: false, pages: [] };
   const wsId = input.wsId ?? [...listXHostStates()].find(([, st]) => st.wcId === wcId)?.[0];
-  const busy = getXHostBusy(wcId);
-  if (busy !== null && busy !== input.ownBusy) return { ok: false, why: `X 网页正忙:${busy}`, rateLimited: false, pages: [] };
-  const bg = bgRunningOn(wcId);
-  if (bg !== null) return { ok: false, why: `后台正在采 @${bg.handle}`, rateLimited: false, pages: [] };
-
-  if (busy === null) setXHostBusy(wcId, BUSY);
+  let mine: string | undefined;
+  if (input.ownToken !== undefined) {
+    if (!holdsPage(input.ownToken, wcId)) return { ok: false, why: '带来的锁已经不是这个 X 网页的持有者了(超时被收回 / 已放)—— 没采', rateLimited: false, pages: [] };
+  } else {
+    const lock = acquirePage(wcId, `${BUSY}「${input.q.slice(0, 20)}」`, input.caller ?? 'main');
+    if (!lock.ok) return { ok: false, why: lock.why, rateLimited: false, pages: [] };
+    mine = lock.token;
+  }
   try {
     const rep = await webviewPorts(wcId).harvest({
       gotoPage: { name: X_PAGE_NAME.search, params: { q: input.q, f: input.f ?? 'latest' } },
@@ -169,7 +176,7 @@ export async function collectSearchByScroll(input: SearchScrollInput): Promise<S
     const out: SearchScrollReport = { ok: true, harvest, rateLimited, pages, totals, stats: summarizeBatch([...uniq.values()]) };
     return { ...out, reportFile: writeReport(input, out) };
   } finally {
-    /** ⚠️ 只撤自己登记的忙 —— 操作台自己标的忙由操作台撤 */
-    if (busy === null) setXHostBusy(wcId, null);
+    /** ⚠️ 只放自己申请的锁 —— 操作台带进来的锁由操作台放 */
+    if (mine !== undefined) releasePage(mine);
   }
 }

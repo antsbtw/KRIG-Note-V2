@@ -8,7 +8,7 @@
  * 业务判据(配方怎么翻译成查询)在 `x-recipe-query.ts`,不在这儿。
  */
 
-import { ipcMain, webContents } from 'electron';
+import { ipcMain, webContents, type WebContents } from 'electron';
 import {
   listAllRecipes, upsertRecipe, deleteRecipe,
 } from '@platform/main/db/search-recipe-repo';
@@ -25,8 +25,10 @@ import {
 import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
-import { clearXHostState, getXHostBusy, getXHostState, setXHostBusy, setXHostState } from './x-host-registry';
-import { bgRunnerStatus, bgRunningOn, kickBgRunner } from './x-bg-runner';
+import { clearXHostState, getXHostState, setXHostState } from './x-host-registry';
+import { bgRunnerStatus, kickBgRunner } from './x-bg-runner';
+import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
+import { revokeLocks } from '@platform/main/flow/resource-lock';
 import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
@@ -100,11 +102,30 @@ export function registerXDataIpc(): void {
   if (wired) return;
   wired = true;
 
-  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, (_e, p: XDataInvoke) => handle(p));
+  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, (e, p: XDataInvoke) => handle(p, e.sender));
+}
+
+/**
+ * ⭐ renderer 申请的锁记在「哪个窗口申请的」名下 —— 窗口直接关掉(来不及 finally 放锁)时主进程自己收回,
+ * 不然 X 网页一直「正忙」到超时。
+ */
+const lockOwnerByToken = new Map<string, number>();
+const watchedSenders = new Set<number>();
+function trackSenderLock(sender: WebContents, token: string): void {
+  lockOwnerByToken.set(token, sender.id);
+  if (watchedSenders.has(sender.id)) return;
+  watchedSenders.add(sender.id);
+  const id = sender.id;
+  sender.once('destroyed', () => {
+    watchedSenders.delete(id);
+    const mine = new Set([...lockOwnerByToken].filter(([, s]) => s === id).map(([t]) => t));
+    for (const t of mine) lockOwnerByToken.delete(t);
+    if (mine.size > 0) revokeLocks((h) => mine.has(h.token), `申请它的窗口(wc#${id})关掉了,没来得及放`);
+  });
 }
 
 /** ⭐ 单入口 —— savePageVerify 复用 saveTweets / saveUsers 分支,不另写一份存库流程 */
-async function handle(p: XDataInvoke): Promise<XDataResult> {
+async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult> {
   {
     try {
       switch (p?.op) {
@@ -528,15 +549,19 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if ('reason' in acc) return failed(acc.reason);
           const wcId = getXHostState(p.wsId as string)?.wcId;
           if (wcId === undefined) return failed('X 网页没开');
-          const busy = getXHostBusy(wcId);
-          if (busy !== null) return failed(`X 网页正忙:${busy}`);
-          return { status: 'ok', value: await loadEngageThread(wcId, acc.restId, p.restId, p.tweetId) };
+          const lock = acquirePage(wcId, '互动卡:读来龙去脉', 'ui');
+          if (!lock.ok) return failed(lock.why);
+          try {
+            return { status: 'ok', value: await loadEngageThread(wcId, acc.restId, p.restId, p.tweetId) };
+          } finally {
+            releasePage(lock.token);
+          }
         }
 
         case 'leftTweet': {
           const wcId = getXHostState(p.wsId as string)?.wcId;
           if (wcId === undefined) return failed('X 网页没开');
-          const busy = getXHostBusy(wcId);
+          const busy = pageBusy(wcId);
           if (busy !== null) return failed(`X 网页正忙:${busy}`);
           const r = await readLeftTweet(wcId);
           return r.ok ? { status: 'ok', value: r.tweet } : failed(r.why);
@@ -626,7 +651,7 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           if (!Number.isInteger(p.wantPages) || p.wantPages < 1 || p.wantPages > 40) return failed('[x.data] searchScroll 的 wantPages 要 1–40(防限流)');
           const recipeName = recipeNameForQuery(p.q, await listAllRecipes());
           const r = await collectSearchByScroll({
-            wcId: p.wcId, q: p.q, f: p.f, wantPages: p.wantPages, maxMs: p.maxMs, recipeName, ownBusy: p.ownBusy,
+            wcId: p.wcId, q: p.q, f: p.f, wantPages: p.wantPages, maxMs: p.maxMs, recipeName, ownToken: p.ownToken, caller: 'ui',
           });
           traceRecorder.lifecycle({
             layer: 'web.net', event: r.ok ? 'x-search-scroll-ok' : 'x-search-scroll-failed', pageId: 'x-data',
@@ -679,24 +704,30 @@ async function handle(p: XDataInvoke): Promise<XDataResult> {
           wc.once('destroyed', () => {
             /** ⚠️ 只清「还是这个 wc」的登记 —— 同 ws 可能已换成新 webview */
             if (getXHostState(ws)?.wcId === id) clearXHostState(ws);
-            setXHostBusy(id, null);
+            revokePage(id, `X 网页 wc#${id} 销毁了`);
           });
           console.log(`[x.host] ${p.wsId} 的 X 网页 = wc#${p.wcId}(后台采集可见)`);
           return { status: 'ok', value: { wsId: p.wsId, wcId: p.wcId } };
         }
 
-        case 'syncBusy':
-          if (!Number.isInteger(p.wcId)) return failed('[x.data] syncBusy 缺 wcId');
-          setXHostBusy(p.wcId, typeof p.reason === 'string' && p.reason !== '' ? p.reason : null);
-          return { status: 'ok', value: { wcId: p.wcId } };
+        /** ⭐⭐⭐ X 网页占用(x-page-lock)—— renderer 只申请,锁只在主进程 */
+        case 'pageAcquire': {
+          if (!Number.isInteger(p.wcId) || typeof p.purpose !== 'string' || p.purpose === '') return failed('[x.data] pageAcquire 要 wcId 和 purpose');
+          const r = acquirePage(p.wcId, p.purpose, 'ui');
+          if (r.ok && sender) trackSenderLock(sender, r.token);
+          return { status: 'ok', value: r };
+        }
 
-        case 'mainBusy':
-          if (!Number.isInteger(p.wcId)) return failed('[x.data] mainBusy 缺 wcId');
-          return { status: 'ok', value: getXHostBusy(p.wcId) };
+        case 'pageRelease': {
+          if (typeof p.token !== 'string' || p.token === '') return failed('[x.data] pageRelease 缺 token');
+          lockOwnerByToken.delete(p.token);
+          const released = releasePage(p.token);
+          return released ? { status: 'ok', value: { released } } : failed(`[x.data] pageRelease:这把锁不是你的(已放过 / 超时被收回)`);
+        }
 
-        case 'bgBusy':
-          if (!Number.isInteger(p.wcId)) return failed('[x.data] bgBusy 缺 wcId');
-          return { status: 'ok', value: bgRunningOn(p.wcId) };
+        case 'pageBusy':
+          if (!Number.isInteger(p.wcId)) return failed('[x.data] pageBusy 缺 wcId');
+          return { status: 'ok', value: pageBusy(p.wcId) };
 
         /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 只做校验 + 调 repo */
         case 'bgCreateJob': {

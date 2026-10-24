@@ -195,7 +195,7 @@ export type XDataInvoke =
    * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。
    * 返回 `SearchScrollReport`(x-search-scroll.ts)。wantPages ≤ 40(SearchTimeline ~50 次/15 分钟)。
    */
-  | { readonly op: 'searchScroll'; readonly wcId: number; readonly q: string; readonly f?: 'latest' | 'top'; readonly wantPages: number; readonly maxMs: number; readonly ownBusy?: string }
+  | { readonly op: 'searchScroll'; readonly wcId: number; readonly q: string; readonly f?: 'latest' | 'top'; readonly wantPages: number; readonly maxMs: number; readonly ownToken?: string }
   /** ⭐ 抽查(2026-10-16):有没有比 after 新的右键「查库」请求 —— 返回 `SpotRequest | null` */
   | { readonly op: 'spotCheckPoll'; readonly wsId: string; readonly after: number }
   /** ⭐ 抽查:按推文 id / 人的 handle 查库 —— 返回 `SpotResult` */
@@ -239,16 +239,19 @@ export type XDataInvoke =
       };
     }
   /**
-   * ⭐⭐ renderer → 主进程:把 X 网页登记(ws→wcId)与「忙」同步过去(`x-host-sync.ts`)。
+   * ⭐⭐ renderer → 主进程:把 X 网页登记(ws→wcId)同步过去(`x-host-sync.ts`)。
    * ⚠️ 登记表每进程一份,后台 runner 在主进程 —— 不同步它永远看不到 X 网页。
    * wcId: null = 这个 ws 的 X 网页卸了。
    */
   | { readonly op: 'syncHost'; readonly wsId: string; readonly wcId: number | null }
-  | { readonly op: 'syncBusy'; readonly wcId: number; readonly reason: string | null }
-  /** ⭐ 后台此刻在不在用这个 webview 采(人手动操作前先问一句);回 `{ handle } | null` */
-  | { readonly op: 'bgBusy'; readonly wcId: number }
-  /** ⭐ 主进程那份「忙」(查回关 / 关注队列 / 求关 …)—— 登记表每进程一份,renderer 自己那份看不到(2026-10-19) */
-  | { readonly op: 'mainBusy'; readonly wcId: number }
+  /**
+   * ⭐⭐⭐ X 网页占用(x-page-lock,Module5-04 第 1 步)—— renderer 不再自己写「忙」(syncBusy 已退役)。
+   * pageAcquire 回 `{ ok: true, token } | { ok: false, why }`;pageRelease 只放得掉自己的 token;
+   * pageBusy 回占用者在干什么(string)或 null。申请方窗口关掉,它的锁主进程自己收回。
+   */
+  | { readonly op: 'pageAcquire'; readonly wcId: number; readonly purpose: string }
+  | { readonly op: 'pageRelease'; readonly token: string }
+  | { readonly op: 'pageBusy'; readonly wcId: number }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
   /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
   | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }

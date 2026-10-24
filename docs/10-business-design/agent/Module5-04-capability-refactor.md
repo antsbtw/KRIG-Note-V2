@@ -128,7 +128,7 @@ type Result<T> =
 
 | 步 | 做什么 | 判据 |
 |---|---|---|
-| 1 | **资源锁**;4 个准备函数在采主页时上锁;`syncBusy` 退役;后台 `runningWc` 并入 | 测试:查回关持锁时操作台申请 → refused,且查回关的锁没被放掉;卡片准备期间巡检到点 → 让路 |
+| 1 ✅代码(10-23,真机待验,见 §7) | **资源锁**;4 个准备函数在采主页时上锁;`syncBusy` 退役;后台 `runningWc` 并入 | 测试:查回关持锁时操作台申请 → refused,且查回关的锁没被放掉;卡片准备期间巡检到点 → 让路 |
 | 2 | **能力契约 + 执行器 + 统一结果 + `krig_flow`**;先接 3 个形状差最大的:`x.engage.prepare`(占网页)、`x.vpn.find`(花搜索额度)、`x.engage.overview`(纯读库) | 三个入口各调一次,检查 / 锁 / 记录 / 结果一致;`flow_step_run` 有行(含 refused) |
 | 3 | **按批迁移其余能力**(读库类 → 采集类 → 输出类);收件箱改成「调任意能力」(白名单退役);定时器改走执行器 | x-data-ipc 的 switch 只剩转发;收件箱能调目录里任意能力 |
 | 4 | **流程搬回主进程**:取关(+ 异常即停)、点人核对、互动前过一轮、求助帖判断循环、找蓝V+扫倾向、采主页重试、卡片流程 | 界面组件里没有 `webDomInvoke` 直调和能力循环 |
@@ -150,3 +150,37 @@ type Result<T> =
 2. 从第 1 步「资源锁」开始;先写失败的测试(查回关持锁时被操作台抢)再改。
 3. 每步完成:跑 `npx vitest run tests/modules/`(`x-bg-runner.verify.test.ts` 依赖本机真库,失败属环境)、真机用开发收件箱自测、提交;本文对应步打 ✅ 并记真机结果。
 4. 用户在用:求关卡 / 互动卡 / 求助回复卡 / 每天巡检 —— 每步都要确认这几样没坏。
+
+## 7. 执行记录
+
+### 第 1 步 资源锁 —— 2026-10-23 代码完成,单测绿,**真机待验**
+
+**做了什么**
+- 平台层通用锁 `src/platform/main/flow/resource-lock.ts`(不认识 X):`acquireLock / releaseLock(token) / lockHolder / holdsLock / revokeLocks / listLocks`。
+  只有持有者能放;默认 TTL 1 小时,超时收回 `console.error`(执行记录等第 2 步)。
+- X 薄壳 `src/modules/x/x-page-lock.ts`:资源键 `page:<wcId>`;`acquirePage / releasePage / pageBusy / holdsPage / revokePage / withPage`。
+  被拒文案统一 `X 网页正忙:<在干什么>(<谁>,已 N 秒)`。
+- 主进程全部占用者改走锁:查回关、关系采集读现状、关注队列、求关 / 互动 / 求助发送、认号、搜索滚动、收件箱(personTab / userList / leftTweet 原来查了不标或不查)、互动卡读来龙去脉。
+- **4 个准备函数**(`prepareAsk / prepareEngage / screenEngage / prepareVpn`)采主页 / 读来龙去脉期间持锁(bug 2)。
+- 后台 `runningWc` 并进锁(开跑一段时占 `后台正在采 @x`);`bgRunningOn` 删除,各处「后台在不在采」的单独检查一并去掉。
+- renderer 不再写忙:`x-host-registry` 的忙表删除,`syncBusy / mainBusy / bgBusy` 三个 op 退役,
+  换成 `pageAcquire / pageRelease / pageBusy`;renderer 封装 `acquireXPage / releaseXPage / xPageBusy`(x-unfollow-run.ts)。
+  申请方窗口关掉 → 主进程收回它的锁;X 网页销毁 → 收回该网页的锁。
+- 操作台:开采前申请,被占着不开采并在按钮旁说出是谁;搜索滚动带着自己的 token(`ownToken`)进去。
+
+**测试** `tests/modules/x-page-lock.test.ts`(13 条):查回关持锁时操作台申请被拒、乱放一把放不掉、查完才空;
+四个准备函数准备中巡检查回关让路、后台不开跑;抛错也放锁;后台在采时准备被拒。
+先对旧代码跑过(接旧忙表)—— 9 条红;注入四种违规(prepareVpn 不上锁 / 谁都能放锁 / 后台不占锁 / 查回关不上锁)各自变红。
+旧的源码守卫 8 个文件改钉新写法;x-task-view 里一处找不到时 -1 仍 `toBeLessThan` 的假绿顺手补了 `> -1`。
+
+**没覆盖(留给后面几步)**
+- 只跳一下的 `show / showInX`(XTaskEngage / XTaskAsk / XTaskVpn)仍是「先问 xPageBusy 再 goto」,不占锁 —— 第 4 步流程搬回主进程时一起收。
+- IPC `leftTweet` 只问不占(只读 DOM,不跳转)。
+- 定时器把「被拒」当「做过了」(`x-daily-upkeep.ts` 查回关让路也 return)—— 第 2 步统一结果后改。
+- 锁超时 / 收回只打终端,还没进 `flow_step_run`(第 2 步)。
+
+**真机待验(改了主进程,必须重启 app)**
+1. 后台查回关在跑时点操作台「采这一页」→ 按钮旁显示「没开采:X 网页正忙:任务:查回关(timer,…)」,查回关正常跑完。
+2. 求关卡 / 互动卡 / 求助回复卡准备时,终端不出现巡检或 `[x.bg] 开跑一段`;准备完后巡检能照常跑。
+3. 人卡核对 / 采推文 / 取关、任务页点名字跳主页照常;后台在采时这些都提示「后台正在采 @x」而不动。
+4. 关掉窗口后 X 网页不会一直「正忙」(终端有 `[lock] 收回 …`)。

@@ -5,8 +5,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  busy: null as string | null,
-  bg: null as { handle: string } | null,
   gate: { allowed: true, todayCount: 0, cap: 30, settings: { 'follow.min_gap_sec': 60, 'follow.jitter_sec': 0 } } as Record<string, unknown>,
   account: { kind: 'ok', restId: 'ME', handle: 'me' } as Record<string, unknown>,
   scriptState: 'followed',
@@ -22,10 +20,8 @@ vi.mock('@modules/x/x-collect-ports', () => ({
     harvest: async () => null,
   }),
 }));
-vi.mock('@modules/x/x-host-registry', () => ({
-  getXHostState: () => ({ wcId: 7 }), getXHostBusy: () => h.busy, setXHostBusy: () => undefined,
-}));
-vi.mock('@modules/x/x-bg-runner', () => ({ bgRunningOn: () => h.bg }));
+/** ⭐ 网页占用用真的锁(x-page-lock)—— 后台在采也是占着这把锁 */
+vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7 }) }));
 vi.mock('@modules/x/x-account-repo', () => ({ accountForWrite: async () => h.account }));
 vi.mock('@modules/x/x-ops-actions-repo', () => ({
   readFollowGate: async () => h.gate,
@@ -36,11 +32,13 @@ vi.mock('@modules/x/x-user-repo', () => ({
 }));
 
 const Q = await import('@modules/x/x-follow-queue');
+const { acquirePage, releasePage } = await import('@modules/x/x-page-lock');
+const { _resetLocks } = await import('@platform/main/flow/resource-lock');
 
 let n = 0;
 const ws = (): string => `ws-t${(n += 1)}`;
 beforeEach(() => {
-  h.busy = null; h.bg = null; h.scriptState = 'followed';
+  _resetLocks(); h.scriptState = 'followed';
   h.gate = { allowed: true, todayCount: 0, cap: 30, settings: { 'follow.min_gap_sec': 60, 'follow.jitter_sec': 0 } };
   h.account = { kind: 'ok', restId: 'ME', handle: 'me' };
   h.actions = []; h.rels = []; h.gotos = [];
@@ -99,13 +97,14 @@ describe('关注队列', () => {
 
     h.gate = { allowed: true, todayCount: 0, cap: 30, settings: { 'follow.min_gap_sec': 60, 'follow.jitter_sec': 0 } };
     const w2 = ws();
-    h.busy = '操作台正在采集';
+    const other = acquirePage(7, '后台正在采 @x', 'timer');
+    if (!other.ok) throw new Error('应拿到');
     Q.addToFollowQueue(w2, [{ restId: '1', handle: 'a' }]);
     await Q.followQueueTick();
     expect(h.gotos).toEqual([]);
-    expect(Q.followQueueStatus(w2).note).toContain('让路');
+    expect(Q.followQueueStatus(w2).note).toContain('让路:后台正在采 @x');
+    releasePage(other.token);
 
-    h.busy = null;
     const w3 = ws();
     h.account = { kind: 'needIdentify', handle: 'x', reason: '登录的号变了' };
     Q.addToFollowQueue(w3, [{ restId: '1', handle: 'a' }]);

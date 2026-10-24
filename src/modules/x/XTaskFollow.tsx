@@ -7,11 +7,11 @@
  */
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { getXHostState, setXHostBusy, subscribeXHost } from './x-host-registry';
+import { getXHostState, subscribeXHost } from './x-host-registry';
 import { AskRun, type AskWho } from './XTaskAsk';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XTabs } from './XTabs';
-import { readProfileAndRefresh, unfollowOnce, xPageBusy } from './x-unfollow-run';
+import { acquireXPage, readProfileAndRefresh, releaseXPage, unfollowOnce } from './x-unfollow-run';
 
 const CHECK_BUSY = '任务:正在核对这个人';
 import type { AskStatus } from './x-follow-back';
@@ -135,18 +135,17 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     setViewing(c.rest_id);
     if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
-    const busy = await xPageBusy(wcId);
-    if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
+    const lock = await acquireXPage(wcId, CHECK_BUSY);
+    if (!lock.ok) { setMsg(`${lock.why},没跳转(跳走会打断)`); return; }
     /**
      * ⭐ 去他主页的同时读资料、把「我和他」的关系写回库(与运营人卡的「点人顺手核对」同一个函数)。
      * 用户 10-21:「点击观察到已经互关过的推友,就应该移除这个列表吧?」—— 读到我已经关注他 → 从候选里拿掉,说清楚。
      */
-    setXHostBusy(wcId, CHECK_BUSY);
     let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
     try {
       v = await readProfileAndRefresh({ rest_id: c.rest_id, handle: c.handle }, wcId);
     } finally {
-      setXHostBusy(wcId, null);
+      await releaseXPage(lock.token);
     }
     if (v.kind === 'miss') { setMsg(`跳过去了,但没读到他的关系:${v.text}`); return; }
     if (v.rec.following === true) {
@@ -169,14 +168,13 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     if (!opening) return;
     if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
-    const busy = await xPageBusy(wcId);
-    if (busy !== null) { setMsg(`${busy},没跳转(跳走会打断)`); return; }
-    setXHostBusy(wcId, CHECK_BUSY);
+    const lock = await acquireXPage(wcId, CHECK_BUSY);
+    if (!lock.ok) { setMsg(`${lock.why},没跳转(跳走会打断)`); return; }
     let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
     try {
       v = await readProfileAndRefresh({ rest_id: x.person, handle: x.handle }, wcId);
     } finally {
-      setXHostBusy(wcId, null);
+      await releaseXPage(lock.token);
     }
     if (v.kind === 'miss') { setMsg(`@${x.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
     setMsg(v.kind === 'same' ? null : `@${x.handle}:${v.text}${v.rec.followedBy === true && x.status !== 'back' ? ' —— 他已经回关了' : ''}`);

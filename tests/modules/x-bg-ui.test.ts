@@ -16,7 +16,8 @@ vi.mock('@modules/x/x-data-types', () => ({
 }));
 
 import { syncOnce, _resetXHostSync } from '@modules/x/x-host-sync';
-import { setXHostState, clearXHostState, setXHostBusy } from '@modules/x/x-host-registry';
+import * as registry from '@modules/x/x-host-registry';
+const { setXHostState, clearXHostState } = registry;
 
 const read = (p: string): string => readFileSync(resolve(__dirname, '../..', p), 'utf8');
 /** 剥注释(⚠️ 不吃 https:// —— 守卫剥注释第四刀) */
@@ -27,7 +28,6 @@ describe('x-host-sync:renderer 登记差异发给主进程', () => {
     sent.length = 0;
     _resetXHostSync();
     for (const ws of ['ws-a', 'ws-b']) clearXHostState(ws);
-    for (const wc of [11, 12]) setXHostBusy(wc, null);
   });
 
   it('登记 → 发 syncHost;同 wcId 再导航不重发;卸了发 null', () => {
@@ -52,14 +52,15 @@ describe('x-host-sync:renderer 登记差异发给主进程', () => {
     expect(sent).toEqual([{ op: 'syncHost', wsId: 'ws-b', wcId: 12 }]);
   });
 
-  it('忙 → 发 syncBusy;不忙 → 发 null', () => {
-    setXHostBusy(11, '运营正在核对这个人');
+  /**
+   * ⭐⭐⭐ 2026-10-23 syncBusy 退役(Module5-04 第 1 步):renderer 不再有自己的「忙」表,
+   * 同步过去会覆盖 / 清掉主进程别人的忙。占网页只走主进程的锁(x-page-lock,IPC pageAcquire)。
+   */
+  it('⭐⭐⭐ 「忙」不再同步:renderer 登记表没有忙,syncOnce 只发 syncHost', () => {
+    expect(Object.keys(registry).filter((k) => /busy/i.test(k))).toEqual([]);
+    setXHostState('ws-a', 11, '');
     syncOnce();
-    expect(sent).toEqual([{ op: 'syncBusy', wcId: 11, reason: '运营正在核对这个人' }]);
-    sent.length = 0;
-    setXHostBusy(11, null);
-    syncOnce();
-    expect(sent).toEqual([{ op: 'syncBusy', wcId: 11, reason: null }]);
+    expect(sent.map((p) => (p as { op: string }).op)).toEqual(['syncHost']);
   });
 });
 
@@ -69,15 +70,18 @@ describe('接线守卫', () => {
     expect(src).toMatch(/^startXHostSync\(\);/m);
   });
 
-  it('⭐⭐ 主进程 syncHost/syncBusy 真写进主进程登记表,webview 销毁自己清', () => {
+  it('⭐⭐ 主进程 syncHost 真写进主进程登记表,webview 销毁自己清(连它上面的锁一起收回);syncBusy 已退役', () => {
     const ipc = strip(read('src/modules/x/x-data-ipc.ts'));
-    const host = ipc.slice(ipc.indexOf("case 'syncHost':"), ipc.indexOf("case 'syncBusy':"));
+    const host = ipc.slice(ipc.indexOf("case 'syncHost':"), ipc.indexOf("case 'pageAcquire':"));
     expect(host.length).toBeGreaterThan(100);
     expect(host).toMatch(/setXHostState\(p\.wsId, p\.wcId/);
     expect(host).toMatch(/clearXHostState\(p\.wsId\)/);
-    expect(host).toMatch(/wc\.once\('destroyed'/);
-    const busy = ipc.slice(ipc.indexOf("case 'syncBusy':"), ipc.indexOf("case 'bgBusy':"));
-    expect(busy).toMatch(/setXHostBusy\(p\.wcId/);
+    expect(host).toMatch(/wc\.once\('destroyed'[\s\S]*revokePage\(id/);
+    expect(ipc).not.toMatch(/case 'syncBusy'|case 'bgBusy'|case 'mainBusy'/);
+    /** renderer 申请的锁:申请方窗口关掉要收回 */
+    const acq = ipc.slice(ipc.indexOf("case 'pageAcquire':"), ipc.indexOf("case 'pageRelease':"));
+    expect(acq).toMatch(/acquirePage\(p\.wcId, p\.purpose, 'ui'\)/);
+    expect(acq).toMatch(/trackSenderLock\(sender, r\.token\)/);
   });
 
   it('⭐ bg* op 调 repo;暂停/恢复先 readJob(UPSERT 不存在的 id 会建残行)', () => {
@@ -96,25 +100,27 @@ describe('接线守卫', () => {
     expect(seg("case 'bgCancelJob':", "case 'opsSettings':")).toMatch(/await deleteJob\(/);
   });
 
-  it('⭐ 人卡三个手动动作都先问后台在不在用这个网页', () => {
+  it('⭐ 人卡三个手动动作都先占住网页(主进程的锁 —— 后台在采也在这把锁上),被占着就不动', () => {
     const page = strip(read('src/modules/x/XOpsPeople.tsx'));
     for (const [a, b] of [
       ['const runVerify = useCallback', 'await readProfileAndRefresh('],
-      ['const collectTweets = useCallback', 'setXHostBusy(wcId, COLLECT_BUSY)'],
+      ['const collectTweets = useCallback', 'for (const tab of PERSON_TABS)'],
     ]) {
       const fn = page.slice(page.indexOf(a), page.indexOf(b));
       expect(fn.length, a).toBeGreaterThan(50);
-      expect(fn, a).toMatch(/await bgBusyNote\(wcId\)/);
+      expect(fn, a).toMatch(/const lock = await acquireXPage\(wcId, \w+\);\s*if \(!lock\.ok\) \{[^\n]*return; \}/);
     }
-    /** ⭐ 取关 2026-10-19 抽到 x-unfollow-run.ts:unfollowOnce 先问 xPageBusy(含主进程的忙 + 后台)再动手 */
+    /** ⭐ 取关 2026-10-19 抽到 x-unfollow-run.ts:unfollowOnce 占住网页再动手 */
     const un = page.slice(page.indexOf('const unfollow = useCallback'), page.indexOf('/** 单击:选中'));
     expect(un).toMatch(/await unfollowOnce\(/);
     const run = strip(read('src/modules/x/x-unfollow-run.ts'));
-    const core = run.slice(run.indexOf('export async function unfollowOnce'), run.indexOf('setXHostBusy(wcId, busyLabel)'));
-    expect(core).toMatch(/await xPageBusy\(wcId\)/);
-    const busyFn = run.slice(run.indexOf('export async function xPageBusy'), run.indexOf('export const UNFOLLOW_STATE_TEXT'));
-    expect(busyFn).toMatch(/op: 'mainBusy'/);
-    expect(busyFn).toMatch(/op: 'bgBusy'/);
+    const core = run.slice(run.indexOf('export async function unfollowOnce'), run.indexOf("op: 'goto'"));
+    expect(core.length).toBeGreaterThan(50);
+    expect(core).toMatch(/const lock = await acquireXPage\(wcId, busyLabel\);\s*if \(!lock\.ok\) return/);
+    const acq = run.slice(run.indexOf('export async function acquireXPage'), run.indexOf('export async function releaseXPage'));
+    expect(acq).toMatch(/op: 'pageAcquire'/);
+    const busyFn = run.slice(run.indexOf('export async function xPageBusy'), run.indexOf('export async function acquireXPage'));
+    expect(busyFn).toMatch(/op: 'pageBusy'/);
   });
 });
 

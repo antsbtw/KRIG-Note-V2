@@ -11,8 +11,9 @@
 import { getXDB } from '@storage/surreal/client';
 import { webviewPorts } from './x-collect-ports';
 import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
-import { bgRunningOn, kickBgRunner } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { kickBgRunner } from './x-bg-runner';
+import { acquirePage, releasePage } from './x-page-lock';
 import { followCheckRunning } from './x-follow-check';
 import { accountForWrite } from './x-account-repo';
 import { PEOPLE_WITH_RELATION } from './x-account';
@@ -53,9 +54,6 @@ export type RelationStart =
 export async function startRelationTask(wsId: string, target?: { readonly restId: string; readonly handle: string }, trigger: 'auto' | 'manual' = 'manual'): Promise<RelationStart> {
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: `${wsId} 的 X 网页没开` };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采一段,等这一段结束再读现状' };
   if (followCheckRunning() !== null) return { ok: false, why: '正在查回关' };
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') return { ok: false, why: `认不出这个 X 网页登录的号:${account.reason}` };
@@ -66,7 +64,9 @@ export async function startRelationTask(wsId: string, target?: { readonly restId
   const running = (await listJobs(wsId)).find((j) => kindOf(j) === 'lists' && j.restId === who.restId && j.status !== 'done' && j.status !== 'failed');
   if (running?.plan) return { ok: true, created: false, jobId: running.id, plan: running.plan };
 
-  setXHostBusy(wcId, BUSY);
+  /** ⭐ 读现状要开他的主页 —— 占住 X 网页;被占着(后台在采一段 / 查回关 / 卡片准备 …)就不读,说出来 */
+  const lock = acquirePage(wcId, BUSY, trigger === 'auto' ? 'timer' : 'ui');
+  if (!lock.ok) return { ok: false, why: lock.why };
   let followers: number | undefined;
   let following: number | undefined;
   try {
@@ -83,7 +83,7 @@ export async function startRelationTask(wsId: string, target?: { readonly restId
     /** 顺手把他的资料和「他和我」的关系更新进库 */
     await refreshPerson(rec, account);
   } finally {
-    setXHostBusy(wcId, null);
+    releasePage(lock.token);
   }
 
   const plan = planRelation({

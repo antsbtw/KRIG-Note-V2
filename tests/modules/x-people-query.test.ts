@@ -201,18 +201,22 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
     /** 2026-10-09 起导航改为「去主页并核对」(harvest + gotoPage),在 runVerify 里 */
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
     expect(fn.length).toBeGreaterThan(200);
-    const busy = fn.indexOf('getXHostBusy(wcId)');
+    /** 2026-10-23 起「问忙不忙」= 申请主进程的锁(x-page-lock),拿不到就不跳 */
+    const busy = fn.indexOf('await acquireXPage(wcId');
     /** 2026-10-19 去主页 + 读资料抽到 readProfileAndRefresh(x-unfollow-run.ts) */
     const go = fn.indexOf('readProfileAndRefresh(');
     expect(busy, '没问忙不忙').toBeGreaterThan(-1);
     expect(go).toBeGreaterThan(-1);
     expect(busy, '先 goto 后问忙 —— 采集已经被打断了').toBeLessThan(go);
-    expect(fn).toMatch(/setFollowNote\(`\$\{busy\},没跳转/);
+    expect(fn).toMatch(/if \(!lock\.ok\) \{ setFollowNote\(`\$\{lock\.why\},没跳转/);
   });
 
-  it('⭐⭐ 操作台采集中登记「忙」,结束时清掉', () => {
+  it('⭐⭐ 操作台开采前先占住网页(被占着就不开采并说出来),结束时放自己的锁', () => {
     const C = read('src/modules/x/XConsole.tsx');
-    expect(C).toMatch(/if \(wcId == null \|\| !running\) return;\s*setXHostBusy\(wcId, '操作台正在采集'\);\s*return \(\) => setXHostBusy\(wcId, null\);/);
+    expect(C).toMatch(/const lock = await acquireXPage\(wcId!, '操作台正在采集'\);\s*if \(!lock\.ok\) \{ setLockNote\(`没开采:\$\{lock\.why\}`\); return; \}\s*setLockNote\(null\);\s*setRunning\(true\);/);
+    expect(C).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);\s*setRunning\(false\);/);
+    /** ⚠️ 旧写法(useEffect 里直接写忙)会盖掉 / 清掉后台查回关的忙 */
+    expect(C).not.toMatch(/setXHostBusy/);
   });
 
   it('⭐ 人卡的按钮与点人走同一个 openInX(判断只有一份)', () => {
@@ -223,15 +227,16 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
   });
 });
 
-describe('x-host-registry 的「忙」', () => {
-  it('登记、查询、清除;按 wcId 分开', async () => {
-    const { setXHostBusy, getXHostBusy } = await import('@modules/x/x-host-registry');
-    expect(getXHostBusy(7)).toBeNull();
-    setXHostBusy(7, '操作台正在采集');
-    expect(getXHostBusy(7)).toBe('操作台正在采集');
-    expect(getXHostBusy(8)).toBeNull();
-    setXHostBusy(7, null);
-    expect(getXHostBusy(7)).toBeNull();
+describe('X 网页占用(x-page-lock;原 x-host-registry 的「忙」2026-10-23 退役)', () => {
+  it('占住、查询、放掉;按 wcId 分开', async () => {
+    const { acquirePage, pageBusy, releasePage } = await import('@modules/x/x-page-lock');
+    expect(pageBusy(7)).toBeNull();
+    const a = acquirePage(7, '操作台正在采集', 'ui');
+    if (!a.ok) throw new Error('应拿到');
+    expect(pageBusy(7)).toBe('操作台正在采集');
+    expect(pageBusy(8)).toBeNull();
+    releasePage(a.token);
+    expect(pageBusy(7)).toBeNull();
   });
 });
 
@@ -415,9 +420,8 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
   });
 
   it('⭐⭐ 忙就不采;采期间登记忙,结束(含出错)一定清掉;能停', () => {
-    expect(fn).toMatch(/const busy = getXHostBusy\(wcId\);\s*if \(busy !== null\)/);
-    expect(fn).toMatch(/setXHostBusy\(wcId, COLLECT_BUSY\)/);
-    expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);\s*\}/);
+    expect(fn).toMatch(/const lock = await acquireXPage\(wcId, COLLECT_BUSY\);\s*if \(!lock\.ok\)/);
+    expect(fn).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);\s*\}/);
     /** ⭐ 停:renderer 外层循环看 cancelCollect;翻页在主进程,停止按钮还要通知主进程 */
     expect(fn).toMatch(/if \(cancelCollect\.current\) \{ parts\.push/);
     const btn = PAGE.slice(PAGE.indexOf('onCancelCollect={'), PAGE.indexOf('onCancelCollect={') + 300);

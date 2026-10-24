@@ -9,8 +9,8 @@ import { recipeToQuery } from './x-recipe-query';
 import { collectSearchByScroll } from './x-search-scroll';
 import { readWsAccount } from './x-account-repo';
 import { recordSearch, searchBudget } from './x-search-budget';
-import { getXHostBusy, getXHostState } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, releasePage } from './x-page-lock';
 import { readPerson } from './x-people-repo';
 import { readDeferred } from './x-defer-repo';
 import { loadEngageThread } from './x-engage-thread';
@@ -253,9 +253,17 @@ export async function setVpnHuman(account: string, tweetId: string, human: 'acce
 export async function prepareVpn(wsId: string, account: string, tweetId: string): Promise<AskPrepared> {
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
+  /** ⭐⭐ 读来龙去脉要用 X 网页 —— 期间占住(Module5-04 §1.3 bug 2) */
+  const lock = acquirePage(wcId, `求助回复卡:准备 ${tweetId}`, 'ui');
+  if (!lock.ok) return lock;
+  try {
+    return await prepareVpnOn(wcId, account, tweetId);
+  } finally {
+    releasePage(lock.token);
+  }
+}
+
+async function prepareVpnOn(wcId: number, account: string, tweetId: string): Promise<AskPrepared> {
   const db = getXDB();
   const [posts, tws] = await db.query<[Array<{ author_rest_id?: string; author_handle?: string; verdict?: VpnVerdict }>, Array<{ text?: string; created_at?: string }>]>(
     `SELECT author_rest_id, author_handle, verdict FROM type::record('x_vpn_post', $id);

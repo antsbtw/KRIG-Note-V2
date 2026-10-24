@@ -15,7 +15,8 @@ import { __setXDBForTest } from '@storage/surreal/client';
 import { x_migration_1_2_26, x_migration_1_2_24, x_migration_1_2_34, x_migration_1_2_35 } from '@storage/surreal/x-schema';
 import { createJob, saveJob, readJob } from '@modules/x/x-bg-job-repo';
 import { tickOnce, _resetBgRunner } from '@modules/x/x-bg-runner';
-import { setXHostState, clearXHostState, setXHostBusy } from '@modules/x/x-host-registry';
+import { setXHostState, clearXHostState } from '@modules/x/x-host-registry';
+import { acquirePage, releasePage } from '@modules/x/x-page-lock';
 import type { BgJob } from '@modules/x/x-bg-job';
 
 function findBinary(): string | null {
@@ -96,13 +97,15 @@ describe.skipIf(!BINARY)('x-bg-runner tickOnce —— 真库调度', () => {
   it('⭐⭐ 你在手动操作该 ws(busy)→ 让路,不跑', async () => {
     await createJob({ restId: '3', handle: 'c', wsId: 'ws-1', range: 'all' });
     setXHostState('ws-1', 102, 'https://x.com/c');
-    setXHostBusy(102, '正在核对');
+    /** 2026-10-23 起「忙」= 有人占着这个网页的锁(x-page-lock) */
+    const lock = acquirePage(102, '正在核对', 'ui');
+    if (!lock.ok) throw new Error('应拿到');
     try {
       const { drive, ran } = recordingDrive();
       await tickOnce(drive, new Date());
       expect(ran, 'ws 忙还去采 —— 没让路').toEqual([]);
     } finally {
-      setXHostBusy(102, null);
+      releasePage(lock.token);
     }
   });
 

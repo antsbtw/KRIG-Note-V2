@@ -6,7 +6,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
-  busy: null as string | null,
   gate: { allowed: true } as Record<string, unknown>,
   account: { kind: 'ok', restId: 'ME', handle: 'antsBTW' } as Record<string, unknown>,
   like: 'liked', box: { found: true, count: 1, text: '' } as Record<string, unknown>,
@@ -43,10 +42,8 @@ vi.mock('@modules/x/x-collect-ports', async () => {
     }),
   };
 });
-vi.mock('@modules/x/x-host-registry', () => ({
-  getXHostState: () => ({ wcId: 7 }), getXHostBusy: () => h.busy, setXHostBusy: () => undefined,
-}));
-vi.mock('@modules/x/x-bg-runner', () => ({ bgRunningOn: () => null }));
+/** ⭐ 网页占用用真的锁(x-page-lock)—— 2026-10-23 起忙不忙只看锁 */
+vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7 }) }));
 vi.mock('@modules/x/x-follow-queue', () => ({ followQueueStatus: () => ({}) }));
 vi.mock('@modules/x/x-account-repo', () => ({ accountForWrite: async () => h.account }));
 vi.mock('@modules/x/x-ops-actions-repo', () => ({
@@ -59,11 +56,13 @@ vi.mock('@modules/x/x-user-repo', () => ({
 
 const { runAsk, replyProblem } = await import('@modules/x/x-ask-run');
 const { X_SCRIPTS } = await import('@modules/x/x-dom-scripts');
+const { acquirePage, releasePage, pageBusy } = await import('@modules/x/x-page-lock');
+const { _resetLocks } = await import('@platform/main/flow/resource-lock');
 
 const input = { wsId: 'ws-1', restId: '42', handle: 'he', tweetId: '123', tweetText: '#蓝V互关', pickKind: 'tweet' as const, reply: '  早上好，互关一起冲！ ' };
 
 beforeEach(() => {
-  h.busy = null; h.gate = { allowed: true }; h.account = { kind: 'ok', restId: 'ME', handle: 'antsBTW' };
+  _resetLocks(); h.gate = { allowed: true }; h.account = { kind: 'ok', restId: 'ME', handle: 'antsBTW' };
   h.like = 'liked'; h.box = { found: true, count: 1, text: '' };
   h.typed = { status: 'ok', value: { checked: true, landed: true, via: 'synthetic-paste', attempts: 1 } };
   h.send = { state: 'sent', replyId: '999' }; h.follow = 'followed';
@@ -95,9 +94,13 @@ describe('runAsk', () => {
   });
 
   it('⭐⭐ 网页忙 / 认不出号 / 留言空 → 一个动作都不做', async () => {
-    h.busy = '操作台正在采集';
-    expect((await runAsk(input)).blocked).toContain('正忙');
-    h.busy = null; h.account = { kind: 'needIdentify', handle: 'x', reason: '登录的号变了' };
+    const other = acquirePage(7, '操作台正在采集', 'ui');
+    if (!other.ok) throw new Error('应拿到');
+    expect((await runAsk(input)).blocked).toContain('操作台正在采集');
+    /** 被拒的一方不会放掉别人的锁 */
+    expect(pageBusy(7)).toBe('操作台正在采集');
+    releasePage(other.token);
+    h.account = { kind: 'needIdentify', handle: 'x', reason: '登录的号变了' };
     expect((await runAsk(input)).blocked).toContain('认不出');
     h.account = { kind: 'ok', restId: 'ME', handle: 'antsBTW' };
     expect((await runAsk({ ...input, reply: '!!' })).blocked).toContain('没有字也没有表情');

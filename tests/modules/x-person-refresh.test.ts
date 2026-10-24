@@ -108,15 +108,15 @@ describe('接线', () => {
     expect(PROFILE_ENDPOINT).toBe('UserByScreenName');
   });
 
-  it('⭐⭐⭐ 操作台采集中不跳;自己核对期间登记忙,结束(含出错)一定清掉', () => {
+  it('⭐⭐⭐ 操作台采集中不跳;自己核对期间占住网页,结束(含出错)一定放掉', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
-    expect(fn).toMatch(/if \(busy !== null && busy !== VERIFY_BUSY\)/);
-    expect(fn.indexOf('setXHostBusy(wcId, VERIFY_BUSY)')).toBeGreaterThan(-1);
+    /** 2026-10-23 起占网页走主进程的锁(x-page-lock):拿不到就不跳;核对是串行的(openInX 排队),不需要「自己的忙不算」的豁免 */
+    expect(fn).toMatch(/const lock = await acquireXPage\(wcId, VERIFY_BUSY\);\s*if \(!lock\.ok\)/);
     /**
      * ⚠️ 第一版只看「finally 后 80 字内出现清忙」—— 注入「把它挪到 finally 块外面」仍全绿
      * (还在 80 字内),而那样一出错就永远挂着「忙」。改成钉 **finally 块本身**的内容。
      */
-    expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);\s*\}/);
+    expect(fn).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);\s*\}/);
   });
 
   it('⭐⭐ 一次只核对一个;核对中再点只记住最后一个', () => {

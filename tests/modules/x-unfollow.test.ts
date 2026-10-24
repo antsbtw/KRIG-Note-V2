@@ -103,16 +103,16 @@ describe('⭐⭐⭐ 取关流程(页面)', () => {
   const RUN = read('src/modules/x/x-unfollow-run.ts');
   const core = RUN.slice(RUN.indexOf('export async function unfollowOnce'), RUN.indexOf('export type VerifyOutcome'));
 
-  it('顺序:暂停检查 → 调共用取关 → 核对;共用取关里:忙检查 → 闸门 → 去主页 → 点 → 记录', () => {
+  it('顺序:暂停检查 → 调共用取关 → 核对;共用取关里:闸门 → 占住网页 → 去主页 → 点 → 记录', () => {
     expect(fn.length).toBeGreaterThan(600);
     expect(core.length).toBeGreaterThan(1200);
     const at = (src: string, s: string): number => { const i = src.indexOf(s); expect(i, `找不到 ${s}`).toBeGreaterThan(-1); return i; };
     const page = ['if (unfollowPaused !== null)', 'await unfollowOnce(', 'await runVerify(p);'].map((x) => at(fn, x));
     expect(page).toEqual([...page].sort((a, b) => a - b));
     const order = [
-      'await xPageBusy(wcId)',
       "op: 'unfollowGate'",
       'gate.allowed ? undefined : gate.reason',
+      'await acquireXPage(wcId, busyLabel)',
       "op: 'goto'",
       'scriptId: X_SCRIPTS.unfollow',
       "op: 'logAction'",
@@ -126,9 +126,9 @@ describe('⭐⭐⭐ 取关流程(页面)', () => {
     expect(PAGE).toMatch(/onClick=\{\(\) => \{ setUnfollowPaused\(null\);/);
   });
 
-  it('⭐⭐ 取关期间登记忙,结束(含出错)一定清掉', () => {
-    expect(core).toMatch(/setXHostBusy\(wcId, busyLabel\)/);
-    expect(core).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);/);
+  it('⭐⭐ 取关期间占住网页(主进程的锁),拿不到就不动;结束(含出错)一定放掉', () => {
+    expect(core).toMatch(/const lock = await acquireXPage\(wcId, busyLabel\);\s*if \(!lock\.ok\) return \{ blocked:/);
+    expect(core).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);/);
   });
 
   it('⭐ 只有「我关注他」的人才出现取关入口', () => {

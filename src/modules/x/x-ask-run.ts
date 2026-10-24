@@ -19,8 +19,8 @@ import { resolve as resolvePage } from '@platform/main/web-capability/wiring/web
 import { webviewPorts } from './x-collect-ports';
 import { X_SCRIPTS, replyNeedle } from './x-dom-scripts';
 import { X_ANCHORS, X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, releasePage } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
 import { appendAction, readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
@@ -79,9 +79,6 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   if (running.has(p.wsId)) return { ok: false, blocked: '上一个求关还没做完' };
   const wcId = getXHostState(p.wsId)?.wcId;
   if (wcId === undefined) return { ok: false, blocked: 'X 网页没开' };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, blocked: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, blocked: '后台正在采' };
   if (followQueueStatus(p.wsId).current) return { ok: false, blocked: '关注队列正在动作' };
   /** engage / vpn 都只点赞 + 回复,不关注;vpn = 回复求助(2026-10-23),记进 x_vpn_reply */
   const engage = p.mode === 'engage' || p.mode === 'vpn';
@@ -94,9 +91,11 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
   const warning = engage ? undefined : await readFollowGate(localDayStart(new Date()).toISOString()).then((g) => (g.allowed ? undefined : g.reason));
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') return { ok: false, blocked: `认不出登录的号:${account.reason}` };
+  /** ⭐⭐ 占住 X 网页(x-page-lock);被占着就不动手 —— 别人也放不掉这把锁 */
+  const lock = acquirePage(wcId, BUSY, 'ui');
+  if (!lock.ok) return { ok: false, blocked: lock.why };
 
   running.add(p.wsId);
-  setXHostBusy(wcId, BUSY);
   const ports = webviewPorts(wcId);
   const reply = p.reply.trim();
   const r: { -readonly [K in keyof AskRunResult]: AskRunResult[K] } = { ok: false, warning };
@@ -165,7 +164,7 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
     stop(r.liked === undefined ? 'like' : r.replied === undefined ? 'reply' : 'follow', `出错:${e instanceof Error ? e.message : String(e)}`);
     return r;
   } finally {
-    setXHostBusy(wcId, null);
+    releasePage(lock.token);
     running.delete(p.wsId);
     await (vpn ? recordVpn(account.restId, p, reply, r) : engage ? recordEngage(account.restId, p, reply, r) : recordAsk(account.restId, p, reply, r))
       .catch((e) => console.error(`[x.ask] ${vpn ? 'x_vpn_reply' : engage ? 'x_engage' : 'x_ask'} 没写上`, e));

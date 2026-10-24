@@ -7,7 +7,6 @@
  */
 import { xDataCall } from './x-data-types';
 import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, setXHostBusy } from './x-host-registry';
 import { auditUserPayload, type XUserRecord } from './x-user-audit';
 import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
 import { X_SCRIPTS } from './x-dom-scripts';
@@ -16,19 +15,30 @@ import { localDayStart, type UnfollowGate } from './x-ops-settings';
 export type Who = { readonly rest_id: string; readonly handle: string };
 
 /**
- * ⭐ X 网页现在能不能被我们跳走 —— 三处的「忙」都问:
- * renderer 自己登记的 · 主进程登记的(查回关 / 关注队列 / 求关;登记表每进程一份)· 后台采集。
- * @param own 自己登记的那个忙不算(核对中再核对)
+ * ⭐ X 网页现在有没有人占着(只问,不占)—— 锁只在主进程(x-page-lock),查回关 / 关注队列 / 求关 / 后台采集 /
+ * 别的界面都在那一把锁上。要真的用网页(跳转 / 采)用 `acquireXPage`,别「先问再用」(问完到用之间会被人抢)。
  */
-export async function xPageBusy(wcId: number, own?: string): Promise<string | null> {
-  const local = getXHostBusy(wcId);
-  if (local !== null && local !== own) return local;
-  const main = await xDataCall({ op: 'mainBusy', wcId });
-  if (main.status === 'ok' && typeof main.value === 'string' && main.value !== own) return main.value;
-  const bg = await xDataCall({ op: 'bgBusy', wcId });
-  if (bg.status !== 'ok') return `问不到后台状态(${bg.reason})`;
-  const v = bg.value as { handle: string } | null;
-  return v ? `后台正在采 @${v.handle}(可在人卡暂停)` : null;
+export async function xPageBusy(wcId: number): Promise<string | null> {
+  const r = await xDataCall({ op: 'pageBusy', wcId });
+  if (r.status !== 'ok') return `问不到 X 网页占用状态(${r.reason})`;
+  return typeof r.value === 'string' ? r.value : null;
+}
+
+/**
+ * ⭐⭐⭐ 占住 X 网页(Module5-04 第 1 步)—— 拿到 token,用完在 finally 里 `releaseXPage(token)`。
+ * 被占着返回 `{ ok: false, why }`(「X 网页正忙:查回关(timer,已 40 秒)」)。
+ * ⚠️ renderer 不再自己写「忙」:原来 setXHostBusy 同步到主进程会覆盖 / 清掉别人的忙。
+ */
+export async function acquireXPage(wcId: number, purpose: string): Promise<{ ok: true; token: string } | { ok: false; why: string }> {
+  const r = await xDataCall({ op: 'pageAcquire', wcId, purpose });
+  if (r.status !== 'ok') return { ok: false, why: `申请不到 X 网页(${r.reason})` };
+  return r.value as { ok: true; token: string } | { ok: false; why: string };
+}
+
+/** 放自己的锁;放不掉要响(不能静默 —— 说明锁已超时被收回,期间可能有人用过这个网页) */
+export async function releaseXPage(token: string): Promise<void> {
+  const r = await xDataCall({ op: 'pageRelease', token });
+  if (r.status !== 'ok') console.error(`[x.page-lock] 放锁没成:${r.reason}`);
 }
 
 export const UNFOLLOW_STATE_TEXT: Readonly<Record<string, string>> = {
@@ -45,15 +55,14 @@ export type UnfollowOutcome =
  * ⚠️ 不做「异常即停」的暂停 —— 那是调用方的界面状态;本函数只如实回结果。
  */
 export async function unfollowOnce(p: Who, wcId: number, busyLabel: string, reason?: string, wsId?: string): Promise<UnfollowOutcome> {
-  const busy = await xPageBusy(wcId);
-  if (busy !== null) return { blocked: `${busy},先等它结束` };
   const g = await xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() });
   if (g.status === 'failed') return { blocked: g.reason };
   const gate = g.value as UnfollowGate;
   /** ⚠️⚠️ 用户 10-21:「我的任务我自己控制,有问题提示就好了」—— 超了平时的量照做,只带提醒 */
   const warning = gate.allowed ? undefined : gate.reason;
 
-  setXHostBusy(wcId, busyLabel);
+  const lock = await acquireXPage(wcId, busyLabel);
+  if (!lock.ok) return { blocked: `${lock.why},先等它结束` };
   let result: { done: boolean; state: string; why?: string } = { done: false, state: 'error' };
   try {
     const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: p.handle } });
@@ -66,7 +75,7 @@ export async function unfollowOnce(p: Who, wcId: number, busyLabel: string, reas
   } catch (e) {
     result = { done: false, state: 'error', why: e instanceof Error ? e.message : String(e) };
   } finally {
-    setXHostBusy(wcId, null);
+    await releaseXPage(lock.token);
   }
   const detail = result.done ? undefined : `${UNFOLLOW_STATE_TEXT[result.state] ?? result.state}${result.why ? `:${result.why}` : ''}`;
   await xDataCall({

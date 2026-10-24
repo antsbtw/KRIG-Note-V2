@@ -8,8 +8,8 @@
  * 返回形状与求关准备(AskPrepared)一致,互动卡和求关卡用同一个组件。
  */
 import { getXDB } from '@storage/surreal/client';
-import { getXHostBusy, getXHostState } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, releasePage } from './x-page-lock';
 import { collectPersonTab } from './x-person-collect';
 import { X_PAGE_NAME } from './x-pages';
 import { readPerson } from './x-people-repo';
@@ -66,10 +66,14 @@ export function pickEngageTweet(
 export async function screenEngage(wsId: string, restId: string, handle: string, hisAt?: string): Promise<{ ok: false; why: string } | { ok: true; active: boolean; why?: string }> {
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
-  const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: 1, attempt: 1 });
+  const lock = acquirePage(wcId, `互动:先过一轮 @${handle}`, 'ui');
+  if (!lock.ok) return lock;
+  let r: Awaited<ReturnType<typeof collectPersonTab>>;
+  try {
+    r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: 1, attempt: 1 });
+  } finally {
+    releasePage(lock.token);
+  }
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };
   const a = activeWithin(r.records, restId, hisAt, new Date());
   console.log(`[x.engage] 筛 @${handle}:${a.active ? '2 小时内有动静' : a.why}`);
@@ -81,9 +85,17 @@ export async function prepareEngage(
 ): Promise<AskPrepared> {
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
+  /** ⭐⭐ 采主页 + 读来龙去脉期间占住 X 网页(Module5-04 §1.3 bug 2) */
+  const lock = acquirePage(wcId, `互动卡:准备 @${handle}`, 'ui');
+  if (!lock.ok) return lock;
+  try {
+    return await prepareEngageOn(wcId, account, restId, handle, hisTweetId);
+  } finally {
+    releasePage(lock.token);
+  }
+}
+
+async function prepareEngageOn(wcId: number, account: string, restId: string, handle: string, hisTweetId?: string): Promise<AskPrepared> {
   const { settings } = await readSettings();
   const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: settings['ask.collect_pages'], attempt: 1 });
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };

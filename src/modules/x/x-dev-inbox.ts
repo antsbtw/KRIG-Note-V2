@@ -17,8 +17,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFile
 import path from 'node:path';
 import { collectSearchByScroll } from './x-search-scroll';
 import { collectPersonTab } from './x-person-collect';
-import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, releasePage } from './x-page-lock';
 import { manualSummary, pageProblem } from './x-page-ledger';
 import { X_MANUAL } from './x-manual';
 import { setPageTap } from './x-page-tap';
@@ -111,10 +111,15 @@ function validate(c: unknown): Cmd | string {
 async function runPersonTab(cmd: PersonCmd): Promise<unknown> {
   const wcId = getXHostState(cmd.wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: `${cmd.wsId} 的 X 网页没开` };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
-  const r = await collectPersonTab({ wcId, page: cmd.page, handle: cmd.handle, restId: cmd.restId, pageCap: cmd.pageCap, attempt: 1 });
+  /** ⭐ 原来查了忙却不标忙(Module5-04 §1.2)—— 现在占住 */
+  const lock = acquirePage(wcId, `开发测试:采 @${cmd.handle} ${cmd.page}`, 'inbox');
+  if (!lock.ok) return { ok: false, why: lock.why };
+  let r: Awaited<ReturnType<typeof collectPersonTab>>;
+  try {
+    r = await collectPersonTab({ wcId, page: cmd.page, handle: cmd.handle, restId: cmd.restId, pageCap: cmd.pageCap, attempt: 1 });
+  } finally {
+    releasePage(lock.token);
+  }
   if (!r.reached) return { ok: false, why: r.reason };
   return {
     ok: true, records: r.records.length, pageInserted: r.pageInserted, stopReason: r.paging?.stopReason,
@@ -127,10 +132,8 @@ async function runPersonTab(cmd: PersonCmd): Promise<unknown> {
 async function runUserList(cmd: UserListCmd): Promise<unknown> {
   const wcId = getXHostState(cmd.wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: `${cmd.wsId} 的 X 网页没开` };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ok: false, why: `X 网页正忙:${busy}` };
-  if (bgRunningOn(wcId) !== null) return { ok: false, why: '后台正在采' };
-  setXHostBusy(wcId, '开发测试:采名单');
+  const lock = acquirePage(wcId, '开发测试:采名单', 'inbox');
+  if (!lock.ok) return { ok: false, why: lock.why };
   try {
     const ports = webviewPorts(wcId);
     const go = await ports.goto(cmd.page, { handle: cmd.handle });
@@ -146,7 +149,7 @@ async function runUserList(cmd: UserListCmd): Promise<unknown> {
       ledger: ledger.map((l) => ({ page: l.page, label: l.label, xUsers: l.xUsers, notParsed: l.notParsed.length, other: l.other, manualDiff: l.manualDiff, ok: pageProblem(l) === undefined })),
     };
   } finally {
-    setXHostBusy(wcId, null);
+    releasePage(lock.token);
   }
 }
 
@@ -189,8 +192,17 @@ async function tick(): Promise<void> {
           const wcId = getXHostState(cmd.wsId)?.wcId;
           if (wcId === undefined) out = { ok: false, why: 'X 网页没开' };
           else {
-            if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
-            out = await readLeftTweet(wcId);
+            /** ⭐ 原来不查忙还能先跳转(Module5-04 §1.2)—— 现在占住才动 */
+            const lock = acquirePage(wcId, '开发测试:读左边那条', 'inbox');
+            if (!lock.ok) out = { ok: false, why: lock.why };
+            else {
+              try {
+                if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
+                out = await readLeftTweet(wcId);
+              } finally {
+                releasePage(lock.token);
+              }
+            }
           }
         } else if (cmd.op === 'vpnFind') {
           out = await findVpnPosts(cmd.wsId);
@@ -239,7 +251,7 @@ async function tick(): Promise<void> {
           out = await runUserList(cmd);
         } else {
           console.log(`[x.dev] 执行 ${next}:${cmd.op}「${cmd.q.slice(0, 40)}」最多 ${cmd.wantPages} 页`);
-          out = await collectSearchByScroll(cmd);
+          out = await collectSearchByScroll({ ...cmd, ownToken: undefined, caller: 'inbox' });
         }
       } finally {
         sampling?.stop();

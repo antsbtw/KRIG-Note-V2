@@ -11,8 +11,8 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { X_PAGE_NAME } from './x-pages';
-import { readProfileAndRefresh, xPageBusy } from './x-unfollow-run';
-import { getXHostState, setXHostBusy } from './x-host-registry';
+import { acquireXPage, readProfileAndRefresh, releaseXPage, xPageBusy } from './x-unfollow-run';
+import { getXHostState } from './x-host-registry';
 import type { EngageOverview } from './x-engage-repo';
 import type { RecentPerson } from './x-engage';
 import { AskRun, type AskWho } from './XTaskAsk';
@@ -70,14 +70,13 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const openPerson = async (p: RecentPerson): Promise<void> => {
     const wcId = getXHostState(wsId)?.wcId;
     if (wcId === undefined) { setViewNote('X 网页没开'); return; }
-    const busy = await xPageBusy(wcId);
-    if (busy !== null) { setViewNote(`${busy},没跳转(跳走会打断)`); return; }
-    setXHostBusy(wcId, '任务:正在核对这个人');
+    const lock = await acquireXPage(wcId, '任务:正在核对这个人');
+    if (!lock.ok) { setViewNote(`${lock.why},没跳转(跳走会打断)`); return; }
     let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
     try {
       v = await readProfileAndRefresh({ rest_id: p.restId, handle: p.handle }, wcId);
     } finally {
-      setXHostBusy(wcId, null);
+      await releaseXPage(lock.token);
     }
     if (v.kind === 'miss') { setViewNote(`@${p.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
     const still = v.rec.following === true && v.rec.followedBy === true;

@@ -10,15 +10,15 @@
  * ⚠️ 前提是名单能翻页 —— 10-19 修过「只认 Bottom 的 TimelineTerminateTimeline」(原来第一页就停)。
  *
  * 保护(记忆 project-x-write-redline-cancelled;这是读操作,但占用 X 网页):
- *  · X 网页忙 / 后台在采 → 让路,不抢
+ *  · X 网页被别人占着(操作台 / 后台采集 / 卡片准备 …)→ 让路,不抢;占住期间别人也放不掉(x-page-lock)
  *  · 一次只跑一个;页数有上限(设置 follow.check_max_pages)
  *  · 每次都留运行记录(x_follow_check)+ 留痕;没追上 / 对不上明说,不当成「没回关」
  */
 import { webviewPorts } from './x-collect-ports';
 import { pageProblem } from './x-page-ledger';
 import { X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, getXHostState, setXHostBusy } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState } from './x-host-registry';
+import { acquirePage, releasePage } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
 import { readSettings } from './x-ops-actions-repo';
 import { existingUserIds, saveUsers } from './x-user-repo';
@@ -42,15 +42,12 @@ export async function checkFollowBack(wsId: string, trigger: 'auto' | 'manual'):
   if (running !== null) return { ran: false, why: `正在查(${running})` };
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { ran: false, why: `${wsId} 的 X 网页没开` };
-  const busy = getXHostBusy(wcId);
-  if (busy !== null) return { ran: false, why: `X 网页正忙:${busy}` };
-  const bg = bgRunningOn(wcId);
-  if (bg !== null) return { ran: false, why: `后台正在采 @${bg.handle}` };
+  const lock = acquirePage(wcId, BUSY, trigger === 'auto' ? 'timer' : 'ui');
+  if (!lock.ok) return { ran: false, why: lock.why };
   const account = await accountForWrite(wcId);
-  if (account.kind !== 'ok') return { ran: false, why: `认不出这个 X 网页登录的号:${account.reason}` };
+  if (account.kind !== 'ok') { releasePage(lock.token); return { ran: false, why: `认不出这个 X 网页登录的号:${account.reason}` }; }
 
   running = wsId;
-  setXHostBusy(wcId, BUSY);
   const say = (m: string): void => console.log(`[x.follow-check] ${wsId} @${account.handle} ${m}`);
   try {
     const { settings } = await readSettings();
@@ -98,7 +95,7 @@ export async function checkFollowBack(wsId: string, trigger: 'auto' | 'manual'):
     try { await record({ ok: false, caughtUp: false, pages: 0, seen: 0, newFollowers: 0, askedBack: [], stopReason: `出错:${why}` }); } catch { /* 终端已打 */ }
     return { ran: false, why };
   } finally {
-    setXHostBusy(wcId, null);
+    releasePage(lock.token);
     running = null;
   }
 

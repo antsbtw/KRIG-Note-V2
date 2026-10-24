@@ -30,12 +30,12 @@ import {
   type CSSProperties, type ReactElement,
 } from 'react';
 import { xDataCall } from './x-data-types';
-import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
+import { subscribeXHost, getXHostState } from './x-host-registry';
 import type { XUserRecord } from './x-user-audit';
 import type { CollectOnWebviewResult } from './x-collect-on-webview';
 import type { CirclePerson } from './x-friend-circle';
 import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
-import { readProfileAndRefresh, unfollowOnce, type UnfollowOutcome } from './x-unfollow-run';
+import { acquireXPage, readProfileAndRefresh, releaseXPage, unfollowOnce, type UnfollowOutcome } from './x-unfollow-run';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XPersonLists } from './XPersonLists';
 import { describeProgress, type BgJob } from './x-bg-job';
@@ -53,23 +53,9 @@ const WIDE = 760;
 
 const fmt = (n: number | undefined): string => (n === undefined ? '—' : n.toLocaleString());
 
-/**
- * ⭐⭐ 后台此刻在不在用这个 X 网页采(2026-10-14 第 4 步)—— 人手动操作前先问主进程。
- * ⚠️ 后台 runner 在主进程,它的「正在用」不在本进程的 x-host-registry 里;
- * 不问就会和后台抢同一个 webview(跳走会打断后台那一段)。问不到也说出来,不当成「不忙」。
- */
 /** 互关倾向是谁定的 —— 人 > AI > 算法 */
 const INTENT_SOURCE: Readonly<Record<string, string>> = { human: '你标的', ai: 'AI', rule: '算法' };
 
-/** 主进程的忙 + 后台采集(renderer 自己登记的忙由调用方先问 —— 各处有自己的豁免)*/
-async function bgBusyNote(wcId: number): Promise<string | null> {
-  const main = await xDataCall({ op: 'mainBusy', wcId });
-  if (main.status === 'ok' && typeof main.value === 'string') return main.value;
-  const r = await xDataCall({ op: 'bgBusy', wcId });
-  if (r.status !== 'ok') return `问不到后台状态(${r.reason})`;
-  const v = r.value as { handle: string } | null;
-  return v ? `后台正在采 @${v.handle}(可在人卡暂停)` : null;
-}
 
 export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactElement {
   const [overview, setOverview] = useState<PeopleOverview | null>(null);
@@ -152,18 +138,15 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   /**
    * ⭐⭐ 让 X 网页打开这个人的主页,并**顺手核对**。
    * ⚠️ 不跳的情况都说出来:X 网页没开 / 操作台正在采集(跳走会打断采集)。
-   * ⚠️ 核对期间登记「忙」,免得操作台同时在这个页面上采。
+   * ⚠️ 核对期间占住 X 网页(主进程的锁,x-page-lock),免得操作台 / 后台同时在这个页面上采;被占着就不跳,说出是谁。
    */
   const VERIFY_BUSY = '运营正在核对这个人';
   const runVerify = useCallback(async (p: PersonRow): Promise<void> => {
     if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
-    const busy = getXHostBusy(wcId);
-    if (busy !== null && busy !== VERIFY_BUSY) { setFollowNote(`${busy},没跳转(跳走会打断采集)`); return; }
-    const bg = await bgBusyNote(wcId);
-    if (bg !== null) { setFollowNote(`${bg},没跳转(跳走会打断采集)`); return; }
+    const lock = await acquireXPage(wcId, VERIFY_BUSY);
+    if (!lock.ok) { setFollowNote(`${lock.why},没跳转(跳走会打断采集)`); return; }
     setFollowNote(null);
     setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
-    setXHostBusy(wcId, VERIFY_BUSY);
     let result: { kind: 'same' | 'changed' | 'new' | 'miss'; text: string };
     try {
       const r = await readProfileAndRefresh(p, wcId);
@@ -187,7 +170,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
         if (r.changes.length > 0 || r.kind === 'new') loadOverview();
       }
     } finally {
-      setXHostBusy(wcId, null);
+      await releaseXPage(lock.token);
     }
     setVerify((v) => ({ ...v, [p.rest_id]: { ...result, at: Date.now() } }));
   }, [wcId, loadOverview]);
@@ -224,13 +207,10 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   const cancelCollect = useRef(false);
   const collectTweets = useCallback(async (p: PersonRow, range: TimelineRange): Promise<void> => {
     if (wcId == null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: 'X 网页没开,没法采' } })); return; }
-    const busy = getXHostBusy(wcId);
-    if (busy !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${busy},先等它结束` } })); return; }
-    const bg = await bgBusyNote(wcId);
-    if (bg !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${bg},先等这一段结束` } })); return; }
+    const lock = await acquireXPage(wcId, COLLECT_BUSY);
+    if (!lock.ok) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${lock.why},先等它结束` } })); return; }
     const start = rangeStart(range, new Date());
     const label = TIMELINE_RANGES.find((r) => r.id === range)?.label ?? range;
-    setXHostBusy(wcId, COLLECT_BUSY);
     cancelCollect.current = false;
     const parts: string[] = [];
     const say = (msg: string): void =>
@@ -309,7 +289,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     } catch (e) {
       parts.push(`出错:${e instanceof Error ? e.message : String(e)}`);
     } finally {
-      setXHostBusy(wcId, null);
+      await releaseXPage(lock.token);
     }
     setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `[${label}] 采完:${parts.join(';')}` } }));
     setCardRev((v) => v + 1);

@@ -12,8 +12,8 @@ import { getXDB } from '@storage/surreal/client';
 import { decideAccount, parseWhoAmI, type AccountDecision, type WhoAmIRaw, type WsAccount } from './x-account';
 import { webviewPorts } from './x-collect-ports';
 import { X_SCRIPTS } from './x-dom-scripts';
-import { getXHostBusy, getXHostState, listXHostStates, setXHostBusy } from './x-host-registry';
-import { bgRunningOn } from './x-bg-runner';
+import { getXHostState, listXHostStates } from './x-host-registry';
+import { acquirePage, releasePage } from './x-page-lock';
 import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
 import { auditUserPayload } from './x-user-audit';
@@ -97,12 +97,9 @@ export async function identifyAccount(wsId: string): Promise<IdentifyResult> {
   /** handle 变了 → 旧 id 作废;没变但没 id → 保持没 id */
   if (!row || row.handle !== seen.handle) await writeWsAccount(wsId, seen.handle, undefined);
 
-  const busy = getXHostBusy(wcId);
-  if (busy !== null && busy !== IDENTIFY_BUSY) return { status: 'pending', handle: seen.handle, reason: `${busy},等它空了再认(要开一次 @${seen.handle} 的主页)` };
-  const bg = bgRunningOn(wcId);
-  if (bg !== null) return { status: 'pending', handle: seen.handle, reason: `后台正在采 @${bg.handle},等它歇下来再认` };
-
-  setXHostBusy(wcId, IDENTIFY_BUSY);
+  /** ⭐ 占住 X 网页(x-page-lock);被占着(含另一次认号 / 后台在采)→ 等它空了再认 */
+  const lock = acquirePage(wcId, IDENTIFY_BUSY, 'ui');
+  if (!lock.ok) return { status: 'pending', handle: seen.handle, reason: `${lock.why},等它空了再认(要开一次 @${seen.handle} 的主页)` };
   try {
     const h = await webviewPorts(wcId).harvest({
       gotoPage: { name: X_PAGE_NAME.profile, params: { handle: seen.handle } },
@@ -116,6 +113,6 @@ export async function identifyAccount(wsId: string): Promise<IdentifyResult> {
     await writeWsAccount(wsId, seen.handle, me.restId);
     return { status: 'ok', account: { wsId, handle: seen.handle, restId: me.restId } };
   } finally {
-    setXHostBusy(wcId, null);
+    releasePage(lock.token);
   }
 }

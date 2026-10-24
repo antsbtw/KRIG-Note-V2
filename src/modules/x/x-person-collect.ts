@@ -22,7 +22,7 @@ import { webviewPorts } from './x-collect-ports';
 type Live = { cancelled: boolean; msg?: string; seq: number };
 
 /**
- * ⚠️ 按 **wcId** 分:一个 X 网页同一时刻只跑一次(人卡那边还有 getXHostBusy 挡着);
+ * ⚠️ 按 **wcId** 分:一个 X 网页同一时刻只跑一次(调用方还有 x-page-lock 的网页锁挡着);
  * 分开记,A 窗口点停不会停掉 B 窗口(`project-host-broadcast-multi-ws-fanout` 同族)。
  */
 const live = new Map<number, Live>();
