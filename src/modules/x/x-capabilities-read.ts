@@ -25,7 +25,7 @@ import { followQueueStatus } from './x-follow-queue';
 import { listJobs } from './x-bg-job-repo';
 import { bgRunnerStatus } from './x-bg-runner';
 import { personCollectProgress } from './x-person-collect';
-import type { PeopleFilter } from './x-people-query';
+import { DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, type PeopleFilter } from './x-people-query';
 
 type O = Record<string, unknown>;
 type Acc = { readonly restId: string; readonly handle: string };
@@ -48,6 +48,17 @@ const int = (o: O, k: string, lo: number, hi: number, def?: number): number => {
   return v as number;
 };
 const iso = (o: O, k: string): string => { const v = o[k]; if (typeof v !== 'string' || Number.isNaN(Date.parse(v))) throw new Bad(`${k} 要 ISO 时间`); return v; };
+/**
+ * 筛选条件:没给的字段用默认值(AI / 收件箱可以只给 group);分组 / 范围 / 排序认不出 → invalid
+ * (2026-10-24 Windows 真机:原来不校验,跑进 queryPeople 才抛「不认识的分组」,被记成 failed)
+ */
+const peopleFilter = (raw: unknown): PeopleFilter => {
+  const f = { ...DEFAULT_PEOPLE_FILTER, ...(raw && typeof raw === 'object' ? (raw as Partial<PeopleFilter>) : {}) };
+  if (!PEOPLE_GROUPS.some((g) => g.id === f.group)) throw new Bad(`filter.group 只认 ${PEOPLE_GROUPS.map((g) => g.id).join(' / ')}`);
+  if (f.scope !== 'in' && f.scope !== 'excluded') throw new Bad('filter.scope 只认 in / excluded');
+  if (!PEOPLE_SORTS.some((x) => x.id === f.sort)) throw new Bad(`filter.sort 只认 ${PEOPLE_SORTS.map((x) => x.id).join(' / ')}`);
+  return f;
+};
 const modeOf = (m: unknown): 'ask' | 'engage' | 'vpn' => (m === 'engage' || m === 'vpn' ? m : 'ask');
 
 /**
@@ -112,7 +123,7 @@ export function registerXReadCapabilities(): void {
     inputDoc: { ...WS, filter: '筛选条件(同运营人页)', limit: '一页几个,1–500', start: '从第几个开始,≥0' },
     parse: (o) => ({
       wsId: str(o, 'wsId'),
-      filter: (o.filter && typeof o.filter === 'object' ? o.filter : {}) as PeopleFilter,
+      filter: peopleFilter(o.filter),
       limit: int(o, 'limit', 1, 500), start: int(o, 'start', 0, Number.MAX_SAFE_INTEGER),
     }),
     run: (i, a) => queryPeople(a.restId, i.filter, i.limit, i.start),

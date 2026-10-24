@@ -76,7 +76,7 @@ const T: Row[] = [
   ['x.ops.status', 'opsStatus', ws, 'readOpsStatus', ['ME'], true, false],
   ['x.account.read', 'wsAccount', ws, 'readWsAccount', ['ws-1'], false, false],
   ['x.people.overview', 'peopleOverview', ws, 'readPeopleOverview', ['ME'], true, false],
-  ['x.people.query', 'queryPeople', { ...ws, filter: { group: 'all' }, limit: 50, start: 0 }, 'queryPeople', ['ME', { group: 'all' }, 50, 0], true, false],
+  ['x.people.query', 'queryPeople', { ...ws, filter: { group: 'mutual' }, limit: 50, start: 0 }, 'queryPeople', ['ME', { scope: 'in', group: 'mutual', blueOnly: false, cnText: false, text: '', tag: '', intentOnly: false, sort: 'followersDesc' }, 50, 0], true, false],
   ['x.person.read', 'personDetail', { ...ws, restId: '42' }, 'readPerson', ['ME', '42'], true, false],
   ['x.tag.catalog', 'tagCatalog', {}, 'readTagCatalog', [], false, false],
   ['x.blueMutual.overview', 'blueMutualOverview', ws, 'readBlueMutualOverview', ['ME'], true, false],
@@ -158,6 +158,9 @@ describe('认号 / 参数', () => {
     const bad: Array<[string, Record<string, unknown>]> = [
       ['x.cursor.read', { scope: '  ' }],
       ['x.people.query', { ...ws, filter: {}, limit: 0, start: 0 }],
+      /** 2026-10-24 Windows 真机发现:分组认不出原来跑进去才抛(记成 failed) */
+      ['x.people.query', { ...ws, filter: { group: 'nope' }, limit: 10, start: 0 }],
+      ['x.people.query', { ...ws, filter: { group: 'all', sort: 'random' }, limit: 10, start: 0 }],
       ['x.people.query', { ...ws, filter: {}, limit: 10, start: -1 }],
       ['x.person.read', { ...ws, restId: '' }],
       ['x.blueMutual.candidates', { ...ws, limit: 501 }],
