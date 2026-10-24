@@ -14,6 +14,11 @@
  * - 被拒时如实说出:被谁占着(caller)、在干什么(purpose)、多久了。
  * - 超时收回是兜底(进程里有人忘了放 / renderer 没了),**要响**:console.error 写明是谁的锁被收回。
  *   ⚠️ 不是正常路径 —— 正常路径永远是持有者自己在 finally 里放。
+ * - ⭐ 成功路径也留痕(2026-10-23 用户:「你从后台看得到这些操作吗?」):占住 / 放掉 / 拒绝各打一行 `[lock]`,
+ *   格式固定(`scripts/lock-report.mjs` 按它对账:有没有两个人同时占、有没有占了不放)—— 改格式要一起改脚本。
+ *     [lock] 占住 page:3「任务:查回关」(timer) #<token>
+ *     [lock] 放掉 page:3「任务:查回关」(timer) 用了 42 秒 #<token>
+ *     [lock] 拒绝 page:3「操作台正在采集」(ui):被「任务:查回关」(timer)占着 12 秒 #<持有者 token>
  * - ⚠️ 模块级状态每进程一份(记忆 feedback-per-process-module-state):**只在主进程用**;
  *   renderer 要占资源走 IPC 申请,不许自己 import 本文件当真。
  */
@@ -50,14 +55,16 @@ function live(resource: string, now: number): LockHolder | null {
   if (!h) return null;
   if (now - h.since > h.ttlMs) {
     drop(h);
-    console.error(`[lock] ⚠️ ${resource} 的锁超时被收回:「${h.purpose}」(${h.caller})占了 ${Math.round((now - h.since) / 1000)} 秒没放 —— 持有方漏了 release,要查`);
+    console.error(`[lock] ⚠️ 超时收回 ${resource}「${h.purpose}」(${h.caller})占了 ${secs(now - h.since)} 秒没放 —— 持有方漏了 release,要查 #${h.token}`);
     return null;
   }
   return h;
 }
 
+const secs = (ms: number): number => Math.max(0, Math.round(ms / 1000));
+
 function describe(h: LockHolder, now: number): string {
-  return `${h.purpose}(${h.caller},已 ${Math.max(0, Math.round((now - h.since) / 1000))} 秒)`;
+  return `${h.purpose}(${h.caller},已 ${secs(now - h.since)} 秒)`;
 }
 
 export function acquireLock(
@@ -65,11 +72,15 @@ export function acquireLock(
 ): LockAcquired | LockRefused {
   const now = opts?.now ?? Date.now();
   const cur = live(resource, now);
-  if (cur) return { ok: false, holder: cur, why: describe(cur, now) };
+  if (cur) {
+    console.log(`[lock] 拒绝 ${resource}「${purpose}」(${caller}):被「${cur.purpose}」(${cur.caller})占着 ${secs(now - cur.since)} 秒 #${cur.token}`);
+    return { ok: false, holder: cur, why: describe(cur, now) };
+  }
   seq += 1;
   const h: LockHolder = { token: `${resource}#${seq}:${now.toString(36)}`, resource, purpose, caller, since: now, ttlMs: opts?.ttlMs ?? DEFAULT_LOCK_TTL_MS };
   byResource.set(resource, h);
   byToken.set(h.token, h);
+  console.log(`[lock] 占住 ${resource}「${purpose}」(${caller}) #${h.token}`);
   return { ok: true, token: h.token };
 }
 
@@ -81,6 +92,7 @@ export function releaseLock(token: string): boolean {
     return false;
   }
   drop(h);
+  console.log(`[lock] 放掉 ${h.resource}「${h.purpose}」(${h.caller}) 用了 ${secs(Date.now() - h.since)} 秒 #${token}`);
   return true;
 }
 
@@ -101,7 +113,7 @@ export function revokeLocks(pred: (h: LockHolder) => boolean, why: string): numb
   const hit = [...byResource.values()].filter(pred);
   for (const h of hit) {
     drop(h);
-    console.warn(`[lock] 收回 ${h.resource} 的锁「${h.purpose}」(${h.caller}):${why}`);
+    console.warn(`[lock] 收回 ${h.resource}「${h.purpose}」(${h.caller}):${why} #${h.token}`);
   }
   return hit.length;
 }

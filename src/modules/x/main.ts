@@ -53,6 +53,7 @@ import { startDailyUpkeep, stopDailyUpkeep } from './x-daily-upkeep';
 import { registerSpotCheckMenu } from './x-spot-check';
 import { startFollowQueue, stopFollowQueue } from './x-follow-queue';
 import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
+import { listLocks } from '@platform/main/flow/resource-lock';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -120,6 +121,10 @@ export function registerXModule(): void {
   app.on('before-quit', stopFollowQueue);
   /** ⭐ 后台采集状态进运行体检(黑匣子)—— X 自己登记,宿主不认识 X 内部 */
   registerHealthProbe('x.bg', bgRunnerHealth);
+  /** ⭐ 此刻谁占着哪个 X 网页(x-page-lock)—— 卡住复盘时看「是不是有人占着不放」 */
+  registerHealthProbe('x.page-lock', () => ({
+    held: listLocks().map((h) => ({ resource: h.resource, purpose: h.purpose, caller: h.caller, sinceSec: Math.round((Date.now() - h.since) / 1000) })),
+  }));
 }
 
 
