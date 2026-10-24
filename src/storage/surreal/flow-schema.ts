@@ -158,3 +158,25 @@ export async function flow_migration_1_1_0(db: Surreal): Promise<void> {
     { rid: new RecordId('schema_version', '1.1.0'), now: Date.now() },
   );
 }
+
+/**
+ * ⭐ 1.2.0(2026-10-24,Module5-04 第 3 步)—— 状态轮询的记录只留 7 天(用户 10-24「全记,只留 7 天」)。
+ * keep_days 有值 = 到期清(flow-run-repo purgeExpiredCalls);NONE = 长期保留。
+ */
+const FLOW_SCHEMA_1_2_0 = `
+DEFINE FIELD IF NOT EXISTS keep_days ON flow_step_run TYPE option<int>;
+DEFINE INDEX IF NOT EXISTS idx_step_keep ON flow_step_run FIELDS keep_days, created_at;
+`;
+
+export async function flow_migration_1_2_0(db: Surreal): Promise<void> {
+  await db.query(FLOW_SCHEMA_1_2_0);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE flow_step_run');
+  if (!('keep_days' in (info?.[0]?.fields ?? {}))) {
+    throw new Error('[flow-schema 1.2.0] 加字段失败:flow_step_run.keep_days 不在 INFO FOR TABLE 里 —— 轮询记录会永远不清');
+  }
+  console.log('[flow-schema 1.2.0] flow_step_run 加了 keep_days(状态轮询只留 7 天)');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.0', appliedAt = $now, description = 'flow_step_run keep_days (probe retention)'`,
+    { rid: new RecordId('schema_version', '1.2.0'), now: Date.now() },
+  );
+}

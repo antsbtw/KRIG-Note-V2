@@ -63,6 +63,11 @@ export interface Capability<I, O, C = undefined> {
   readonly run: (input: I, ctx: RunCtx<C>) => Promise<O>;
   /** 这次是为谁跑的(跨库只存字符串,如 x_author:<id>) */
   readonly subject?: (input: I) => string | undefined;
+  /**
+   * 状态轮询(界面每 1–5 秒刷一次):执行记录照记、只留 7 天(用户 10-24「全记,只留 7 天」);
+   * 成功的不打终端(防刷屏,我的判断),没成的照打。
+   */
+  readonly probe?: boolean;
   /** 记录里的输出摘要;不给 = 原样(太大就只记字段名) */
   readonly summarize?: (out: O) => Record<string, unknown>;
 }
@@ -95,6 +100,9 @@ function newCallId(now: number): string {
   return `call_${new Date(now).toISOString().replace(/[-:T.Z]/g, '').slice(0, 14)}_${seq.toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 }
 
+/** 状态轮询的记录留几天(用户 10-24 定 7 天);清理见 flow-run-repo purgeExpiredCalls */
+export const PROBE_KEEP_DAYS = 7;
+
 /** 记录里放多大的输出原样(再大只记字段名)—— 回看够用,不把 flow 库撑大 */
 const OUTPUT_INLINE_LIMIT = 4000;
 function defaultSummary(out: unknown): Record<string, unknown> | undefined {
@@ -113,6 +121,7 @@ export async function execute(
   const callId = newCallId(t0);
   const cap = registry.get(id);
   const kindOf = cap?.kind ?? 'unknown';
+  const probe = cap?.probe === true;
   let input: unknown;
   let subjectRef: string | undefined;
   const held = new Map<string, string>();
@@ -123,11 +132,11 @@ export async function execute(
     const durationMs = Date.now() - t0;
     const tail = r.ok ? '' : ` —— ${r.why}`;
     const line = `[cap] ${id}(${opts.caller})${r.ok ? 'ok' : r.kind} ${durationMs}ms${tail} #${callId}`;
-    if (!r.ok && r.kind === 'failed') console.warn(line); else console.log(line);
+    if (!r.ok && r.kind === 'failed') console.warn(line); else if (!(probe && r.ok)) console.log(line);
     await recordCall({
       callId, runId: opts.runId, capability: id, kind: kindOf, caller: opts.caller,
       status: r.ok ? 'ok' : r.kind, why: r.ok ? undefined : r.why,
-      input: asRecord(input ?? raw), output, subjectRef, durationMs,
+      input: asRecord(input ?? raw), output, subjectRef, durationMs, keepDays: probe ? PROBE_KEEP_DAYS : undefined,
     });
     return r;
   };

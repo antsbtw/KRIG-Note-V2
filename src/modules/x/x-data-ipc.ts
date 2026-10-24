@@ -16,51 +16,47 @@ import { recipeNameForQuery } from './x-recipe-query';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { existingTweetIds, saveTweets } from './x-tweet-repo';
 import { existingUserIds, saveUsers, saveTweetAuthors, refreshPerson } from './x-user-repo';
-import { readCursor, saveCursor, clearCursor } from './x-cursor-repo';
-import { appendCollectLog, readOpsStatus, type CollectLogEntry } from './x-collect-log-repo';
+import { saveCursor, clearCursor } from './x-cursor-repo';
+import { appendCollectLog, type CollectLogEntry } from './x-collect-log-repo';
 import {
-  queryPeople, readFriendCircle, readPeopleOverview, readPerson, readPersonTweets, readTagCatalog, scanMutualIntent,
-  setExcluded, setMutualIntent, setTags,
+  scanMutualIntent, setExcluded, setMutualIntent, setTags,
 } from './x-people-repo';
-import { appendAction, readSettings, readUnfollowGate, writeSetting } from './x-ops-actions-repo';
+import { appendAction, writeSetting } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 import { clearXHostState, getXHostState, setXHostState } from './x-host-registry';
-import { bgRunnerStatus, kickBgRunner } from './x-bg-runner';
+import { kickBgRunner } from './x-bg-runner';
 import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
 import { revokeLocks } from '@platform/main/flow/resource-lock';
 import { execute, type CapResult } from '@platform/main/capability/capability';
-import { X_CAP } from './x-capabilities';
 import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
 import { collectSearchByScroll } from './x-search-scroll';
-import { readBlueMutualOverview, readCandidates, readFollowProgress } from './x-task-blue-mutual';
+
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
-import { checkFollowBack, followCheckRunning } from './x-follow-check';
-import { readAskStatuses, readLastFollowCheck, readPersonTimeline } from './x-follow-check-repo';
-import { readPersonLists } from './x-list-member-repo';
-import { draftAskReply, readDraftRules, setDraftRuleActive } from './x-ask-draft';
+import { checkFollowBack } from './x-follow-check';
+
+import { draftAskReply, setDraftRuleActive } from './x-ask-draft';
 
 import { collectEngagement } from './x-engage-collect';
 import { screenEngage } from './x-engage-prepare';
 import { readLeftTweet } from './x-left-tweet';
 import { getXDB } from '@storage/surreal/client';
-import { judgeVpnPosts, prepareVpn, readVpnOverview, setVpnHuman } from './x-vpn-run';
+import { judgeVpnPosts, prepareVpn, setVpnHuman } from './x-vpn-run';
 import { replyLangOf, vpnLink } from './x-vpn-help';
 import type { ReplyLang } from '@shared/types/x-reply-types';
 import { DEFER_DAYS, recordDefer } from './x-defer-repo';
 import { loadEngageThread } from './x-engage-thread';
-import { listRelationJobs, startRelationTask } from './x-relation-task';
-import { readPaceViews } from './x-pace-repo';
+import { startRelationTask } from './x-relation-task';
+
 import { prepareAsk } from './x-ask-prepare';
 import { runAsk } from './x-ask-run';
-import { readFollowGate } from './x-ops-actions-repo';
-import { localDayStart } from './x-ops-settings';
-import { createJob, deleteJob, listJobs, readJob, setJobStatus } from './x-bg-job-repo';
+
+import { createJob, deleteJob, readJob, setJobStatus } from './x-bg-job-repo';
 import { isBgRange } from './x-bg-job';
 import type { TimelineRange } from './x-person-timeline';
-import { cancelPersonCollect, collectPersonTab, personCollectProgress, tracePersonProgress } from './x-person-collect';
+import { cancelPersonCollect, collectPersonTab, tracePersonProgress } from './x-person-collect';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
 
@@ -127,6 +123,42 @@ function trackSenderLock(sender: WebContents, token: string): void {
 }
 
 /**
+ * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步第 1 批)
+ * 校验 / 认号 / 额度 / 占网页 / 留记录都在执行器;这里只转发,caller = ui。renderer 的 op 名不变。
+ */
+const CAP_OF_OP: Readonly<Record<string, string>> = {
+  list: 'x.recipe.list',
+  readCursor: 'x.cursor.read',
+  opsStatus: 'x.ops.status',
+  wsAccount: 'x.account.read',
+  peopleOverview: 'x.people.overview',
+  queryPeople: 'x.people.query',
+  personDetail: 'x.person.read',
+  tagCatalog: 'x.tag.catalog',
+  blueMutualOverview: 'x.blueMutual.overview',
+  blueMutualCandidates: 'x.blueMutual.candidates',
+  blueMutualFollowProgress: 'x.blueMutual.followProgress',
+  askFollowStatus: 'x.ask.followStatus',
+  relationJobs: 'x.relation.jobs',
+  paceStatus: 'x.pace.status',
+  personLists: 'x.person.lists',
+  personTimeline: 'x.person.timeline',
+  vpnOverview: 'x.vpn.overview',
+  draftRules: 'x.draft.rules',
+  followQueueStatus: 'x.followQueue.status',
+  bgStatus: 'x.bg.status',
+  bgListJobs: 'x.bg.jobs',
+  opsSettings: 'x.settings.read',
+  unfollowGate: 'x.unfollow.gate',
+  personCollectProgress: 'x.person.collectProgress',
+  friendCircle: 'x.person.friendCircle',
+  personTweets: 'x.person.tweets',
+  engagePrepare: 'x.engage.prepare',
+  engageOverview: 'x.engage.overview',
+  vpnFind: 'x.vpn.find',
+};
+
+/**
  * 能力层的统一结果 → 现在 renderer 认的 IPC 形状(过渡:renderer 还没改成认 refused / failed / invalid)。
  * 没成的一律 failed(why),why 原样 —— 界面显示的话和原来一样。
  */
@@ -138,10 +170,9 @@ function fromCap(r: CapResult<unknown>): XDataResult {
 async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult> {
   {
     try {
+      const capId = CAP_OF_OP[(p as { op?: string })?.op ?? ''];
+      if (capId) return fromCap(await execute(capId, p, { caller: 'ui' }));
       switch (p?.op) {
-        case 'list':
-          return { status: 'ok', value: await listAllRecipes() };
-
         case 'upsert': {
           const r = p.recipe;
           /**
@@ -305,14 +336,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
          * ⚠️ scope 为空要拒收:那会让所有名单共用一个断点,
          * A 名单的游标被 B 续采,而那种错在数据里看不出来。
          */
-        case 'readCursor': {
-          if (typeof p.scope !== 'string' || p.scope.trim() === '') {
-            return failed('[x.data] readCursor 缺 scope');
-          }
-          /** ⭐ 读不到回 null —— 调用方据此从头采,这是正确行为不是降级 */
-          return { status: 'ok', value: await readCursor(p.scope) };
-        }
-
         case 'saveCursor': {
           if (typeof p.cursor?.scope !== 'string' || p.cursor.scope.trim() === '') {
             return failed('[x.data] saveCursor 缺 scope');
@@ -335,11 +358,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: { deleted: p.recipeId } };
 
         /** ⭐⭐ 运营 → 状态(2026-10-07)—— 只读 */
-        case 'opsStatus': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readOpsStatus(acc.restId) };
-        }
 
         /** ⭐⭐ 认号(1.2.27)—— 结果三态原样回去,pending/failed 的原因给人看 */
         case 'identifyAccount': {
@@ -352,39 +370,7 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: r };
         }
 
-        case 'wsAccount':
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] wsAccount 缺 wsId');
-          return { status: 'ok', value: await readWsAccount(p.wsId) };
-
         /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
-        case 'peopleOverview': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readPeopleOverview(acc.restId) };
-        }
-
-        case 'queryPeople': {
-          /** ⚠️ limit 要有上界:几千行连头像一起过 IPC 再全渲染,面板会卡 */
-          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 500) {
-            return failed('[x.data] queryPeople 的 limit 要在 1–500 之间');
-          }
-          if (!Number.isInteger(p.start) || p.start < 0) {
-            return failed('[x.data] queryPeople 的 start 要是非负整数');
-          }
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await queryPeople(acc.restId, p.filter, p.limit, p.start) };
-        }
-
-        case 'personDetail': {
-          if (typeof p.restId !== 'string' || p.restId === '') {
-            return failed('[x.data] personDetail 缺 restId —— 人的身份是数字 id');
-          }
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readPerson(acc.restId, p.restId) };
-        }
-
         case 'setExcluded':
           if (typeof p.restId !== 'string' || p.restId === '' || typeof p.excluded !== 'boolean') {
             return failed('[x.data] setExcluded 要 restId(数字 id)和 excluded(true/false)');
@@ -404,49 +390,10 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: tags };
         }
 
-        case 'tagCatalog':
-          return { status: 'ok', value: await readTagCatalog() };
-
-        case 'blueMutualOverview': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readBlueMutualOverview(acc.restId) };
-        }
-
-        case 'blueMutualCandidates': {
-          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 500) return failed('[x.data] limit 要 1–500');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readCandidates(acc.restId, p.limit) };
-        }
-
-        case 'blueMutualFollowProgress': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          const gate = await readFollowGate(localDayStart(new Date()).toISOString());
-          const prog = await readFollowProgress(acc.restId, gate.settings['follow.revisit_days']);
-          return { status: 'ok', value: { ...prog, today: gate.todayCount, cap: gate.cap, burst: gate.settings['follow.burst_size'] } };
-        }
-
         case 'followCheckRun': {
           if (typeof p.wsId !== 'string') return failed('[x.data] followCheckRun 缺 wsId');
           const r = await checkFollowBack(p.wsId, 'manual');
           return r.ran ? { status: 'ok', value: r } : failed(`没查:${r.why}`);
-        }
-
-        case 'askFollowStatus': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          const { settings } = await readSettings();
-          return {
-            status: 'ok',
-            value: {
-              statuses: await readAskStatuses(acc.restId, settings['follow.revisit_days']),
-              lastCheck: await readLastFollowCheck(acc.restId),
-              running: followCheckRunning() === p.wsId,
-              revisitDays: settings['follow.revisit_days'],
-            },
-          };
         }
 
         case 'relationStart': {
@@ -458,28 +405,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-relation-start' : 'x-relation-start-refused', pageId: 'x-data',
             detail: r.ok ? { jobId: r.jobId, created: r.created, target: r.plan.target.handle, self: r.plan.self } : { why: r.why } });
           return r.ok ? { status: 'ok', value: r } : failed(r.why);
-        }
-
-        case 'relationJobs':
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] relationJobs 缺 wsId');
-          return { status: 'ok', value: await listRelationJobs(p.wsId) };
-
-        case 'paceStatus':
-          return { status: 'ok', value: await readPaceViews() };
-
-        case 'personLists': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] personLists 要数字 id');
-          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 500) return failed('[x.data] personLists 的 limit 要 1–500');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readPersonLists(acc.restId, p.restId, p.limit) };
-        }
-
-        case 'personTimeline': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId)) return failed('[x.data] personTimeline 要数字 id');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readPersonTimeline(acc.restId, p.restId) };
         }
 
         case 'followQueueAdd': {
@@ -500,23 +425,11 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
         }
 
         /** ⭐⭐ 已迁到能力层(Module5-04 第 2 步):校验 / 认号 / 额度 / 占网页 / 留记录都在执行器,这里只转发 */
-        case 'engageOverview':
-          return fromCap(await execute(X_CAP.engageOverview, { wsId: p.wsId, limit: p.limit }, { caller: 'ui' }));
-
-        case 'vpnFind':
-          return fromCap(await execute(X_CAP.vpnFind, { wsId: p.wsId }, { caller: 'ui' }));
-
         case 'vpnJudge': {
           if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 50) return failed('[x.data] vpnJudge 的 limit 要 1–50');
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
           return { status: 'ok', value: await judgeVpnPosts(acc.restId, p.limit) };
-        }
-
-        case 'vpnOverview': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readVpnOverview(acc.restId) };
         }
 
         case 'vpnHuman': {
@@ -539,9 +452,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           const r = await screenEngage(p.wsId as string, p.restId, p.handle, typeof p.hisAt === 'string' ? p.hisAt : undefined);
           return r.ok ? { status: 'ok', value: r } : failed(r.why);
         }
-
-        case 'engagePrepare':
-          return fromCap(await execute(X_CAP.engagePrepare, { wsId: p.wsId, restId: p.restId, handle: p.handle, hisTweetId: p.hisTweetId }, { caller: 'ui' }));
 
         case 'engageThread': {
           if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId)) return failed('[x.data] engageThread 要数字 id');
@@ -580,12 +490,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           if ('reason' in acc) return failed(acc.reason);
           await recordDefer(acc.restId, p.restId, modeOf(p.mode), typeof p.tweetId === 'string' && p.tweetId !== '' ? p.tweetId : undefined);
           return { status: 'ok', value: { days: DEFER_DAYS } };
-        }
-
-        case 'draftRules': {
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readDraftRules(acc.restId, modeOf(p.mode)) };
         }
 
         case 'draftRuleActive': {
@@ -634,10 +538,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
               followed: r.followed, failedStep: r.failedStep, detail: r.detail } });
           return { status: 'ok', value: r };
         }
-
-        case 'followQueueStatus':
-          if (typeof p.wsId !== 'string') return failed('[x.data] followQueueStatus 要 wsId');
-          return { status: 'ok', value: followQueueStatus(p.wsId) };
 
         case 'followQueueControl':
           if (typeof p.wsId !== 'string' || !['pause', 'resume', 'clear'].includes(p.action)) return failed('[x.data] followQueueControl 参数不对');
@@ -749,20 +649,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
         }
 
         /** ⭐⭐ 此刻状态(运营顶栏 / 人卡「在不在跑」)+ 这个号各状态任务数 */
-        case 'bgStatus': {
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] bgStatus 缺 wsId');
-          const jobs = await listJobs(p.wsId);
-          const counts: Record<string, number> = { queued: 0, running: 0, paused: 0, done: 0, failed: 0 };
-          for (const j of jobs) counts[j.status] = (counts[j.status] ?? 0) + 1;
-          return { status: 'ok', value: { ...bgRunnerStatus(p.wsId), counts, now: Date.now() } };
-        }
-
-        case 'bgListJobs': {
-          const jobs = await listJobs(typeof p.wsId === 'string' && p.wsId !== '' ? p.wsId : undefined);
-          const mine = typeof p.restId === 'string' && p.restId !== '' ? jobs.filter((j) => j.restId === p.restId) : jobs;
-          return { status: 'ok', value: mine };
-        }
-
         case 'bgPauseJob':
         case 'bgResumeJob': {
           if (typeof p.id !== 'string' || p.id === '') return failed(`[x.data] ${p.op} 缺 id`);
@@ -790,19 +676,10 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
         }
 
         /** ⭐ 运营设置 / 取关闸门 / 动作记录(2026-10-10) */
-        case 'opsSettings':
-          return { status: 'ok', value: await readSettings() };
-
         case 'setOpsSetting':
           await writeSetting(p.key, p.value);
           console.log(`[x.ops] 设置 ${p.key} = ${p.value}`);
           return { status: 'ok', value: { key: p.key, value: p.value } };
-
-        case 'unfollowGate':
-          if (typeof p.dayStartIso !== 'string' || Number.isNaN(Date.parse(p.dayStartIso))) {
-            return failed('[x.data] unfollowGate 要 dayStartIso(本地今天的开始)');
-          }
-          return { status: 'ok', value: await readUnfollowGate(p.dayStartIso) };
 
         case 'logAction': {
           const e = p.entry;
@@ -835,9 +712,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: await collectPersonTab(p) };
         }
 
-        case 'personCollectProgress':
-          return { status: 'ok', value: personCollectProgress(p.wcId) };
-
         case 'cancelPersonCollect': {
           const hit = cancelPersonCollect(p.wcId);
           console.log(`[x.people] 停止采集 wc#${p.wcId}:${hit ? '已通知主进程' : '主进程这边没有在跑的(renderer 自己会停)'}`);
@@ -850,21 +724,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-collect', pageId: 'x-data', detail: { ...e } });
           return { status: 'ok', value: { logged: true } };
         }
-
-        case 'friendCircle': {
-          if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] friendCircle 缺 restId');
-          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) return failed('[x.data] friendCircle 的 limit 要在 1–200 之间');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await readFriendCircle(acc.restId, p.restId, p.limit) };
-        }
-
-        case 'personTweets':
-          if (typeof p.restId !== 'string' || p.restId === '') return failed('[x.data] personTweets 缺 restId');
-          if (!Number.isInteger(p.limit) || p.limit <= 0 || p.limit > 200) {
-            return failed('[x.data] personTweets 的 limit 要在 1–200 之间');
-          }
-          return { status: 'ok', value: await readPersonTweets(p.restId, p.limit) };
 
         case 'refreshPerson': {
           const rec = p.record;

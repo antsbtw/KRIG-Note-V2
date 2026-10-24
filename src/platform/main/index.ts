@@ -67,6 +67,7 @@ import { cleanOversizedPartitionCaches } from './web-settings/partition-cache-cl
 import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { registerFlowCapabilities } from './capability/flow-capabilities';
+import { startFlowRetention, stopFlowRetention } from './flow/flow-retention';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
 import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
@@ -191,6 +192,8 @@ app.whenReady().then(async () => {
   const storageStartedAt = Date.now();
   try {
     await initStorage();
+    /** ⭐ 执行记录到期清理(状态轮询只留 7 天)—— 停止调用在 before-quit */
+    startFlowRetention();
     console.log(`[storage] cold-start latency: ${Date.now() - storageStartedAt}ms`);
   } catch (err) {
     console.error('[storage] init failed:', err);
@@ -394,6 +397,7 @@ app.on('before-quit', (event) => {
   // ⭐ 步 3:停 web.net 健康巡检(与上面同理:活着的 setInterval 会吊住事件循环)
   stopHealthWatch();
   stopHealthMonitor();
+  stopFlowRetention();
   stopTraceSweep();
   stopTraceLifecycle();
   if (reconciled) {

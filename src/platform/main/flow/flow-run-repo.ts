@@ -103,6 +103,8 @@ export async function recordCall(c: {
   readonly output?: Record<string, unknown>;
   readonly subjectRef?: string;
   readonly durationMs: number;
+  /** 只留几天(状态轮询 = 7);不给 = 长期保留 */
+  readonly keepDays?: number;
 }): Promise<void> {
   try {
     await getFlowDB().query(
@@ -110,7 +112,7 @@ export async function recordCall(c: {
          run_id = $runId, seq = 1, step_id = $capability, step_type = $stepType,
          capability = $capability, input = $input, output = $output,
          status = $status, reasoning = $reasoning, subject_ref = $subjectRef,
-         duration_ms = $durationMs, caller = $caller, call_id = $callId, created_at = time::now()`,
+         duration_ms = $durationMs, caller = $caller, call_id = $callId, keep_days = $keepDays, created_at = time::now()`,
       {
         runId: c.runId ?? c.callId,
         capability: c.capability,
@@ -123,6 +125,7 @@ export async function recordCall(c: {
         durationMs: Math.max(0, Math.round(c.durationMs)),
         caller: c.caller,
         callId: c.callId,
+        keepDays: c.keepDays,
       },
     );
   } catch (err) {
@@ -189,6 +192,18 @@ export async function listCalls(q: {
     { limit: q.limit, capability: q.capability, caller: q.caller, status: q.status },
   );
   return res?.[0] ?? [];
+}
+
+/**
+ * ⭐ 清掉过期的记录:只删 keep_days 有值的(状态轮询)且超过期限的;长期保留的不碰。
+ * ⚠️ 期限现在只有一种(7 天,用户 10-24 定)—— 写死在 SQL 里,多一种时再按 keep_days 分组删。
+ * @returns 删了几行(删失败会抛,调用方打出来)
+ */
+export async function purgeExpiredCalls(): Promise<number> {
+  const res = await getFlowDB().query<[unknown[]]>(
+    'DELETE flow_step_run WHERE keep_days != NONE AND created_at < time::now() - 7d RETURN BEFORE',
+  );
+  return Array.isArray(res?.[0]) ? res[0].length : 0;
 }
 
 /** 一次执行的完整回看 —— run 头 + 每步 */

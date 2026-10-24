@@ -190,13 +190,13 @@ describe('接线守卫:三个入口都走执行器,旧路已删', () => {
     return IPC.slice(i, j);
   };
 
-  it('IPC 三个 op 只转发给 execute(caller ui),不再自己校验 / 认号', () => {
-    for (const [op, id] of [['engagePrepare', 'engagePrepare'], ['engageOverview', 'engageOverview'], ['vpnFind', 'vpnFind']]) {
-      const c = caseOf(op);
-      expect(c, op).toMatch(new RegExp(`execute\\(X_CAP\\.${id}, `));
-      expect(c, op).toMatch(/caller: 'ui'/);
-      expect(c, op).not.toMatch(/accountOfWs|readWsAccount|prepareEngage\(|findVpnPosts\(|readEngageOverview\(/);
+  it('IPC 三个 op 只转发(第 3 步起走 op → 能力对照表),switch 里不再有它们,不再自己校验 / 认号', () => {
+    const table = IPC.slice(IPC.indexOf('const CAP_OF_OP'), IPC.indexOf('};', IPC.indexOf('const CAP_OF_OP')));
+    for (const [op, id] of [['engagePrepare', 'x.engage.prepare'], ['engageOverview', 'x.engage.overview'], ['vpnFind', 'x.vpn.find']]) {
+      expect(table, op).toMatch(new RegExp(`\\b${op}: '${id.replace(/\./g, '\\.')}'`));
+      expect(IPC, op).not.toMatch(new RegExp(`case '${op}':`));
     }
+    expect(IPC).not.toMatch(/prepareEngage\(|findVpnPosts\(|readEngageOverview\(/);
   });
 
   it('收件箱:能调目录里任意能力(op call),能列目录(op capabilities);老三个 op 也走执行器', () => {

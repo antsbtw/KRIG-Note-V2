@@ -12,7 +12,7 @@
 import { defineCapability, capFailed, type Need, type Prepared } from '@platform/main/capability/capability';
 import { getXHostState } from './x-host-registry';
 import { pageResource } from './x-page-lock';
-import { readWsAccount } from './x-account-repo';
+import { registerXReadCapabilities, wsAccount } from './x-capabilities-read';
 import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
 import { findVpnPostsWith } from './x-vpn-run';
@@ -30,14 +30,6 @@ export const X_CAP = {
 
 type Acc = { readonly restId: string; readonly handle: string };
 
-/** 认出这个 ws 登录的号(要数字 id) */
-async function wsAccount(wsId: string): Promise<Acc | { refused: string }> {
-  const a = await readWsAccount(wsId);
-  if (!a) return { refused: `${wsId} 还没认出登录的是哪个号 —— 打开 X 网页,在运营面板点「认号」` };
-  if (!a.restId) return { refused: `${wsId} 登录的是 @${a.handle},但数字 id 还没拿到 —— 在运营面板点「认号」` };
-  return { restId: a.restId, handle: a.handle };
-}
-
 /** 占这个 ws 的 X 网页 */
 function pageNeed(wsId: string, purpose: string): { wcId: number; need: Need } | { refused: string } {
   const wcId = getXHostState(wsId)?.wcId;
@@ -53,6 +45,8 @@ let registered = false;
 export function registerXCapabilities(): void {
   if (registered) return;
   registered = true;
+  /** 第 3 步第 1 批:26 个读库能力(x-capabilities-read.ts) */
+  registerXReadCapabilities();
 
   defineCapability<{ wsId: string; restId: string; handle: string; hisTweetId?: string }, unknown, { wcId: number; acc: Acc }>({
     id: X_CAP.engagePrepare,

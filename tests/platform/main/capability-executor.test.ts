@@ -10,11 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const rows: Array<Record<string, unknown>> = [];
 const db = { down: false };
 const selects: Array<{ sql: string; v: Record<string, unknown> }> = [];
+const deletes: string[] = [];
 vi.mock('@storage/surreal/client', () => ({
   getFlowDB: () => ({
     query: async (sql: string, v: Record<string, unknown>) => {
       if (db.down) throw new Error('库挂了');
       if (sql.includes('CREATE flow_step_run')) rows.push(v);
+      if (sql.includes('DELETE flow_step_run')) { deletes.push(sql); return [[{ id: 1 }, { id: 2 }]]; }
       if (sql.includes('SELECT call_id')) { selects.push({ sql, v }); return [[{ call_id: 'c1', capability: 'demo.double', caller: 'ui', status: 'ok' }]]; }
       return [[]];
     },
@@ -157,6 +159,33 @@ describe('flow.calls.recent —— AI 能自己回看执行记录', () => {
     expect(selects[0].v).toMatchObject({ limit: 5, caller: 'timer', status: 'refused' });
     expect(rows.at(-1)).toMatchObject({ capability: 'flow.calls.recent', caller: 'ai', output: { count: 1 } });
     expect(await cap.execute('flow.calls.recent', { status: 'weird' }, { caller: 'ai' })).toMatchObject({ ok: false, kind: 'invalid' });
+  });
+});
+
+describe('⭐ 状态轮询(用户 10-24:「全记,只留 7 天」)', () => {
+  const poll = cap.defineCapability<{ fail?: boolean }, { n: number }>({
+    id: 'demo.poll', kind: 'input', describe: '轮询的状态(测试用)', inputDoc: {}, probe: true,
+    parse: (raw) => ({ fail: (raw as { fail?: boolean })?.fail === true }),
+    run: async (i) => { if (i.fail) throw cap.capFailed('读不到'); return { n: 1 }; },
+  });
+  it('每次都记一行,带 keepDays = 7;成功不打终端,失败照打', async () => {
+    vi.mocked(console.log).mockClear();
+    await cap.execute(poll.id, {}, { caller: 'ui' });
+    expect(rows.at(-1)).toMatchObject({ capability: 'demo.poll', status: 'ok', keepDays: 7 });
+    expect(vi.mocked(console.log).mock.calls.filter((c) => String(c[0]).startsWith('[cap] demo.poll'))).toEqual([]);
+    await cap.execute(poll.id, { fail: true }, { caller: 'ui' });
+    expect(rows.at(-1)).toMatchObject({ status: 'failed', keepDays: 7 });
+    expect(vi.mocked(console.warn).mock.calls.some((c) => String(c[0]).startsWith('[cap] demo.poll'))).toBe(true);
+  });
+  it('非轮询的不带 keepDays(长期保留)', async () => {
+    await cap.execute('demo.double', { n: 2 }, { caller: 'ui' });
+    expect(rows.at(-1)?.keepDays).toBeUndefined();
+  });
+  it('清理只删 keep_days 有值且过期的行,并说删了几行', async () => {
+    const { purgeExpiredCalls } = await import('@platform/main/flow/flow-run-repo');
+    deletes.length = 0;
+    expect(await purgeExpiredCalls()).toBe(2);
+    expect(deletes[0]).toMatch(/DELETE flow_step_run WHERE keep_days != NONE AND created_at < time::now\(\) - 7d RETURN BEFORE/);
   });
 });
 
