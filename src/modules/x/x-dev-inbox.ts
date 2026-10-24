@@ -67,9 +67,33 @@ type EngageCmd = (Sampling & { op: 'engageCollect'; wsId: string }) | (Sampling 
   | (Sampling & { op: 'vpnFind'; wsId: string }) | (Sampling & { op: 'vpnJudge'; wsId: string; limit: number })
   | (Sampling & { op: 'vpnOverview'; wsId: string }) | (Sampling & { op: 'vpnDraft'; wsId: string; tweetId: string })
   | (Sampling & { op: 'vpnPrune'; wsId: string });
-type Cmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd;
+/** 占住 X 网页一段时间(模拟有人在用)—— 资源锁回归 */
+type HoldPageCmd = Sampling & { op: 'holdPage'; wsId: string; ms: number; purpose?: string };
+type SingleCmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd | HoldPageCmd;
+/** 同时跑 2–4 条(不能套 parallel);第 i 条晚 i × staggerMs 开跑 */
+type ParallelCmd = Sampling & { op: 'parallel'; cmds: SingleCmd[]; staggerMs?: number };
+type Cmd = SingleCmd | ParallelCmd;
 
 function validate(c: unknown): Cmd | string {
+  const top = c as { op?: string; cmds?: unknown; staggerMs?: unknown; wsId?: unknown; ms?: unknown; purpose?: unknown };
+  if (top?.op === 'parallel') {
+    if (!Array.isArray(top.cmds) || top.cmds.length < 2 || top.cmds.length > 4) return 'parallel 要 2–4 条 cmds';
+    if (top.staggerMs !== undefined && (!Number.isInteger(top.staggerMs) || (top.staggerMs as number) < 0 || (top.staggerMs as number) > 60_000)) return 'parallel 的 staggerMs 要 0–60000';
+    const subs: SingleCmd[] = [];
+    for (const [i, x] of top.cmds.entries()) {
+      if ((x as { op?: string })?.op === 'parallel') return `parallel 第 ${i + 1} 条:不能套 parallel`;
+      const v = validate(x);
+      if (typeof v === 'string') return `parallel 第 ${i + 1} 条:${v}`;
+      subs.push(v as SingleCmd);
+    }
+    return { op: 'parallel', cmds: subs, staggerMs: top.staggerMs as number | undefined };
+  }
+  if (top?.op === 'holdPage') {
+    if (typeof top.wsId !== 'string') return 'holdPage 要 wsId';
+    if (!Number.isInteger(top.ms) || (top.ms as number) < 1000 || (top.ms as number) > 15 * 60_000) return 'holdPage 的 ms 要 1000–900000';
+    if (top.purpose !== undefined && typeof top.purpose !== 'string') return 'holdPage 的 purpose 要字符串';
+    return top as unknown as HoldPageCmd;
+  }
   const o = c as Partial<SearchCmd> & Partial<PersonCmd> & Partial<UserListCmd>;
   if (o?.sample !== undefined && (typeof o.sample !== 'string' || !/^[\w.-]{1,40}$/.test(o.sample))) return 'sample 只收 1–40 个字母数字 _ . -';
   if (['engageCollect', 'engageOverview', 'engagePrepare', 'leftTweet', 'engageScreen', 'vpnFind', 'vpnJudge', 'vpnOverview', 'vpnDraft', 'vpnPrune'].includes(String((o as { op?: string })?.op))) {
@@ -153,6 +177,121 @@ async function runUserList(cmd: UserListCmd): Promise<unknown> {
   }
 }
 
+/** 执行一条指令(单条 / parallel 里的每一条都走这里) */
+async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
+  let out: unknown;
+  if (cmd.op === 'parallel') return runParallel(cmd, next);
+  if (cmd.op === 'holdPage') return runHoldPage(cmd);
+  const sampling = cmd.sample ? startSampling(cmd.sample) : undefined;
+  try {
+    if (cmd.op === 'personTab') {
+      console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
+      out = await runPersonTab(cmd);
+    } else if (cmd.op === 'leftTweet') {
+      const wcId = getXHostState(cmd.wsId)?.wcId;
+      if (wcId === undefined) out = { ok: false, why: 'X 网页没开' };
+      else {
+        /** ⭐ 原来不查忙还能先跳转(Module5-04 §1.2)—— 现在占住才动 */
+        const lock = acquirePage(wcId, '开发测试:读左边那条', 'inbox');
+        if (!lock.ok) out = { ok: false, why: lock.why };
+        else {
+          try {
+            if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
+            out = await readLeftTweet(wcId);
+          } finally {
+            releasePage(lock.token);
+          }
+        }
+      }
+    } else if (cmd.op === 'vpnFind') {
+      out = await findVpnPosts(cmd.wsId);
+    } else if (cmd.op === 'vpnPrune') {
+      const acc = await readWsAccount(cmd.wsId);
+      out = acc?.restId ? await pruneVpnPosts(acc.restId) : { ok: false, why: '认不出号' };
+    } else if (cmd.op === 'vpnJudge' || cmd.op === 'vpnOverview' || cmd.op === 'vpnDraft') {
+      const acc = await readWsAccount(cmd.wsId);
+      if (!acc?.restId) out = { ok: false, why: '认不出号' };
+      else if (cmd.op === 'vpnJudge') out = await judgeVpnPosts(acc.restId, cmd.limit);
+      else if (cmd.op === 'vpnOverview') out = await readVpnOverview(acc.restId);
+      else {
+        const [post, tw] = await getXDB().query<[Array<{ recipe?: string; verdict?: { direction?: 'out' | 'in' | 'none' } }>, Array<{ text?: string }>]>(
+          `SELECT recipe, verdict FROM type::record('x_vpn_post', $id); SELECT text FROM x_tweet WHERE tweet_id = $id;`, { id: cmd.tweetId });
+        const text = tw?.[0]?.text ?? '';
+        const lang = replyLangOf(text);
+        out = await draftAskReply({ account: acc.restId, tweet: text, person: {}, mode: 'vpn',
+          vpn: { link: vpnLink(lang, acc.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction } });
+      }
+    } else if (cmd.op === 'engageScreen') {
+      out = await screenEngage(cmd.wsId, cmd.restId, cmd.handle);
+    } else if (cmd.op === 'engageCollect') {
+      out = await collectEngagement(cmd.wsId);
+    } else if (cmd.op === 'engagePrepare') {
+      const acc = await readWsAccount(cmd.wsId);
+      out = acc?.restId ? await prepareEngage(cmd.wsId, acc.restId, cmd.restId, cmd.handle, cmd.hisTweetId) : { ok: false, why: '认不出号' };
+    } else if (cmd.op === 'engageOverview') {
+      const acc = await readWsAccount(cmd.wsId);
+      out = acc?.restId ? await readEngageOverview(acc.restId, acc.handle, 10) : { ok: false, why: '认不出号' };
+    } else if (cmd.op === 'askDraft') {
+      const acc = await readWsAccount(cmd.wsId);
+      if (!acc?.restId) out = { ok: false, why: '认不出号' };
+      else {
+        const drafts = [];
+        for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {}, mode: cmd.mode, revise: cmd.revise }) });
+        out = { ok: true, drafts };
+      }
+    } else if (cmd.op === 'relationStart') {
+      console.log(`[x.dev] 执行 ${next}:relationStart ${cmd.wsId} ${cmd.handle ?? '(我)'}`);
+      out = await startRelationTask(cmd.wsId, cmd.restId && cmd.handle ? { restId: cmd.restId, handle: cmd.handle } : undefined);
+    } else if (cmd.op === 'followCheck') {
+      console.log(`[x.dev] 执行 ${next}:followCheck ${cmd.wsId}`);
+      out = await checkFollowBack(cmd.wsId, 'manual');
+    } else if (cmd.op === 'userList') {
+      console.log(`[x.dev] 执行 ${next}:userList @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
+      out = await runUserList(cmd);
+    } else {
+      console.log(`[x.dev] 执行 ${next}:${cmd.op}「${cmd.q.slice(0, 40)}」最多 ${cmd.wantPages} 页`);
+      out = await collectSearchByScroll({ ...cmd, ownToken: undefined, caller: 'inbox' });
+    }
+  } finally {
+    sampling?.stop();
+  }
+  if (sampling) {
+    console.log(`[x.dev] 样本 ${sampling.pages()} 页存到 ${sampling.dir}`);
+    out = { ...(out as object), samples: { dir: sampling.dir, pages: sampling.pages() } };
+  }
+  return out;
+}
+
+/**
+ * ⭐⭐ 同时跑几条(2026-10-23,资源锁回归):收件箱本来一次一条,造不出「A 正在用网页时 B 来抢」。
+ * 第 i 条在 i × staggerMs 后开跑(让第一条先占住网页);全部跑完一起返回,每条带起止时间。
+ */
+async function runParallel(cmd: ParallelCmd, next: string): Promise<unknown> {
+  const t0 = Date.now();
+  console.log(`[x.dev] 执行 ${next}:parallel ${cmd.cmds.map((c) => c.op).join(' + ')}(间隔 ${cmd.staggerMs ?? 0}ms)`);
+  const runs = await Promise.allSettled(cmd.cmds.map(async (c, i) => {
+    await new Promise((r) => setTimeout(r, i * (cmd.staggerMs ?? 0)));
+    const startedMs = Date.now() - t0;
+    const result = await runCmd(c, `${next}#${i + 1}`);
+    return { op: c.op, startedMs, finishedMs: Date.now() - t0, result };
+  }));
+  return { ok: true, runs: runs.map((r, i) => (r.status === 'fulfilled' ? r.value : { op: cmd.cmds[i].op, error: r.reason instanceof Error ? r.reason.message : String(r.reason) })) };
+}
+
+/** ⭐ 占住 X 网页 ms 毫秒什么都不做 —— 模拟「操作台 / 人卡正在用」,看别的任务让不让路 */
+async function runHoldPage(cmd: HoldPageCmd): Promise<unknown> {
+  const wcId = getXHostState(cmd.wsId)?.wcId;
+  if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
+  const lock = acquirePage(wcId, cmd.purpose ?? '开发测试:占着网页', 'inbox');
+  if (!lock.ok) return { ok: false, why: lock.why };
+  try {
+    await new Promise((r) => setTimeout(r, cmd.ms));
+    return { ok: true, heldMs: cmd.ms };
+  } finally {
+    releasePage(lock.token);
+  }
+}
+
 /** 挂上旁路,把每页原始载荷存进样本目录;返回摘钩子的函数 */
 function startSampling(name: string): { dir: string; pages: () => number; stop: () => void } {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -183,83 +322,7 @@ async function tick(): Promise<void> {
     const startedAt = new Date().toISOString();
     if (typeof cmd === 'string') out = { ok: false, why: cmd };
     else {
-      const sampling = cmd.sample ? startSampling(cmd.sample) : undefined;
-      try {
-        if (cmd.op === 'personTab') {
-          console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
-          out = await runPersonTab(cmd);
-        } else if (cmd.op === 'leftTweet') {
-          const wcId = getXHostState(cmd.wsId)?.wcId;
-          if (wcId === undefined) out = { ok: false, why: 'X 网页没开' };
-          else {
-            /** ⭐ 原来不查忙还能先跳转(Module5-04 §1.2)—— 现在占住才动 */
-            const lock = acquirePage(wcId, '开发测试:读左边那条', 'inbox');
-            if (!lock.ok) out = { ok: false, why: lock.why };
-            else {
-              try {
-                if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
-                out = await readLeftTweet(wcId);
-              } finally {
-                releasePage(lock.token);
-              }
-            }
-          }
-        } else if (cmd.op === 'vpnFind') {
-          out = await findVpnPosts(cmd.wsId);
-        } else if (cmd.op === 'vpnPrune') {
-          const acc = await readWsAccount(cmd.wsId);
-          out = acc?.restId ? await pruneVpnPosts(acc.restId) : { ok: false, why: '认不出号' };
-        } else if (cmd.op === 'vpnJudge' || cmd.op === 'vpnOverview' || cmd.op === 'vpnDraft') {
-          const acc = await readWsAccount(cmd.wsId);
-          if (!acc?.restId) out = { ok: false, why: '认不出号' };
-          else if (cmd.op === 'vpnJudge') out = await judgeVpnPosts(acc.restId, cmd.limit);
-          else if (cmd.op === 'vpnOverview') out = await readVpnOverview(acc.restId);
-          else {
-            const [post, tw] = await getXDB().query<[Array<{ recipe?: string; verdict?: { direction?: 'out' | 'in' | 'none' } }>, Array<{ text?: string }>]>(
-              `SELECT recipe, verdict FROM type::record('x_vpn_post', $id); SELECT text FROM x_tweet WHERE tweet_id = $id;`, { id: cmd.tweetId });
-            const text = tw?.[0]?.text ?? '';
-            const lang = replyLangOf(text);
-            out = await draftAskReply({ account: acc.restId, tweet: text, person: {}, mode: 'vpn',
-              vpn: { link: vpnLink(lang, acc.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction } });
-          }
-        } else if (cmd.op === 'engageScreen') {
-          out = await screenEngage(cmd.wsId, cmd.restId, cmd.handle);
-        } else if (cmd.op === 'engageCollect') {
-          out = await collectEngagement(cmd.wsId);
-        } else if (cmd.op === 'engagePrepare') {
-          const acc = await readWsAccount(cmd.wsId);
-          out = acc?.restId ? await prepareEngage(cmd.wsId, acc.restId, cmd.restId, cmd.handle, cmd.hisTweetId) : { ok: false, why: '认不出号' };
-        } else if (cmd.op === 'engageOverview') {
-          const acc = await readWsAccount(cmd.wsId);
-          out = acc?.restId ? await readEngageOverview(acc.restId, acc.handle, 10) : { ok: false, why: '认不出号' };
-        } else if (cmd.op === 'askDraft') {
-          const acc = await readWsAccount(cmd.wsId);
-          if (!acc?.restId) out = { ok: false, why: '认不出号' };
-          else {
-            const drafts = [];
-            for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {}, mode: cmd.mode, revise: cmd.revise }) });
-            out = { ok: true, drafts };
-          }
-        } else if (cmd.op === 'relationStart') {
-          console.log(`[x.dev] 执行 ${next}:relationStart ${cmd.wsId} ${cmd.handle ?? '(我)'}`);
-          out = await startRelationTask(cmd.wsId, cmd.restId && cmd.handle ? { restId: cmd.restId, handle: cmd.handle } : undefined);
-        } else if (cmd.op === 'followCheck') {
-          console.log(`[x.dev] 执行 ${next}:followCheck ${cmd.wsId}`);
-          out = await checkFollowBack(cmd.wsId, 'manual');
-        } else if (cmd.op === 'userList') {
-          console.log(`[x.dev] 执行 ${next}:userList @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
-          out = await runUserList(cmd);
-        } else {
-          console.log(`[x.dev] 执行 ${next}:${cmd.op}「${cmd.q.slice(0, 40)}」最多 ${cmd.wantPages} 页`);
-          out = await collectSearchByScroll({ ...cmd, ownToken: undefined, caller: 'inbox' });
-        }
-      } finally {
-        sampling?.stop();
-      }
-      if (sampling) {
-        console.log(`[x.dev] 样本 ${sampling.pages()} 页存到 ${sampling.dir}`);
-        out = { ...(out as object), samples: { dir: sampling.dir, pages: sampling.pages() } };
-      }
+      out = await runCmd(cmd, next);
     }
     writeFileSync(path.join(outbox, next), JSON.stringify({ cmd: next, startedAt, finishedAt: new Date().toISOString(), result: out }, null, 2));
     renameSync(doing, `${doing.replace(/\.running$/, '')}.done`);
