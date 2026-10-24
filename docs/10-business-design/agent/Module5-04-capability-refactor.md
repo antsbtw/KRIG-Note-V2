@@ -128,7 +128,7 @@ type Result<T> =
 
 | 步 | 做什么 | 判据 |
 |---|---|---|
-| 1 ✅代码(10-23,真机待验,见 §7) | **资源锁**;4 个准备函数在采主页时上锁;`syncBusy` 退役;后台 `runningWc` 并入 | 测试:查回关持锁时操作台申请 → refused,且查回关的锁没被放掉;卡片准备期间巡检到点 → 让路 |
+| 1 ✅(10-23,Windows 测试机真机回归全过,见 step1-regression) | **资源锁**;4 个准备函数在采主页时上锁;`syncBusy` 退役;后台 `runningWc` 并入 | 测试:查回关持锁时操作台申请 → refused,且查回关的锁没被放掉;卡片准备期间巡检到点 → 让路 |
 | 2 | **能力契约 + 执行器 + 统一结果 + `krig_flow`**;先接 3 个形状差最大的:`x.engage.prepare`(占网页)、`x.vpn.find`(花搜索额度)、`x.engage.overview`(纯读库) | 三个入口各调一次,检查 / 锁 / 记录 / 结果一致;`flow_step_run` 有行(含 refused) |
 | 3 | **按批迁移其余能力**(读库类 → 采集类 → 输出类);收件箱改成「调任意能力」(白名单退役);定时器改走执行器 | x-data-ipc 的 switch 只剩转发;收件箱能调目录里任意能力 |
 | 4 | **流程搬回主进程**:取关(+ 异常即停)、点人核对、互动前过一轮、求助帖判断循环、找蓝V+扫倾向、采主页重试、卡片流程 | 界面组件里没有 `webDomInvoke` 直调和能力循环 |
@@ -153,7 +153,7 @@ type Result<T> =
 
 ## 7. 执行记录
 
-### 第 1 步 资源锁 —— 2026-10-23 代码完成,单测绿,**真机待验**
+### 第 1 步 资源锁 —— 2026-10-23 ✅ 完成(单测绿 + Windows 测试机真机回归全过)
 
 **做了什么**
 - 平台层通用锁 `src/platform/main/flow/resource-lock.ts`(不认识 X):`acquireLock / releaseLock(token) / lockHolder / holdsLock / revokeLocks / listLocks`。
