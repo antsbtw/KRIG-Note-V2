@@ -16,7 +16,9 @@ vi.mock('@modules/x/x-account-repo', () => ({ accountForWrite: async () => ({ ki
 vi.mock('@modules/x/x-user-repo', () => ({ writeRelations: async (_a: unknown, obs: unknown[]) => { relWrites.push(...obs); return { report: {}, before: new Map() }; } }));
 vi.mock('@storage/surreal/client', () => ({ getXDB: () => ({ query: async (sql: string) => (sql.includes('x_ask') ? [asked] : [[]]) }) }));
 
-import { prepareAsk } from '@modules/x/x-ask-prepare';
+import { prepareAskOn } from '@modules/x/x-ask-prepare';
+/** 2026-10-24 认号 / 占网页挪到能力 x.ask.prepare 的执行器;这里只测「只干活」的那份(wcId 7 = 已占住的网页) */
+const prepareAsk = (_ws: string, acc: string, restId: string, handle: string) => prepareAskOn(7, acc, restId, handle);
 
 const tw = (rel: { following?: boolean; followedBy?: boolean }, id = 't1') => ({
   id, text: '出摊了,浇朋友 #蓝V互关', createdAt: '2026-10-20T00:00:00Z', authorRestId: 'P', ...rel,

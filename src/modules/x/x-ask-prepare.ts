@@ -4,13 +4,10 @@
  * 放弃的人记成「算法排除」(写明原因;人标过的不动)—— 不再出现在候选里。
  */
 import { getXDB } from '@storage/surreal/client';
-import { getXHostState } from './x-host-registry';
-import { acquirePage, releasePage } from './x-page-lock';
 import { collectPersonTab } from './x-person-collect';
 import { X_PAGE_NAME } from './x-pages';
 import { readPerson } from './x-people-repo';
 import { pickAskTweet, type AskPlan } from './x-ask-plan';
-import { followQueueStatus } from './x-follow-queue';
 import { readSettings } from './x-ops-actions-repo';
 import { accountForWrite } from './x-account-repo';
 import { writeRelations } from './x-user-repo';
@@ -33,23 +30,10 @@ const EXCLUDE_RULE_SQL = `UPDATE type::record('x_author', $rest_id) SET
   WHERE excluded_source = NONE OR excluded_source = 'rule' RETURN rest_id`;
 
 /**
- * ⭐⭐ 准备期间占住 X 网页(Module5-04 §1.3 bug 2):原来只查别人忙不忙、自己采的那几秒不登记 →
- * 巡检 / 后台采集到点就把网页带走,卡片采到的不是这个人。
+ * ⭐⭐ 求关卡准备 —— 只干活(Module5-04 第 3 步):认号 / 网页开没开 / 关注队列在不在动 / 占网页由能力 `x.ask.prepare` 的执行器做。
+ * ⚠️ 调这里之前必须已经占住 wcId(采他主页那几秒别人不能带走,Module5-04 §1.3 bug 2)。
  */
-export async function prepareAsk(wsId: string, account: string, restId: string, handle: string): Promise<AskPrepared> {
-  const wcId = getXHostState(wsId)?.wcId;
-  if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
-  if (followQueueStatus(wsId).current) return { ok: false, why: '关注队列正在动作' };
-  const lock = acquirePage(wcId, `求关卡:准备 @${handle}`, 'ui');
-  if (!lock.ok) return lock;
-  try {
-    return await prepareAskOn(wcId, account, restId, handle);
-  } finally {
-    releasePage(lock.token);
-  }
-}
-
-async function prepareAskOn(wcId: number, account: string, restId: string, handle: string): Promise<AskPrepared> {
+export async function prepareAskOn(wcId: number, account: string, restId: string, handle: string): Promise<AskPrepared> {
   const { settings } = await readSettings();
   const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: settings['ask.collect_pages'], attempt: 1 });
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };

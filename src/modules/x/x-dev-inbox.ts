@@ -7,13 +7,12 @@
  * ⚠️ 只认白名单里的指令;一次只跑一个;X 网页忙 / 后台在跑就让路(由被调函数判)。
  * ⚠️ 定时器 unref + before-quit 停(记忆 project-graceful-shutdown)。
  */
-import { readLeftTweet } from './x-left-tweet';
 import { judgeVpnPosts, pruneVpnPosts, readVpnOverview } from './x-vpn-run';
 import { execute, listCapabilities } from '@platform/main/capability/capability';
 import { X_CAP } from './x-capabilities';
 import { getXDB } from '@storage/surreal/client';
 import { replyLangOf, vpnLink } from './x-vpn-help';
-import { X_PAGE_NAME } from './x-pages';
+
 import { app } from 'electron';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -24,11 +23,7 @@ import { acquirePage, releasePage } from './x-page-lock';
 import { manualSummary, pageProblem } from './x-page-ledger';
 import { X_MANUAL } from './x-manual';
 import { setPageTap } from './x-page-tap';
-import { checkFollowBack } from './x-follow-check';
-import { startRelationTask } from './x-relation-task';
 import { draftAskReply } from './x-ask-draft';
-import { collectEngagement } from './x-engage-collect';
-import { screenEngage } from './x-engage-prepare';
 import { readWsAccount } from './x-account-repo';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
@@ -208,21 +203,7 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
       console.log(`[x.dev] 执行 ${next}:personTab @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
       out = await runPersonTab(cmd);
     } else if (cmd.op === 'leftTweet') {
-      const wcId = getXHostState(cmd.wsId)?.wcId;
-      if (wcId === undefined) out = { ok: false, why: 'X 网页没开' };
-      else {
-        /** ⭐ 原来不查忙还能先跳转(Module5-04 §1.2)—— 现在占住才动 */
-        const lock = acquirePage(wcId, '开发测试:读左边那条', 'inbox');
-        if (!lock.ok) out = { ok: false, why: lock.why };
-        else {
-          try {
-            if (cmd.goto) await webviewPorts(wcId).goto(X_PAGE_NAME.status, { tweetId: cmd.goto });
-            out = await readLeftTweet(wcId);
-          } finally {
-            releasePage(lock.token);
-          }
-        }
-      }
+      out = await execute('x.left.read', { wsId: cmd.wsId, open: cmd.goto }, { caller: 'inbox' });
     } else if (cmd.op === 'vpnFind') {
       out = await execute(X_CAP.vpnFind, { wsId: cmd.wsId }, { caller: 'inbox' });
     } else if (cmd.op === 'vpnPrune') {
@@ -242,9 +223,9 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
           vpn: { link: vpnLink(lang, acc.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction } });
       }
     } else if (cmd.op === 'engageScreen') {
-      out = await screenEngage(cmd.wsId, cmd.restId, cmd.handle);
+      out = await execute('x.engage.screen', { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle }, { caller: 'inbox' });
     } else if (cmd.op === 'engageCollect') {
-      out = await collectEngagement(cmd.wsId, 'inbox');
+      out = await execute('x.engage.collect', { wsId: cmd.wsId }, { caller: 'inbox' });
     } else if (cmd.op === 'engagePrepare') {
       out = await execute(X_CAP.engagePrepare, { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle, hisTweetId: cmd.hisTweetId }, { caller: 'inbox' });
     } else if (cmd.op === 'engageOverview') {
@@ -259,10 +240,10 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
       }
     } else if (cmd.op === 'relationStart') {
       console.log(`[x.dev] 执行 ${next}:relationStart ${cmd.wsId} ${cmd.handle ?? '(我)'}`);
-      out = await startRelationTask(cmd.wsId, cmd.restId && cmd.handle ? { restId: cmd.restId, handle: cmd.handle } : undefined);
+      out = await execute('x.relation.start', { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle }, { caller: 'inbox' });
     } else if (cmd.op === 'followCheck') {
       console.log(`[x.dev] 执行 ${next}:followCheck ${cmd.wsId}`);
-      out = await checkFollowBack(cmd.wsId, 'manual');
+      out = await execute('x.followCheck.run', { wsId: cmd.wsId }, { caller: 'inbox' });
     } else if (cmd.op === 'userList') {
       console.log(`[x.dev] 执行 ${next}:userList @${cmd.handle} ${cmd.page} 最多 ${cmd.pageCap} 页`);
       out = await runUserList(cmd);

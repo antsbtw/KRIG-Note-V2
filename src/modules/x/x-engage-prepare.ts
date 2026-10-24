@@ -8,8 +8,6 @@
  * 返回形状与求关准备(AskPrepared)一致,互动卡和求关卡用同一个组件。
  */
 import { getXDB } from '@storage/surreal/client';
-import { getXHostState } from './x-host-registry';
-import { acquirePage, releasePage } from './x-page-lock';
 import { collectPersonTab } from './x-person-collect';
 import { X_PAGE_NAME } from './x-pages';
 import { readPerson } from './x-people-repo';
@@ -63,17 +61,9 @@ export function pickEngageTweet(
  * ⭐⭐ 先过一轮:采他主页最新一页,看 2 小时内有没有动静(用户 10-23:「应该是我勾选15人后,自动先过一轮最新的用户推文,
  * 然后再筛选出那些近期有发推的人,没有的就先放一放。」)—— 调用方一个一个调、显示进度;没动静的由调用方记「放一放」。
  */
-export async function screenEngage(wsId: string, restId: string, handle: string, hisAt?: string): Promise<{ ok: false; why: string } | { ok: true; active: boolean; why?: string }> {
-  const wcId = getXHostState(wsId)?.wcId;
-  if (wcId === undefined) return { ok: false, why: 'X 网页没开' };
-  const lock = acquirePage(wcId, `互动:先过一轮 @${handle}`, 'ui');
-  if (!lock.ok) return lock;
-  let r: Awaited<ReturnType<typeof collectPersonTab>>;
-  try {
-    r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: 1, attempt: 1 });
-  } finally {
-    releasePage(lock.token);
-  }
+/** ⭐ 只干活(Module5-04 第 3 步):网页开没开 / 占网页由能力 `x.engage.screen` 的执行器做;⚠️ 调之前必须已占住 wcId */
+export async function screenEngageOn(wcId: number, restId: string, handle: string, hisAt?: string): Promise<{ ok: false; why: string } | { ok: true; active: boolean; why?: string }> {
+  const r = await collectPersonTab({ wcId, page: X_PAGE_NAME.profile, handle, restId, pageCap: 1, attempt: 1 });
   if (!r.reached) return { ok: false, why: `去不到他的主页:${r.reason}` };
   const a = activeWithin(r.records, restId, hisAt, new Date());
   console.log(`[x.engage] 筛 @${handle}:${a.active ? '2 小时内有动静' : a.why}`);

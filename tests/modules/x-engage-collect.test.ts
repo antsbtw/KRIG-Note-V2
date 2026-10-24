@@ -27,7 +27,9 @@ vi.mock('@modules/x/x-engage-repo', () => ({
   writeEngageCursor: async (_h: string, key: string, c: { oldest?: string; newest?: string }) => { written[key] = c; },
 }));
 
-import { collectEngagement } from '@modules/x/x-engage-collect';
+import { collectEngagementWith } from '@modules/x/x-engage-collect';
+/** 2026-10-24 认号 / 占网页挪到能力 x.engage.collect 的执行器;这里只测「只干活」的那份 */
+const collectEngagement = (ws: string) => collectEngagementWith(ws, { restId: 'ME', handle: 'me' }, 'T');
 import { resetSearchBudget, searchBudget } from '@modules/x/x-search-budget';
 
 describe('采互动一段', () => {

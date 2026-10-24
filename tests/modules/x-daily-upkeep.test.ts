@@ -22,39 +22,70 @@ let lastCheck: { at: string; ok: boolean } | null = null;
 let jobs: Array<{ self: boolean; status: string; createdAt: string }> = [];
 vi.mock('@modules/x/x-host-registry', () => ({ listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
 vi.mock('@modules/x/x-account-repo', () => ({ readWsAccount: async () => ({ restId: 'ME', handle: 'me' }) }));
-vi.mock('@modules/x/x-follow-check', () => ({
-  followCheckRunning: () => null,
-  checkFollowBack: async () => { calls.push('follow-check'); return { ran: true }; },
+vi.mock('@modules/x/x-follow-check', () => ({ followCheckRunning: () => null }));
+/**
+ * ⭐ 2026-10-24 巡检每件事都走执行器(caller = timer):这里换掉执行器,记下调了谁、谁发起的
+ * result[id] 可改成 refused / failed 看巡检怎么接
+ */
+const result: Record<string, Record<string, unknown>> = {};
+const NAME: Record<string, string> = { 'x.followCheck.run': 'follow-check', 'x.relation.start': 'relation', 'x.engage.collect': 'engage' };
+vi.mock('@platform/main/capability/capability', () => ({
+  execute: async (id: string, input: { wsId?: string }, opts: { caller: string }) => {
+    calls.push(`${NAME[id] ?? id}:${opts.caller}`);
+    expect(input.wsId).toBe('ws-1');
+    return result[id] ?? { ok: true, value: id === 'x.relation.start' ? { ok: true, jobId: 'J' } : { ok: true, runs: [] }, callId: 'c' };
+  },
 }));
 vi.mock('@modules/x/x-follow-check-repo', () => ({ readLastFollowCheck: async () => lastCheck }));
-vi.mock('@modules/x/x-relation-task', () => ({
-  listRelationJobs: async () => jobs,
-  startRelationTask: async (_ws: string, _t: unknown, trigger: string) => { calls.push(`relation:${trigger}`); return { ok: true, jobId: 'J' }; },
-}));
+vi.mock('@modules/x/x-relation-task', () => ({ listRelationJobs: async () => jobs }));
 
 let engageCov: Record<string, { at?: string; oldest?: string; newest?: string }> = { mine: {}, toMe: {}, mentionMe: {} };
 vi.mock('@modules/x/x-engage-repo', () => ({ readEngageCoverage: async () => engageCov }));
-vi.mock('@modules/x/x-engage-collect', () => ({ collectEngagement: async () => { calls.push('engage'); return { ok: true, runs: [] }; } }));
 
 import { dailyUpkeepTick } from '@modules/x/x-daily-upkeep';
 
+describe('⭐⭐ 被拒不算做过(Module5-04 §1.5:原来网页忙没跑也占掉 10 分钟)', () => {
+  beforeEach(() => { calls.length = 0; for (const k of Object.keys(result)) delete result[k]; });
+  it('查回关被拒(网页被人占着)→ 说「让路」,接着看下一件(关系采集)', async () => {
+    lastCheck = null; jobs = [];
+    result['x.followCheck.run'] = { ok: false, kind: 'refused', why: 'X 网页正忙:操作台正在采集', callId: 'c' };
+    expect(await dailyUpkeepTick(now)).toBe('relation:ws-1');
+    expect(calls).toEqual(['follow-check:timer', 'relation:timer']);
+  });
+  it('三件都被拒 → 这一轮什么都没做(返回 null),10 分钟后再看', async () => {
+    lastCheck = null; jobs = []; engageCov = { mine: {}, toMe: {}, mentionMe: {} };
+    for (const id of Object.keys(NAME)) result[id] = { ok: false, kind: 'refused', why: '网页忙', callId: 'c' };
+    expect(await dailyUpkeepTick(now)).toBeNull();
+    expect(calls).toEqual(['follow-check:timer', 'relation:timer', 'engage:timer']);
+  });
+  it('做了没成(failed)→ 算这一轮做了一件(响一声,不往下抢)', async () => {
+    lastCheck = null; jobs = [];
+    result['x.followCheck.run'] = { ok: false, kind: 'failed', why: '翻页出错', callId: 'c' };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await dailyUpkeepTick(now)).toBe('follow-check:ws-1');
+    expect(calls).toEqual(['follow-check:timer']);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
 describe('一轮只做一件:先查回关,再关系采集', () => {
-  beforeEach(() => { calls.length = 0; });
+  beforeEach(() => { calls.length = 0; for (const k of Object.keys(result)) delete result[k]; });
   it('查回关到点 → 只查回关', async () => {
     lastCheck = null; jobs = [];
     expect(await dailyUpkeepTick(now)).toBe('follow-check:ws-1');
-    expect(calls).toEqual(['follow-check']);
+    expect(calls).toEqual(['follow-check:timer']);
   });
   it('查回关今天做过 → 关系采集(标 auto)', async () => {
     lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [];
     expect(await dailyUpkeepTick(now)).toBe('relation:ws-1');
-    expect(calls).toEqual(['relation:auto']);
+    expect(calls).toEqual(['relation:timer']);
   });
   it('前两件做过 → 采互动(三条里有没采过的)', async () => {
     lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
     engageCov = { mine: {}, toMe: {}, mentionMe: {} };
     expect(await dailyUpkeepTick(now)).toBe('engage:ws-1');
-    expect(calls).toEqual(['engage']);
+    expect(calls).toEqual(['engage:timer']);
   });
   it('三件都做过 → 什么都不做', async () => {
     lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];

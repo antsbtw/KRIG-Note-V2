@@ -25,28 +25,20 @@ import { clearXHostState, getXHostState, setXHostState } from './x-host-registry
 import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
 import { revokeLocks } from '@platform/main/flow/resource-lock';
 import { execute, type CapResult } from '@platform/main/capability/capability';
-import { accountForWrite, identifyAccount, readWsAccount } from './x-account-repo';
+import { accountForWrite, readWsAccount } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
 import { lookupSpot, pollSpot } from './x-spot-check';
 import { collectSearchByScroll } from './x-search-scroll';
 
 import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
-import { checkFollowBack } from './x-follow-check';
 
 import { draftAskReply } from './x-ask-draft';
 
-import { collectEngagement } from './x-engage-collect';
-import { screenEngage } from './x-engage-prepare';
-import { readLeftTweet } from './x-left-tweet';
 import { getXDB } from '@storage/surreal/client';
-import { judgeVpnPosts, prepareVpn } from './x-vpn-run';
+import { judgeVpnPosts } from './x-vpn-run';
 import { replyLangOf, vpnLink } from './x-vpn-help';
 import type { ReplyLang } from '@shared/types/x-reply-types';
 
-import { loadEngageThread } from './x-engage-thread';
-import { startRelationTask } from './x-relation-task';
-
-import { prepareAsk } from './x-ask-prepare';
 import { runAsk } from './x-ask-run';
 
 import { cancelPersonCollect, collectPersonTab, tracePersonProgress } from './x-person-collect';
@@ -116,7 +108,7 @@ function trackSenderLock(sender: WebContents, token: string): void {
 }
 
 /**
- * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步第 1、2 批)
+ * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步第 1、2、3a 批)
  * 校验 / 认号 / 额度 / 占网页 / 留记录都在执行器;这里只转发,caller = ui。renderer 的 op 名不变。
  */
 const CAP_OF_OP: Readonly<Record<string, string>> = {
@@ -165,13 +157,30 @@ const CAP_OF_OP: Readonly<Record<string, string>> = {
   bgResumeJob: 'x.bg.resumeJob',
   bgCancelJob: 'x.bg.cancelJob',
   setOpsSetting: 'x.settings.write',
+  // 第 3 步第 3a 批:用网页的
+  identifyAccount: 'x.account.identify',
+  followCheckRun: 'x.followCheck.run',
+  relationStart: 'x.relation.start',
+  askPrepare: 'x.ask.prepare',
+  vpnPrepare: 'x.vpn.prepare',
+  engageScreen: 'x.engage.screen',
+  engageThread: 'x.engage.thread',
+  leftTweet: 'x.left.read',
+  engageCollect: 'x.engage.collect',
 };
 
 /**
  * 能力层的统一结果 → 现在 renderer 认的 IPC 形状(过渡:renderer 还没改成认 refused / failed / invalid)。
  * 没成的一律 failed(why),why 原样 —— 界面显示的话和原来一样。
  */
-function fromCap(r: CapResult<unknown>): XDataResult {
+function fromCap(r: CapResult<unknown>, op?: string): XDataResult {
+  /**
+   * ⚠️ 认号:徽章认的是 { status: ok | pending | failed, reason } —— 没认成也是 ok 包着(它据此重试 / 重读库)。
+   * refused = pending(网页忙,等它空了再认),failed = failed;参数不对才是 IPC 失败。
+   */
+  if (op === 'identifyAccount' && !r.ok && r.kind !== 'invalid') {
+    return { status: 'ok', value: { status: r.kind === 'refused' ? 'pending' : 'failed', reason: r.why } };
+  }
   return r.ok ? { status: 'ok', value: r.value } : failed(r.why);
 }
 
@@ -180,7 +189,7 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
   {
     try {
       const capId = CAP_OF_OP[(p as { op?: string })?.op ?? ''];
-      if (capId) return fromCap(await execute(capId, p, { caller: 'ui' }));
+      if (capId) return fromCap(await execute(capId, p, { caller: 'ui' }), p.op);
       switch (p?.op) {
         /**
          * ⭐⭐⭐ **采到的推文落库** —— 2026-10-05。
@@ -333,48 +342,11 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
          * A 名单的游标被 B 续采,而那种错在数据里看不出来。
          */
         /** ⭐⭐ 认号(1.2.27)—— 结果三态原样回去,pending/failed 的原因给人看 */
-        case 'identifyAccount': {
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] identifyAccount 缺 wsId');
-          const r = await identifyAccount(p.wsId);
-          traceRecorder.lifecycle({
-            layer: 'web.net', event: `x-account-identify-${r.status}`, pageId: 'x-data',
-            detail: { wsId: p.wsId, ...(r.status === 'ok' ? { handle: r.account.handle, restId: r.account.restId } : { reason: r.reason }) },
-          });
-          return { status: 'ok', value: r };
-        }
-
         /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
-        case 'followCheckRun': {
-          if (typeof p.wsId !== 'string') return failed('[x.data] followCheckRun 缺 wsId');
-          const r = await checkFollowBack(p.wsId, 'manual');
-          return r.ran ? { status: 'ok', value: r } : failed(`没查:${r.why}`);
-        }
-
-        case 'relationStart': {
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] relationStart 缺 wsId');
-          if (p.restId !== undefined && (!/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '')) {
-            return failed('[x.data] relationStart 给了 restId 就要数字 id + handle');
-          }
-          const r = await startRelationTask(p.wsId, p.restId !== undefined ? { restId: p.restId, handle: p.handle as string } : undefined);
-          traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-relation-start' : 'x-relation-start-refused', pageId: 'x-data',
-            detail: r.ok ? { jobId: r.jobId, created: r.created, target: r.plan.target.handle, self: r.plan.self } : { why: r.why } });
-          return r.ok ? { status: 'ok', value: r } : failed(r.why);
-        }
-
         case 'followQueueAdd': {
           if (typeof p.wsId !== 'string' || !Array.isArray(p.items)) return failed('[x.data] followQueueAdd 要 wsId 和 items');
           const r = addToFollowQueue(p.wsId, p.items);
           traceRecorder.lifecycle({ layer: 'web.net', event: 'x-follow-queue-add', pageId: 'x-data', detail: { wsId: p.wsId, ...r } });
-          return { status: 'ok', value: r };
-        }
-
-        case 'askPrepare': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string') return failed('[x.data] askPrepare 要 restId / handle');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          const r = await prepareAsk(p.wsId, acc.restId, p.restId, p.handle);
-          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-prepare', pageId: 'x-data',
-            detail: { handle: p.handle, ok: r.ok, kind: r.ok ? r.plan.kind : undefined, why: r.ok ? r.plan.why : r.why } });
           return { status: 'ok', value: r };
         }
 
@@ -384,50 +356,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           const acc = await accountOfWs(p.wsId);
           if ('reason' in acc) return failed(acc.reason);
           return { status: 'ok', value: await judgeVpnPosts(acc.restId, p.limit) };
-        }
-
-        case 'vpnPrepare': {
-          if (typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId)) return failed('[x.data] vpnPrepare 要推文 id');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await prepareVpn(p.wsId as string, acc.restId, p.tweetId) };
-        }
-
-        case 'engageScreen': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.handle !== 'string' || p.handle === '') return failed('[x.data] engageScreen 要数字 id + handle');
-          const r = await screenEngage(p.wsId as string, p.restId, p.handle, typeof p.hisAt === 'string' ? p.hisAt : undefined);
-          return r.ok ? { status: 'ok', value: r } : failed(r.why);
-        }
-
-        case 'engageThread': {
-          if (typeof p.restId !== 'string' || !/^\d+$/.test(p.restId) || typeof p.tweetId !== 'string' || !/^\d+$/.test(p.tweetId)) return failed('[x.data] engageThread 要数字 id');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          const wcId = getXHostState(p.wsId as string)?.wcId;
-          if (wcId === undefined) return failed('X 网页没开');
-          const lock = acquirePage(wcId, '互动卡:读来龙去脉', 'ui');
-          if (!lock.ok) return failed(lock.why);
-          try {
-            return { status: 'ok', value: await loadEngageThread(wcId, acc.restId, p.restId, p.tweetId) };
-          } finally {
-            releasePage(lock.token);
-          }
-        }
-
-        case 'leftTweet': {
-          const wcId = getXHostState(p.wsId as string)?.wcId;
-          if (wcId === undefined) return failed('X 网页没开');
-          const busy = pageBusy(wcId);
-          if (busy !== null) return failed(`X 网页正忙:${busy}`);
-          const r = await readLeftTweet(wcId);
-          return r.ok ? { status: 'ok', value: r.tweet } : failed(r.why);
-        }
-
-        case 'engageCollect': {
-          if (typeof p.wsId !== 'string' || p.wsId === '') return failed('[x.data] engageCollect 缺 wsId');
-          const r = await collectEngagement(p.wsId);
-          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-engage-collect', pageId: 'x-data', detail: r });
-          return r.ok ? { status: 'ok', value: r } : failed(r.why);
         }
 
         case 'askDraft': {

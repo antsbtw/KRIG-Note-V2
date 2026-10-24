@@ -91,19 +91,29 @@ vi.mock('@modules/x/x-pace-repo', () => ({ readPace: async () => ({ gapSec: 0, p
 
 const lock = await import('@platform/main/flow/resource-lock');
 const { acquirePage, releasePage, pageBusy } = await import('@modules/x/x-page-lock');
-const { checkFollowBack } = await import('@modules/x/x-follow-check');
-const { prepareAsk } = await import('@modules/x/x-ask-prepare');
-const { screenEngage } = await import('@modules/x/x-engage-prepare');
 /** ⭐ 2026-10-23 第 2 步:互动卡准备迁到能力层 —— 占网页由执行器做(x.engage.prepare) */
 const { execute } = await import('@platform/main/capability/capability');
 const { registerXCapabilities, X_CAP } = await import('@modules/x/x-capabilities');
 registerXCapabilities();
 /** 统一结果 → 旧形状(ok + why),下面的断言照旧 */
-const prepareEngage = async (ws: string, _acc: string, restId: string, handle: string): Promise<unknown> => {
-  const r = await execute(X_CAP.engagePrepare, { wsId: ws, restId, handle }, { caller: 'ui' });
-  return r.ok ? r.value : { ok: false, why: r.why };
+/**
+ * ⭐ 2026-10-24 第 3 步:查回关 / 求关卡 / 先过一轮 / 求助卡也迁到能力层 —— 占网页都在执行器,只有 execute 一个入口。
+ * 下面把统一结果转回旧形状,断言的意思不变。
+ */
+type Res = { ok: true; value: unknown } | { ok: false; why: string; kind: string };
+const asOld = async (p: Promise<Res>): Promise<unknown> => { const r = await p; return r.ok ? r.value : { ok: false, why: r.why, kind: r.kind }; };
+const prepareEngage = (ws: string, _acc: string, restId: string, handle: string): Promise<unknown> =>
+  asOld(execute(X_CAP.engagePrepare, { wsId: ws, restId, handle }, { caller: 'ui' }) as Promise<Res>);
+const prepareAsk = (ws: string, _acc: string, restId: string, handle: string): Promise<unknown> =>
+  asOld(execute('x.ask.prepare', { wsId: ws, restId, handle }, { caller: 'ui' }) as Promise<Res>);
+const screenEngage = (ws: string, restId: string, handle: string): Promise<unknown> =>
+  asOld(execute('x.engage.screen', { wsId: ws, restId, handle }, { caller: 'ui' }) as Promise<Res>);
+const prepareVpn = (ws: string, _acc: string, tweetId: string): Promise<unknown> =>
+  asOld(execute('x.vpn.prepare', { wsId: ws, tweetId }, { caller: 'ui' }) as Promise<Res>);
+const checkFollowBack = async (ws: string, trigger: 'auto' | 'manual'): Promise<{ ran: boolean; why?: string }> => {
+  const r = await execute('x.followCheck.run', { wsId: ws }, { caller: trigger === 'auto' ? 'timer' : 'ui' });
+  return r.ok ? (r.value as { ran: true }) : { ran: false, why: r.why };
 };
-const { prepareVpn } = await import('@modules/x/x-vpn-run');
 const { dailyUpkeepTick } = await import('@modules/x/x-daily-upkeep');
 const { tickOnce, _resetBgRunner } = await import('@modules/x/x-bg-runner');
 
@@ -224,7 +234,10 @@ describe('⭐⭐⭐ 卡片准备期间,巡检 / 后台采集到点 → 让路', 
 
   it('采到一半抛错 → 锁照样放掉', async () => {
     h.collectThrows = true;
-    await expect(prepareAsk('ws-1', 'ME', '42', 'he')).rejects.toThrow('网页没了');
+    /** 执行器接住了抛错 → failed(原因原样),不再往上抛 */
+    const r = (await prepareAsk('ws-1', 'ME', '42', 'he')) as { ok: boolean; kind?: string; why?: string };
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(r.why).toContain('网页没了');
     expect(pageBusy(7)).toBeNull();
   });
 

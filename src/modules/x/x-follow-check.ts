@@ -17,8 +17,6 @@
 import { webviewPorts } from './x-collect-ports';
 import { pageProblem } from './x-page-ledger';
 import { X_PAGE_NAME } from './x-pages';
-import { getXHostState } from './x-host-registry';
-import { acquirePage, releasePage } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
 import { readSettings } from './x-ops-actions-repo';
 import { existingUserIds, saveUsers } from './x-user-repo';
@@ -30,7 +28,8 @@ const BUSY = '任务:查回关';
 let running: string | null = null;
 
 export type FollowCheckResult =
-  | { readonly ran: false; readonly why: string }
+  /** failed = 跑了但出错;不带 = 没动手(正在查 / 认不出号) */
+  | { readonly ran: false; readonly why: string; readonly failed?: true }
   | { readonly ran: true; readonly ok: boolean; readonly caughtUp: boolean; readonly pages: number; readonly seen: number;
       readonly newFollowers: number; readonly askedBack: readonly string[]; readonly stopReason: string; readonly problem?: string };
 
@@ -38,14 +37,17 @@ export function followCheckRunning(): string | null {
   return running;
 }
 
-export async function checkFollowBack(wsId: string, trigger: 'auto' | 'manual'): Promise<FollowCheckResult> {
+/** 占网页时写在锁上的用途(能力 x.followCheck.run 用) */
+export const FOLLOW_CHECK_BUSY = BUSY;
+
+/**
+ * ⭐⭐ 查回关 —— 只干活(Module5-04 第 3 步):网页开没开 / 占网页由能力 `x.followCheck.run` 的执行器做,
+ * 界面 / 定时器 / 收件箱一律 `execute(…)`。⚠️ 调这里之前必须已经占住 wcId。
+ */
+export async function checkFollowBackOn(wsId: string, wcId: number, trigger: 'auto' | 'manual'): Promise<FollowCheckResult> {
   if (running !== null) return { ran: false, why: `正在查(${running})` };
-  const wcId = getXHostState(wsId)?.wcId;
-  if (wcId === undefined) return { ran: false, why: `${wsId} 的 X 网页没开` };
-  const lock = acquirePage(wcId, BUSY, trigger === 'auto' ? 'timer' : 'ui');
-  if (!lock.ok) return { ran: false, why: lock.why };
   const account = await accountForWrite(wcId);
-  if (account.kind !== 'ok') { releasePage(lock.token); return { ran: false, why: `认不出这个 X 网页登录的号:${account.reason}` }; }
+  if (account.kind !== 'ok') return { ran: false, why: `认不出这个 X 网页登录的号:${account.reason}` };
 
   running = wsId;
   const say = (m: string): void => console.log(`[x.follow-check] ${wsId} @${account.handle} ${m}`);
@@ -93,9 +95,8 @@ export async function checkFollowBack(wsId: string, trigger: 'auto' | 'manual'):
     const why = e instanceof Error ? e.message : String(e);
     console.error(`[x.follow-check] ${wsId} 出错:${why}`);
     try { await record({ ok: false, caughtUp: false, pages: 0, seen: 0, newFollowers: 0, askedBack: [], stopReason: `出错:${why}` }); } catch { /* 终端已打 */ }
-    return { ran: false, why };
+    return { ran: false, why, failed: true };
   } finally {
-    releasePage(lock.token);
     running = null;
   }
 

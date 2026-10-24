@@ -6,7 +6,6 @@
  * 推文入库后分组靠 x_tweet 的 in_reply_to_user_id / mention_ids(按数字 id,不按 handle)。
  */
 import { collectSearchByScroll } from './x-search-scroll';
-import { readWsAccount } from './x-account-repo';
 import { SEGMENT_PAGES, advanceCursor, nextEngageRun, type EngageCursor, type EngageKey } from './x-engage';
 import { recordSearch, searchBudget } from './x-search-budget';
 import { readEngageCoverage, runRange, writeEngageCursor } from './x-engage-repo';
@@ -18,10 +17,11 @@ export type EngageCollectResult =
 /** 一页满 20 条;第一页就「到头」却是满的 —— 多半是悄悄限流(后面明明还有) */
 const FULL_PAGE = 18;
 
-/** @param caller 谁发起的(留在网页锁上,被拒的人看得见):每天巡检 = timer,任务页按钮 = ui */
-export async function collectEngagement(wsId: string, caller: 'ui' | 'timer' | 'inbox' = 'ui'): Promise<EngageCollectResult> {
-  const acc = await readWsAccount(wsId);
-  if (!acc?.handle || !acc.restId) return { ok: false, why: `${wsId} 还没认出登录的号` };
+/**
+ * ⭐ 采互动一段 —— 只干活(Module5-04 第 3 步):认号 / 占网页由能力 `x.engage.collect` 的执行器做;
+ * 整段期间网页一直占着,每次搜索带着同一把锁(ownToken)进去(原来每次搜索各占各的,中间别人能插进来)。
+ */
+export async function collectEngagementWith(wsId: string, acc: { readonly restId: string; readonly handle: string }, ownToken: string): Promise<EngageCollectResult> {
   /** ⭐ 先看额度账本:撞过限流没过 15 分钟 / 最近 15 分钟搜得太多 → 不硬撞,说清什么时候能接着采 */
   const budget = searchBudget();
   if (budget.waitUntil !== undefined) {
@@ -38,7 +38,7 @@ export async function collectEngagement(wsId: string, caller: 'ui' | 'timer' | '
     done.add(`${q.key}:${q.kind}`);
     /** 从头采已经覆盖了这条的新和旧 —— 这一段里别再补新的 / 往回翻 */
     if (q.kind === 'fresh') { done.add(`${q.key}:new`); done.add(`${q.key}:back`); }
-    const r = await collectSearchByScroll({ wsId, q: q.q, f: 'latest', wantPages: q.pages, maxMs: 6 * 60_000, caller });
+    const r = await collectSearchByScroll({ wsId, q: q.q, f: 'latest', wantPages: q.pages, maxMs: 6 * 60_000, ownToken });
     const pages = r.totals?.pages ?? 0;
     const reachedBottom = (r.harvest as { reachedBottom?: boolean } | undefined)?.reachedBottom === true;
     /**

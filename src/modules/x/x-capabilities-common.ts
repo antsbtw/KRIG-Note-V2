@@ -2,8 +2,11 @@
  * X 能力登记的共用件(Module5-04 第 3 步,2026-10-24)—— 认号、参数小工具、一条能力的构造器
  * 读库(x-capabilities-read.ts)/ 改库(x-capabilities-write.ts)两批共用;认号那句话全 X 只此一份。
  */
-import { defineCapability, type CapabilityKind } from '@platform/main/capability/capability';
+import { defineCapability, type Caller, type CapabilityKind } from '@platform/main/capability/capability';
 import { readWsAccount } from './x-account-repo';
+import type { Need } from '@platform/main/capability/capability';
+import { getXHostState } from './x-host-registry';
+import { pageResource } from './x-page-lock';
 import { DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, type PeopleFilter } from './x-people-query';
 
 export type O = Record<string, unknown>;
@@ -45,17 +48,27 @@ export const modeOf = (m: unknown): 'ask' | 'engage' | 'vpn' => (m === 'engage' 
  * @param account 要认号:从参数的 wsId 认,认出的号作为 run 的第二个参数
  * @param subject 这次是为谁(跨库只存字符串,如 x_author:<id>)
  */
+/** 占住的那个 X 网页:wcId + 锁的 token(往下调需要同一把锁的函数时带进去,如搜索的 ownToken) */
+export type HeldPage = { readonly wcId: number; readonly token: string };
+type Prep = { readonly acc?: Acc; readonly wcId?: number };
+
 export function xCap<I extends O>(kind: CapabilityKind, def: {
   readonly id: string;
   readonly describe: string;
   readonly inputDoc: Readonly<Record<string, string>>;
   readonly parse: (o: O) => I;
   readonly account?: boolean;
+  /** 要占这个 ws 的 X 网页:返回写在锁上的用途(被拒的人看得见) */
+  readonly page?: (i: I) => string;
+  /** 额外的前提(如「关注队列正在动作」);返回原因 = refused */
+  readonly preflight?: (i: I) => Promise<string | null> | string | null;
   readonly probe?: boolean;
   readonly subject?: (i: I) => string | undefined;
-  readonly run: (i: I, acc: Acc) => Promise<unknown> | unknown;
+  /** acc 只在 account: true 时有;page 只在声明了 page 时有 */
+  readonly run: (i: I, acc: Acc, page: HeldPage, caller: Caller) => Promise<unknown> | unknown;
 }): void {
-  defineCapability<I, unknown, Acc>({
+  const needsPrep = def.account === true || def.page !== undefined || def.preflight !== undefined;
+  defineCapability<I, unknown, Prep>({
     id: def.id,
     kind,
     subject: def.subject,
@@ -70,13 +83,34 @@ export function xCap<I extends O>(kind: CapabilityKind, def: {
         throw e;
       }
     },
-    prepare: def.account
+    prepare: needsPrep
       ? async (i) => {
-        const acc = await wsAccount(i.wsId as string);
-        return 'refused' in acc ? acc : { ctx: acc };
+        let acc: Acc | undefined;
+        if (def.account) {
+          const a = await wsAccount(i.wsId as string);
+          if ('refused' in a) return a;
+          acc = a;
+        }
+        const why = def.preflight ? await def.preflight(i) : null;
+        if (why !== null) return { refused: why };
+        if (!def.page) return { ctx: { acc } };
+        const p = pageNeed(i.wsId as string, def.page(i));
+        if ('refused' in p) return p;
+        return { needs: [p.need], ctx: { acc, wcId: p.wcId } };
       }
       : undefined,
-    run: async (i, ctx) => def.run(i, ctx.prep),
+    run: async (i, ctx) => {
+      const wcId = ctx.prep?.wcId;
+      const page = wcId === undefined ? undefined : { wcId, token: ctx.held.get(pageResource(wcId)) as string };
+      return def.run(i, ctx.prep?.acc as Acc, page as HeldPage, ctx.caller);
+    },
   });
+}
+
+/** 占这个 ws 的 X 网页 */
+export function pageNeed(wsId: string, purpose: string): { wcId: number; need: Need } | { refused: string } {
+  const wcId = getXHostState(wsId)?.wcId;
+  if (wcId === undefined) return { refused: 'X 网页没开' };
+  return { wcId, need: { resource: pageResource(wcId), purpose, label: 'X 网页' } };
 }
 

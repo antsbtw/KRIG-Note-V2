@@ -11,9 +11,8 @@
 import { getXDB } from '@storage/surreal/client';
 import { webviewPorts } from './x-collect-ports';
 import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
-import { getXHostState } from './x-host-registry';
+
 import { kickBgRunner } from './x-bg-runner';
-import { acquirePage, releasePage } from './x-page-lock';
 import { followCheckRunning } from './x-follow-check';
 import { accountForWrite } from './x-account-repo';
 import { PEOPLE_WITH_RELATION } from './x-account';
@@ -45,18 +44,23 @@ async function dbCounts(account: string, owner: string, self: boolean): Promise<
 }
 
 export type RelationStart =
-  | { readonly ok: false; readonly why: string }
+  /** refused = 没动手(正在查回关 / 认不出号);不带 = 做了没成 */
+  | { readonly ok: false; readonly why: string; readonly refused?: true }
   | { readonly ok: true; readonly created: boolean; readonly jobId: string; readonly plan: RelPlan };
 
 /**
  * @param target 不给 = 我自己(这个 ws 登录的号)
  */
-export async function startRelationTask(wsId: string, target?: { readonly restId: string; readonly handle: string }, trigger: 'auto' | 'manual' = 'manual'): Promise<RelationStart> {
-  const wcId = getXHostState(wsId)?.wcId;
-  if (wcId === undefined) return { ok: false, why: `${wsId} 的 X 网页没开` };
-  if (followCheckRunning() !== null) return { ok: false, why: '正在查回关' };
+/** 占网页时写在锁上的用途(能力 x.relation.start 用) */
+export const RELATION_BUSY = BUSY;
+
+/**
+ * ⭐ 只干活(Module5-04 第 3 步):网页开没开 / 占网页由能力 `x.relation.start` 的执行器做。⚠️ 调这里之前必须已经占住 wcId。
+ */
+export async function startRelationTaskOn(wsId: string, wcId: number, target?: { readonly restId: string; readonly handle: string }, trigger: 'auto' | 'manual' = 'manual'): Promise<RelationStart> {
+  if (followCheckRunning() !== null) return { ok: false, why: '正在查回关', refused: true };
   const account = await accountForWrite(wcId);
-  if (account.kind !== 'ok') return { ok: false, why: `认不出这个 X 网页登录的号:${account.reason}` };
+  if (account.kind !== 'ok') return { ok: false, why: `认不出这个 X 网页登录的号:${account.reason}`, refused: true };
   const who = target ?? { restId: account.restId, handle: account.handle };
   const self = who.restId === account.restId;
 
@@ -64,27 +68,21 @@ export async function startRelationTask(wsId: string, target?: { readonly restId
   const running = (await listJobs(wsId)).find((j) => kindOf(j) === 'lists' && j.restId === who.restId && j.status !== 'done' && j.status !== 'failed');
   if (running?.plan) return { ok: true, created: false, jobId: running.id, plan: running.plan };
 
-  /** ⭐ 读现状要开他的主页 —— 占住 X 网页;被占着(后台在采一段 / 查回关 / 卡片准备 …)就不读,说出来 */
-  const lock = acquirePage(wcId, BUSY, trigger === 'auto' ? 'timer' : 'ui');
-  if (!lock.ok) return { ok: false, why: lock.why };
   let followers: number | undefined;
   let following: number | undefined;
-  try {
-    const rep = await webviewPorts(wcId).harvest({
-      gotoPage: { name: X_PAGE_NAME.profile, params: { handle: who.handle } },
-      pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
-      noisyUrlSubstrings: X_NOISY_URLS,
-    });
-    const items = (rep?.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
-    const rec = pickProfileUser(items.flatMap((it) => auditUserPayload(it.text).items), who.handle, who.restId);
-    if (!rec) return { ok: false, why: `没读到 @${who.handle} 的主页资料(${items.length === 0 ? '主页资料那条请求没来' : '载荷里找不到这个人'})` };
-    followers = rec.followersCount;
-    following = rec.followingCount;
-    /** 顺手把他的资料和「他和我」的关系更新进库 */
-    await refreshPerson(rec, account);
-  } finally {
-    releasePage(lock.token);
-  }
+  /** ⚠️ 网页由执行器占着(能力 x.relation.start),这里不放锁 */
+  const rep = await webviewPorts(wcId).harvest({
+    gotoPage: { name: X_PAGE_NAME.profile, params: { handle: who.handle } },
+    pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
+    noisyUrlSubstrings: X_NOISY_URLS,
+  });
+  const items = (rep?.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
+  const rec = pickProfileUser(items.flatMap((it) => auditUserPayload(it.text).items), who.handle, who.restId);
+  if (!rec) return { ok: false, why: `没读到 @${who.handle} 的主页资料(${items.length === 0 ? '主页资料那条请求没来' : '载荷里找不到这个人'})` };
+  followers = rec.followersCount;
+  following = rec.followingCount;
+  /** 顺手把他的资料和「他和我」的关系更新进库 */
+  await refreshPerson(rec, account);
 
   const plan = planRelation({
     target: who, self, trigger, xCounts: { followers, following },

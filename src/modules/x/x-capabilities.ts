@@ -9,12 +9,13 @@
  * 前提检查(认号 / 网页开没开 / 额度)写在这里一份,三个入口(界面 / 定时器 / 收件箱)都不再自己查。
  * ⚠️ 只在主进程 import(x/main.ts 调 registerXCapabilities)。
  */
-import { defineCapability, capFailed, type Need, type Prepared } from '@platform/main/capability/capability';
+import { defineCapability, capFailed, type Prepared } from '@platform/main/capability/capability';
 import { getXHostState } from './x-host-registry';
 import { pageResource } from './x-page-lock';
 import { registerXReadCapabilities } from './x-capabilities-read';
 import { registerXWriteCapabilities } from './x-capabilities-write';
-import { wsAccount } from './x-capabilities-common';
+import { registerXPageCapabilities } from './x-capabilities-page';
+import { pageNeed, wsAccount } from './x-capabilities-common';
 import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
 import { findVpnPostsWith } from './x-vpn-run';
@@ -32,13 +33,6 @@ export const X_CAP = {
 
 type Acc = { readonly restId: string; readonly handle: string };
 
-/** 占这个 ws 的 X 网页 */
-function pageNeed(wsId: string, purpose: string): { wcId: number; need: Need } | { refused: string } {
-  const wcId = getXHostState(wsId)?.wcId;
-  if (wcId === undefined) return { refused: 'X 网页没开' };
-  return { wcId, need: { resource: pageResource(wcId), purpose, label: 'X 网页' } };
-}
-
 const isWs = (v: unknown): v is string => typeof v === 'string' && v !== '';
 const obj = (raw: unknown): Record<string, unknown> => (raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {});
 
@@ -51,6 +45,8 @@ export function registerXCapabilities(): void {
   registerXReadCapabilities();
   /** 第 3 步第 2 批:15 个改库能力(x-capabilities-write.ts) */
   registerXWriteCapabilities();
+  /** 第 3 步第 3a 批:9 个用网页的(x-capabilities-page.ts) */
+  registerXPageCapabilities();
 
   defineCapability<{ wsId: string; restId: string; handle: string; hisTweetId?: string }, unknown, { wcId: number; acc: Acc }>({
     id: X_CAP.engagePrepare,
