@@ -9,11 +9,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rows: Array<Record<string, unknown>> = [];
 const db = { down: false };
+const selects: Array<{ sql: string; v: Record<string, unknown> }> = [];
 vi.mock('@storage/surreal/client', () => ({
   getFlowDB: () => ({
     query: async (sql: string, v: Record<string, unknown>) => {
       if (db.down) throw new Error('库挂了');
       if (sql.includes('CREATE flow_step_run')) rows.push(v);
+      if (sql.includes('SELECT call_id')) { selects.push({ sql, v }); return [[{ call_id: 'c1', capability: 'demo.double', caller: 'ui', status: 'ok' }]]; }
       return [[]];
     },
   }),
@@ -141,6 +143,20 @@ describe('统一结果', () => {
     db.down = false;
     expect(r.ok).toBe(true);
     expect(console.error).toHaveBeenCalled();
+  });
+});
+
+describe('flow.calls.recent —— AI 能自己回看执行记录', () => {
+  it('按条件读能力调用(只读 caller 有值的行);这次查询本身也记一行(只记条数)', async () => {
+    const { registerFlowCapabilities } = await import('@platform/main/capability/flow-capabilities');
+    registerFlowCapabilities();
+    selects.length = 0;
+    const r = await cap.execute('flow.calls.recent', { limit: 5, status: 'refused', caller: 'timer' }, { caller: 'ai' });
+    expect(r).toMatchObject({ ok: true, value: { calls: [{ call_id: 'c1' }] } });
+    expect(selects[0].sql).toMatch(/WHERE caller != NONE AND caller = \$caller AND status = \$status ORDER BY created_at DESC LIMIT \$limit/);
+    expect(selects[0].v).toMatchObject({ limit: 5, caller: 'timer', status: 'refused' });
+    expect(rows.at(-1)).toMatchObject({ capability: 'flow.calls.recent', caller: 'ai', output: { count: 1 } });
+    expect(await cap.execute('flow.calls.recent', { status: 'weird' }, { caller: 'ai' })).toMatchObject({ ok: false, kind: 'invalid' });
   });
 });
 

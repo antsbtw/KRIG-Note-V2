@@ -17,6 +17,7 @@ const h = vi.hoisted(() => ({
   calls: [] as string[],
   heldInCollect: [] as Array<string | null>,
   searchTokens: [] as Array<string | undefined>,
+  recipes: [{ name: 'VPN求助-中文', keywords: ['梯子'], template: 'plain' }] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@storage/surreal/client', () => ({
@@ -46,7 +47,7 @@ vi.mock('@modules/x/x-people-repo', () => ({ readPerson: async () => null }));
 vi.mock('@modules/x/x-user-repo', () => ({ writeRelations: async () => ({}) }));
 vi.mock('@modules/x/x-search-budget', () => ({ searchBudget: () => h.budget, recordSearch: () => undefined }));
 vi.mock('@platform/main/db/search-recipe-repo', () => ({
-  listAllRecipes: async () => [{ name: 'VPN求助-中文', keywords: ['梯子'], template: 'plain' }],
+  listAllRecipes: async () => h.recipes,
 }));
 vi.mock('@modules/x/x-search-scroll', () => ({
   collectSearchByScroll: async (i: { ownToken?: string; wsId?: string }) => {
@@ -80,6 +81,7 @@ beforeEach(() => {
   h.account = { wsId: 'ws-1', handle: 'me', restId: 'ME' };
   h.host = { wcId: 7, url: '' };
   h.budget = { usedPages: 0, freePages: 30 };
+  h.recipes = [{ name: 'VPN求助-中文', keywords: ['梯子'], template: 'plain' }];
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
 
@@ -143,6 +145,21 @@ describe('x.vpn.find —— 花搜索额度', () => {
     if (!r.ok) expect(r.why).toContain('额度');
     expect(h.calls).toEqual([]);
     expect(h.rows.map((x) => x.status)).toEqual(['refused', 'refused', 'refused', 'refused']);
+  });
+});
+
+describe('x.vpn.find —— 没有配方', () => {
+  it('⭐ 库里一条 VPN 配方都没有 → refused(什么也不会做),不占网页、不搜(2026-10-23 Windows 新库真机发现)', async () => {
+    h.recipes = [];
+    vi.mocked(console.log).mockClear();
+    const r = await execute(X_CAP.vpnFind, { wsId: 'ws-1' }, { caller: 'ui' });
+    const busyDuring = pageBusy(7);
+    expect(r).toMatchObject({ ok: false, kind: 'refused' });
+    if (!r.ok) expect(r.why).toContain('没有 VPN 配方');
+    expect(busyDuring).toBeNull();
+    expect(h.calls).toEqual([]);
+    /** 没占过网页:锁日志里不能有「找求助帖」的占住 */
+    expect(vi.mocked(console.log).mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[lock] 占住'))).toEqual([]);
   });
 });
 

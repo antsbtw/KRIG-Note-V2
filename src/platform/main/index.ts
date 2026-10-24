@@ -66,6 +66,7 @@ import { registerWebSettingsHandler } from './web-settings/handler';
 import { cleanOversizedPartitionCaches } from './web-settings/partition-cache-cleaner';
 import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
+import { registerFlowCapabilities } from './capability/flow-capabilities';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
 import { runMigration022IfNeeded } from '@storage/migrations/022-ebook-thought';
@@ -185,6 +186,8 @@ app.whenReady().then(async () => {
 
   // L7 — Storage (SurrealDB Sidecar) 基础设施初始化
   // 业务 store 尚未接入;本步仅启动 SurrealDB + 跑 schema migration。
+  /** ⭐ 平台自带的能力(查执行记录)—— 只是登记,不碰库;各模块的能力由模块自己登记 */
+  registerFlowCapabilities();
   const storageStartedAt = Date.now();
   try {
     await initStorage();

@@ -44,7 +44,7 @@ export async function dailyUpkeepTick(now = Date.now()): Promise<string | null> 
         return `relation:${wsId}`;
       }
       if (engageCollectDue(await readEngageCoverage(acc.handle), now, searchBudget(now))) {
-        const r = await collectEngagement(wsId);
+        const r = await collectEngagement(wsId, 'timer');
         console.log(`[x.daily] ${wsId} 采互动一段:${r.ok ? `${r.runs.map((x) => `${x.label} ${x.tweets} 条${x.problem ? `(${x.problem})` : ''}`).join(' · ')}${r.note ? ` · ${r.note}` : ''}` : r.why}`);
         return `engage:${wsId}`;
       }

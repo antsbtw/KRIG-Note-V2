@@ -17,6 +17,8 @@ import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
 import { findVpnPostsWith } from './x-vpn-run';
 import { readEngageOverview } from './x-engage-repo';
+import { listAllRecipes } from '@platform/main/db/search-recipe-repo';
+import { VPN_RECIPES } from './x-vpn-help';
 
 export const X_CAP = {
   engagePrepare: 'x.engage.prepare',
@@ -102,6 +104,9 @@ export function registerXCapabilities(): void {
         return { refused: `刚撞过搜索限流,${new Date(b.waitUntil).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} 后再找` };
       }
       if (b.freePages < 1) return { refused: `搜索额度用完了(最近 15 分钟用了 ${b.usedPages} 页),过一会儿再找` };
+      /** 一条配方都没有 = 什么也不会做 → refused,不去占网页(2026-10-23 Windows 新库真机:原来先占网页才发现) */
+      const names = new Set((await listAllRecipes()).map((r) => r.name));
+      if (!VPN_RECIPES.some((n) => names.has(n))) return { refused: `库里没有 VPN 配方(${VPN_RECIPES.join(' / ')})—— 先在配方里建` };
       const p = pageNeed(i.wsId, '找求助帖(配方搜索)');
       if ('refused' in p) return p;
       return { needs: [p.need], ctx: { acc } };

@@ -18,7 +18,8 @@ export type EngageCollectResult =
 /** 一页满 20 条;第一页就「到头」却是满的 —— 多半是悄悄限流(后面明明还有) */
 const FULL_PAGE = 18;
 
-export async function collectEngagement(wsId: string): Promise<EngageCollectResult> {
+/** @param caller 谁发起的(留在网页锁上,被拒的人看得见):每天巡检 = timer,任务页按钮 = ui */
+export async function collectEngagement(wsId: string, caller: 'ui' | 'timer' | 'inbox' = 'ui'): Promise<EngageCollectResult> {
   const acc = await readWsAccount(wsId);
   if (!acc?.handle || !acc.restId) return { ok: false, why: `${wsId} 还没认出登录的号` };
   /** ⭐ 先看额度账本:撞过限流没过 15 分钟 / 最近 15 分钟搜得太多 → 不硬撞,说清什么时候能接着采 */
@@ -37,7 +38,7 @@ export async function collectEngagement(wsId: string): Promise<EngageCollectResu
     done.add(`${q.key}:${q.kind}`);
     /** 从头采已经覆盖了这条的新和旧 —— 这一段里别再补新的 / 往回翻 */
     if (q.kind === 'fresh') { done.add(`${q.key}:new`); done.add(`${q.key}:back`); }
-    const r = await collectSearchByScroll({ wsId, q: q.q, f: 'latest', wantPages: q.pages, maxMs: 6 * 60_000 });
+    const r = await collectSearchByScroll({ wsId, q: q.q, f: 'latest', wantPages: q.pages, maxMs: 6 * 60_000, caller });
     const pages = r.totals?.pages ?? 0;
     const reachedBottom = (r.harvest as { reachedBottom?: boolean } | undefined)?.reachedBottom === true;
     /**

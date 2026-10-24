@@ -244,7 +244,7 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
     } else if (cmd.op === 'engageScreen') {
       out = await screenEngage(cmd.wsId, cmd.restId, cmd.handle);
     } else if (cmd.op === 'engageCollect') {
-      out = await collectEngagement(cmd.wsId);
+      out = await collectEngagement(cmd.wsId, 'inbox');
     } else if (cmd.op === 'engagePrepare') {
       out = await execute(X_CAP.engagePrepare, { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle, hisTweetId: cmd.hisTweetId }, { caller: 'inbox' });
     } else if (cmd.op === 'engageOverview') {

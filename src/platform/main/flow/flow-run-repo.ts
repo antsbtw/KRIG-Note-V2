@@ -172,6 +172,25 @@ export async function endRun(
   }
 }
 
+/**
+ * ⭐ 最近的能力调用(caller 有值的行 = 能力调用;旧编排的行没有 caller)—— 给 AI / 回看用
+ * 条件都可选,都是 AND。
+ */
+export async function listCalls(q: {
+  readonly limit: number; readonly capability?: string; readonly caller?: string; readonly status?: string;
+}): Promise<Array<Record<string, unknown>>> {
+  const where = ['caller != NONE'];
+  if (q.capability) where.push('capability = $capability');
+  if (q.caller) where.push('caller = $caller');
+  if (q.status) where.push('status = $status');
+  const res = await getFlowDB().query<[Array<Record<string, unknown>>]>(
+    `SELECT call_id, capability, caller, status, reasoning, subject_ref, duration_ms, <string> created_at AS created_at, input, output
+       FROM flow_step_run WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT $limit`,
+    { limit: q.limit, capability: q.capability, caller: q.caller, status: q.status },
+  );
+  return res?.[0] ?? [];
+}
+
 /** 一次执行的完整回看 —— run 头 + 每步 */
 export async function readRun(runId: string): Promise<{
   run: Record<string, unknown> | null;
