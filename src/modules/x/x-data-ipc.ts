@@ -20,18 +20,6 @@ import { clearXHostState, getXHostState, setXHostState } from './x-host-registry
 import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
 import { revokeLocks } from '@platform/main/flow/resource-lock';
 import { execute, type CapResult } from '@platform/main/capability/capability';
-import { readWsAccount } from './x-account-repo';
-
-import { addToFollowQueue, controlFollowQueue, followQueueStatus } from './x-follow-queue';
-
-import { draftAskReply } from './x-ask-draft';
-
-import { getXDB } from '@storage/surreal/client';
-import { judgeVpnPosts } from './x-vpn-run';
-import { replyLangOf, vpnLink } from './x-vpn-help';
-import type { ReplyLang } from '@shared/types/x-reply-types';
-
-import { runAsk } from './x-ask-run';
 
 import { tracePersonProgress } from './x-person-collect';
 
@@ -41,16 +29,6 @@ const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
  * ⭐⭐ 读关系要知道看哪个号(1.2.27)—— 这个 ws 记的登录号的数字 id。
  * ⚠️ 没认出来就**明说**,不退回「全库那份」(那正是互相覆盖的老问题)。
  */
-/** 卡片的三种模式:求关 / 互动 / 回复求助 —— 其余一律当求关 */
-const modeOf = (m: unknown): 'ask' | 'engage' | 'vpn' => (m === 'engage' || m === 'vpn' ? m : 'ask');
-
-async function accountOfWs(wsId: unknown): Promise<{ restId: string } | { reason: string }> {
-  if (typeof wsId !== 'string' || wsId === '') return { reason: '[x.data] 缺 wsId —— 关系按号存,不知道看哪个号' };
-  const a = await readWsAccount(wsId);
-  if (!a) return { reason: `${wsId} 还没认出登录的是哪个号 —— 打开 X 网页,在运营面板点「认号」` };
-  if (!a.restId) return { reason: `${wsId} 登录的是 @${a.handle},但数字 id 还没拿到 —— 在运营面板点「认号」` };
-  return { restId: a.restId };
-}
 
 /** ⚠️ 幂等 —— 多窗口/热重载下可能被调多次 */
 let wired = false;
@@ -82,10 +60,10 @@ function trackSenderLock(sender: WebContents, token: string): void {
 }
 
 /**
- * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步第 1、2、3a、3b 批)
+ * ⭐⭐⭐ 已迁到能力层的 op → 能力 id(Module5-04 第 2 步 + 第 3 步全部四批)
  * 校验 / 认号 / 额度 / 占网页 / 留记录都在执行器;这里只转发,caller = ui。renderer 的 op 名不变。
  */
-const CAP_OF_OP: Readonly<Record<string, string>> = {
+const CAP_OF_OP: Readonly<Record<string, string | ((p: XDataInvoke) => string)>> = {
   list: 'x.recipe.list',
   readCursor: 'x.cursor.read',
   opsStatus: 'x.ops.status',
@@ -152,6 +130,13 @@ const CAP_OF_OP: Readonly<Record<string, string>> = {
   saveTweets: 'x.tweet.save',
   saveUsers: 'x.user.save',
   savePageVerify: 'x.page.saveVerify',
+  // 第 3 步第 4 批:AI 类 + 对外动作(对外动作执行器只接受 ui / timer)
+  vpnJudge: 'x.vpn.judge',
+  askDraft: 'x.ask.draft',
+  askRun: 'x.ask.run',
+  followQueueAdd: 'x.followQueue.add',
+  /** 暂停 / 清空 = 普通控制;继续 = 对外动作(接着去关注)—— 按 action 分到两个能力 */
+  followQueueControl: (p) => ((p as { action?: string }).action === 'resume' ? 'x.followQueue.resume' : 'x.followQueue.control'),
 };
 
 /**
@@ -166,6 +151,8 @@ function fromCap(r: CapResult<unknown>, op?: string): XDataResult {
   if (op === 'identifyAccount' && !r.ok && r.kind !== 'invalid') {
     return { status: 'ok', value: { status: r.kind === 'refused' ? 'pending' : 'failed', reason: r.why } };
   }
+  /** 做了一半(求关:赞成了、留言没成)—— 卡片要显示哪步成了,原样给它(它自己看 ok / failedStep) */
+  if (!r.ok && r.partial !== undefined) return { status: 'ok', value: r.partial };
   return r.ok ? { status: 'ok', value: r.value } : failed(r.why);
 }
 
@@ -173,7 +160,8 @@ function fromCap(r: CapResult<unknown>, op?: string): XDataResult {
 async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult> {
   {
     try {
-      const capId = CAP_OF_OP[(p as { op?: string })?.op ?? ''];
+      const capOf = CAP_OF_OP[(p as { op?: string })?.op ?? ''];
+      const capId = typeof capOf === 'function' ? capOf(p) : capOf;
       if (capId) return fromCap(await execute(capId, p, { caller: 'ui' }), p.op);
       switch (p?.op) {
         /**
@@ -195,66 +183,7 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
          */
         /** ⭐⭐ 认号(1.2.27)—— 结果三态原样回去,pending/failed 的原因给人看 */
         /** ⭐ 运营 → 人(2026-10-08)—— 只读 */
-        case 'followQueueAdd': {
-          if (typeof p.wsId !== 'string' || !Array.isArray(p.items)) return failed('[x.data] followQueueAdd 要 wsId 和 items');
-          const r = addToFollowQueue(p.wsId, p.items);
-          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-follow-queue-add', pageId: 'x-data', detail: { wsId: p.wsId, ...r } });
-          return { status: 'ok', value: r };
-        }
-
         /** ⭐⭐ 已迁到能力层(Module5-04 第 2 步):校验 / 认号 / 额度 / 占网页 / 留记录都在执行器,这里只转发 */
-        case 'vpnJudge': {
-          if (!Number.isInteger(p.limit) || p.limit < 1 || p.limit > 50) return failed('[x.data] vpnJudge 的 limit 要 1–50');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          return { status: 'ok', value: await judgeVpnPosts(acc.restId, p.limit) };
-        }
-
-        case 'askDraft': {
-          if (typeof p.tweetText !== 'string' || p.tweetText.trim() === '') return failed('[x.data] askDraft 缺他那条帖子的正文');
-          const acc = await accountOfWs(p.wsId);
-          if ('reason' in acc) return failed(acc.reason);
-          const rv = p.revise as { previous?: unknown; note?: unknown; keep?: unknown } | undefined;
-          if (rv !== undefined && (typeof rv.previous !== 'string' || typeof rv.note !== 'string' || rv.note.trim() === '')) return failed('[x.data] 点评要上一版 + 点评内容');
-          const mode = modeOf(p.mode);
-          /** ⭐ 回复求助:试用链接(按这条帖子的配方打来源标识)/ 语言 / 方向 —— 从名单里这条读 */
-          let vpn: { link: string; lang: ReplyLang; direction?: 'out' | 'in' | 'none' } | undefined;
-          if (mode === 'vpn') {
-            if (typeof p.tweetId !== 'string' || p.tweetId === '') return failed('[x.data] 回复求助草拟要 tweetId');
-            const me = await readWsAccount(p.wsId as string);
-            if (!me?.handle) return failed('认不出登录的号');
-            const [post] = await getXDB().query<[Array<{ recipe?: string; verdict?: { direction?: 'out' | 'in' | 'none' } }>]>(
-              `SELECT recipe, verdict FROM type::record('x_vpn_post', $id)`, { id: p.tweetId });
-            const lang = replyLangOf(p.tweetText);
-            vpn = { link: vpnLink(lang, me.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction };
-          }
-          const r = await draftAskReply({ account: acc.restId, tweet: p.tweetText, person: { name: p.name, bio: p.bio }, mode, vpn,
-            context: typeof p.context === 'string' ? p.context : undefined,
-            revise: rv ? { previous: rv.previous as string, note: (rv.note as string).trim(), keep: rv.keep === true } : undefined });
-          traceRecorder.lifecycle({ layer: 'web.net', event: r.ok ? 'x-ask-draft' : 'x-ask-draft-failed', pageId: 'x-data',
-            detail: r.ok ? { ms: r.ms, examples: r.examples, text: r.text } : { why: r.why } });
-          return { status: 'ok', value: r };
-        }
-
-        case 'askRun': {
-          if (typeof p.reply !== 'string' || typeof p.tweetText !== 'string' || typeof p.handle !== 'string'
-            || !['tweet', 'bio-latest', 'other'].includes(p.pickKind)) return failed('[x.data] askRun 参数不全');
-          const r = await runAsk({ wsId: p.wsId, restId: p.restId, handle: p.handle, tweetId: p.tweetId,
-            tweetText: p.tweetText, pickKind: p.pickKind, reply: p.reply,
-            aiText: typeof p.aiText === 'string' && p.aiText !== '' ? p.aiText : undefined,
-            mode: modeOf(p.mode) });
-          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-run', pageId: 'x-data',
-            detail: { handle: p.handle, tweetId: p.tweetId, ok: r.ok, blocked: r.blocked, liked: r.liked, replied: r.replied,
-              followed: r.followed, failedStep: r.failedStep, detail: r.detail } });
-          return { status: 'ok', value: r };
-        }
-
-        case 'followQueueControl':
-          if (typeof p.wsId !== 'string' || !['pause', 'resume', 'clear'].includes(p.action)) return failed('[x.data] followQueueControl 参数不对');
-          controlFollowQueue(p.wsId, p.action);
-          console.log(`[x.follow] ${p.wsId} ${p.action}`);
-          return { status: 'ok', value: followQueueStatus(p.wsId) };
-
         /** ⭐⭐⭐ 搜索滚动截获(2026-10-16)—— 配方名在这里对回(推文上记查询串,作者记配方名) */
         /** ⭐ 抽查(2026-10-16)—— 问有没有新请求 / 按 id 查库 */
         /** ⭐⭐ 互关倾向(1.2.30,蓝V互关 M2)—— 扫描结果与人的决定都留痕 */

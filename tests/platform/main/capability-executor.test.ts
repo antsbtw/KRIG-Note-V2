@@ -220,6 +220,43 @@ describe('⭐ 带着锁进来(界面已经占住网页,再请主进程干活 —
   });
 });
 
+describe('⭐⭐ 对外动作(kind output)只接受人点的 / 定时器;AI、收件箱要人批复(Module5-04 §5;批复入口在 P3)', () => {
+  let ran = 0;
+  const post = cap.defineCapability<Record<string, never>, string>({
+    id: 'demo.post', kind: 'output', describe: '对外发一条(测试用)', inputDoc: {},
+    parse: () => ({}), run: async () => { ran += 1; return 'sent'; },
+  });
+  it('ui / timer → 照做', async () => {
+    ran = 0;
+    expect(await cap.execute(post.id, {}, { caller: 'ui' })).toMatchObject({ ok: true });
+    expect(await cap.execute(post.id, {}, { caller: 'timer' })).toMatchObject({ ok: true });
+    expect(ran).toBe(2);
+  });
+  it('ai / inbox → refused(说清要人批复),一步不动,记一行', async () => {
+    ran = 0; rows.length = 0;
+    for (const caller of ['ai', 'inbox'] as const) {
+      const r = await cap.execute(post.id, {}, { caller });
+      expect(r).toMatchObject({ ok: false, kind: 'refused' });
+      if (!r.ok) expect(r.why).toContain('人批复');
+    }
+    expect(ran).toBe(0);
+    expect(rows.map((x) => [x.caller, x.status])).toEqual([['ai', 'refused'], ['inbox', 'refused']]);
+  });
+});
+
+describe('⭐ 没成但带着做了一半的结果(求关:赞成了、留言没成)', () => {
+  const half = cap.defineCapability<Record<string, never>, never>({
+    id: 'demo.half', kind: 'input', describe: '做一半(测试用)', inputDoc: {},
+    parse: () => ({}), run: async () => { throw cap.capFailed('留言没发出去', { liked: 'ok', replied: 'failed' }); },
+  });
+  it('记 failed,结果里带 partial(界面要显示哪步成了)', async () => {
+    rows.length = 0;
+    const r = await cap.execute(half.id, {}, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed', why: '留言没发出去', partial: { liked: 'ok', replied: 'failed' } });
+    expect(rows[0]).toMatchObject({ status: 'failed', output: { partial: { liked: 'ok', replied: 'failed' } } });
+  });
+});
+
 describe('能力目录(给 AI 读)', () => {
   it('列得出 id / kind / describe / inputDoc', () => {
     expect(cap.listCapabilities()).toContainEqual({ id: 'demo.double', kind: 'input', describe: '把 n 翻倍(测试用)', inputDoc: { n: '整数 0–100' } });

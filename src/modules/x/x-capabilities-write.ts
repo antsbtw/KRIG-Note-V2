@@ -12,7 +12,7 @@ import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { Bad, digits, modeOf, str, xCap, type O } from './x-capabilities-common';
 import { clearCursor, saveCursor } from './x-cursor-repo';
 import { setExcluded, setMutualIntent, setTags } from './x-people-repo';
-import { setVpnHuman } from './x-vpn-run';
+import { pruneVpnPosts, setVpnHuman } from './x-vpn-run';
 import { DEFER_DAYS, recordDefer } from './x-defer-repo';
 import { setDraftRuleActive } from './x-ask-draft';
 import { createJob, deleteJob, readJob, setJobStatus } from './x-bg-job-repo';
@@ -95,6 +95,11 @@ export function registerXWriteCapabilities(): void {
     },
     subject: (i) => `x_tweet:${i.tweetId}`,
     run: async (i, a) => { await setVpnHuman(a.restId, i.tweetId, i.human); return true; },
+  });
+  write({
+    id: 'x.vpn.prune', describe: '清掉求助名单里过期(超过 24 小时)/ 已不符合配方的帖子(人标过的留着)', account: true,
+    inputDoc: { wsId: '哪个 workspace 的号' }, parse: (o) => ({ wsId: str(o, 'wsId') }),
+    run: (_i, a) => pruneVpnPosts(a.restId),
   });
   write({
     id: 'x.person.defer', describe: `把一个人「放一放」(${DEFER_DAYS} 天内不再出现在这类卡片里)`, account: true,

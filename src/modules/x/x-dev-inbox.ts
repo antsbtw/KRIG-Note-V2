@@ -7,23 +7,18 @@
  * ⚠️ 只认白名单里的指令;一次只跑一个;X 网页忙 / 后台在跑就让路(由被调函数判)。
  * ⚠️ 定时器 unref + before-quit 停(记忆 project-graceful-shutdown)。
  */
-import { judgeVpnPosts, pruneVpnPosts, readVpnOverview } from './x-vpn-run';
 import { execute, listCapabilities } from '@platform/main/capability/capability';
 import { X_CAP } from './x-capabilities';
-import { getXDB } from '@storage/surreal/client';
-import { replyLangOf, vpnLink } from './x-vpn-help';
 
 import { app } from 'electron';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { collectPersonTab } from './x-person-collect';
+import type { collectPersonTab } from './x-person-collect';
 import { getXHostState } from './x-host-registry';
 import { acquirePage, releasePage } from './x-page-lock';
 import { manualSummary, pageProblem } from './x-page-ledger';
 import { X_MANUAL } from './x-manual';
 import { setPageTap } from './x-page-tap';
-import { draftAskReply } from './x-ask-draft';
-import { readWsAccount } from './x-account-repo';
 import { runCollect } from './x-collect-run';
 import { webviewPorts } from './x-collect-ports';
 import { X_USER_LIST_PAGES } from './x-pages';
@@ -141,21 +136,16 @@ function validate(c: unknown): Cmd | string {
   return o as unknown as SearchCmd;
 }
 
+/** 采主页一个标签页(走能力 x.person.collectTab)+ 按说明书清点逐页账 —— 给说明书基线用 */
 async function runPersonTab(cmd: PersonCmd): Promise<unknown> {
   const wcId = getXHostState(cmd.wsId)?.wcId;
   if (wcId === undefined) return { ok: false, why: `${cmd.wsId} 的 X 网页没开` };
-  /** ⭐ 原来查了忙却不标忙(Module5-04 §1.2)—— 现在占住 */
-  const lock = acquirePage(wcId, `开发测试:采 @${cmd.handle} ${cmd.page}`, 'inbox');
-  if (!lock.ok) return { ok: false, why: lock.why };
-  let r: Awaited<ReturnType<typeof collectPersonTab>>;
-  try {
-    r = await collectPersonTab({ wcId, page: cmd.page, handle: cmd.handle, restId: cmd.restId, pageCap: cmd.pageCap, attempt: 1 });
-  } finally {
-    releasePage(lock.token);
-  }
-  if (!r.reached) return { ok: false, why: r.reason };
+  const c = await execute('x.person.collectTab', { wcId, page: cmd.page, handle: cmd.handle, restId: cmd.restId, pageCap: cmd.pageCap, attempt: 1 }, { caller: 'inbox' });
+  if (!c.ok) return c;
+  const r = c.value as Awaited<ReturnType<typeof collectPersonTab>>;
+  if (!r.reached) return { ok: false, why: r.reason, callId: c.callId };
   return {
-    ok: true, records: r.records.length, pageInserted: r.pageInserted, stopReason: r.paging?.stopReason,
+    ok: true, callId: c.callId, records: r.records.length, pageInserted: r.pageInserted, stopReason: r.paging?.stopReason,
     ledgerProblem: r.ledgerProblem,
     manual: manualSummary(r.ledger, X_MANUAL.site, X_MANUAL.version),
     ledger: r.ledger.map((l) => ({ page: l.page, label: l.label, x: l.xTweets, notParsed: l.notParsed.length, notInDb: l.notInDb?.length, dir: l.directionWrong, retried: l.retried, other: l.other, ok: pageProblem(l) === undefined })),
@@ -206,21 +196,13 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
     } else if (cmd.op === 'vpnFind') {
       out = await execute(X_CAP.vpnFind, { wsId: cmd.wsId }, { caller: 'inbox' });
     } else if (cmd.op === 'vpnPrune') {
-      const acc = await readWsAccount(cmd.wsId);
-      out = acc?.restId ? await pruneVpnPosts(acc.restId) : { ok: false, why: '认不出号' };
-    } else if (cmd.op === 'vpnJudge' || cmd.op === 'vpnOverview' || cmd.op === 'vpnDraft') {
-      const acc = await readWsAccount(cmd.wsId);
-      if (!acc?.restId) out = { ok: false, why: '认不出号' };
-      else if (cmd.op === 'vpnJudge') out = await judgeVpnPosts(acc.restId, cmd.limit);
-      else if (cmd.op === 'vpnOverview') out = await readVpnOverview(acc.restId);
-      else {
-        const [post, tw] = await getXDB().query<[Array<{ recipe?: string; verdict?: { direction?: 'out' | 'in' | 'none' } }>, Array<{ text?: string }>]>(
-          `SELECT recipe, verdict FROM type::record('x_vpn_post', $id); SELECT text FROM x_tweet WHERE tweet_id = $id;`, { id: cmd.tweetId });
-        const text = tw?.[0]?.text ?? '';
-        const lang = replyLangOf(text);
-        out = await draftAskReply({ account: acc.restId, tweet: text, person: {}, mode: 'vpn',
-          vpn: { link: vpnLink(lang, acc.handle, post?.[0]?.recipe, new Date()), lang, direction: post?.[0]?.verdict?.direction } });
-      }
+      out = await execute('x.vpn.prune', { wsId: cmd.wsId }, { caller: 'inbox' });
+    } else if (cmd.op === 'vpnJudge') {
+      out = await execute('x.vpn.judge', { wsId: cmd.wsId, limit: cmd.limit }, { caller: 'inbox' });
+    } else if (cmd.op === 'vpnOverview') {
+      out = await execute('x.vpn.overview', { wsId: cmd.wsId }, { caller: 'inbox' });
+    } else if (cmd.op === 'vpnDraft') {
+      out = await execute('x.ask.draft', { wsId: cmd.wsId, mode: 'vpn', tweetId: cmd.tweetId }, { caller: 'inbox' });
     } else if (cmd.op === 'engageScreen') {
       out = await execute('x.engage.screen', { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle }, { caller: 'inbox' });
     } else if (cmd.op === 'engageCollect') {
@@ -230,13 +212,11 @@ async function runCmd(cmd: Cmd, next: string): Promise<unknown> {
     } else if (cmd.op === 'engageOverview') {
       out = await execute(X_CAP.engageOverview, { wsId: cmd.wsId, limit: 10 }, { caller: 'inbox' });
     } else if (cmd.op === 'askDraft') {
-      const acc = await readWsAccount(cmd.wsId);
-      if (!acc?.restId) out = { ok: false, why: '认不出号' };
-      else {
-        const drafts = [];
-        for (const t of cmd.tweets) drafts.push({ tweet: t, draft: await draftAskReply({ account: acc.restId, tweet: t, person: {}, mode: cmd.mode, revise: cmd.revise }) });
-        out = { ok: true, drafts };
+      const drafts = [];
+      for (const t of cmd.tweets) {
+        drafts.push({ tweet: t, draft: await execute('x.ask.draft', { wsId: cmd.wsId, tweetText: t, mode: cmd.mode, revise: cmd.revise }, { caller: 'inbox' }) });
       }
+      out = { ok: true, drafts };
     } else if (cmd.op === 'relationStart') {
       console.log(`[x.dev] 执行 ${next}:relationStart ${cmd.wsId} ${cmd.handle ?? '(我)'}`);
       out = await execute('x.relation.start', { wsId: cmd.wsId, restId: cmd.restId, handle: cmd.handle }, { caller: 'inbox' });

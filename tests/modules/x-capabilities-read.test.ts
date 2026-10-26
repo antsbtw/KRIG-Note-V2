@@ -200,6 +200,7 @@ describe('接线守卫:IPC 只剩转发', () => {
   it('对照表在 switch 之前查,查到就 execute(caller ui)', () => {
     const h0 = IPC.indexOf('async function handle(');
     const body = IPC.slice(h0, IPC.indexOf('switch (p?.op)', h0));
-    expect(body).toMatch(/const capId = CAP_OF_OP\[[^\]]+\];\s*if \(capId\) return fromCap\(await execute\(capId, p, \{ caller: 'ui' \}\)(, p\.op)?\);/);
+    /** 2026-10-25 对照表的值可以是函数(按参数分到不同能力,如关注队列 继续 / 暂停) */
+    expect(body).toMatch(/const capOf = CAP_OF_OP\[[^\]]+\];\s*const capId = typeof capOf === 'function' \? capOf\(p\) : capOf;\s*if \(capId\) return fromCap\(await execute\(capId, p, \{ caller: 'ui' \}\), p\.op\);/);
   });
 });

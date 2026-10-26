@@ -29,7 +29,11 @@ export type Caller = 'ui' | 'timer' | 'inbox' | 'ai';
 
 export type CapResult<T> =
   | { readonly ok: true; readonly value: T; readonly callId: string }
-  | { readonly ok: false; readonly kind: 'refused' | 'failed' | 'invalid'; readonly why: string; readonly callId: string };
+  | {
+    readonly ok: false; readonly kind: 'refused' | 'failed' | 'invalid'; readonly why: string; readonly callId: string;
+    /** failed 时可带「做了一半的结果」(如求关:赞成了、留言没成)—— 界面要显示哪步成了 */
+    readonly partial?: unknown;
+  };
 
 /**
  * 要占的资源(如 `page:<wcId>`);purpose 给被拒的人看;
@@ -80,10 +84,10 @@ export interface Capability<I, O, C = undefined> {
 }
 
 class CapSignal extends Error {
-  constructor(readonly kind: 'refused' | 'failed', why: string) { super(why); }
+  constructor(readonly kind: 'refused' | 'failed', why: string, readonly partial?: unknown) { super(why); }
 }
-/** run 里:做了没成 */
-export const capFailed = (why: string): Error => new CapSignal('failed', why);
+/** run 里:做了没成;partial = 做了一半的结果(界面要看哪步成了) */
+export const capFailed = (why: string, partial?: unknown): Error => new CapSignal('failed', why, partial);
 /** run 里:跑到一半发现不该做(没对外界动手) */
 export const capRefused = (why: string): Error => new CapSignal('refused', why);
 
@@ -151,6 +155,13 @@ export async function execute(
   };
 
   if (!cap) return finish({ ok: false, kind: 'invalid', why: `目录里没有能力 ${id}`, callId });
+  /**
+   * ⭐⭐ 对外动作(发帖 / 点赞 / 留言 / 关注 …)只接受人在界面上点的、或人排进队列后由定时器按节奏执行的;
+   * AI / 收件箱调用要人批复(Module5-04 §5「外发动作仍由人批复或在批过的规则内」;批复入口是 P3,到时在这里放开)。
+   */
+  if (cap.kind === 'output' && opts.caller !== 'ui' && opts.caller !== 'timer') {
+    return finish({ ok: false, kind: 'refused', why: `「${cap.describe}」是对外动作,${opts.caller} 调用要人批复(批复入口还没做,P3)—— 没动手`, callId });
+  }
   const parsed = cap.parse(raw);
   if (typeof parsed === 'string') return finish({ ok: false, kind: 'invalid', why: parsed, callId });
   input = parsed;
@@ -187,7 +198,12 @@ export async function execute(
     const value = await cap.run(parsed, { caller: opts.caller, callId, held, prep: prep.ctx });
     return finish({ ok: true, value, callId }, cap.summarize ? cap.summarize(value) : defaultSummary(value));
   } catch (e) {
-    if (e instanceof CapSignal) return finish({ ok: false, kind: e.kind, why: e.message, callId });
+    if (e instanceof CapSignal) {
+      return finish(
+        { ok: false, kind: e.kind, why: e.message, callId, ...(e.partial !== undefined ? { partial: e.partial } : {}) },
+        e.partial !== undefined ? { partial: e.partial } : undefined,
+      );
+    }
     const why = e instanceof Error ? e.message : String(e);
     console.error(`[cap] ${id} 出错:`, e);
     return finish({ ok: false, kind: 'failed', why: `出错:${why}`, callId });
