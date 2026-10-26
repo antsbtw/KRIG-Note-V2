@@ -252,17 +252,29 @@ describe('⭐⭐⭐ 卡片准备期间,巡检 / 后台采集到点 → 让路', 
     expect(h.calls).toEqual([]);
   });
 
-  it('对照(证明上面能失败):网页空着时,后台到点会开跑,且跑的时候占着网页', async () => {
-    let held: string | null = null;
-    await tickOnce(async () => { held = pageBusy(7); });
-    expect(held).toContain('后台');
+  /**
+   * 收尾(10-26):后台每段走能力 x.bg.segment,锁由执行器占 —— 这里走生产那条(tickOnce 默认 drive),
+   * 在「后台正在采」那一刻按住门,看锁和准备函数
+   */
+  it('对照(证明上面能失败):网页空着时,后台到点会开跑,且跑的时候占着网页;跑完放掉', async () => {
+    h.collectDoor = h.door();
+    const run = tickOnce();
+    for (let k = 0; k < 50 && h.collectDoor.entered === 0; k++) await new Promise((r) => setTimeout(r, 10));
+    expect(h.collectDoor.entered).toBe(1);
+    expect(pageBusy(7)).toContain('后台');
+    h.collectDoor.open();
+    await run;
     expect(pageBusy(7)).toBeNull();
   });
 
-  it('后台在采时,准备函数被拒(后台的 runningWc 已并进这把锁)', async () => {
-    let r: unknown;
-    await tickOnce(async () => { r = await prepareEngage('ws-1', 'ME', '42', 'he'); });
+  it('后台在采时,准备函数被拒(后台的锁由执行器占)', async () => {
+    h.collectDoor = h.door();
+    const run = tickOnce();
+    for (let k = 0; k < 50 && h.collectDoor.entered === 0; k++) await new Promise((r) => setTimeout(r, 10));
+    const r = await prepareEngage('ws-1', 'ME', '42', 'he');
     expect(r).toMatchObject({ ok: false });
     expect((r as { why: string }).why).toContain('后台');
+    h.collectDoor.open();
+    await run;
   });
 });

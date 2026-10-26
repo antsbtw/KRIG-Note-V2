@@ -165,7 +165,7 @@ describe('⭐⭐⭐ runCollect 逐页账:对上才往下翻;对不上重采一�
 
 describe('接线', () => {
   const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
-  it('savePageVerify 复用 saveTweets / saveUsers 分支后按 id 回读;操作台每页调它;报告有逐页账', () => {
+  it('savePageVerify 复用 saveTweets / saveUsers 分支后按 id 回读', () => {
     /** 2026-10-24 迁到能力 x.page.saveVerify:直接调存库那一份(不再绕回 IPC) */
     const body = capBlock('x.page.saveVerify');
     expect(body.length).toBeGreaterThan(200);
@@ -173,23 +173,14 @@ describe('接线', () => {
     expect(body).toMatch(/await saveUserBatch\(i\.users, i\.userCtx\)/);
     expect(body).toMatch(/existingTweetIds\(/);
     expect(body).toMatch(/existingUserIds\(/);
-    expect(read('src/modules/x/XConsole.tsx')).toMatch(/savePage: async \(\{ tweets, users \}\) => \{[\s\S]{0,600}op: 'savePageVerify'/);
-    expect(read('src/modules/x/x-run-report.ts')).toMatch(/L\.push\(\.\.\.ledgerSection\(run\.paging\?\.ledger\)\);/);
+    /** 2026-10-26 操作台(界面里那份采集)和它的报告文件拆了;逐页账的行为测试在本文件上半 */
+    void read;
   });
 });
 
-describe('⭐⭐⭐ 操作台搜索页走滚动截获(2026-10-16 真机 30 页全对)', () => {
+describe('⭐⭐⭐ 搜索走滚动截获(2026-10-16 真机 30 页全对)', () => {
   const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
-  it('搜索页 → searchScroll(不再走自己拿游标重放);页数上限 40;带着自己的锁进去(不让路给自己)', () => {
-    const C = read('src/modules/x/XConsole.tsx');
-    const i = C.indexOf("if (origin?.name === X_PAGE_NAME.search && (origin.params.q ?? '') !== '') {");
-    expect(i).toBeGreaterThan(-1);
-    const branch = C.slice(i, C.indexOf('return;\n                      }', i));
-    expect(branch).toMatch(/op: 'searchScroll'/);
-    expect(branch).toMatch(/Math\.min\(Math\.max\(Number\(pagesWanted\) \|\| 10, 1\), 40\)/);
-    expect(branch).toMatch(/ownToken: lock\.token/);
-    /** 分支在 runCollect 之前,且 return 掉 —— 不会两条路都跑 */
-    expect(i).toBeLessThan(C.indexOf('const run = await runCollect({'));
+  it('页数上限 40;带来的锁要真是持有者(操作台那条入口 2026-10-26 已拆,只剩能力 x.search.scroll)', () => {
     /** 2026-10-24 页数上限在能力 x.search.scroll 的参数校验里 */
     expect(capBlock('x.search.scroll')).toMatch(/wantPages: int\(o, 'wantPages', 1, 40\)/);
     /** 带来的 token 必须真是这个网页现在的持有者(过期 / 别的网页的锁不能混进来) */
@@ -197,12 +188,3 @@ describe('⭐⭐⭐ 操作台搜索页走滚动截获(2026-10-16 真机 30 页�
   });
 });
 
-describe('操作台:滚动截获采完要留在界面上(10-16 用户:「没有采集信息?」)', () => {
-  const read = (p: string): string => require('node:fs').readFileSync(require('node:path').join(process.cwd(), p), 'utf8');
-  it('结果存进 scrollDone,并在「不在采集中」时显示;使用说明在有结果时不显示', () => {
-    const C = read('src/modules/x/XConsole.tsx');
-    expect(C).toMatch(/setScrollDone\(\{\s*head:/);
-    expect(C).toMatch(/\{!running && scrollDone && \(/);
-    expect(C).toMatch(/\{!running && !report && !scrollDone && \(/);
-  });
-});

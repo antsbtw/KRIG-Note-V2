@@ -19,6 +19,7 @@ import { registerXCollectCapabilities } from './x-capabilities-collect';
 import { registerXActCapabilities } from './x-capabilities-act';
 import { registerXFlows } from './x-flows';
 import { registerCardQueueCapabilities } from './x-card-queue';
+import { registerXTimerCapabilities } from './x-capabilities-timer';
 import { pageNeed, wsAccount } from './x-capabilities-common';
 import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
@@ -59,6 +60,8 @@ export function registerXCapabilities(): void {
   registerXFlows();
   /** 第 4 步 4c:卡片队列(x-card-queue.ts) */
   registerCardQueueCapabilities();
+  /** 收尾(10-26):定时器调的两个(后台采一段 / 关注一个人)—— 占锁、记录归执行器 */
+  registerXTimerCapabilities();
 
   defineCapability<{ wsId: string; restId: string; handle: string; hisTweetId?: string }, unknown, { wcId: number; acc: Acc }>({
     id: X_CAP.engagePrepare,

@@ -137,10 +137,8 @@ describe('⭐⭐ 接线:写要认号,读要按号', () => {
     }
   });
 
-  it('页面:采集落库与核对都把采集网页的 wcId 带上', () => {
-    const CON = read('src/modules/x/XConsole.tsx');
-    expect(CON).toMatch(/op: 'saveUsers', records: users, ctx: \{ listSource, wcId: wcId \?\? undefined \}/);
-    expect(CON).toMatch(/searchRecipe: origin\?\.params\.q,[\s\S]{0,200}wcId: wcId \?\? undefined/);
+  it('核对把读到资料的那个网页的 wcId 带上(按它认号)', () => {
+    /** 2026-10-26 操作台(界面里采集落库那一份)拆了;采集落库都在主进程,按 wcId 认号见 x-save-batch / x-step5 测试 */
     /** 2026-10-26 核对搬到主进程 x-person-act.ts:按读到它的那个网页认号 */
     /** 第 5 步(10-26):刷新落库一份 = x-save-batch savePersonRefresh */
     expect(read('src/modules/x/x-person-act.ts')).toMatch(/await savePersonRefresh\(rec, await accountForWrite\(wcId\)\)/);

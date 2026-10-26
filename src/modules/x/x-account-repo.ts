@@ -9,6 +9,7 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
+import type { Caller } from '@platform/main/capability/capability';
 import { decideAccount, parseWhoAmI, type AccountDecision, type WhoAmIRaw, type WsAccount } from './x-account';
 import { webviewPorts } from './x-collect-ports';
 import { X_SCRIPTS } from './x-dom-scripts';
@@ -82,7 +83,7 @@ const IDENTIFY_BUSY = '运营正在认号';
 /**
  * ⭐⭐ 认号:页面读 handle → 库里已有同 handle 且有数字 id 就完事;否则开一次自己的主页拿数字 id。
  */
-export async function identifyAccount(wsId: string): Promise<IdentifyResult> {
+export async function identifyAccount(wsId: string, caller: Caller): Promise<IdentifyResult> {
   const wcId = getXHostState(wsId)?.wcId;
   if (wcId === undefined) return { status: 'failed', reason: `${wsId} 的 X 网页没开,认不了号` };
   const seen = await whoAmIOnWc(wcId);
@@ -96,7 +97,8 @@ export async function identifyAccount(wsId: string): Promise<IdentifyResult> {
   if (!row || row.handle !== seen.handle) await writeWsAccount(wsId, seen.handle, undefined);
 
   /** ⭐ 占住 X 网页(x-page-lock);被占着(含另一次认号 / 后台在采)→ 等它空了再认 */
-  const lock = acquirePage(wcId, IDENTIFY_BUSY, 'ui');
+  /** 按需占锁(多半读页面就认出来了,只有要开主页时才占);占锁人记真实调用方(收尾 10-26,原来写死「界面」) */
+  const lock = acquirePage(wcId, IDENTIFY_BUSY, caller);
   if (!lock.ok) return { status: 'pending', handle: seen.handle, reason: `${lock.why},等它空了再认(要开一次 @${seen.handle} 的主页)` };
   try {
     /** 读主页资料一份(x-person-profile);认号只要数字 id,不落库 */

@@ -31,6 +31,10 @@ vi.mock('@modules/x/x-user-repo', () => ({
   writeRelations: async (_a: unknown, obs: Array<Record<string, unknown>>, source: string) => { h.rels.push({ ...obs[0], source }); return { report: {}, before: new Map() }; },
 }));
 
+/** 收尾(10-26):每关一个人走能力 x.person.follow(执行器占锁 / 记一行)—— 执行记录不碰真库 */
+vi.mock('@storage/surreal/client', () => ({ getFlowDB: () => ({ query: async () => [[]] }), getXDB: () => ({ query: async () => [[]] }) }));
+const { registerXTimerCapabilities } = await import('@modules/x/x-capabilities-timer');
+registerXTimerCapabilities();
 const Q = await import('@modules/x/x-follow-queue');
 const { acquirePage, releasePage } = await import('@modules/x/x-page-lock');
 const { _resetLocks } = await import('@platform/main/flow/resource-lock');

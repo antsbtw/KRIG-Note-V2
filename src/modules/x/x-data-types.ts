@@ -238,11 +238,9 @@ export type XDataInvoke =
   | { readonly op: 'syncHost'; readonly wsId: string; readonly wcId: number | null }
   /**
    * ⭐⭐⭐ X 网页占用(x-page-lock,Module5-04 第 1 步)—— renderer 不再自己写「忙」(syncBusy 已退役)。
-   * pageAcquire 回 `{ ok: true, token } | { ok: false, why }`;pageRelease 只放得掉自己的 token;
-   * pageBusy 回占用者在干什么(string)或 null。申请方窗口关掉,它的锁主进程自己收回。
+   * pageBusy 回占用者在干什么(string)或 null。要用网页一律调能力(执行器占锁);
+   * pageAcquire / pageRelease(界面自带锁)收尾 10-26 拆了。
    */
-  | { readonly op: 'pageAcquire'; readonly wcId: number; readonly purpose: string }
-  | { readonly op: 'pageRelease'; readonly token: string }
   | { readonly op: 'pageBusy'; readonly wcId: number }
   /**
    * ⭐⭐ 第 4 步 4a(2026-10-26):取关 / 核对 / 左边打开某页都在主进程(能力 x.person.unfollow / verify / x.page.open)
@@ -252,7 +250,7 @@ export type XDataInvoke =
   | { readonly op: 'personUnfollow'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly reason?: string }
   | { readonly op: 'unfollowHalt'; readonly wsId: string }
   | { readonly op: 'unfollowResume'; readonly wsId: string }
-  | { readonly op: 'pageOpen'; readonly wsId: string; readonly page: 'profile' | 'status'; readonly handle?: string; readonly tweetId?: string }
+  | { readonly op: 'pageOpen'; readonly wsId: string; readonly page: 'profile' | 'status' | 'search'; readonly handle?: string; readonly tweetId?: string; readonly q?: string; readonly f?: string }
   /**
    * ⭐⭐ 第 4 步 4b(2026-10-26):原来写在界面里的循环搬到主进程当流程(x-flows.ts);界面只开始 / 看进度 / 叫停
    */

@@ -130,7 +130,4 @@ describe('接线(M1 + M2)', () => {
     expect(RUN).toMatch(/version: '1\.2\.29'[\s\S]{0,200}up: x_migration_1_2_29/);
     expect(RUN).toMatch(/version: '1\.2\.30'[\s\S]{0,200}up: x_migration_1_2_30/);
   });
-  it('操作台有「只看蓝V作者」勾选框,且真的改 blueOnly', () => {
-    expect(read('src/modules/x/XConsole.tsx')).toMatch(/checked=\{r\.blueOnly \?\? false\}\s*onChange=\{\(e\) => set\('blueOnly', e\.target\.checked\)\}/);
-  });
 });

@@ -56,7 +56,6 @@ vi.mock('@modules/x/x-user-repo', () => ({
 
 const { runAsk, replyProblem } = await import('@modules/x/x-ask-run');
 const { X_SCRIPTS } = await import('@modules/x/x-dom-scripts');
-const { acquirePage, releasePage, pageBusy } = await import('@modules/x/x-page-lock');
 const { _resetLocks } = await import('@platform/main/flow/resource-lock');
 
 const input = { wsId: 'ws-1', restId: '42', handle: 'he', tweetId: '123', tweetText: '#蓝V互关', pickKind: 'tweet' as const, reply: '  早上好，互关一起冲！ ' };
@@ -71,7 +70,7 @@ beforeEach(() => {
 
 describe('runAsk', () => {
   it('⭐⭐ 全成:去推文 → 赞 → 查框 → 贴 → 发 → 去主页 → 关;三笔动作留痕;关系写我关注他;x_ask 记人写的留言', async () => {
-    const r = await runAsk(input);
+    const r = await runAsk(input, 7);
     expect(r).toMatchObject({ ok: true, liked: 'ok', replied: 'ok', followed: 'ok', replyId: '999' });
     expect(h.calls).toEqual([
       'goto:x.status', `run:${X_SCRIPTS.likeTweet}`, `run:${X_SCRIPTS.replyBoxState}`, 'type:早上好，互关一起冲！',
@@ -86,31 +85,25 @@ describe('runAsk', () => {
 
   it('⭐⭐ 用户 10-21「我的任务我自己控制,有问题提示就好了」:关注超了平时的量 → 照做,只带提醒', async () => {
     h.gate = { allowed: false, reason: '今天已关注 30 个,超过平时的量 30' };
-    const r = await runAsk(input);
+    const r = await runAsk(input, 7);
     expect(r.blocked).toBeUndefined();
     expect(r.ok).toBe(true);
     expect(r.followed).toBe('ok');
     expect(r.warning).toContain('超过平时的量');
   });
 
-  it('⭐⭐ 网页忙 / 认不出号 / 留言空 → 一个动作都不做', async () => {
-    const other = acquirePage(7, '操作台正在采集', 'ui');
-    if (!other.ok) throw new Error('应拿到');
-    expect((await runAsk(input)).blocked).toContain('操作台正在采集');
-    /** 被拒的一方不会放掉别人的锁 */
-    expect(pageBusy(7)).toBe('操作台正在采集');
-    releasePage(other.token);
+  it('⭐⭐ 认不出号 / 留言空 → 一个动作都不做(网页忙由执行器挡:x-close-out.test「求关卡发送」)', async () => {
     h.account = { kind: 'needIdentify', handle: 'x', reason: '登录的号变了' };
-    expect((await runAsk(input)).blocked).toContain('认不出');
+    expect((await runAsk(input, 7)).blocked).toContain('认不出');
     h.account = { kind: 'ok', restId: 'ME', handle: 'antsBTW' };
-    expect((await runAsk({ ...input, reply: '!!' })).blocked).toContain('没有字也没有表情');
+    expect((await runAsk({ ...input, reply: '!!' }, 7)).blocked).toContain('没有字也没有表情');
     expect(h.calls).toEqual([]);
     expect(h.actions).toEqual([]);
   });
 
   it('⭐⭐ 点赞没成 → 停,不留言不关注;x_ask 记下停在哪', async () => {
     h.like = 'no-button';
-    const r = await runAsk(input);
+    const r = await runAsk(input, 7);
     expect(r).toMatchObject({ ok: false, liked: 'failed', failedStep: 'like' });
     expect(h.calls.some((c) => c.startsWith('type:') || c === 'goto:x.profile')).toBe(false);
     expect(h.asks[0]).toMatchObject({ liked: 'failed', fstep: 'like' });
@@ -118,7 +111,7 @@ describe('runAsk', () => {
 
   it('⭐⭐ 回复框里有残留 → 不贴不发', async () => {
     h.box = { found: true, count: 1, text: '上次没发的' };
-    const r = await runAsk(input);
+    const r = await runAsk(input, 7);
     expect(r).toMatchObject({ failedStep: 'reply', replied: 'failed' });
     expect(h.calls.some((c) => c.startsWith('type:'))).toBe(false);
     expect(h.calls).not.toContain(`run:${X_SCRIPTS.sendReply}`);
@@ -126,13 +119,13 @@ describe('runAsk', () => {
 
   it('⭐⭐ 留言没贴对(校验没过)→ 不点发送', async () => {
     h.typed = { status: 'ok', value: { checked: true, landed: false, via: 'none', attempts: 3 } };
-    expect(await runAsk(input)).toMatchObject({ failedStep: 'reply' });
+    expect(await runAsk(input, 7)).toMatchObject({ failedStep: 'reply' });
     expect(h.calls).not.toContain(`run:${X_SCRIPTS.sendReply}`);
   });
 
   it('⭐⭐ 点了发送但页面上没看到我的回复 → 停,不关注(说不清发没发出去)', async () => {
     h.send = { state: 'unseen' };
-    const r = await runAsk(input);
+    const r = await runAsk(input, 7);
     expect(r).toMatchObject({ ok: false, replied: 'unseen', failedStep: 'reply' });
     expect(h.calls).not.toContain('goto:x.profile');
     expect(h.rels).toEqual([]);
@@ -140,7 +133,7 @@ describe('runAsk', () => {
 
   it('本来就赞过 / 本来就关注着:不重复记动作,照常往下走', async () => {
     h.like = 'already-liked'; h.follow = 'already-following';
-    const r = await runAsk(input);
+    const r = await runAsk(input, 7);
     expect(r).toMatchObject({ ok: true, liked: 'already', followed: 'already' });
     expect(h.actions.map((a) => a.action)).toEqual(['reply']);
   });
@@ -159,7 +152,7 @@ describe('replyProblem', () => {
 
 describe('⭐⭐ 互动模式(2026-10-22,蓝V互关第 3 件事:点赞 + 回复,不关注)', () => {
   it('不去主页、不点关注、不写「我关注他」;动作留痕标「互动」;记进 x_engage(回他找我的那条 = his-message)', async () => {
-    const r = await runAsk({ ...input, mode: 'engage', reply: '说得对,这波确实超预期' });
+    const r = await runAsk({ ...input, mode: 'engage', reply: '说得对,这波确实超预期' }, 7);
     expect(r).toMatchObject({ ok: true, liked: 'ok', replied: 'ok' });
     expect(r.followed).toBeUndefined();
     expect(h.calls).not.toContain('goto:x.profile');
@@ -171,7 +164,7 @@ describe('⭐⭐ 互动模式(2026-10-22,蓝V互关第 3 件事:点赞 + 回复,
   });
   it('关注闸门不管互动(今天关注满了也能互动)', async () => {
     h.gate = { allowed: false, reason: '今天已关注 30/30' };
-    const r = await runAsk({ ...input, mode: 'engage' });
+    const r = await runAsk({ ...input, mode: 'engage' }, 7);
     expect(r.ok).toBe(true);
   });
 });

@@ -9,7 +9,7 @@
  * | view | 位置 | 入口 | 为什么 |
  * |---|---|---|---|
  * | `x-web-view` | 左栏 | navSide tab 𝕏 | 人在用的,要全宽、长期开 |
- * | `x-workbench-view` | 右栏 | SlotPicker | 工具,用完就关,不该占死一栏 |
+ * | ~~`x-workbench-view`~~ | — | — | 操作台,2026-10-26 已拆 |
  *
  * ⭐ 两个独立 ⇒ 可以**只开一个**。
  *
@@ -37,7 +37,8 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
      */
     expect(all().length, 'X 的 view 一个都没注册 —— 守卫在空转').toBeGreaterThanOrEqual(2);
     expect(byId('x-web-view'), 'x-web-view 不在注册表').toBeDefined();
-    expect(byId('x-workbench-view'), 'x-workbench-view 不在注册表').toBeDefined();
+    expect(byId('x-ops-view'), 'x-ops-view 不在注册表').toBeDefined();
+    expect(byId('x-task-view'), 'x-task-view 不在注册表').toBeDefined();
   });
 
   it('⭐ 左栏「网页」:上 navSide 切换条', () => {
@@ -54,20 +55,20 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
     expect(v!.navSideTab?.navSideDisabled, '没禁用空面板 —— 点 tab 会展开一栏空的').toBe(true);
   });
 
-  it('⭐⭐ 右栏「操作台」:**不占** navSide,只进 SlotPicker', () => {
-    const v = byId('x-workbench-view');
-    expect(v, 'x-workbench-view 没注册 —— SlotPicker 里召不出来').toBeDefined();
-    expect(
-      v!.navSideTab,
-      '操作台占了 navSide 切换条 —— 用户要的是「随时可关的右栏工具」,\n'
-      + '占 navSide 等于把它变成第二个常驻入口',
-    ).toBeUndefined();
-    expect(v!.slotPickerEntry?.label).toBe('X 操作台');
+  it('⭐⭐ 操作台已拆(2026-10-26 Module5-04 收尾):不再注册,X 网页里也没有它的按钮', () => {
+    /**
+     * 它在界面里直接驱动网页、在界面进程跑整套采集,绕过执行器(判据 2 / 3);配方搬到「任务」,调试改走开发收件箱。
+     * 存着这个绑定的 ws 由 SlotArea 自愈清掉(「指向已删视图的 slot 绑定要自愈」)。
+     */
+    expect(byId('x-workbench-view'), '操作台又注册回来了').toBeUndefined();
+    const src = readFileSync(join(process.cwd(), 'src/modules/x/XWebView.tsx'), 'utf-8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(src).not.toMatch(/x-workbench-view|操作台/);
   });
 
   it('⭐ 两个是**不同的** view(不是同一个挂两处)', () => {
     const a = byId('x-web-view');
-    const b = byId('x-workbench-view');
+    const b = byId('x-ops-view');
     expect(a!.component, '两个 view 用了同一个组件 —— 那就不是「各自独立」了')
       .not.toBe(b!.component);
   });
@@ -127,7 +128,7 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
      * 判据:两个 label **互不为前缀**(光靠前缀分不出就等于没分)。
      */
     const web = byId('x-web-view')!.navSideTab!.label;
-    const wb = byId('x-workbench-view')!.slotPickerEntry!.label;
+    const wb = byId('x-ops-view')!.navSideTab!.label;
     expect(web, 'label 为空').toBeTruthy();
     expect(wb, 'label 为空').toBeTruthy();
     expect(web).not.toBe(wb);
@@ -152,37 +153,6 @@ describe('⭐⭐ X 的两个 view 各自独立', () => {
       '左栏没声明 web-rendering —— webview 取不到 Host,切过去会白屏',
     ).toContain('web-rendering');
   });
-
-  it('⭐⭐ 左栏有「操作台」专用按钮,且 view id 两处一致', () => {
-    /**
-     * 用户 2026-10-01:「右栏叫『X 操作台』—— 这个应该通过 x 的 toolbar
-     * 设置一个 button 来调出来?」
-     *
-     * ⭐ 理由实测过:picker 里「X 网页」与「X 操作台」并排,
-     * 用户点错开出第二个网页 view。**最常用的动作不该靠认名字。**
-     *
-     * ⚠️ 代价是 `x-workbench-view` 这个字面量**出现在两个文件**
-     * (注册处 + 按钮处)。漂了的表现是「点按钮没反应」且不报错 ——
-     * 本条用**两边对照**钉住,不钉单个字面量
-     * (`project-x-field-four-place-registration` 的做法)。
-     */
-    const src = readFileSync(
-      join(process.cwd(), 'src/modules/x/XWebView.tsx'),
-      'utf-8',
-    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-
-    // ① 真的有开/关操作台的调用
-    expect(src, '没有 openRight —— 按钮点了不会开').toMatch(/bus\.slot\.openRight\(/);
-    expect(src, '没有 closeRight —— 开了关不掉').toMatch(/bus\.slot\.closeRight\(/);
-
-    // ② ⭐ 按钮用的 id 必须与注册表里真实存在的 id 一致
-    const registeredId = byId('x-workbench-view')!.id;
-    expect(
-      src.includes(`'${registeredId}'`),
-      `按钮里的 view id 与注册的不一致 —— 点了会静默无反应。\n`
-      + `  注册的是 '${registeredId}',但 XWebView 里找不到这个字面量`,
-    ).toBe(true);
-  });
 });
 
 
@@ -203,7 +173,7 @@ describe('⭐⭐ 运营 view', () => {
     /** SlotPickerPopup 列的是 navSideTab ∪ slotPickerEntry —— 有 navSideTab 就能进右栏 */
     expect(v!.navSideTab?.label).toBe('运营');
     expect(v!.component, '与别的 view 共用了组件').not.toBe(byId('x-web-view')!.component);
-    expect(v!.component).not.toBe(byId('x-workbench-view')!.component);
+    expect(v!.component).not.toBe(byId('x-web-view')!.component);
   });
 
   it('⭐ navSide 顺位不与别人撞', () => {

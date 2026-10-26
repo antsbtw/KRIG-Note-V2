@@ -211,13 +211,6 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
     expect(fn).toMatch(/if \('refused' in r\) \{[\s\S]{0,160}setFollowNote\(`\$\{r\.refused\},没跳转/);
   });
 
-  it('⭐⭐ 操作台开采前先占住网页(被占着就不开采并说出来),结束时放自己的锁', () => {
-    const C = read('src/modules/x/XConsole.tsx');
-    expect(C).toMatch(/const lock = await acquireXPage\(wcId!, '操作台正在采集'\);\s*if \(!lock\.ok\) \{ setLockNote\(`没开采:\$\{lock\.why\}`\); return; \}\s*setLockNote\(null\);\s*setRunning\(true\);/);
-    expect(C).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);\s*setRunning\(false\);/);
-    /** ⚠️ 旧写法(useEffect 里直接写忙)会盖掉 / 清掉后台查回关的忙 */
-    expect(C).not.toMatch(/setXHostBusy/);
-  });
 
   it('⭐ 人卡的按钮与点人走同一个 openInX(判断只有一份)', () => {
     expect(PAGE).toMatch(/onOpenInX=\{\(person\) => openInX\(person\)\}/);
