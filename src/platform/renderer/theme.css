@@ -119,4 +119,16 @@
   --logout-text:       #ef4444;
   --logout-bg-hover:   #fee2e2;
   --logout-text-hover: #dc2626;
+
+  /*
+   * ── X 模块用的名字(2026-10-26)──
+   * X 面板写的是 var(--text-primary, #ddd) 这类,名字原来没定义 → 浅色下落到给深色配的兜底色,白底淡灰字看不清
+   * (用户在 Windows 浅色截图报的)。深色那段不加:深色下兜底色本来就对,Mac 上看起来一点不变。
+   */
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --border-color:   #cbd5e1;
+  --accent-color:   #2563eb;
+  --bg-primary:     #ffffff;
+  --bg-secondary:   #f1f5f9;
 }
