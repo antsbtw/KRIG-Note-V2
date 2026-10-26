@@ -350,67 +350,7 @@ describe('⭐⭐ scriptId 字面量两边必须一致(不 import 的代价)', ()
     expect(branch, 'goto 没收语义页面名').toMatch(/readonly\s+name\s*:\s*string/);
   });
 
-  it('⭐ Console 的页面名下拉**从真表读**,不许面板抄一份', () => {
-    /**
-     * ⚠️ 旧实现的注释专门记了这条:面板抄一份清单就会漂,
-     * 而漂的表现是「**面板上有这个名字、点下去说没登记**」。
-     * ⭐ 本条钉:Console 里不许出现写死的 `x.` 页面名字面量。
-     */
-    const console = strip(readFileSync(join(ROOT, 'src/modules/x/XConsole.tsx'), 'utf-8'));
-    expect(console, 'Console 没调 webPageListNames —— 下拉是从哪来的?')
-      .toMatch(/webPageListNames/);
-    const hardcoded = console.match(/'x\.[a-zA-Z]+'/g) ?? [];
-    expect(
-      hardcoded,
-      'Console 里写死了语义页面名 —— 必须从 listPageNames() 真表读:\n  '
-      + hardcoded.join(', '),
-    ).toEqual([]);
-  });
 
-  it('⭐⭐ Console 的参数框**按真表渲染**,不许写死「哪些页面要 handle」', () => {
-    /**
-     * ⚠️⚠️ 旧实现的原文(同族第五刀):
-     * > 真因:面板有**四处写死的正则** `/^x\.(profile|withReplies|articles)$/`
-     * > 决定「要不要显示 handle 输入框」。新页面不在里面 → 框不显示 →
-     * > 参数不传 → resolve 拿到空 handle 返回 null。
-     *
-     * ⚠️ 2026-10-01 又验了一次:Console 第一版没有参数表,
-     * 用户点 `x.profile` 直接 failed「没传参数」—— 面板不知道该填什么。
-     *
-     * ⭐ 判据:Console 里**不许出现判断页面名的条件**,
-     * 参数清单只能来自 `params`(真表)。
-     */
-    const c = strip(readFileSync(join(ROOT, 'src/modules/x/XConsole.tsx'), 'utf-8'));
-
-    // ① 真的从真表取参数
-    expect(c, '没从页面表取参数清单 —— 面板又在自己猜了')
-      .toMatch(/\.params\s*\[\s*pageName\s*\]/);
-
-    // ② ⚠️ 不许出现「按页面名分支」的写法(那就是写死清单的开端)
-    const hardcoded = c.match(/x\.(profile|withReplies|status|home)/g) ?? [];
-    expect(
-      hardcoded,
-      'Console 里出现了写死的页面名 —— 下一个新页面就会被漏掉\n'
-      + '(旧实现正是这么栽的:四处正则决定要不要显示输入框):\n  '
-      + hardcoded.join(', '),
-    ).toEqual([]);
-
-    /**
-     * ③ ⚠️ **参数名**同理 —— 2026-10-01 实测:
-     * 我写了 `k === 'handle' ? 'elonmusk…' : k`,于是 `tweetId` 那个框
-     * 只显示「tweetId」三个字,用户填了账号名 →
-     * 拼出 `/i/status/elonmusk` → 判据诚实超时。
-     * ⭐ 提示该放在**业务的真表**里(`PARAM_HINTS`),不放面板。
-     */
-    const paramBranch = c.match(/['"](handle|tweetId|q|days)['"]\s*(===|==|\?)/g) ?? [];
-    expect(
-      paramBranch,
-      'Console 里按**参数名**分支了 —— 提示应来自真表 hints,\n'
-      + '写在面板里的话,新参数又会只显示一个光秃秃的字段名:\n  '
-      + paramBranch.join(', '),
-    ).toEqual([]);
-    expect(c, '没用真表的 hints —— placeholder 是从哪来的?').toMatch(/hints\s*\[/);
-  });
 });
 
 

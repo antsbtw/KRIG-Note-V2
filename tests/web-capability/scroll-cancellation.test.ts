@@ -140,40 +140,6 @@ describe('⭐⭐ 接线:「停」必须停两件事', () => {
   });
 });
 
-describe('⭐⭐ 面板:「停翻页」要点得到', () => {
-  const panel = readFileSync(
-    resolve(__dirname, '../../src/modules/x/XConsole.tsx'), 'utf-8',
-  ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-
-  it('⭐⭐ 「停」类按钮不许被 busy 挡住', () => {
-    /**
-     * ⚠️⚠️ 用户 2026-10-02:「点击停它不停的呀?看到 button 没有反应?」
-     * 真因:`disabled` 含 `busy`,而 scrollUntil 跑 30 轮要 20 多秒,
-     * **期间所有按钮都是灰的** —— 包括「停」。
-     * ⭐ 「停」是取消动作,恰恰该在忙的时候可用。
-     */
-    /**
-     * ⚠️ 2026-10-02 更新:`captureStop` 已被 `acquire` 收编
-     * (用户:「不是选择用哪条腿…上层只关注某个具体的目标」),
-     * 面板上现在只剩 `scrollStop` 这一个显式的「停」。
-     * ⭐ 钉的仍是同一条行为:**取消动作不许被 busy 挡住**。
-     */
-    for (const op of ['scrollStop']) {
-      const i = panel.indexOf(op);
-      expect(i, `${op} 的按钮不见了`).toBeGreaterThan(-1);
-      // 往回找这个按钮的 disabled
-      const head = panel.lastIndexOf('<button', i);
-      expect(head, `${op} 找不到所属按钮`).toBeGreaterThan(-1);
-      const btn = panel.slice(head, i);
-      expect(btn, `${op} 的按钮被 busy 挡住了 —— 忙的时候就点不动`)
-        .not.toMatch(/disabled=\{[^}]*\bdisabled\b/);
-    }
-  });
-
-  it('⭐ 控制 tab 有独立的「停翻页」', () => {
-    expect(panel, '只滚不捕时翻页停不下来').toMatch(/op: 'scrollStop'/);
-  });
-});
 
 /**
  * ⭐⭐⭐ `afterRound` —— **采集自己该做的事,不该是人点的按钮**
@@ -230,17 +196,4 @@ describe('⭐⭐ 每轮滚完给业务一个时机', () => {
       .not.toMatch(/afterRoundScript\?:\s*string/);
   });
 
-  it('⭐⭐ 面板上**不该有**「展开全部」按钮', () => {
-    /**
-     * ⭐ 用户点破的就是这个:它要人记得点、还要记得顺序。
-     * ⚠️ 判据钉「按钮没了」+「滚动时自动带上脚本」两条 ——
-     * 只钉前者会被一个「两边都没有」的实现满足(那就彻底不展开了)。
-     */
-    const panel = readFileSync(
-      resolve(__dirname, '../../src/modules/x/XConsole.tsx'), 'utf-8',
-    ).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\{\/\*[\s\S]*?\*\/\}/g, '');
-    expect(panel, '「展开全部」按钮还在 —— 它该是内部机制').not.toContain('展开全部');
-    expect(panel, '滚动时没自动展开 —— 那就彻底不展开了')
-      .toMatch(/afterRoundScriptId:\s*X_SCRIPTS\.expandAll/);
-  });
 });

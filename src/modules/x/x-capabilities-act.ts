@@ -16,7 +16,7 @@ import { Bad, digits, int, modeOf, str, xCap, type O } from './x-capabilities-co
 import { judgeVpnPosts } from './x-vpn-run';
 import { draftAskReply } from './x-ask-draft';
 import { replyLangOf, vpnLink } from './x-vpn-help';
-import { runAsk } from './x-ask-run';
+import { askBusy, runAsk } from './x-ask-run';
 import { addToFollowQueue, controlFollowQueue, followQueueStatus, type FollowItem } from './x-follow-queue';
 import { resumeUnfollow, unfollowHalted, unfollowOn, verifyPersonOn } from './x-person-act';
 import { webviewPorts } from './x-collect-ports';
@@ -100,8 +100,10 @@ export function registerXActCapabilities(): void {
       };
     },
     subject: (i) => `x_author:${i.restId}`,
-    run: async (i) => {
-      const r = await runAsk(i);
+    /** 收尾(10-26):占网页归执行器(原来 runAsk 里自己占、占锁人写死「界面」) */
+    page: (i) => askBusy(i.handle),
+    run: async (i, _a, page) => {
+      const r = await runAsk(i, page.wcId);
       traceRecorder.lifecycle({ layer: 'web.net', event: 'x-ask-run', pageId: 'x-data',
         detail: { handle: i.handle, tweetId: i.tweetId, ok: r.ok, blocked: r.blocked, liked: r.liked, replied: r.replied,
           followed: r.followed, failedStep: r.failedStep, detail: r.detail } });
@@ -142,20 +144,27 @@ export function registerXActCapabilities(): void {
   // ── 第 4 步 4a:业务界面不再直接驱动网页 ──
 
   control({
-    id: 'x.page.open', describe: '左边 X 网页打开某人主页 / 某条推文(打开那一下占着网页,别人在用就不跳)',
-    inputDoc: { ...WS, page: 'profile / status', handle: 'page = profile 时:他的 handle', tweetId: 'page = status 时:推文 id' },
-    parse: (o) => {
-      if (o.page !== 'profile' && o.page !== 'status') throw new Bad('page 只认 profile / status');
-      return o.page === 'profile'
-        ? { wsId: str(o, 'wsId'), page: 'profile' as const, handle: str(o, 'handle'), tweetId: undefined }
-        : { wsId: str(o, 'wsId'), page: 'status' as const, handle: undefined, tweetId: digits(o, 'tweetId') };
+    id: 'x.page.open', describe: '左边 X 网页打开某人主页 / 某条推文 / 一个搜索(打开那一下占着网页,别人在用就不跳)',
+    inputDoc: {
+      ...WS, page: 'profile / status / search', handle: 'page = profile 时:他的 handle', tweetId: 'page = status 时:推文 id',
+      q: 'page = search 时:搜索串(配方翻译出来的那个)', f: 'page = search 时:latest / top',
     },
-    page: (i) => (i.page === 'profile' ? `打开 @${i.handle} 的主页` : `打开推文 ${i.tweetId}`),
+    parse: (o) => {
+      if (o.page !== 'profile' && o.page !== 'status' && o.page !== 'search') throw new Bad('page 只认 profile / status / search');
+      const base = { wsId: str(o, 'wsId'), handle: undefined as string | undefined, tweetId: undefined as string | undefined, q: undefined as string | undefined, f: undefined as string | undefined };
+      if (o.page === 'profile') return { ...base, page: 'profile' as const, handle: str(o, 'handle') };
+      if (o.page === 'status') return { ...base, page: 'status' as const, tweetId: digits(o, 'tweetId') };
+      if (o.f !== undefined && o.f !== 'latest' && o.f !== 'top') throw new Bad('f 只认 latest / top');
+      return { ...base, page: 'search' as const, q: str(o, 'q'), f: (o.f as string | undefined) ?? 'latest' };
+    },
+    page: (i) => (i.page === 'profile' ? `打开 @${i.handle} 的主页` : i.page === 'status' ? `打开推文 ${i.tweetId}` : `打开搜索「${(i.q ?? '').slice(0, 30)}」`),
     subject: (i) => (i.tweetId ? `x_tweet:${i.tweetId}` : undefined),
     run: async (i, _a, page) => {
       const go = i.page === 'profile'
         ? await webviewPorts(page.wcId).goto(X_PAGE_NAME.profile, { handle: i.handle as string })
-        : await webviewPorts(page.wcId).goto(X_PAGE_NAME.status, { tweetId: i.tweetId as string });
+        : i.page === 'status'
+          ? await webviewPorts(page.wcId).goto(X_PAGE_NAME.status, { tweetId: i.tweetId as string })
+          : await webviewPorts(page.wcId).goto(X_PAGE_NAME.search, { q: i.q as string, f: i.f as string });
       if (!go.ok) throw capFailed(`没打开:${go.reason ?? '?'}`);
       return { opened: true };
     },

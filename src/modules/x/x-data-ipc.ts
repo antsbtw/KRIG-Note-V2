@@ -8,14 +8,13 @@
  * 业务判据(配方怎么翻译成查询)在 `x-recipe-query.ts`,不在这儿。
  */
 
-import { ipcMain, webContents, type WebContents } from 'electron';
+import { ipcMain, webContents } from 'electron';
 
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 import { clearXHostState, getXHostState, setXHostState } from './x-host-registry';
 
-import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
-import { revokeLocks } from '@platform/main/flow/resource-lock';
+import { pageBusy, revokePage } from './x-page-lock';
 import { execute, type CapResult } from '@platform/main/capability/capability';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
@@ -32,26 +31,7 @@ export function registerXDataIpc(): void {
   if (wired) return;
   wired = true;
 
-  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, (e, p: XDataInvoke) => handle(p, e.sender));
-}
-
-/**
- * ⭐ renderer 申请的锁记在「哪个窗口申请的」名下 —— 窗口直接关掉(来不及 finally 放锁)时主进程自己收回,
- * 不然 X 网页一直「正忙」到超时。
- */
-const lockOwnerByToken = new Map<string, number>();
-const watchedSenders = new Set<number>();
-function trackSenderLock(sender: WebContents, token: string): void {
-  lockOwnerByToken.set(token, sender.id);
-  if (watchedSenders.has(sender.id)) return;
-  watchedSenders.add(sender.id);
-  const id = sender.id;
-  sender.once('destroyed', () => {
-    watchedSenders.delete(id);
-    const mine = new Set([...lockOwnerByToken].filter(([, s]) => s === id).map(([t]) => t));
-    for (const t of mine) lockOwnerByToken.delete(t);
-    if (mine.size > 0) revokeLocks((h) => mine.has(h.token), `申请它的窗口(wc#${id})关掉了,没来得及放`);
-  });
+  ipcMain.handle(IPC_CHANNELS.X_DATA_INVOKE, (_e, p: XDataInvoke) => handle(p));
 }
 
 /**
@@ -170,7 +150,7 @@ function fromCap(r: CapResult<unknown>, op?: string): XDataResult {
 }
 
 /** ⭐ 单入口 —— savePageVerify 复用 saveTweets / saveUsers 分支,不另写一份存库流程 */
-async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult> {
+async function handle(p: XDataInvoke): Promise<XDataResult> {
   {
     try {
       const capOf = CAP_OF_OP[(p as { op?: string })?.op ?? ''];
@@ -222,21 +202,10 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
           return { status: 'ok', value: { wsId: p.wsId, wcId: p.wcId } };
         }
 
-        /** ⭐⭐⭐ X 网页占用(x-page-lock)—— renderer 只申请,锁只在主进程 */
-        case 'pageAcquire': {
-          if (!Number.isInteger(p.wcId) || typeof p.purpose !== 'string' || p.purpose === '') return failed('[x.data] pageAcquire 要 wcId 和 purpose');
-          const r = acquirePage(p.wcId, p.purpose, 'ui');
-          if (r.ok && sender) trackSenderLock(sender, r.token);
-          return { status: 'ok', value: r };
-        }
-
-        case 'pageRelease': {
-          if (typeof p.token !== 'string' || p.token === '') return failed('[x.data] pageRelease 缺 token');
-          lockOwnerByToken.delete(p.token);
-          const released = releasePage(p.token);
-          return released ? { status: 'ok', value: { released } } : failed(`[x.data] pageRelease:这把锁不是你的(已放过 / 超时被收回)`);
-        }
-
+        /**
+         * X 网页占用(x-page-lock):界面只问「谁占着」;要用网页一律调能力(执行器占锁)。
+         * 收尾 10-26:pageAcquire / pageRelease(界面自带锁)拆了 —— 唯一用它的操作台已拆,留着就是绕过执行器的口子
+         */
         case 'pageBusy':
           if (!Number.isInteger(p.wcId)) return failed('[x.data] pageBusy 缺 wcId');
           return { status: 'ok', value: pageBusy(p.wcId) };

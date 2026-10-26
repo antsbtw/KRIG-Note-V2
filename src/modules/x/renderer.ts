@@ -24,7 +24,7 @@
  * | view | 位置 | 入口 | 为什么 |
  * |---|---|---|---|
  * | `x-web-view` | 左栏 | navSide tab 𝕏 | 人在用的(浏览/登录/右键提取),要全宽、长期开 |
- * | `x-workbench-view` | 右栏 | SlotPicker | 工具(采集/结果/拟回复),用完就关,不该占死一栏 |
+ * | ~~`x-workbench-view`~~ | — | — | 操作台,2026-10-26 已拆(见下方 ②) |
  *
  * ⭐ 两个独立 ⇒ 可以**只开一个**:只想浏览就不开面板,只看结果就不必开网页。
  * ⚠️ 面板走 `slotPickerEntry` 而非 `navSideTab`(与 `thought-view` 同款)——
@@ -33,7 +33,6 @@
 
 import { registerView } from '@slot/view-type-registry/register-view';
 import { XWebView } from './XWebView';
-import { XWorkbenchView } from './XWorkbenchView';
 import { XOpsView } from './XOpsView';
 import { XTaskView } from './XTaskView';
 import { registerXCommands } from './x-commands';
@@ -41,7 +40,6 @@ import { startXHostSync } from './x-host-sync';
 
 /** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
 export const X_WEB_VIEW_ID = 'x-web-view';
-export const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
 export const X_OPS_VIEW_ID = 'x-ops-view';
 export const X_TASK_VIEW_ID = 'x-task-view';
 
@@ -84,13 +82,10 @@ registerView({
   },
 });
 
-/** ② 右栏:X 的操作面板 —— ⭐ 不占 navSide,从 SlotPicker 召出、随时可关 */
-registerView({
-  id: X_WORKBENCH_VIEW_ID,
-  install: [],
-  component: XWorkbenchView,
-  slotPickerEntry: { label: 'X 操作台', icon: '🛠', order: 6 },
-});
+/**
+ * ② (已拆)X 操作台 x-workbench-view —— 2026-10-26 Module5-04 收尾:它在界面里直接驱动网页、在界面进程跑整套采集,
+ * 绕过执行器;配方搬到「任务」,调试改走开发收件箱。存着这个绑定的 ws 由 SlotArea 自愈清掉。
+ */
 
 /**
  * ③ 运营 —— ⭐ X 的**业务平台**(2026-10-07)

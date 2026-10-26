@@ -11,11 +11,11 @@
  * ⚠️ 队列在内存(重启即空,人重新勾)—— 已关注的都在动作记录里,不会丢账。
  */
 import { getXHostState } from './x-host-registry';
-import { acquirePage, pageBusy, releasePage } from './x-page-lock';
+import { pageBusy } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
 import { readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
-import { followOn } from './x-person-act';
+import { execute } from '@platform/main/capability/capability';
 
 export type FollowItem = { readonly restId: string; readonly handle: string; readonly reason?: string };
 export type FollowDone = {
@@ -24,7 +24,6 @@ export type FollowDone = {
 };
 type Queue = { items: FollowItem[]; done: FollowDone[]; current?: FollowItem; paused?: string; nextAt: number; note?: string };
 
-const BUSY = '任务:正在关注';
 const queues = new Map<string, Queue>();
 let timer: NodeJS.Timeout | null = null;
 let ticking = false;
@@ -82,19 +81,23 @@ async function step(ws: string, x: Queue): Promise<void> {
   const account = await accountForWrite(wcId);
   if (account.kind !== 'ok') { x.paused = `认不出登录的号:${account.reason} —— 已暂停`; return; }
 
-  /** ⭐⭐ 占住 X 网页(x-page-lock);上面问过之后被人抢了 → 这一步让路,人不出队 */
-  const lock = acquirePage(wcId, BUSY, 'timer');
-  if (!lock.ok) { x.note = `让路:${lock.why}`; return; }
-  const item = x.items.shift()!;
+  /**
+   * ⭐⭐ 关注一个人 = 能力 x.person.follow(收尾 10-26):占网页、记执行记录归执行器,定时器只「到点调一下」。
+   * 上面问过之后被人抢了网页 → 执行器 refused,这一拍让路,人不出队。
+   */
+  const item = x.items[0];
   x.current = item; x.note = heads;
-  /** ⭐ 关注一份(x-person-act followOn):去主页 → 点 → 核对 → 写关系 → 记动作 */
-  let done: { state: FollowDone['state']; detail?: string };
+  let r: Awaited<ReturnType<typeof execute>>;
   try {
-    done = await followOn(ws, wcId, account, item, item.reason);
+    r = await execute('x.person.follow', { wsId: ws, restId: item.restId, handle: item.handle, reason: item.reason }, { caller: 'timer' });
   } finally {
-    releasePage(lock.token);
     x.current = undefined;
   }
+  /** 只有「没动手」(refused:网页刚被人占了 / 认不出号)才让路留在队里;invalid 和 failed 一样出队 + 异常即停,免得卡死在同一个人 */
+  if (!r.ok && r.kind === 'refused') { x.note = `让路:${r.why}`; return; }
+  x.items.shift();
+  const done = r.ok ? (r.value as { state: FollowDone['state']; detail?: string })
+    : ((r.partial as { state: FollowDone['state']; detail?: string } | undefined) ?? { state: 'failed' as const, detail: r.why });
   const { state, detail } = done;
   x.done.push({ restId: item.restId, handle: item.handle, at: new Date().toISOString(), state, detail });
   if (state === 'failed') {

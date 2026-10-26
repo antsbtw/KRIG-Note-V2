@@ -4,7 +4,7 @@
  * 用户 10-16:「既然验证过了,操作台是后台,应该把编排好的流程放在主页面了。是否增加一个和运营同级的task(任务),
  * 这个任务就是蓝V互关」「应该按照设计流程,蓝V互关我们要做什么,围绕需要做的事情来展现或构建就好了。」
  * → 左:任务列表;右:选中任务要做的几件事,每件事「做到哪了 + 往下推一步的按钮」,细节点进去再看。
- * ⚠️ 业务功能只进这里 / 运营,不进操作台(操作台是测试后台,将来隐藏)。
+ * ⚠️ 业务功能只进这里 / 运营。操作台(测试后台)2026-10-26 已拆;要调试某个网页动作 → 登记成能力,从开发收件箱调。
  */
 import { useCallback, useState, type CSSProperties, type ReactElement } from 'react';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
@@ -13,15 +13,18 @@ import { XAccountBadge } from './XAccountBadge';
 import { BlueMutualTask } from './XTaskBlueMutual';
 import { RelationTask } from './XTaskRelation';
 import { VpnHelpTask } from './XTaskVpn';
+import { RecipesTask } from './XTaskRecipes';
 
 /** ⚠️ 任务清单 —— 标签与 id 同在一处 */
-type TaskId = 'blue-mutual' | 'relation' | 'vpn-help';
+type TaskId = 'blue-mutual' | 'relation' | 'vpn-help' | 'recipes';
 const TASKS: ReadonlyArray<{ id: TaskId; label: string }> = [
   { id: 'blue-mutual', label: '蓝V互关' },
   /** ⭐ 2026-10-20 用户:「在任务中添加一个"关系采集"这样的完整任务吧」 */
   { id: 'relation', label: '关系采集' },
   /** ⭐ 2026-10-23 用户:「下面再完成VPN求助配方这个任务?和蓝V互关类似了」 */
   { id: 'vpn-help', label: 'VPN求助' },
+  /** ⭐ 2026-10-26 从操作台搬来(操作台拆了);用户:「「任务」--才是真正的执行者」 */
+  { id: 'recipes', label: '搜索配方' },
 ];
 
 export function XTaskView({ workspaceId, slot }: ViewComponentProps): ReactElement {
@@ -60,6 +63,7 @@ export function XTaskView({ workspaceId, slot }: ViewComponentProps): ReactEleme
           {task === 'blue-mutual' && <BlueMutualTask key={accountKey} wsId={workspaceId} />}
           {task === 'relation' && <RelationTask key={accountKey} wsId={workspaceId} />}
           {task === 'vpn-help' && <VpnHelpTask key={accountKey} wsId={workspaceId} />}
+          {task === 'recipes' && <RecipesTask wsId={workspaceId} />}
         </div>
       </div>
     </div>

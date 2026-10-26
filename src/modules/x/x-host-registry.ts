@@ -78,7 +78,7 @@ export function subscribeXHost(cb: Listener): () => void {
  * ⚠️ 2026-10-23:「X 网页正忙」不在这里了 —— 改成主进程的资源锁(`x-page-lock.ts`,Module5-04 第 1 步)。
  * 原来这里一张 `wcId → 原因` 的表谁都能写、谁都能清,renderer 那份还同步过去覆盖主进程那份:
  * 查回关标了忙 → 操作台盖掉 → 操作台结束清掉 → 查回关还在跑,别人看不见忙。
- * renderer 要占网页:`acquireXPage` / `releaseXPage`(x-unfollow-run.ts,走 IPC)。
+ * renderer 不占网页:要用网页调能力,执行器占锁(界面自带锁 2026-10-26 拆了)。
  */
 
 /**

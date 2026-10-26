@@ -73,16 +73,14 @@ describe('接线守卫', () => {
 
   it('⭐⭐ 主进程 syncHost 真写进主进程登记表,webview 销毁自己清(连它上面的锁一起收回);syncBusy 已退役', () => {
     const ipc = strip(read('src/modules/x/x-data-ipc.ts'));
-    const host = ipc.slice(ipc.indexOf("case 'syncHost':"), ipc.indexOf("case 'pageAcquire':"));
+    const host = ipc.slice(ipc.indexOf("case 'syncHost':"), ipc.indexOf("case 'pageBusy':"));
     expect(host.length).toBeGreaterThan(100);
     expect(host).toMatch(/setXHostState\(p\.wsId, p\.wcId/);
     expect(host).toMatch(/clearXHostState\(p\.wsId\)/);
     expect(host).toMatch(/wc\.once\('destroyed'[\s\S]*revokePage\(id/);
     expect(ipc).not.toMatch(/case 'syncBusy'|case 'bgBusy'|case 'mainBusy'/);
-    /** renderer 申请的锁:申请方窗口关掉要收回 */
-    const acq = ipc.slice(ipc.indexOf("case 'pageAcquire':"), ipc.indexOf("case 'pageRelease':"));
-    expect(acq).toMatch(/acquirePage\(p\.wcId, p\.purpose, 'ui'\)/);
-    expect(acq).toMatch(/trackSenderLock\(sender, r\.token\)/);
+    /** 收尾 10-26:界面自带锁(pageAcquire / pageRelease)拆了 —— 要用网页调能力,执行器占锁 */
+    expect(ipc).not.toMatch(/case 'pageAcquire'|case 'pageRelease'/);
   });
 
   it('⭐ bg* op 调 repo;暂停/恢复先 readJob(UPSERT 不存在的 id 会建残行)', () => {
@@ -131,9 +129,9 @@ describe('接线守卫', () => {
     expect(un).toMatch(/r = await unfollowPerson\(workspaceId, p\);/);
     expect(un).toMatch(/if \('blocked' in r\) \{/);
     const run = strip(read('src/modules/x/x-unfollow-run.ts'));
-    const acq = run.slice(run.indexOf('export async function acquireXPage'), run.indexOf('export async function releaseXPage'));
-    expect(acq).toMatch(/op: 'pageAcquire'/);
-    const busyFn = run.slice(run.indexOf('export async function xPageBusy'), run.indexOf('export async function acquireXPage'));
+    expect(run).not.toMatch(/acquireXPage|op: 'pageAcquire'/);
+    const busyFn = run.slice(run.indexOf('export async function xPageBusy'), run.indexOf('export { UNFOLLOW_STATE_TEXT }'));
+    expect(busyFn.length).toBeGreaterThan(50);
     expect(busyFn).toMatch(/op: 'pageBusy'/);
   });
 });

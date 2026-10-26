@@ -39,7 +39,7 @@ vi.mock('@modules/x/x-vpn-run', () => ({
   readVpnOverview: async () => ({}), findVpnPostsWith: async () => ({ ok: true, runs: [] }), setVpnHuman: async () => undefined, prepareVpnOn: async () => ({ ok: true }),
 }));
 vi.mock('@modules/x/x-ask-draft', () => ({ draftAskReply: fake('draftAskReply', { ok: true, text: '早上好', ms: 900, examples: 3 }), readDraftRules: async () => [], setDraftRuleActive: async () => undefined }));
-vi.mock('@modules/x/x-ask-run', () => ({ runAsk: fake('runAsk', { ok: true, liked: 'ok', replied: 'ok', followed: 'ok' }) }));
+vi.mock('@modules/x/x-ask-run', () => ({ askBusy: (h: string) => `任务:正在求关 @${h}`, runAsk: fake('runAsk', { ok: true, liked: 'ok', replied: 'ok', followed: 'ok' }) }));
 vi.mock('@modules/x/x-follow-queue', () => ({
   addToFollowQueue: fakeSync('addToFollowQueue', { added: 2, skipped: 0 }),
   controlFollowQueue: fakeSync('controlFollowQueue', undefined),
@@ -143,7 +143,8 @@ describe('接线守卫:第 3 步收口', () => {
   const IPC = strip(read('src/modules/x/x-data-ipc.ts'));
   it('⭐ IPC switch 只剩底座 4 个(业务全走能力对照表;界面流程上报 3 个 2026-10-26 第 4 步退役)', () => {
     const cases = [...IPC.matchAll(/case '([a-zA-Z]+)':/g)].map((m) => m[1]).sort();
-    expect(cases).toEqual(['pageAcquire', 'pageBusy', 'pageRelease', 'syncHost']);
+    /** 收尾 10-26:界面自带锁(pageAcquire / pageRelease)拆了,只剩登记网页 + 问谁占着 */
+    expect(cases).toEqual(['pageBusy', 'syncHost']);
   });
   it('⭐ 关注队列控制按 action 分:继续 → 对外动作的能力;做了一半的结果原样给卡片', () => {
     const table = IPC.slice(IPC.indexOf('const CAP_OF_OP'), IPC.indexOf('};', IPC.indexOf('const CAP_OF_OP')));

@@ -5,7 +5,7 @@
  * 后台采集 / 操作台 / 人卡 …… 都在这里申请,在 finally 里用**自己的 token** 放。
  * 别人放不掉你的锁(旧的 `setXHostBusy(wcId, null)` 谁都能清,这正是 Module5-04 §1.3 的 bug 1)。
  *
- * ⚠️ 只在主进程用。renderer 走 IPC `pageAcquire` / `pageRelease` / `pageBusy`(x-unfollow-run.ts 的封装)。
+ * ⚠️ 只在主进程用。renderer 只能问 IPC `pageBusy`;要用网页调能力,执行器占锁。
  */
 import { acquireLock, holdsLock, lockHolder, releaseLock, revokeLocks } from '@platform/main/flow/resource-lock';
 

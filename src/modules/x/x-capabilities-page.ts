@@ -34,8 +34,8 @@ export function registerXPageCapabilities(): void {
     inputDoc: WS, parse: (o) => ({ wsId: str(o, 'wsId') }),
     /** 网页没开 = 没动手(refused),和别的能力一致(2026-10-24 Windows 真机:原来 identifyAccount 判成 failed) */
     preflight: (i) => (getXHostState(i.wsId) ? null : 'X 网页没开,认不了号'),
-    run: async (i) => {
-      const r = await identifyAccount(i.wsId);
+    run: async (i, _a, _p, caller) => {
+      const r = await identifyAccount(i.wsId, caller);
       traceRecorder.lifecycle({
         layer: 'web.net', event: `x-account-identify-${r.status}`, pageId: 'x-data',
         detail: { wsId: i.wsId, ...(r.status === 'ok' ? { handle: r.account.handle, restId: r.account.restId } : { reason: r.reason }) },

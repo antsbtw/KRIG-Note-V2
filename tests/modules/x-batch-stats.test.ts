@@ -40,7 +40,7 @@ describe('显示名也是依据(10-16 真机明细:「米丽（蓝V互关）」�
 });
 
 describe('接线', () => {
-  it('saveTweets 算统计、留痕、回给页面;操作台显示', () => {
+  it('saveTweets 算统计、留痕、回给页面', () => {
     const IPC = readFileSync(join(process.cwd(), 'src/modules/x/x-data-ipc.ts'), 'utf8');
     /** 2026-10-24 存推文搬到 x-save-batch.ts saveTweetBatch(能力 x.tweet.save);IPC 只剩对照表 */
     expect(capOfOp(IPC, 'saveTweets')).toBe('x.tweet.save');
@@ -49,15 +49,6 @@ describe('接线', () => {
     expect(body).toMatch(/const stats = summarizeBatch\(records\);/);
     expect(body).toMatch(/source: ctx\?\.source \?\? '\(empty\)', stats,/);
     expect(body).toMatch(/return \{ \.\.\.r, stats, statsLine: statsLine\(stats\) \}/);
-    expect(readFileSync(join(process.cwd(), 'src/modules/x/XConsole.tsx'), 'utf8')).toMatch(/setStep\(`本批:\$\{v\.statsLine\}`\s*\+ \(leak && leak\.seen > leak\.captured \? ` ｜ \$\{completenessLine\(leak\)\}` : ''\)\);/);
   });
 });
 
-describe('报告里的对账一行', () => {
-  it('漏采 / 一页没漏 / 没数据 三种都说清', async () => {
-    const { completenessLine } = await import('@modules/x/x-run-report');
-    expect(completenessLine({ seen: 19, captured: 2 })).toContain('漏采:浏览器收到目标数据 19 次,只采到 2 页');
-    expect(completenessLine({ seen: 5, captured: 5 })).toContain('一页没漏');
-    expect(completenessLine(undefined)).toContain('没有对账数据');
-  });
-});

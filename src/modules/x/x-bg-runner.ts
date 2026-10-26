@@ -20,7 +20,8 @@
  */
 
 import { getXHostState } from './x-host-registry';
-import { acquirePage, pageBusy, releasePage } from './x-page-lock';
+import { pageBusy } from './x-page-lock';
+import { execute } from '@platform/main/capability/capability';
 import { activeJobsForWs, wsWithActiveJobs, readJob, saveJob } from './x-bg-job-repo';
 import { BG_LIST_TABS, describeProgress, isDue, kindOf, nextTab, type BgJob, type BgListTab } from './x-bg-job';
 import { readPace as readPaceState, recordPaceOutcome } from './x-pace-repo';
@@ -221,7 +222,8 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
  * @param drive 给某 ws 的某 job 跑一段 + 存回库。注入便于测。
  */
 export async function tickOnce(
-  drive: (wsId: string, wcId: number, job: BgJob) => Promise<void>,
+  /** 不给 = 生产那条:调能力 x.bg.segment(执行器占锁 / 记一行) */
+  drive: (wsId: string, wcId: number, job: BgJob) => Promise<void> = driveViaExecutor,
   now: Date = new Date(),
 ): Promise<void> {
   const wss = await wsWithActiveJobs();
@@ -248,13 +250,10 @@ export async function tickOnce(
       if (first) waitNoteByWs.set(wsId, isDue(first, { now, wsBusy, segmentGapSec: gaps.get(first.id) ?? 120 }).why);
       continue;
     }
-    /** ⭐⭐ 占住这个网页(原 runningWc 并进 x-page-lock):查完 isDue 到这里之间被人抢了 → 这一轮让路 */
-    const lock = acquirePage(host.wcId, `后台正在采 @${due.handle}(可在人卡暂停)`, 'timer');
-    if (!lock.ok) {
-      console.log(`[x.bg] ${wsId} 让路:${lock.why}`);
-      waitNoteByWs.set(wsId, `让路:${lock.why}`);
-      continue;
-    }
+    /**
+     * ⭐⭐ 占网页归执行器(Module5-04 收尾,2026-10-26):drive 默认调能力 x.bg.segment,执行器占锁 / 记一行;
+     * 查完 isDue 到执行器占锁之间被人抢了 → 执行器 refused,这一轮让路(drive 里记下原因)
+     */
     console.log(`[x.bg] ${wsId} 开跑一段:@${due.handle} ${due.range}(${due.id})`);
     runningWs.add(wsId);
     waitNoteByWs.delete(wsId);
@@ -263,7 +262,6 @@ export async function tickOnce(
       await drive(wsId, host.wcId, due);
     } finally {
       runningWs.delete(wsId);
-      releasePage(lock.token);
       liveByWs.delete(wsId);
     }
   }
@@ -281,8 +279,22 @@ export function bgRunnerHealth(): Record<string, unknown> {
   };
 }
 
-/** 真正跑一段 + 存回库 —— tickOnce 的默认 drive(生产用) */
-async function driveSegment(_wsId: string, wcId: number, job: BgJob): Promise<void> {
+/**
+ * ⭐ tickOnce 的默认 drive(生产用):只「到点调一下」—— 占锁、记执行记录、结果格式归执行器(能力 x.bg.segment)。
+ * 被拒(网页刚被人占了 / 任务刚被暂停)= 这一轮让路,原因写给人看。
+ */
+async function driveViaExecutor(wsId: string, _wcId: number, job: BgJob): Promise<void> {
+  const r = await execute('x.bg.segment', { wsId, jobId: job.id, handle: job.handle }, { caller: 'timer' });
+  if (r.ok) return;
+  console.log(`[x.bg] ${wsId} @${job.handle} 这一段没跑${r.kind === 'refused' ? '(让路)' : ''}:${r.why}`);
+  waitNoteByWs.set(wsId, `${r.kind === 'refused' ? '让路' : '这一段没跑成'}:${r.why}`);
+}
+
+/**
+ * 真正跑一段 + 存回库 —— 能力 x.bg.segment 的 run(网页已由执行器占着)。
+ * 返回这一段之后的进度(人看的那句);saved = false 表示人在这期间暂停 / 取消了,断点没存。
+ */
+export async function driveSegment(_wsId: string, wcId: number, job: BgJob): Promise<{ saved: boolean; progress: string }> {
   const now = new Date();
   const key = paceKeyOf(job);
   const pace = await readPaceState(key);
@@ -300,11 +312,13 @@ async function driveSegment(_wsId: string, wcId: number, job: BgJob): Promise<vo
   // ⚠️ 重新读一遍再存?不:runSegment 返回的是基于传入 job 的新状态,直接存。
   // 但人可能在这期间暂停/取消了 —— 存前查一下当前状态,别把「已取消」覆盖回 running。
   const fresh = await readJob(job.id);
-  if (fresh === null) { console.log(`[x.bg] 一段跑完,但任务 ${job.id} 已被取消 —— 不存断点`); return; }
-  if (fresh.status === 'paused') { console.log(`[x.bg] 一段跑完,但任务 ${job.id} 已暂停 —— 不覆盖`); return; }
+  if (fresh === null) { console.log(`[x.bg] 一段跑完,但任务 ${job.id} 已被取消 —— 不存断点`); return { saved: false, progress: '任务已被取消,断点没存' }; }
+  if (fresh.status === 'paused') { console.log(`[x.bg] 一段跑完,但任务 ${job.id} 已暂停 —— 不覆盖`); return { saved: false, progress: '任务已暂停,没覆盖' }; }
   await saveJob(report.job);
   /** ⭐ 人看的那块屏:每段结束一行(第几页/存了几条/停在哪) */
-  console.log(`[x.bg] 一段结束 @${job.handle}:${describeProgress(report.job)}`);
+  const progress = describeProgress(report.job);
+  console.log(`[x.bg] 一段结束 @${job.handle}:${progress}`);
+  return { saved: true, progress };
 }
 
 /**
@@ -314,7 +328,7 @@ let tickEvery = DEFAULTS.tickMs;
 
 function runTick(): void {
   nextTickAt = Date.now() + tickEvery;
-  void tickOnce(driveSegment).catch((err) => {
+  void tickOnce().catch((err) => {
     // 调度自己抛错不许拖垮进程,但必须留痕
     console.warn('[x.bg] 调度一轮抛错', err);
   });
@@ -346,7 +360,7 @@ export function stopBgRunner(): void {
 let kick: ReturnType<typeof setTimeout> | null = null;
 export function kickBgRunner(delayMs = 3000): void {
   if (!timer || kick) return;
-  kick = setTimeout(() => { kick = null; void tickOnce(driveSegment).catch((err) => console.warn('[x.bg] 调度一轮抛错', err)); }, delayMs);
+  kick = setTimeout(() => { kick = null; void tickOnce().catch((err) => console.warn('[x.bg] 调度一轮抛错', err)); }, delayMs);
   kick.unref?.();
 }
 
