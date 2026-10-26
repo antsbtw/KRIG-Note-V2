@@ -1,0 +1,103 @@
+/**
+ * ⭐ 每天自动:先查回关,再给我自己的号跑关系采集(2026-10-21,用户「按照顺序做吧」第 1 件)
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { relationDailyDue } from '@modules/x/x-relation-plan';
+
+const now = Date.parse('2026-10-22T12:00:00Z');
+describe('关系采集该不该每天自动跑', () => {
+  it('没跑过 → 跑;最近一个 24 小时内建的 → 不跑;满 24 小时 → 跑', () => {
+    expect(relationDailyDue([], now)).toBe(true);
+    expect(relationDailyDue([{ status: 'done', createdAt: '2026-10-22T01:00:00Z' }], now)).toBe(false);
+    expect(relationDailyDue([{ status: 'done', createdAt: '2026-10-21T11:00:00Z' }, { status: 'failed', createdAt: '2026-10-20T11:00:00Z' }], now)).toBe(true);
+  });
+  it('有在跑 / 排队的不跑;人暂停的不自动重开', () => {
+    expect(relationDailyDue([{ status: 'running', createdAt: '2026-10-01T00:00:00Z' }], now)).toBe(false);
+    expect(relationDailyDue([{ status: 'paused', createdAt: '2026-10-01T00:00:00Z' }], now)).toBe(false);
+  });
+});
+
+const calls: string[] = [];
+let lastCheck: { at: string; ok: boolean } | null = null;
+let jobs: Array<{ self: boolean; status: string; createdAt: string }> = [];
+vi.mock('@modules/x/x-host-registry', () => ({ listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
+vi.mock('@modules/x/x-account-repo', () => ({ readWsAccount: async () => ({ restId: 'ME', handle: 'me' }) }));
+vi.mock('@modules/x/x-follow-check', () => ({ followCheckRunning: () => null }));
+/**
+ * ⭐ 2026-10-24 巡检每件事都走执行器(caller = timer):这里换掉执行器,记下调了谁、谁发起的
+ * result[id] 可改成 refused / failed 看巡检怎么接
+ */
+const result: Record<string, Record<string, unknown>> = {};
+const NAME: Record<string, string> = { 'x.followCheck.run': 'follow-check', 'x.relation.start': 'relation', 'x.engage.collect': 'engage' };
+vi.mock('@platform/main/capability/capability', () => ({
+  execute: async (id: string, input: { wsId?: string }, opts: { caller: string }) => {
+    calls.push(`${NAME[id] ?? id}:${opts.caller}`);
+    expect(input.wsId).toBe('ws-1');
+    return result[id] ?? { ok: true, value: id === 'x.relation.start' ? { ok: true, jobId: 'J' } : { ok: true, runs: [] }, callId: 'c' };
+  },
+}));
+vi.mock('@modules/x/x-follow-check-repo', () => ({ readLastFollowCheck: async () => lastCheck }));
+vi.mock('@modules/x/x-relation-task', () => ({ listRelationJobs: async () => jobs }));
+
+let engageCov: Record<string, { at?: string; oldest?: string; newest?: string }> = { mine: {}, toMe: {}, mentionMe: {} };
+vi.mock('@modules/x/x-engage-repo', () => ({ readEngageCoverage: async () => engageCov }));
+
+import { dailyUpkeepTick } from '@modules/x/x-daily-upkeep';
+
+describe('⭐⭐ 被拒不算做过(Module5-04 §1.5:原来网页忙没跑也占掉 10 分钟)', () => {
+  beforeEach(() => { calls.length = 0; for (const k of Object.keys(result)) delete result[k]; });
+  it('查回关被拒(网页被人占着)→ 说「让路」,接着看下一件(关系采集)', async () => {
+    lastCheck = null; jobs = [];
+    result['x.followCheck.run'] = { ok: false, kind: 'refused', why: 'X 网页正忙:操作台正在采集', callId: 'c' };
+    expect(await dailyUpkeepTick(now)).toBe('relation:ws-1');
+    expect(calls).toEqual(['follow-check:timer', 'relation:timer']);
+  });
+  it('三件都被拒 → 这一轮什么都没做(返回 null),10 分钟后再看', async () => {
+    lastCheck = null; jobs = []; engageCov = { mine: {}, toMe: {}, mentionMe: {} };
+    for (const id of Object.keys(NAME)) result[id] = { ok: false, kind: 'refused', why: '网页忙', callId: 'c' };
+    expect(await dailyUpkeepTick(now)).toBeNull();
+    expect(calls).toEqual(['follow-check:timer', 'relation:timer', 'engage:timer']);
+  });
+  it('做了没成(failed)→ 算这一轮做了一件(响一声,不往下抢)', async () => {
+    lastCheck = null; jobs = [];
+    result['x.followCheck.run'] = { ok: false, kind: 'failed', why: '翻页出错', callId: 'c' };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect(await dailyUpkeepTick(now)).toBe('follow-check:ws-1');
+    expect(calls).toEqual(['follow-check:timer']);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+});
+
+describe('一轮只做一件:先查回关,再关系采集', () => {
+  beforeEach(() => { calls.length = 0; for (const k of Object.keys(result)) delete result[k]; });
+  it('查回关到点 → 只查回关', async () => {
+    lastCheck = null; jobs = [];
+    expect(await dailyUpkeepTick(now)).toBe('follow-check:ws-1');
+    expect(calls).toEqual(['follow-check:timer']);
+  });
+  it('查回关今天做过 → 关系采集(标 auto)', async () => {
+    lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [];
+    expect(await dailyUpkeepTick(now)).toBe('relation:ws-1');
+    expect(calls).toEqual(['relation:timer']);
+  });
+  it('前两件做过 → 采互动(三条里有没采过的)', async () => {
+    lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
+    engageCov = { mine: {}, toMe: {}, mentionMe: {} };
+    expect(await dailyUpkeepTick(now)).toBe('engage:ws-1');
+    expect(calls).toEqual(['engage:timer']);
+  });
+  it('三件都做过 → 什么都不做', async () => {
+    lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: true, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
+    /** 最近 7 天已采全、刚补过新的 → 不到 3 小时不再采 */
+    const at = new Date(now - 60 * 60_000).toISOString();
+    const full = { oldest: '2026-10-01T00:00:00Z', newest: at, at };
+    engageCov = { mine: full, toMe: full, mentionMe: full };
+    expect(await dailyUpkeepTick(now)).toBeNull();
+    expect(calls).toEqual([]);
+  });
+  it('别人的名单任务不算(只看我自己的)', async () => {
+    lastCheck = { at: '2026-10-22T08:00:00Z', ok: true }; jobs = [{ self: false, status: 'done', createdAt: '2026-10-22T09:00:00Z' }];
+    expect(await dailyUpkeepTick(now)).toBe('relation:ws-1');
+  });
+});

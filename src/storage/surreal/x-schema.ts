@@ -1766,6 +1766,572 @@ DEFINE INDEX IF NOT EXISTS idx_collect_log_at ON x_collect_log FIELDS at;
 `;
 
 /**
+ * ⭐⭐ 1.2.40 —— 任务「VPN求助」(2026-10-23)
+ * 用户 10-23:「下面再完成VPN求助配方这个任务?和蓝V互关类似了,先找到VPN的求助贴,再筛选有价值的,然后再草拟回复对方的方法。」
+ * 用户选:先帮忙再带链接 · 只回 24 小时内的 · Gemma 先判、我抽看推翻。
+ * · x_vpn_post:配方找到的一条求助帖一行(id = 推文 id)—— Gemma 的判断 + 你的推翻 + 回没回
+ * · x_vpn_reply:回复一次一行(只追加)—— 也是「回复求助」的范例库,和求关 / 互动分开
+ * · x_draft_note / x_defer 的 mode 加上 vpn(点评 / 放一放按任务分开)
+ */
+const X_SCHEMA_1_2_40 = `
+DEFINE TABLE IF NOT EXISTS x_vpn_post SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account        ON x_vpn_post TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_id       ON x_vpn_post TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS recipe         ON x_vpn_post TYPE string;
+DEFINE FIELD IF NOT EXISTS author_rest_id ON x_vpn_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS author_handle  ON x_vpn_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS posted_at      ON x_vpn_post TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS found_at       ON x_vpn_post TYPE datetime;
+-- Gemma:worth / direction(out 出海 · in 回国 · none)/ reason / translation / model / ms
+DEFINE FIELD IF NOT EXISTS verdict        ON x_vpn_post TYPE option<object> FLEXIBLE;
+DEFINE FIELD IF NOT EXISTS judged_at      ON x_vpn_post TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS judge_error    ON x_vpn_post TYPE option<string>;
+-- 你的推翻:accept = 值得回 / reject = 不值得
+DEFINE FIELD IF NOT EXISTS human          ON x_vpn_post TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['accept', 'reject'];
+DEFINE FIELD IF NOT EXISTS human_at       ON x_vpn_post TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS replied_at     ON x_vpn_post TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_vpn_post ON x_vpn_post FIELDS account, found_at;
+
+DEFINE TABLE IF NOT EXISTS x_vpn_reply SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_vpn_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person        ON x_vpn_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person_handle ON x_vpn_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_vpn_reply TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_vpn_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_text    ON x_vpn_reply TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_source  ON x_vpn_reply TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reply_id      ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS liked         ON x_vpn_reply TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS replied       ON x_vpn_reply TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS failed_step   ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS failed_detail ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_vpn_reply TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at            ON x_vpn_reply TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_vpn_reply ON x_vpn_reply FIELDS account, at;
+
+DEFINE FIELD OVERWRITE mode ON x_draft_note TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
+DEFINE FIELD OVERWRITE mode ON x_defer TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
+`;
+
+/**
+ * ⭐ 1.2.41 —— 卡片队列 x_card_queue(2026-10-26,Module5-04 第 4 步 4c)
+ * 用户 10-26 选「现在就把卡片队列搬到主进程」:这一批人 / 第几张 / 前面每张的结果存在这里,关窗口、重启 app 后还停在那一张。
+ * 一个号一种卡一行(id = <wsId>:<mode>);state 存 JSON 文本(数组里的对象 FLEXIBLE 不下传,记忆 project-surreal-flexible-parse-error)。
+ */
+const X_SCHEMA_1_2_41 = `
+DEFINE TABLE IF NOT EXISTS x_card_queue SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id      ON x_card_queue TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS mode       ON x_card_queue TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
+DEFINE FIELD IF NOT EXISTS state      ON x_card_queue TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS updated_at ON x_card_queue TYPE datetime;
+`;
+
+export async function x_migration_1_2_41(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_41);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_card_queue');
+  if (!('state' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.41] x_card_queue 没建起来 —— 卡片队列存不住,重启就丢');
+  console.log('[x-schema 1.2.41] 卡片队列 x_card_queue');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.41', appliedAt = $now, description = '卡片队列 x_card_queue'`,
+    { rid: new RecordId('schema_version', '1.2.41'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_40(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_40);
+  const [a, b, c] = await db.query<[{ fields?: Record<string, string> }, { fields?: Record<string, string> }, { fields?: Record<string, string> }]>(
+    'INFO FOR TABLE x_vpn_post; INFO FOR TABLE x_vpn_reply; INFO FOR TABLE x_draft_note;',
+  );
+  if (!('verdict' in (a?.fields ?? {})) || !('reply_text' in (b?.fields ?? {}))) throw new Error('[x-schema 1.2.40] x_vpn_post / x_vpn_reply 没建起来');
+  if (!String(c?.fields?.mode ?? '').includes('vpn')) throw new Error('[x-schema 1.2.40] x_draft_note.mode 没加上 vpn');
+  console.log('[x-schema 1.2.40] 任务「VPN求助」x_vpn_post / x_vpn_reply');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.40', appliedAt = $now, description = '任务「VPN求助」x_vpn_post / x_vpn_reply'`,
+    { rid: new RecordId('schema_version', '1.2.40'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐ 1.2.39 —— 先放一放 x_defer(2026-10-23)
+ * 用户 10-23:「近期已经放一放的,就先不要列表在下面了吧,否则不是重复的勾选它?」
+ * 一次放一放一行(只追加);名单只藏「最近 DEFER_DAYS 天放一放过」的人,过了自动回来。求关 / 互动各算各的。
+ */
+const X_SCHEMA_1_2_39 = `
+DEFINE TABLE IF NOT EXISTS x_defer SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account  ON x_defer TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person   ON x_defer TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS mode     ON x_defer TYPE string ASSERT $value INSIDE ['ask', 'engage'];
+DEFINE FIELD IF NOT EXISTS tweet_id ON x_defer TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at       ON x_defer TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_defer ON x_defer FIELDS account, mode, at;
+`;
+
+export async function x_migration_1_2_39(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_39);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_defer');
+  if (!('person' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.39] x_defer 没建起来');
+  console.log('[x-schema 1.2.39] 先放一放 x_defer');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.39', appliedAt = $now, description = '先放一放 x_defer'`,
+    { rid: new RecordId('schema_version', '1.2.39'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.38 —— 你对 AI 草稿的点评 x_draft_note(2026-10-22)
+ * 用户 10-22:「在回复框增加一个我对AI回复提出要求的窗口(点评),要求AI如何调整回复的内容、语气等。
+ *  达到训练AI或者通过AI来找到我想要的回复方法。」
+ * 一次点评一行(只追加):对着哪条帖子、改之前的草稿、你的点评、改之后的草稿。
+ * keep = 「以后都这样」→ 成为长期要求,每次草拟都带上;active = 还生效(你可以停掉,行不删,留痕)。
+ */
+const X_SCHEMA_1_2_38 = `
+DEFINE TABLE IF NOT EXISTS x_draft_note SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account    ON x_draft_note TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS mode       ON x_draft_note TYPE string ASSERT $value INSIDE ['ask', 'engage'];
+DEFINE FIELD IF NOT EXISTS note       ON x_draft_note TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS keep       ON x_draft_note TYPE bool;
+DEFINE FIELD IF NOT EXISTS active     ON x_draft_note TYPE bool;
+DEFINE FIELD IF NOT EXISTS tweet_text ON x_draft_note TYPE string;
+DEFINE FIELD IF NOT EXISTS draft_before ON x_draft_note TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS draft_after  ON x_draft_note TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at         ON x_draft_note TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_draft_note ON x_draft_note FIELDS account, mode;
+`;
+
+export async function x_migration_1_2_38(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_38);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_draft_note');
+  if (!('note' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.38] x_draft_note 没建起来');
+  console.log('[x-schema 1.2.38] 你对 AI 草稿的点评 x_draft_note');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.38', appliedAt = $now, description = '你对 AI 草稿的点评 x_draft_note'`,
+    { rid: new RecordId('schema_version', '1.2.38'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.37 —— 互动记录 x_engage(2026-10-22,蓝V互关第 3 件事)
+ * 已互关的蓝V,一次互动一行(只追加):回他哪条 → 我回了什么 → 点赞 / 回复结果。和 x_ask(求关)分开:
+ * 求关留言和日常互动口吻不同,范例库与「原样通过率」各算各的(设计文档 §3:放手按场景分开统计)。
+ */
+const X_SCHEMA_1_2_37 = `
+DEFINE TABLE IF NOT EXISTS x_engage SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_engage TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person        ON x_engage TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person_handle ON x_engage TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_engage TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_engage TYPE string;
+-- his-message = 回他找我的那条;latest = 他最近的原创;other = 人换了一条
+DEFINE FIELD IF NOT EXISTS pick_kind     ON x_engage TYPE string ASSERT $value INSIDE ['his-message', 'latest', 'other'];
+DEFINE FIELD IF NOT EXISTS reply_text    ON x_engage TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_source  ON x_engage TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reply_id      ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS liked         ON x_engage TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS replied       ON x_engage TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS failed_step   ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS failed_detail ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_engage TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at            ON x_engage TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_engage_person ON x_engage FIELDS account, person;
+`;
+
+export async function x_migration_1_2_37(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_37);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_engage');
+  if (!('reply_text' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.37] x_engage 没建起来');
+  console.log('[x-schema 1.2.37] 互动记录 x_engage');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.37', appliedAt = $now, description = '互动记录 x_engage'`,
+    { rid: new RecordId('schema_version', '1.2.37'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐ 1.2.36 —— 采互动的连续覆盖边界 x_engage_cursor(2026-10-22)
+ * 一条搜索一行(id = 号:mine / toMe / mentionMe):连续覆盖到的最早 / 最新时间。
+ * ⚠️ 不能从库里「最早一条推文」推算:库里有别的搜索留下的零散旧推文(真机 09-04),会把中间空档当成已覆盖。
+ */
+const X_SCHEMA_1_2_36 = `
+DEFINE TABLE IF NOT EXISTS x_engage_cursor SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS oldest     ON x_engage_cursor TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS newest     ON x_engage_cursor TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS updated_at ON x_engage_cursor TYPE datetime;
+`;
+
+export async function x_migration_1_2_36(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_36);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_engage_cursor');
+  if (!('oldest' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.36] x_engage_cursor 没建起来');
+  console.log('[x-schema 1.2.36] 采互动的连续覆盖边界 x_engage_cursor');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.36', appliedAt = $now, description = '采互动连续覆盖边界 x_engage_cursor'`,
+    { rid: new RecordId('schema_version', '1.2.36'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.35 —— 关系采集任务 + 节奏自调(2026-10-20)
+ *
+ * 用户 10-20:「在任务中添加一个"关系采集"这样的完整任务吧…1、先读取用户的bio,了解现状,followers/following/verified followers;
+ *  2、比对库中的差距;制定采集策略,然后自动采集,并显示进度。」
+ * 「这些是配置项,没有必要用户做配置,而是AI执行这些任务时自我优化就可以了。根据限流出现的不同来调整这些参数。」
+ * ① x_bg_job:target_self(采的是不是我自己的号)/ plan_json(读到的现状 + 每个名单的策略)/ stats_json(每个名单采了多少)
+ *    —— 存 JSON 字符串:SCHEMAFULL 下 object FLEXIBLE 不往下传(记忆 project-surreal-flexible-parse-error)
+ * ② x_pace:每种接口一行当前节奏(段间隔 / 每段页数 / 连续顺利几段);x_pace_event:每次调整只追加一条(为什么、从多少到多少)
+ */
+const X_SCHEMA_1_2_35 = `
+DEFINE FIELD IF NOT EXISTS target_self ON x_bg_job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS plan_json   ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS stats_json  ON x_bg_job TYPE option<string>;
+
+DEFINE TABLE IF NOT EXISTS x_pace SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS gap_sec    ON x_pace TYPE int;
+DEFINE FIELD IF NOT EXISTS pages      ON x_pace TYPE int;
+DEFINE FIELD IF NOT EXISTS ok_streak  ON x_pace TYPE int;
+DEFINE FIELD IF NOT EXISTS limited_at ON x_pace TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS updated_at ON x_pace TYPE datetime;
+
+DEFINE TABLE IF NOT EXISTS x_pace_event SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS pace_key ON x_pace_event TYPE string;
+DEFINE FIELD IF NOT EXISTS at       ON x_pace_event TYPE datetime;
+DEFINE FIELD IF NOT EXISTS kind     ON x_pace_event TYPE string ASSERT $value INSIDE ['slower', 'faster'];
+DEFINE FIELD IF NOT EXISTS from_gap ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS to_gap   ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS from_pages ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS to_pages ON x_pace_event TYPE int;
+DEFINE FIELD IF NOT EXISTS why      ON x_pace_event TYPE string;
+DEFINE INDEX IF NOT EXISTS idx_pace_event_at ON x_pace_event FIELDS pace_key, at;
+`;
+
+export async function x_migration_1_2_35(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_35);
+  type Info = { fields?: Record<string, string> };
+  const [job, pace] = await db.query<[Info, Info]>('INFO FOR TABLE x_bg_job; INFO FOR TABLE x_pace;');
+  if (!('plan_json' in (job?.fields ?? {}))) throw new Error('[x-schema 1.2.35] x_bg_job.plan_json 没加上');
+  if (!('gap_sec' in (pace?.fields ?? {}))) throw new Error('[x-schema 1.2.35] x_pace 没建起来');
+  console.log('[x-schema 1.2.35] 关系采集任务字段 + 节奏自调 x_pace / x_pace_event');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.35', appliedAt = $now, description = '关系采集任务 + 节奏自调'`,
+    { rid: new RecordId('schema_version', '1.2.35'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.34 —— 人卡采他的三个名单(2026-10-19)
+ *
+ * 用户 10-19:「在人卡中增加自动采集follower/following/verified followers这三个自动采集的方法吧。」
+ * 选了「后台慢慢采全」+「人卡显示名单 + 标出候选」。
+ * ① x_bg_job 加 kind(NONE = 老的帖子/回复/转发任务)+ 三个名单各自的断点 / 到底 —— 复用后台调度、暂停、跨重启续采
+ * ② x_list_member:谁在谁的名单里(只追加观察时间,不删;取关 / 被取关看 last_seen 落后就知道)
+ *    ⚠️ 不复用 x_author.list_memberships:那是「我的哪个名单采到过他」的采集痕迹,别人的名单混进去意思就错了
+ */
+const X_SCHEMA_1_2_34 = `
+DEFINE FIELD IF NOT EXISTS kind ON x_bg_job TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['timeline', 'lists'];
+DEFINE FIELD IF NOT EXISTS followers_cursor  ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS followers_done    ON x_bg_job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS following_cursor  ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS following_done    ON x_bg_job TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS verified_cursor   ON x_bg_job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS verified_done     ON x_bg_job TYPE option<bool>;
+
+DEFINE TABLE IF NOT EXISTS x_list_member SCHEMAFULL;
+-- 名单是谁的(数字 id)/ 哪个名单 / 名单里的人(数字 id)
+DEFINE FIELD IF NOT EXISTS owner      ON x_list_member TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS list       ON x_list_member TYPE string ASSERT $value INSIDE ['followers', 'following', 'verifiedFollowers'];
+DEFINE FIELD IF NOT EXISTS member     ON x_list_member TYPE string ASSERT $value != '';
+-- 哪个号看到的(名单对不同登录号可能不同:受保护号 / 屏蔽)
+DEFINE FIELD IF NOT EXISTS seen_by    ON x_list_member TYPE string;
+DEFINE FIELD IF NOT EXISTS first_seen ON x_list_member TYPE datetime;
+DEFINE FIELD IF NOT EXISTS last_seen  ON x_list_member TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_list_member_owner ON x_list_member FIELDS owner, list;
+DEFINE INDEX IF NOT EXISTS idx_list_member_member ON x_list_member FIELDS member;
+`;
+
+export async function x_migration_1_2_34(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_34);
+  type Info = { fields?: Record<string, string> };
+  const [job, lm] = await db.query<[Info, Info]>('INFO FOR TABLE x_bg_job; INFO FOR TABLE x_list_member;');
+  if (!('kind' in (job?.fields ?? {}))) throw new Error('[x-schema 1.2.34] x_bg_job.kind 没加上');
+  if (!('last_seen' in (lm?.fields ?? {}))) throw new Error('[x-schema 1.2.34] x_list_member 没建起来');
+  console.log('[x-schema 1.2.34] 后台任务加「名单」种类,建 x_list_member');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.34', appliedAt = $now, description = '后台任务加名单种类 + x_list_member'`,
+    { rid: new RecordId('schema_version', '1.2.34'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.33 —— 查回关运行记录 x_follow_check(2026-10-19,蓝V互关求关第 4 阶段)
+ *
+ * 用户 10-17:「这些动作完毕后,要记录关注时间,定期检查对方是否回关,建立和对方互动的时间线。」
+ * 用户 10-19 选「每天自动一次」—— 要跨重启记得上次什么时候查的,每次查的结果也留底(只追加)。
+ * 一次查 = 从我的 followers 第一页往下翻,直到连续见到 N 个已知关注者(追上了)或到页数上限。
+ * ⭐ caught_up = false 时,「没出现在名单里」不能当「没回关」—— 界面据此写「未确认」。
+ */
+const X_SCHEMA_1_2_33 = `
+DEFINE TABLE IF NOT EXISTS x_follow_check SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_follow_check TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_follow_check TYPE string;
+DEFINE FIELD IF NOT EXISTS trigger       ON x_follow_check TYPE string ASSERT $value INSIDE ['auto', 'manual'];
+DEFINE FIELD IF NOT EXISTS at            ON x_follow_check TYPE datetime;
+DEFINE FIELD IF NOT EXISTS ok            ON x_follow_check TYPE bool;
+DEFINE FIELD IF NOT EXISTS caught_up     ON x_follow_check TYPE bool;
+DEFINE FIELD IF NOT EXISTS pages         ON x_follow_check TYPE int;
+DEFINE FIELD IF NOT EXISTS seen          ON x_follow_check TYPE int;
+DEFINE FIELD IF NOT EXISTS new_followers ON x_follow_check TYPE int;
+-- 这次查到回关了的求关对象(数字 id)
+DEFINE FIELD IF NOT EXISTS asked_back    ON x_follow_check TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS stop_reason   ON x_follow_check TYPE string;
+DEFINE FIELD IF NOT EXISTS problem       ON x_follow_check TYPE option<string>;
+DEFINE INDEX IF NOT EXISTS idx_follow_check_account_at ON x_follow_check FIELDS account, at;
+`;
+
+export async function x_migration_1_2_33(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_33);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_follow_check');
+  if (!('caught_up' in (info?.fields ?? {}))) throw new Error('[x-schema 1.2.33] x_follow_check 没建起来');
+  console.log('[x-schema 1.2.33] 建查回关运行记录 x_follow_check');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.33', appliedAt = $now, description = '查回关运行记录 x_follow_check'`,
+    { rid: new RecordId('schema_version', '1.2.33'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.32 —— 求关:动作记录放开「点赞 / 留言」+ 求关记录表 x_ask(2026-10-17)
+ *
+ * 用户 10-17:「选择一条和互关相关的,点赞、留言求关、关注。三个动作。…这些动作完毕后,要记录关注时间,
+ *  定期检查对方是否回关,建立和对方互动的时间线。」「看来还是我自己先训练吧。」→ 计划(三个动作 + 留言进范例库)用户回「开始」。
+ * x_ask 一次求关一行(只追加):对方哪条推文 → 我留了什么 → 三个动作各自结果。
+ * ⭐ 它同时是**求关留言的范例库**:reply_source = 'human' 且 replied = 'ok' 的行 = 用户亲手写并发出去的
+ *   (记忆 project-x-ask-reply-corpus:账号上已有的回复是 Muse 自动回复,不算)。
+ */
+const X_SCHEMA_1_2_32 = `
+DEFINE FIELD OVERWRITE action ON x_action_log TYPE string ASSERT $value INSIDE ['unfollow', 'follow', 'like', 'reply'];
+
+DEFINE TABLE IF NOT EXISTS x_ask SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account       ON x_ask TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person        ON x_ask TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person_handle ON x_ask TYPE string;
+DEFINE FIELD IF NOT EXISTS tweet_id      ON x_ask TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS tweet_text    ON x_ask TYPE string;
+DEFINE FIELD IF NOT EXISTS pick_kind     ON x_ask TYPE string ASSERT $value INSIDE ['tweet', 'bio-latest', 'other'];
+DEFINE FIELD IF NOT EXISTS reply_text    ON x_ask TYPE string;
+DEFINE FIELD IF NOT EXISTS reply_source  ON x_ask TYPE string ASSERT $value INSIDE ['human', 'ai'];
+DEFINE FIELD IF NOT EXISTS ai_text       ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS reply_id      ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS liked         ON x_ask TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS replied       ON x_ask TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS followed      ON x_ask TYPE option<string> ASSERT $value = NONE OR $value INSIDE ['ok', 'already', 'failed'];
+DEFINE FIELD IF NOT EXISTS failed_step   ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS failed_detail ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS ws_id         ON x_ask TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS at            ON x_ask TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_ask_person ON x_ask FIELDS account, person;
+DEFINE INDEX IF NOT EXISTS idx_ask_at     ON x_ask FIELDS at;
+`;
+
+export async function x_migration_1_2_32(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_32);
+  type Info = { fields?: Record<string, string> };
+  const [log, ask] = await db.query<[Info, Info]>('INFO FOR TABLE x_action_log; INFO FOR TABLE x_ask;');
+  if (!String(log?.fields?.action ?? '').includes("'reply'")) throw new Error('[x-schema 1.2.32] x_action_log.action 没放开 like / reply');
+  if (!('reply_text' in (ask?.fields ?? {}))) throw new Error('[x-schema 1.2.32] x_ask 没建起来');
+  console.log('[x-schema 1.2.32] 求关:动作记录放开点赞 / 留言,建 x_ask');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.32', appliedAt = $now, description = '求关:动作记录放开点赞 / 留言,建 x_ask'`,
+    { rid: new RecordId('schema_version', '1.2.32'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐ 1.2.31 —— 动作记录放开「关注」(2026-10-16,蓝V互关 M4;改表用户 10-16 已确认)
+ * 原来 ASSERT 只认 unfollow。⚠️ 用 OVERWRITE 改断言(IF NOT EXISTS 不会改已有字段;临时库 3.0.4 验过)。
+ */
+const X_SCHEMA_1_2_31 = `
+DEFINE FIELD OVERWRITE action ON x_action_log TYPE string ASSERT $value INSIDE ['unfollow', 'follow'];
+DEFINE INDEX IF NOT EXISTS idx_action_log_target ON x_action_log FIELDS action, target_rest_id;
+`;
+
+export async function x_migration_1_2_31(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_31);
+  const [info] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_action_log');
+  if (!String(info?.fields?.action ?? '').includes("'follow'")) throw new Error('[x-schema 1.2.31] x_action_log.action 没放开 follow');
+  console.log('[x-schema 1.2.31] 动作记录放开「关注」');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.31', appliedAt = $now, description = '动作记录放开「关注」'`,
+    { rid: new RecordId('schema_version', '1.2.31'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.30 —— 人的**互关倾向**(2026-10-16,蓝V互关 M2;改表用户 10-16 已确认)
+ *
+ * 用户:「对有蓝V有互关倾向的(比如写了蓝V互关/浇朋友等类似属于的Bio或者帖子),进行互动求关。」
+ * 写法同「排除」(1.2.21):单字段 + 来源,人 > AI > 算法(用户 10-08);依据原句必存。
+ * ⚠️ 这是人工/判断字段 —— 采集一个都不许碰(进 USER_BUSINESS_FIELDS)。
+ */
+const X_SCHEMA_1_2_30 = `
+DEFINE FIELD IF NOT EXISTS mutual_intent          ON x_author TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS mutual_intent_source   ON x_author TYPE option<string>
+  ASSERT $value = NONE OR $value INSIDE ['human', 'ai', 'rule'];
+-- 命中的原句(「Bio:…」/「推文 <id>:…」)—— 事后说得清为何求关他
+DEFINE FIELD IF NOT EXISTS mutual_intent_evidence ON x_author TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS mutual_intent_at       ON x_author TYPE option<datetime>;
+`;
+
+export async function x_migration_1_2_30(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_30);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_author');
+  for (const f of ['mutual_intent', 'mutual_intent_source', 'mutual_intent_evidence', 'mutual_intent_at']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) throw new Error(`[x-schema 1.2.30] x_author.${f} 没建上`);
+  }
+  console.log('[x-schema 1.2.30] x_author 互关倾向字段已添加');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.30', appliedAt = $now,
+      description = '人的互关倾向(人 > AI > 算法,存依据原句)'`,
+    { rid: new RecordId('schema_version', '1.2.30'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐ 1.2.29 —— 配方补两个开关(2026-10-16,蓝V互关 M1)
+ *
+ * · blue_only:只看蓝V作者(filter:blue_verified)—— 「蓝V互关」配方要用
+ * · include_replies:连回复一起(filter:replies)—— ⚠️ **老 bug**:操作台一直有这个勾选框,
+ *   但表里没这个字段、repo 也没存没读 → 勾了存完再打开就没了,不报错。这次一起补上。
+ */
+const X_SCHEMA_1_2_29 = `
+DEFINE FIELD IF NOT EXISTS blue_only       ON search_recipes TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS include_replies ON search_recipes TYPE option<bool>;
+`;
+
+export async function x_migration_1_2_29(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_29);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE search_recipes');
+  for (const f of ['blue_only', 'include_replies']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) throw new Error(`[x-schema 1.2.29] search_recipes.${f} 没建上`);
+  }
+  console.log('[x-schema 1.2.29] 配方加 blue_only / include_replies');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.29', appliedAt = $now,
+      description = '配方加 blue_only(只看蓝V)/ include_replies(补存老勾选框)'`,
+    { rid: new RecordId('schema_version', '1.2.29'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.28 —— 关系**变化**记录 `x_relation_change`(2026-10-16,蓝V互关 M0)
+ *
+ * 用户 10-16:「你的数据表写得不聪明了,增加一个表,记录关系的变化的,不久没有这个问题啦?」
+ * x_relation 只存「当前」(每个号对每个人一行);这里**只追加、只在关系变了时写**一条 ——
+ * 名单重采几千人没变就一条不写,记录量小,又能回答「他哪天回关/取关的」。
+ * ⭐ 这个号第一次记到某人也写一条(基线:from 为 NONE)。
+ * ⭐ 变化发生在 (prev_observed_at, observed_at] 之间 —— 我们只知道两次观察之间变了,不编精确时刻。
+ * ⚠️ 1.2.27 已在真库跑过,所以另起一版,不改 1.2.27。
+ */
+const X_SCHEMA_1_2_28 = `
+DEFINE TABLE IF NOT EXISTS x_relation_change SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account          ON x_relation_change TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS person           ON x_relation_change TYPE string ASSERT $value != '';
+-- 变之前(NONE = 这个号以前没记过他)/ 变之后
+DEFINE FIELD IF NOT EXISTS from_i_follow    ON x_relation_change TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS from_follows_me  ON x_relation_change TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS to_i_follow      ON x_relation_change TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS to_follows_me    ON x_relation_change TYPE option<bool>;
+-- 看到新关系的时间 / 上一次看到旧关系的时间(变化在两者之间)
+DEFINE FIELD IF NOT EXISTS observed_at      ON x_relation_change TYPE datetime;
+DEFINE FIELD IF NOT EXISTS prev_observed_at ON x_relation_change TYPE option<datetime>;
+-- 从哪看到的:followers / following / tweet-authors / profile-refresh / migration
+DEFINE FIELD IF NOT EXISTS source           ON x_relation_change TYPE string;
+DEFINE INDEX IF NOT EXISTS idx_relchange_account_person ON x_relation_change FIELDS account, person;
+DEFINE INDEX IF NOT EXISTS idx_relchange_account_at     ON x_relation_change FIELDS account, observed_at;
+`;
+
+export async function x_migration_1_2_28(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_28);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_relation_change');
+  for (const f of ['account', 'person', 'from_i_follow', 'to_follows_me', 'observed_at', 'prev_observed_at', 'source']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) {
+      throw new Error(`[x-schema 1.2.28] x_relation_change.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  console.log('[x-schema 1.2.28] 关系变化表 x_relation_change 已建');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.28', appliedAt = $now,
+      description = '关系变化记录 x_relation_change(只在变了时追加)'`,
+    { rid: new RecordId('schema_version', '1.2.28'), now: Date.now() },
+  );
+}
+
+/**
+ * ⭐⭐ 1.2.27 —— 关系**按号**存 `x_relation`(2026-10-16,蓝V互关模块 M0)
+ *
+ * 用户 10-16:「互相覆盖是很严重的问题哦,应该是分字段,判断起来简单吧?」
+ * 原来 `x_author.i_follow / follows_me` 全库一份:X 载荷里的这两个标记是**看的那个号**的视角,
+ * 两个号采集会互相改写对方的关系,而且不报错。
+ *
+ * ⭐ 一行 = 一个号 × 一个人,record id = [号的 rest_id, 人的 rest_id]。
+ * 号用**数字 id** 不用 handle —— antsBTW → otun_myvpn 改过名,用 handle 就断。
+ * ⭐ 不在人表上按号加列:加第三个号零改表(我的判断,设计文档 §4)。
+ * ⚠️ `x_author.i_follow / follows_me` 保留不删(旧数据由 scripts/x-migrate-relation-to-account.ts 迁过来),
+ *    但**再没有代码写它、读它** —— 守卫 tests/modules/x-relation-guard.test.ts 钉着。
+ *
+ * ── x_ws_account 改为按 ws 定位 ──
+ * 旧行是随机 id(1.0.8 用 CREATE),`UPSERT type::record('x_ws_account', ws_id)` 会撞 ws_id 的 UNIQUE 索引。
+ * 这里把旧行换成 id = ws_id(字段原样搬),之后读写都按 ws 定位,不用 WHERE。
+ */
+const X_SCHEMA_1_2_27 = `
+DEFINE TABLE IF NOT EXISTS x_relation SCHEMAFULL;
+-- 哪个号看到的(号的 rest_id)
+DEFINE FIELD IF NOT EXISTS account     ON x_relation TYPE string ASSERT $value != '';
+-- 对方(人的 rest_id)
+DEFINE FIELD IF NOT EXISTS person      ON x_relation TYPE string ASSERT $value != '';
+-- 我(这个号)关注他 / 他关注我(这个号)—— 不知道就是 NONE,不当 false
+DEFINE FIELD IF NOT EXISTS i_follow    ON x_relation TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS follows_me  ON x_relation TYPE option<bool>;
+-- 这两个标记是什么时候看到的 —— 旧观察不覆盖新观察(Laosun 事故)
+DEFINE FIELD IF NOT EXISTS observed_at ON x_relation TYPE datetime;
+DEFINE INDEX IF NOT EXISTS idx_relation_account ON x_relation FIELDS account;
+`;
+
+export async function x_migration_1_2_27(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_27);
+  const info = await db.query<[{ fields?: Record<string, unknown> }]>('INFO FOR TABLE x_relation');
+  for (const f of ['account', 'person', 'i_follow', 'follows_me', 'observed_at']) {
+    if (!(f in (info?.[0]?.fields ?? {}))) {
+      throw new Error(`[x-schema 1.2.27] x_relation.${f} 没建上 —— 整段 DDL 可能被拒收`);
+    }
+  }
+  /** x_ws_account 旧行换成 id = ws_id —— 先删再建(UNIQUE 索引不许两行同 ws_id 并存) */
+  const [old] = await db.query<[Array<{ id: RecordId; ws_id: string; handle: string; rest_id?: string; detected_at: unknown }>]>(
+    'SELECT * FROM x_ws_account',
+  );
+  let rekeyed = 0;
+  for (const r of old ?? []) {
+    if (String(r.id.id) === r.ws_id) continue;
+    await db.query(
+      `DELETE $old;
+       CREATE type::record('x_ws_account', $ws) SET ws_id = $ws, handle = $handle, rest_id = $rest_id, detected_at = $at;`,
+      { old: r.id, ws: r.ws_id, handle: r.handle, rest_id: r.rest_id ?? undefined, at: r.detected_at },
+    );
+    rekeyed += 1;
+  }
+  const [after] = await db.query<[Array<{ n: number }>]>('SELECT count() AS n FROM x_ws_account GROUP ALL');
+  if ((after?.[0]?.n ?? 0) !== (old ?? []).length) {
+    throw new Error(`[x-schema 1.2.27] x_ws_account 换 id 后行数不对:之前 ${(old ?? []).length},之后 ${after?.[0]?.n ?? 0}`);
+  }
+  console.log(`[x-schema 1.2.27] 关系表 x_relation 已建;x_ws_account 换成按 ws 定位 ${rekeyed} 行`);
+  await db.query(
+    `UPSERT $rid SET version = '1.2.27', appliedAt = $now,
+      description = '关系按号存 x_relation(号 × 人);x_ws_account 按 ws 定位'`,
+    { rid: new RecordId('schema_version', '1.2.27'), now: Date.now() },
+  );
+}
+
+/**
  * ⭐⭐ 1.2.26 —— 后台采集任务 `x_bg_job`(2026-10-13,「他的朋友圈」第二步)
  *
  * 用户 2026-10-10:「可以配置获取的长度(一个月、半年、一年，全部)，如果全部时可能比较长，

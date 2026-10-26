@@ -31,3 +31,45 @@ describe('mergedItems 的腿标记', async () => {
     expect(Object.keys(m[0].requestHeaders ?? {})).toEqual(['authorization']);
   });
 });
+
+describe('⭐⭐⭐ 去重看整段内容,不看前 256 字(2026-10-16 真机:浏览器收到 49 页,合并后剩 2 页)', async () => {
+  const eng = await import('@platform/main/web-capability/wiring/web-collect-engine');
+  const PID = 'page-dedup' as never;
+  /** 同一个接口、开头 300 字一模一样(JSON 外壳),后面的推文不同 —— 翻页的真实形状 */
+  const shell = `{"data":{"search_by_raw_query":{"search_timeline":{"timeline":{"instructions":[${' '.repeat(260)}`;
+  const page = (n: number, from: string) => ({
+    url: `https://x.com/i/api/graphql/q/SearchTimeline?variables=${n}`, method: 'GET', status: 200,
+    text: `${shell}{"entryId":"tweet-${n}"}]}}}}}`, byteLength: 1, at: `2026-10-16T00:00:${String(n).padStart(2, '0')}.000Z`, from,
+  });
+
+  it('49 页开头相同、内容不同 → 49 页都在', () => {
+    const pages = Array.from({ length: 49 }, (_, i) => page(i, 'cdp'));
+    eng.sessionsByPageId.set(PID, { list: () => pages } as never);
+    eng.hooksByPageId.set(PID, { list: () => [] } as never);
+    expect(eng.mergedItems(PID, 1000)).toHaveLength(49);
+  });
+
+  it('同一条响应两条腿各一份 → 仍合成一条(both)', () => {
+    eng.sessionsByPageId.set(PID, { list: () => [page(1, 'cdp')] } as never);
+    eng.hooksByPageId.set(PID, { list: () => [page(1, 'hook')] } as never);
+    const m = eng.mergedItems(PID, 10);
+    expect(m.map((i) => i.from)).toEqual(['both']);
+  });
+
+  it('dedupKey:前缀相同、后面不同 → 键不同', () => {
+    const a = page(1, 'cdp'); const b = page(2, 'cdp');
+    expect(eng.dedupKey(a.url, 200, a.text)).not.toBe(eng.dedupKey(b.url, 200, b.text));
+  });
+});
+
+describe('⭐⭐⭐ 开始采集时两条腿的池子都清空(2026-10-16:钩子池残留上一跑的搜索结果)', () => {
+  it('startAll 里:CDP 清 clearPayloads、钩子清 clear,且都在开始收之前', async () => {
+    const src = (await import('node:fs')).readFileSync((await import('node:path')).join(process.cwd(), 'src/platform/main/web-capability/wiring/web-collect-engine.ts'), 'utf8');
+    const body = src.slice(src.indexOf('async startAll(pageId, noisy)'), src.indexOf('stopAll(pageId)'));
+    expect(body.length).toBeGreaterThan(200);
+    expect(body.indexOf('cap.clearPayloads()')).toBeGreaterThan(-1);
+    expect(body.indexOf('cap.clearPayloads()')).toBeLessThan(body.indexOf('cap.start()'));
+    expect(body.indexOf('hook.clear()')).toBeGreaterThan(-1);
+    expect(body.indexOf('hook.clear()')).toBeLessThan(body.indexOf('await hook.start()'));
+  });
+});

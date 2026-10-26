@@ -9,6 +9,8 @@
  * ② **只写有值的字段** —— 推文载荷偶尔不带关系标记;写成 NONE 会把名单采来的正确标记冲掉
  * ③ 人工字段(排除/标签/大陆背景…)一个都不碰;名单字段(list_*)也不碰 —— 这不是名单
  * ④ 配方来源只加不减(array::union)
+ * ⑥ 关系(iFollow/followsMe)**不写人表**(2026-10-16,1.2.27)—— 它是「哪个号看到的」,
+ *    由调用方按号写 x_relation(`writeRelations`);这里只把它从推文里取出来
  * ⑤ ⭐⭐ **旧的观察不许覆盖新的**(2026-10-08 真库实证):补导拿 10-05 推文里的「互不关注」
  *    覆盖了 10-08 名单采到的「互关」(Laosun)。所以每个作者带**观察时间**,
  *    只有比人表现有数据(fetched_at)更新时才写采集字段;实时采集的观察时间就是「现在」。
@@ -80,8 +82,6 @@ const FIELD_MAP: ReadonlyArray<readonly [keyof TweetAuthor, string]> = [
   ['avatar', 'avatar'],
   ['bio', 'bio'],
   ['isBlueVerified', 'is_blue_verified'],
-  ['iFollow', 'i_follow'],
-  ['followsMe', 'follows_me'],
 ];
 
 /** 导出给守卫:作者写库可能碰到的全部字段 */

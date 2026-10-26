@@ -1,0 +1,345 @@
+/**
+ * ⭐⭐ 任务「蓝V互关」第 2 件事:对有互关倾向的,互动求关(2026-10-16,M3 候选 + M4 关注队列 + M5 回访)
+ *
+ * 用户 10-16:关注=「你在候选列表里勾一批,程序按节奏慢慢关」;回访「关注后几天还没回关,就算不回关」「正确」。
+ * 主页面只放进度;点「去求关」才展开候选名单 / 队列 / 回访(用户:「围绕需要做的事情来展现」)。
+ * ⚠️ 关注在主进程按节奏跑(每日上限 / 间隔 / 随机加 —— 运营设置里可改),异常即停。
+ */
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
+import { xDataCall } from './x-data-types';
+import { getXHostState, subscribeXHost } from './x-host-registry';
+import { AskRun } from './XTaskAsk';
+import { readCards, startCards, type CardQueue, type CardWho } from './x-flow-ui';
+import { XPersonTimeline } from './XPersonTimeline';
+import { XTabs } from './XTabs';
+import { resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson } from './x-unfollow-run';
+
+import type { AskStatus } from './x-follow-back';
+
+type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
+type Prog = { followedTotal: number; followedBack: number; revisit: Array<{ rest_id: string; handle: string; followedAt: string }>; revisitDays: number; today: number; cap: number; burst: number };
+type QItem = { restId: string; handle: string };
+type QDone = { restId: string; handle: string; at: string; state: 'followed' | 'already-following' | 'failed'; detail?: string };
+type QStatus = { waiting: number; next: QItem[]; current?: QItem; paused?: string; note?: string; nextAt: number; done: QDone[]; now: number };
+
+const STATE: Record<QDone['state'], string> = { followed: '✓ 已关注', 'already-following': '· 本来就关注着', failed: '✗ 没关成' };
+
+/** 第 4 阶段:求关对象回关状态 + 上次查回关 */
+type LastCheck = { at: string; ok: boolean; caughtUp: boolean; trigger: string; pages: number; newFollowers: number; askedBack: string[]; stopReason: string; problem?: string };
+type FollowStatus = { statuses: AskStatus[]; lastCheck: LastCheck | null; running: boolean; revisitDays: number };
+const STATUS_LABEL: Record<AskStatus['status'], string> = {
+  back: '已回关', waiting: '等待中', overdue: '没回关', unconfirmed: '未确认', dropped: '已取关',
+};
+const ago = (iso: string): string => {
+  const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+  return m < 60 ? `${m} 分钟前` : m < 1440 ? `${Math.round(m / 60)} 小时前` : `${Math.round(m / 1440)} 天前`;
+};
+
+export function FollowStep({ wsId, candidates }: { wsId: string; candidates: number | undefined }): ReactElement {
+  /** ⭐ 用户 10-22「tab 中再包含 tab」:候选名单 / 求关名单 / 最近关注 */
+  const [sub, setSub] = useState<'cands' | 'asked' | 'recent'>('cands');
+  const [prog, setProg] = useState<Prog | null>(null);
+  /** 一批勾几个 = 连续关注几个后要歇(用户 10-22:「一次最多15人就开始限流15分钟了」) */
+  const burst = prog?.burst ?? 15;
+  const [qs, setQs] = useState<QStatus | null>(null);
+  const [cands, setCands] = useState<Cand[] | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [msg, setMsg] = useState<string | null>(null);
+  /** ⭐ 点了谁(高亮)—— 与「勾选」分开:点 = 左边 X 网页跳到他主页;勾 = 选进这一批 */
+  const [viewing, setViewing] = useState<string | null>(null);
+  /** ⭐ 正在求关的这一批(用户 10-17:点赞、留言求关、关注 —— 取代「勾了就直接关注」) */
+  const [asking, setAsking] = useState<CardQueue | null>(null);
+  const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
+  /** ⭐ 第 4 阶段(2026-10-19):回关状态 / 上次查 / 正在查 */
+  const [fs, setFs] = useState<FollowStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+  /** 点了哪个人名 —— 就地展开他的时间线 */
+  const [lineOf, setLineOf] = useState<string | null>(null);
+  /** 点开核对后让往来重读一遍 */
+  const [lineRev, setLineRev] = useState(0);
+  /**
+   * ⭐ 异常即停:取关失败一次就停,人看过原因点「恢复」才继续 —— 2026-10-26 起在主进程按 workspace 一份,
+   * 和运营人卡是同一个「取关已暂停」(原来两边各管各的)
+   */
+  const [unfPaused, setUnfPaused] = useState<string | null>(null);
+  useEffect(() => { void unfollowHaltOf(wsId).then(setUnfPaused); }, [wsId]);
+  /** ⭐ 4c:一打开先问主进程有没有没做完的那批(关窗口 / 重启后接着那一张);问不到说出来 */
+  useEffect(() => {
+    let alive = true;
+    void readCards(wsId, 'ask').then((r) => {
+      if (!alive) return;
+      if (!r.ok) { setMsg(`读不到没做完的那批卡:${r.why}`); return; }
+      if (r.value) setAsking(r.value);
+    });
+    return () => { alive = false; };
+  }, [wsId]);
+  const [unfDoing, setUnfDoing] = useState<string | null>(null);
+  const loadFs = useCallback(() => {
+    void xDataCall({ op: 'askFollowStatus', wsId }).then((r) => { if (r.status === 'ok') setFs(r.value as FollowStatus); });
+  }, [wsId]);
+  useEffect(() => {
+    loadFs();
+    /** 每天自动查在主进程跑,这里 30 秒看一次结果 / 在不在查 */
+    const t = setInterval(loadFs, 30_000);
+    return () => clearInterval(t);
+  }, [loadFs]);
+  const checkNow = async (): Promise<void> => {
+    setChecking(true);
+    setMsg('正在查回关:去你的 followers 从第一页往下翻,翻到上次见过的人为止…');
+    const r = await xDataCall({ op: 'followCheckRun', wsId });
+    setChecking(false);
+    if (r.status === 'failed') { setMsg(r.reason); return; }
+    const v = r.value as { pages: number; newFollowers: number; askedBack: string[]; caughtUp: boolean; problem?: string };
+    setMsg(`查完:翻了 ${v.pages} 页 · 新关注你 ${v.newFollowers} 人 · 求关过的新回关 ${v.askedBack.length} 人${v.problem ? ` · ⚠️ ${v.problem}` : ''}`);
+    loadFs();
+  };
+  const unfollowAsked = async (s: AskStatus): Promise<void> => {
+    if (wcId === null) { setMsg('X 网页没开,没法取关'); return; }
+    setUnfDoing(s.person);
+    try {
+      const who = { rest_id: s.person, handle: s.handle };
+      /** ⭐ 闸门 / 去主页 / 点 / 记动作 / 同一把锁里核对 / 异常即停 —— 都在主进程(能力 x.person.unfollow) */
+      const r = await unfollowPerson(wsId, who, `求关 ${s.askDays} 天没回关`);
+      if ('blocked' in r) { setMsg(r.blocked); void unfollowHaltOf(wsId).then(setUnfPaused); return; }
+      if (r.halted) {
+        setUnfPaused(r.halted);
+        setMsg(`@${s.handle} 没取关成:${r.detail} —— 已暂停取关`);
+      } else {
+        setMsg(`@${s.handle} ${r.done ? '已取关' : '本来就没关注'} · 核对:${r.verify?.text ?? '?'}${r.warning ? ` · ⚠️ ${r.warning}` : ''}`);
+      }
+    } finally {
+      setUnfDoing(null);
+      loadFs();
+    }
+  };
+
+  const loadProg = useCallback(() => {
+    void xDataCall({ op: 'blueMutualFollowProgress', wsId }).then((r) => { if (r.status === 'ok') setProg(r.value as Prog); });
+  }, [wsId]);
+  const loadQ = useCallback(() => {
+    void xDataCall({ op: 'followQueueStatus', wsId }).then((r) => { if (r.status === 'ok') setQs(r.value as QStatus); });
+  }, [wsId]);
+  const loadCands = useCallback(() => {
+    void xDataCall({ op: 'blueMutualCandidates', wsId, limit: 200 }).then((r) => {
+      if (r.status === 'ok') setCands(r.value as Cand[]); else setMsg(r.reason);
+    });
+  }, [wsId]);
+
+  useEffect(() => { loadProg(); loadQ(); }, [loadProg, loadQ]);
+  /** 队列在跑时每 2 秒看一次(X 无推送通道);关完一个刷新进度和候选 */
+  useEffect(() => {
+    const t = setInterval(() => {
+      loadQ();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [loadQ]);
+  const doneCount = qs?.done.length ?? 0;
+  useEffect(() => { if (doneCount > 0) { loadProg(); loadCands(); } }, [doneCount, loadProg, loadCands]);
+  useEffect(() => { if (cands === null) loadCands(); }, [cands, loadCands]);
+
+  const queued = new Set([...(qs?.next ?? []).map((i) => i.restId), qs?.current?.restId].filter(Boolean) as string[]);
+  /**
+   * ⭐ 点一个候选 → 左边 X 网页跳到他的主页(用户 10-16:「点击这个蓝V时,左边跳转到这个蓝V的profile。
+   * --注意时点击,而不是勾选,勾选是选定」)。
+   * ⚠️ 关注队列正在某人主页上点关注 / X 网页正被采集占着 → 不跳(跳走会打断),说清楚。
+   */
+  const openInX = async (c: Cand): Promise<void> => {
+    setViewing(c.rest_id);
+    if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
+    if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
+    /**
+     * ⭐ 去他主页的同时读资料、把「我和他」的关系写回库(与运营人卡的「点人顺手核对」同一个能力 x.person.verify)。
+     * 用户 10-21:「点击观察到已经互关过的推友,就应该移除这个列表吧?」—— 读到我已经关注他 → 从候选里拿掉,说清楚。
+     */
+    const v = await verifyPerson(wsId, { rest_id: c.rest_id, handle: c.handle });
+    if ('refused' in v) { setMsg(`${v.refused},没跳转(跳走会打断)`); return; }
+    if (v.kind === 'miss') { setMsg(`跳过去了,但没读到他的关系:${v.text}`); return; }
+    if (v.rec.following === true) {
+      setCands((list) => (list ?? []).filter((x) => x.rest_id !== c.rest_id));
+      setPicked((ps) => { const n = new Set(ps); n.delete(c.rest_id); return n; });
+      setMsg(`@${c.handle} ${v.rec.followedBy === true ? '已经互关了' : '你已经关注他了(他还没回关)'} —— X 上刚看到,已从候选里拿掉`);
+      loadProg();
+      return;
+    }
+    setMsg(v.kind === 'same' ? null : `@${c.handle}:${v.text}`);
+  };
+  /**
+   * ⭐ 求关名单里点名字:展开你们的往来 + 左边跳到他的主页(用户 10-23:「这个card,点击后应该自动跳转到这个用户的profile吧?」),
+   * 同时读他主页上的关系写回库、刷新名单和往来(用户 10-23:「这些数据要点开后要及时更新,否则就会列表错误」——
+   * 他刚回关了,名单还挂在「等待中」)。收起不跳;X 网页忙就不跳并说清。
+   */
+  const openAsked = async (x: AskStatus): Promise<void> => {
+    const opening = lineOf !== x.person;
+    setLineOf(opening ? x.person : null);
+    if (!opening) return;
+    if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
+    if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
+    const v = await verifyPerson(wsId, { rest_id: x.person, handle: x.handle });
+    if ('refused' in v) { setMsg(`${v.refused},没跳转(跳走会打断)`); return; }
+    if (v.kind === 'miss') { setMsg(`@${x.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
+    setMsg(v.kind === 'same' ? null : `@${x.handle}:${v.text}${v.rec.followedBy === true && x.status !== 'back' ? ' —— 他已经回关了' : ''}`);
+    /** 关系写回库了 → 名单重算、往来重读 */
+    loadFs(); loadProg();
+    setLineRev((n) => n + 1);
+  };
+  const toggle = (id: string): void => setPicked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  /**
+   * ⚠️ 10-17 撤掉「关注选中的 N 人」:只关注不求关 = 对方不回关(用户原话「莫名其妙关注,不求互关」)。
+   * 改成逐个人求关:看推文 → 选一条 → 点赞 / 留言 / 关注。
+   */
+  /** ⭐ 4c:起一批走主进程(x.cards.start) */
+  const beginAsk = async (list: readonly CardWho[]): Promise<void> => {
+    const r = await startCards(wsId, 'ask', list);
+    if (!r.ok) { setMsg(`没起成这一批:${r.why}`); return; }
+    setAsking(r.value);
+    if (r.value.replaced) setMsg(`⚠️ 盖掉了没做完的那一批(还剩 ${r.value.replaced} 张)`);
+  };
+  const startAsk = (): void => {
+    const list = (cands ?? []).filter((c) => picked.has(c.rest_id)).map((c) => ({ restId: c.rest_id, handle: c.handle, name: c.display_name }));
+    if (list.length === 0) return;
+    if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完`); return; }
+    void beginAsk(list);
+    setPicked(new Set());
+  };
+  const control = async (action: 'pause' | 'resume' | 'clear'): Promise<void> => {
+    await xDataCall({ op: 'followQueueControl', wsId, action });
+    loadQ();
+  };
+
+  const n = (k: AskStatus['status']): number => (fs?.statuses ?? []).filter((x) => x.status === k).length;
+  const secs = qs && qs.nextAt > qs.now ? Math.round((qs.nextAt - qs.now) / 1000) : 0;
+  const qLine = !qs ? '' : qs.paused ? `⏸ 已暂停:${qs.paused}`
+    : qs.current ? `▶ 正在关注 @${qs.current.handle}`
+      : qs.waiting > 0 ? `▶ 队列 ${qs.waiting} 人 · ${qs.note ?? (secs > 0 ? `下一个约 ${secs} 秒后` : '马上开始')}`
+        : '队列空着';
+
+  return (
+    <div>
+      <div>候选(蓝V · 我没关注 · 有互关倾向):{candidates ?? '…'} 人</div>
+      <div style={{ marginTop: 4 }}>
+        今天已关注 {prog ? prog.today : '…'}
+        {' '}· 求关 {fs ? fs.statuses.length : '…'} 人:已回关 {n('back')} · 等待中 {n('waiting')}
+        {' '}· 满 {fs?.revisitDays ?? 7} 天没回关 {n('overdue')}{n('unconfirmed') > 0 ? ` · 未确认 ${n('unconfirmed')}` : ''}
+      </div>
+      <div style={{ marginTop: 4, fontSize: 12 }}>
+        回关上次查:{fs?.running || checking ? '正在查…'
+          : fs?.lastCheck ? `${ago(fs.lastCheck.at)}(${fs.lastCheck.trigger === 'auto' ? '每天自动' : '手动'})· 新关注你 ${fs.lastCheck.newFollowers} 人`
+            + `,其中求关过的 ${fs.lastCheck.askedBack.length} 人${fs.lastCheck.ok ? '' : ` · ⚠️ ${fs.lastCheck.problem ?? fs.lastCheck.stopReason}`}`
+            : '还没查过'}
+        {' '}<button type="button" style={{ fontSize: 11 }} disabled={checking || fs?.running === true || wcId === null} onClick={() => void checkNow()}
+          title="去你的 followers 从第一页往下翻,翻到上次见过的人为止">现在查</button>
+      </div>
+      <div style={{ marginTop: 4, fontSize: 12 }}>{qLine}</div>
+      <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+        {qs && (qs.waiting > 0 || qs.current) && (qs.paused
+          ? <button type="button" onClick={() => void control('resume')}>继续</button>
+          : <button type="button" onClick={() => void control('pause')}>暂停</button>)}
+        {qs && qs.waiting > 0 && <button type="button" onClick={() => void control('clear')} title="清空还没关的(已关的不受影响)">清空队列</button>}
+      </div>
+      {msg && <div style={{ fontSize: 12, marginTop: 4, opacity: 0.85 }}>{msg}</div>}
+
+      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {asking && (
+            <AskRun key={asking.startedAt} wsId={wsId} initial={asking} onActed={loadProg} onPersonDone={loadCands} onEnd={(d) => {
+              setAsking(null);
+              setMsg(`这一批看完 ${d.length}/${asking.items.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+              loadCands();
+            }} />
+          )}
+          <XTabs small active={sub} onChange={(id) => setSub(id as typeof sub)} items={[
+            { id: 'cands', label: `候选名单 ${cands ? cands.length : '…'}`, body: (
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, opacity: 0.7 }}>{cands ? '粉丝多的在前' : '读取中…'}</span>
+              <button type="button" style={{ fontSize: 11 }}
+                onClick={() => setPicked(new Set((cands ?? []).filter((c) => !queued.has(c.rest_id)).slice(0, burst).map((c) => c.rest_id)))}
+                title={`一批 ${burst} 人 —— 连续关注 ${burst} 个后 X 要歇约 15 分钟(用户 10-22)`}>勾 {burst} 人</button>
+              <button type="button" style={{ fontSize: 11 }} onClick={() => setPicked(new Set())}>全不选</button>
+              <button type="button" disabled={picked.size === 0 || asking !== null} onClick={startAsk}>开始求关({picked.size} 人)</button>
+            </div>
+            <div style={{ marginTop: 6, fontSize: 12 }}>
+              {(cands ?? []).map((c) => (
+                <div key={c.rest_id} style={{
+                  display: 'flex', gap: 6, padding: '3px 0', borderBottom: '1px solid var(--border-color, #2a2a2a)',
+                  opacity: queued.has(c.rest_id) ? 0.5 : 1,
+                  background: viewing === c.rest_id ? 'var(--accent-bg, rgba(45,74,107,0.5))' : undefined,
+                }}>
+                  {/* ⚠️ 勾选框只管「选进这一批」—— 不跳转 */}
+                  <input type="checkbox" checked={picked.has(c.rest_id)} disabled={queued.has(c.rest_id)} onChange={() => toggle(c.rest_id)} />
+                  {/* ⭐ 点名字 / 依据这一块 = 左边 X 网页跳到他主页 —— 不勾选 */}
+                  <span style={{ minWidth: 0, cursor: 'pointer', flex: 1 }} onClick={() => void openInX(c)} title="左边 X 网页跳到他的主页">
+                    <strong>{c.display_name ?? c.handle}</strong> @{c.handle}
+                    {c.followers_count !== undefined && <span style={{ opacity: 0.6 }}> · 粉丝 {c.followers_count}</span>}
+                    {c.follows_me === true && <span style={{ color: '#5fc98a' }}> · 他已关注我</span>}
+                    {queued.has(c.rest_id) && <span> · 在队列里</span>}
+                    <div style={{ opacity: 0.7 }}>依据 · {c.mutual_intent_evidence ?? '—'}</div>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+            ) },
+            { id: 'asked', label: `求关名单 ${fs ? fs.statuses.length : '…'}${n('overdue') > 0 ? ` · 满 ${fs?.revisitDays ?? 7} 天没回关 ${n('overdue')}` : ''}`, body: (
+          <div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, opacity: 0.7 }}>点名字看你们的往来</span>
+              {unfPaused && <button type="button" style={{ fontSize: 11 }} onClick={() => { void resumeUnfollowOf(wsId).then(() => unfollowHaltOf(wsId)).then(setUnfPaused); setMsg(null); }} title={unfPaused}>恢复取关</button>}
+            </div>
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              {fs && fs.statuses.length === 0 && <span style={{ opacity: 0.6 }}>还没求关过谁</span>}
+              {(['overdue', 'unconfirmed', 'waiting', 'back', 'dropped'] as const).map((k) => {
+                const list = (fs?.statuses ?? []).filter((x) => x.status === k);
+                if (list.length === 0) return null;
+                return (
+                  <div key={k} style={{ marginTop: 6 }}>
+                    <div style={{ opacity: 0.75 }}>
+                      {k === 'overdue' ? `满 ${fs!.revisitDays} 天没回关(${list.length} 人)—— 你决定:再互动一次 / 取关`
+                        : k === 'unconfirmed' ? `满 ${fs!.revisitDays} 天、还没确认(${list.length} 人)—— 求关之后还没有一次完整的查回关,先点「现在查」`
+                          : `${STATUS_LABEL[k]}(${list.length} 人)`}
+                    </div>
+                    {list.map((x) => (
+                      <div key={x.person}>
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '2px 0' }}>
+                          <span style={{ cursor: 'pointer', flex: 1, minWidth: 0 }} onClick={() => void openAsked(x)} title="展开你们的往来,左边跳到他的主页">
+                            {lineOf === x.person ? '▾' : '▸'} @{x.handle} · 求关 {x.askDays} 天
+                            {x.status === 'back' && (x.alreadyBefore ? ' · 求关前就关注你了'
+                              : x.backBetween ? ` · 在 ${new Date(x.backBetween.from ?? x.askedAt).toLocaleDateString()} ~ ${new Date(x.backBetween.to).toLocaleDateString()} 之间回关` : '')}
+                          </span>
+                          {k === 'overdue' && (
+                            <>
+                              <button type="button" style={{ fontSize: 11 }} disabled={asking !== null}
+                                onClick={() => { void beginAsk([{ restId: x.person, handle: x.handle }]); }}
+                                title="再求关一次:选他一条帖子,点赞 + 留言(关注已在,会记「本来就关注着」)">再互动</button>
+                              <button type="button" style={{ fontSize: 11 }} disabled={unfDoing !== null || unfPaused !== null}
+                                onClick={() => void unfollowAsked(x)} title="去他主页取关(走取关的每日上限 / 间隔;记动作;取关后读回核对)">
+                                {unfDoing === x.person ? '取关中…' : '取关'}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {lineOf === x.person && <div style={{ margin: '2px 0 6px 14px' }}><XPersonTimeline wsId={wsId} restId={x.person} rev={lineRev} /></div>}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+            ) },
+            { id: 'recent', label: `最近关注 ${qs?.done.length ?? 0}`, hidden: (qs?.done.length ?? 0) === 0, body: (
+            <div>
+              <strong style={{ fontSize: 12 }}>最近关注</strong>
+              <div style={{ fontSize: 12, marginTop: 4 }}>
+                {(qs?.done ?? []).map((d) => (
+                  <div key={`${d.restId}-${d.at}`} style={{ color: d.state === 'failed' ? '#f87171' : undefined }}>
+                    {new Date(d.at).toLocaleTimeString()} {STATE[d.state]} @{d.handle}{d.detail ? ` —— ${d.detail}` : ''}
+                  </div>
+                ))}
+              </div>
+            </div>
+            ) },
+          ]} />
+      </div>
+    </div>
+  );
+}

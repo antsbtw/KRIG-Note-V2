@@ -9,6 +9,8 @@
  * 放在 main 用 UTC 切,晚上 8 点以后的采集会被算到第二天。
  */
 
+import { PEOPLE_WITH_RELATION } from './x-account';
+
 
 export type OpsListStat = {
   readonly name: string;
@@ -113,13 +115,14 @@ type LedgerRow = { at: string; kind: 'users' | 'tweets'; inserted: number };
  * ⭐ 状态查询的 SQL —— 与解析拆开,离线脚本能用**同一份** SQL 去问真库。
  * ⚠️ 时间一律在 SQL 里转成字符串(SDK 原样给 DateTime 类,过不了 IPC)。
  */
-export function buildOpsStatusQuery(): { readonly sql: string; readonly vars: Record<string, string> } {
+export function buildOpsStatusQuery(account: string): { readonly sql: string; readonly vars: Record<string, string> } {
+  if (account === '') throw new Error('[x.ops] 没有号的数字 id —— 关注我/我关注是按号存的');
   const expected = EXPECTED_DATASETS.map((d) =>
     `SELECT count() AS n FROM ${d.table} GROUP ALL;`).join('\n');
   /** ⚠️ 语句顺序 = parseOpsStatus 里的下标,改一边必须改另一边 */
   const sql = `
     SELECT count() AS n, count(follows_me = true) AS follows_me, count(i_follow = true) AS i_follow,
-      count(is_blue_verified = true) AS blue FROM x_author GROUP ALL;
+      count(is_blue_verified = true) AS blue FROM ${PEOPLE_WITH_RELATION} GROUP ALL;
     SELECT count() AS n FROM x_tweet GROUP ALL;
     SELECT source, count() AS n FROM x_tweet GROUP BY source;
     SELECT kind, source, origin, <string> time::max(at) AS last_at, math::sum(inserted) AS ins
@@ -131,7 +134,7 @@ export function buildOpsStatusQuery(): { readonly sql: string; readonly vars: Re
       WHERE n > 1 GROUP ALL;
     ${expected}
   `;
-  return { sql, vars: {} };
+  return { sql, vars: { acct: account } };
 }
 
 /** ⭐ 把上面那串语句的结果拆成 `OpsStatus` —— 下标与 SQL 的语句顺序一一对应 */

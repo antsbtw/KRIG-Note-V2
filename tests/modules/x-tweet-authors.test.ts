@@ -6,6 +6,7 @@
  * ⚠️ SQL 在真库上的行为本文件证明不了 —— 交付前在临时库演练。
  */
 import { describe, it, expect } from 'vitest';
+import { saveFnBody } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { authorsFromTweets, buildAuthorUpsert, TWEET_AUTHOR_FIELDS } from '@modules/x/x-tweet-authors';
@@ -97,13 +98,16 @@ describe('「互不关注」与「关系不明」', () => {
 });
 
 describe('接线', () => {
-  const IPC = read('src/modules/x/x-data-ipc.ts');
-  const body = IPC.slice(IPC.indexOf("case 'saveTweets':"), IPC.indexOf("case 'saveUsers':"));
+  /** 2026-10-24 存推文搬到 x-save-batch.ts saveTweetBatch(能力 x.tweet.save) */
+  void read;
+  const body = saveFnBody('saveTweetBatch');
 
   it('⭐⭐⭐ 存推文后顺带写作者,对回配方名,并记账(否则对账差出这批新人)', () => {
     expect(body.length).toBeGreaterThan(500);
-    expect(body).toMatch(/recipeNameForQuery\(p\.ctx\?\.searchRecipe, recipes\)/);
-    expect(body).toMatch(/await saveTweetAuthors\(p\.records, recipeName\)/);
+    /** 第 5 步(10-26):逐页存推也走这里,调用方已知配方名就直接给(ctx.recipeName),不给才按 searchRecipe 对配方表 */
+    expect(body).toMatch(/ctx\?\.recipeName \?\? recipeNameForQuery\(ctx\?\.searchRecipe, /);
+    /** ⭐ 1.2.27:作者的关系是采集网页登录的号看到的 —— 先认号,再按号写 */
+    expect(body).toMatch(/const account = await accountForWrite\(ctx\?\.wcId\);\s*const a = await saveTweetAuthors\(records, recipeName, account\)/);
     expect(body).toMatch(/kind: 'users', source: 'tweet-authors'/);
   });
 
@@ -111,7 +115,8 @@ describe('接线', () => {
     const i = body.indexOf('await saveTweetAuthors');
     const tryAt = body.lastIndexOf('try {', i);
     expect(tryAt, '写作者不在 try 里').toBeGreaterThan(-1);
-    const catchBody = body.slice(body.indexOf('} catch (e) {', i), body.indexOf("return { status: 'ok', value: r };", i));
+    const catchBody = body.slice(body.indexOf('} catch (e) {', i), body.indexOf('return { ...r, stats', i));
+    expect(catchBody.length).toBeGreaterThan(30);
     expect(catchBody).toMatch(/traceRecorder\.lifecycle/);
     expect(catchBody).not.toMatch(/return failed/);
   });
@@ -127,8 +132,10 @@ describe('⭐⭐⭐ 旧的观察不许覆盖新的(2026-10-08 Laosun 那次)', (
    * 临时库验过:旧推文 vs 新名单 → 不动;新推文 vs 旧数据 → 更新;新人 → 写入;实时 → 更新。
    */
   it('采集字段都带「比库里新才写」的条件;fetched_at 是最后一个赋值', () => {
-    const q = buildAuthorUpsert({ restId: '1', handle: 'h', iFollow: false, followsMe: false, ...OBS }, 'R');
-    for (const col of ['handle', 'i_follow', 'follows_me', 'fetched_at']) {
+    const q = buildAuthorUpsert({ restId: '1', handle: 'h', isBlueVerified: true, iFollow: false, followsMe: false, ...OBS }, 'R');
+    /** ⭐ 1.2.27:关系不写人表(按号写 x_relation)—— 载荷带了也不出现 */
+    expect(q.sql).not.toMatch(/\bi_follow\b|\bfollows_me\b/);
+    for (const col of ['handle', 'is_blue_verified', 'fetched_at']) {
       expect(q.sql, `${col} 没带时间条件`).toMatch(new RegExp(`${col} = IF \\(fetched_at = NONE OR fetched_at <= type::datetime\\(\\$obs\\)\\) THEN`));
     }
     const sets = q.sql.slice(q.sql.indexOf(' SET ') + 5, q.sql.indexOf(' RETURN'));

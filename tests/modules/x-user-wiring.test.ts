@@ -15,6 +15,7 @@
  * ⚠️ 本文件证明「每一环都在且对得上」,**不是**「点了真会采到人」——那要真机。
  */
 import { describe, it, expect } from 'vitest';
+import { capBlock, capOfOp, ipcHandles, readCapBlock, saveFnBody } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { X_USER_LIST_PAGES, PAGE_PARAMS } from '@modules/x/x-pages';
 
@@ -113,25 +114,24 @@ describe('一个入口:采到人就存', () => {
   });
 
   it('⭐⭐⭐ IPC 拒收空 listSource —— 它会永久留在人的档案里', () => {
-    const i = IPC.indexOf("case 'saveUsers':");
-    expect(i).toBeGreaterThan(-1);
-    const body = IPC.slice(i, IPC.indexOf("case 'delete':", i));
+    /** 2026-10-24 迁到能力 x.user.save:空 listSource 在参数校验里拒(invalid) */
+    const body = capBlock('x.user.save');
     expect(body.length).toBeGreaterThan(200);
-    expect(body).toMatch(/listSource !== 'string' \|\| p\.ctx\.listSource\.trim\(\) === ''/);
-    expect(body).toMatch(/return failed\(/);
+    expect(body).toMatch(/listSource !== 'string' \|\| ctx\.listSource\.trim\(\) === ''/);
+    expect(body).toMatch(/throw new Bad\(/);
   });
 
   it('⭐⭐⭐ 契约与 handler 两边都有 saveUsers', () => {
     /** ⚠️ 契约有、handler 没有 = 点了静默回「不认识的 op」 */
     expect(TYPES).toMatch(/op: 'saveUsers'/);
-    expect(IPC).toMatch(/case 'saveUsers':/);
+    expect(ipcHandles(IPC, 'saveUsers')).toBe(true);
     /** ⚠️ 同一行还会 import 别的(saveTweetAuthors)—— 钉「saveUsers 从 repo 来」,不钉整行字面 */
-    expect(IPC).toMatch(/import \{[^}]*\bsaveUsers\b[^}]*\} from '\.\/x-user-repo'/);
+    expect(require('node:fs').readFileSync(require('node:path').join(process.cwd(), 'src/modules/x/x-save-batch.ts'), 'utf8')).toMatch(/import \{[^}]*\bsaveUsers\b[^}]*\} from '\.\/x-user-repo'/);
   });
 
   it('⭐⭐ 落库结果落盘 —— 不然「报了 N 条库里 0 行」只能去猜', () => {
-    const i = IPC.indexOf("case 'saveUsers':");
-    const body = IPC.slice(i, IPC.indexOf("case 'delete':", i));
+    const body = saveFnBody('saveUserBatch');
+    expect(body.length).toBeGreaterThan(200);
     expect(body).toMatch(/traceRecorder\.lifecycle\(/);
     expect(body).toMatch(/x-save-users-ok/);
     expect(body).toMatch(/x-save-users-incomplete/);
@@ -142,7 +142,11 @@ describe('一个入口:采到人就存', () => {
   it('⭐⭐⭐ 面板要显示「解出多少」和「存了多少」两个数', () => {
     /** ⚠️ 合成一个数就是「面板报 44、库里 0」那家族的起点 */
     expect(CONSOLE).toMatch(/解出 <strong>\{userRun\.users\}<\/strong>/);
-    expect(CONSOLE).toMatch(/新 <strong>\{userRun\.saved\.inserted\}<\/strong>/);
+    /** 2026-10-19:「入库 新」看按页累计(整批复存那一遍新增必为 0,用户截图误以为失效);整批那遍仍并排写出 */
+    expect(CONSOLE).toMatch(/入库 新 <strong>\{userRun\.pageInserted\}<\/strong>/);
+    expect(CONSOLE).toMatch(/采完整批复存:新 \{userRun\.saved\.inserted\}/);
+    expect(CONSOLE).toMatch(/pageSaved\.current\.inserted \+= v\.usersInserted/);
+    expect(CONSOLE).toMatch(/pageSaved\.current = \{ inserted: 0, updated: 0 \};\s*const run = await runCollect\(/);
     /** ⭐ 没存进去要说为什么(最常见=认不出页面被拒收) */
     expect(CONSOLE).toMatch(/没入库：\{userRun\.reason\}/);
   });
@@ -298,10 +302,13 @@ describe('一个入口:采到人就存', () => {
   it('⭐⭐⭐ IPC 三个游标 op 都要有 handler —— 契约有、handler 没有 = 静默失败', () => {
     for (const op of ['readCursor', 'saveCursor', 'clearCursor']) {
       expect(TYPES, `契约里缺 ${op}`).toMatch(new RegExp(`op: '${op}'`));
-      expect(IPC, `handler 里缺 ${op} —— 点了会回「不认识的 op」`)
-        .toMatch(new RegExp(`case '${op}':`));
+      expect(ipcHandles(IPC, op), `handler 里缺 ${op} —— 点了会回「不认识的 op」`).toBe(true);
     }
-    expect(IPC).toContain("import { readCursor, saveCursor, clearCursor } from './x-cursor-repo'");
+    /** 2026-10-24 三个都迁到能力 x.cursor.read / save / clear */
+    void capOfOp;
+    expect(readCapBlock('x.cursor.read')).toMatch(/readCursor\(i\.scope\)/);
+    expect(capBlock('x.cursor.save')).toMatch(/await saveCursor\(i\.cursor\)/);
+    expect(capBlock('x.cursor.clear')).toMatch(/await clearCursor\(i\.scope\)/);
   });
 
   it('⭐⭐⭐ 到头了不许续 —— 带着到底的游标去续只会白跑一趟', () => {

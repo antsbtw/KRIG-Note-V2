@@ -102,6 +102,19 @@ export type HarvestReport = {
    * 没走到收尾(比如导航失败)时没有这一项。
    */
   readonly cdpSettle?: { readonly waitedMs: number; readonly leftInFlight: number };
+  /**
+   * ⭐ 诊断(2026-10-16):这一跑里浏览器**实际发出**的接口请求(方法 路径 状态 → 次数)。
+   * 与 items(收到的)对照:浏览器发了 30 次、我们只收到 2 次 = 漏采在采集层,不是站点没给。
+   */
+  readonly apiSeen?: Readonly<Record<string, number>>;
+  /**
+   * ⭐⭐ 对账(2026-10-16,用户:「配方搜索,然后把所有的推文采集下来,这是基本函数/功能,必须保证的哦。」)
+   * seen = 浏览器收到的**目标数据**(命中 pageUrlIncludes、状态 200)次数;captured = 我们采到的页数。
+   * seen > captured → 漏采在采集层,problems 里有一条,ok 为 false。没有计数器 / 没给判据 → 不报。
+   */
+  readonly completeness?: { readonly seen: number; readonly captured: number };
+  /** ⭐ 诊断:收尾时两条腿池子里原始各几条(合并去重前)*/
+  readonly rawHeld?: { readonly cdp: number; readonly hook: number };
 };
 
 /** 本层依赖的最小操作集 —— ⭐ 由 wiring 注入,本层零 Electron */
@@ -119,6 +132,10 @@ export interface HarvestDeps {
    * ⭐⭐ CDP 还有几条 body 在取回途中 —— 收尾前等它归零(2026-10-16,种子没头的根因:两条腿赛跑)。
    */
   cdpInFlight(pageId: PageId): number;
+  /** ⭐ 诊断:浏览器至今发出的接口请求计数(可选;没有就不报)—— 与「收到的」对照找漏采 */
+  apiSeen?(pageId: PageId): Readonly<Record<string, number>>;
+  /** ⭐ 诊断:两条腿池子里**原始**各有几条(合并去重之前)—— 与合并后的条数对照,看是不是去重吞了 */
+  rawHeld?(pageId: PageId): { readonly cdp: number; readonly hook: number };
   finishAcquire(pageId: PageId, startedAt?: number): {
     ok: boolean; problems: readonly string[]; items: readonly AcquiredItem[];
     elapsedMs: number;

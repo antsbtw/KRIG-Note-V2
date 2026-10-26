@@ -126,6 +126,27 @@ describe('⭐⭐⭐ 到底的判据', () => {
     expect(a.terminated).toBe(false);
     expect(a.cursor).toBe('C1');
   });
+  /**
+   * ⚠️⚠️ 2026-10-19 真机:我自己的 followers 第一页带 `direction: Top`(上面没有更新的了)+ 正常 Bottom 游标。
+   * 原先不看方向 → 约 5000 人的名单第一页就判到头。
+   */
+  it('⭐⭐⭐ 只有 direction: Top 的 terminate —— 不是到头,接着翻', () => {
+    const a = auditUserPayload(payload([person(0), cursor('C1')], [{ type: 'TimelineTerminateTimeline', direction: 'Top' }]));
+    expect(a.terminated).toBe(false);
+    expect(a.cursor).toBe('C1');
+    expect(a.problems.join()).not.toMatch(/direction/);
+  });
+  it('Top + Bottom 两条都有(别人号 71 人那页)—— 到头', () => {
+    const a = auditUserPayload(payload([person(0), cursor('C1')], [
+      { type: 'TimelineTerminateTimeline', direction: 'Top' }, { type: 'TimelineTerminateTimeline', direction: 'Bottom' },
+    ]));
+    expect(a.terminated).toBe(true);
+  });
+  it('没带 direction —— 按到头算,但要记 problem(不认识的形状不静默)', () => {
+    const a = auditUserPayload(payload([person(0), cursor('C1')], [{ type: 'TimelineTerminateTimeline' }]));
+    expect(a.terminated).toBe(true);
+    expect(a.problems.join()).toMatch(/没带 direction/);
+  });
 });
 
 describe('⚠️⚠️ 空 handle 要在解析层就喊', () => {

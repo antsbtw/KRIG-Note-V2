@@ -87,6 +87,53 @@ export async function recordStep(
 }
 
 /**
+ * ⭐⭐ 记一次能力调用(Module5-04 第 2 步)—— 执行器每次调用都调,含被拒 / 参数不对 / 失败的。
+ * 不属于某条流程:run_id = call_id、seq = 1。
+ * ⚠️ 写不进去不拦业务,但要响(console.error)—— 「记录是空的」会被误读成「没跑过」。
+ */
+export async function recordCall(c: {
+  readonly callId: string;
+  readonly runId?: string;
+  readonly capability: string;
+  readonly kind: string;
+  readonly caller: string;
+  readonly status: 'ok' | 'refused' | 'failed' | 'invalid';
+  readonly why?: string;
+  readonly input?: Record<string, unknown>;
+  readonly output?: Record<string, unknown>;
+  readonly subjectRef?: string;
+  readonly durationMs: number;
+  /** 只留几天(状态轮询 = 7);不给 = 长期保留 */
+  readonly keepDays?: number;
+}): Promise<void> {
+  try {
+    await getFlowDB().query(
+      `CREATE flow_step_run SET
+         run_id = $runId, seq = 1, step_id = $capability, step_type = $stepType,
+         capability = $capability, input = $input, output = $output,
+         status = $status, reasoning = $reasoning, subject_ref = $subjectRef,
+         duration_ms = $durationMs, caller = $caller, call_id = $callId, keep_days = $keepDays, created_at = time::now()`,
+      {
+        runId: c.runId ?? c.callId,
+        capability: c.capability,
+        stepType: c.kind,
+        input: c.input,
+        output: c.output,
+        status: c.status,
+        reasoning: c.why,
+        subjectRef: c.subjectRef,
+        durationMs: Math.max(0, Math.round(c.durationMs)),
+        caller: c.caller,
+        callId: c.callId,
+        keepDays: c.keepDays,
+      },
+    );
+  } catch (err) {
+    console.error(`[flow-repo] ⚠️ 能力调用没记上(不拦业务)${c.capability} ${c.status} #${c.callId}:${String(err)}`);
+  }
+}
+
+/**
  * 收一条 run。
  *
  * ⚠️ `status` 由**调用方**汇总给出,这里不替它算 ——
@@ -126,6 +173,37 @@ export async function endRun(
     /** ⚠️ 不静默:收不了 run 就是「这次执行没有结局」,必须看得见 */
     console.error(`[flow-repo] ⚠️⚠️ 收 run 失败,记录会停在 running(run_id=${runId}):${String(err)}`);
   }
+}
+
+/**
+ * ⭐ 最近的能力调用(caller 有值的行 = 能力调用;旧编排的行没有 caller)—— 给 AI / 回看用
+ * 条件都可选,都是 AND。
+ */
+export async function listCalls(q: {
+  readonly limit: number; readonly capability?: string; readonly caller?: string; readonly status?: string;
+}): Promise<Array<Record<string, unknown>>> {
+  const where = ['caller != NONE'];
+  if (q.capability) where.push('capability = $capability');
+  if (q.caller) where.push('caller = $caller');
+  if (q.status) where.push('status = $status');
+  const res = await getFlowDB().query<[Array<Record<string, unknown>>]>(
+    `SELECT call_id, capability, caller, status, reasoning, subject_ref, duration_ms, keep_days, <string> created_at AS created_at, input, output
+       FROM flow_step_run WHERE ${where.join(' AND ')} ORDER BY created_at DESC LIMIT $limit`,
+    { limit: q.limit, capability: q.capability, caller: q.caller, status: q.status },
+  );
+  return res?.[0] ?? [];
+}
+
+/**
+ * ⭐ 清掉过期的记录:只删 keep_days 有值的(状态轮询)且超过期限的;长期保留的不碰。
+ * ⚠️ 期限现在只有一种(7 天,用户 10-24 定)—— 写死在 SQL 里,多一种时再按 keep_days 分组删。
+ * @returns 删了几行(删失败会抛,调用方打出来)
+ */
+export async function purgeExpiredCalls(): Promise<number> {
+  const res = await getFlowDB().query<[unknown[]]>(
+    'DELETE flow_step_run WHERE keep_days != NONE AND created_at < time::now() - 7d RETURN BEFORE',
+  );
+  return Array.isArray(res?.[0]) ? res[0].length : 0;
 }
 
 /** 一次执行的完整回看 —— run 头 + 每步 */

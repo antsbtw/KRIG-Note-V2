@@ -7,6 +7,7 @@
  * 这里钉的是**纯逻辑**与**接线**。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock, saveFnBody } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -142,14 +143,15 @@ describe('账本接线', () => {
   };
 
   it('⭐⭐⭐ 人和推文落库后都记账 —— 漏一边,曲线和对账就少一半', () => {
-    expect(caseBody('saveUsers')).toMatch(/logCollect\(\{\s*kind: 'users'/);
-    expect(caseBody('saveTweets')).toMatch(/logCollect\(\{\s*kind: 'tweets'/);
+    /** 2026-10-24 存人 / 存推文搬到 x-save-batch.ts(能力 x.user.save / x.tweet.save) */
+    void caseBody;
+    expect(saveFnBody('saveUserBatch')).toMatch(/logCollect\(\{\s*kind: 'users'/);
+    expect(saveFnBody('saveTweetBatch')).toMatch(/logCollect\(\{\s*kind: 'tweets'/);
   });
 
   it('⭐⭐ 记账失败不让落库报失败,但要留痕(不静默)', () => {
-    const i = IPC.indexOf('async function logCollect');
-    expect(i).toBeGreaterThan(-1);
-    const body = IPC.slice(i, IPC.indexOf('\n}\n', i));
+    const body = saveFnBody('logCollect');
+    expect(body.length).toBeGreaterThan(50);
     expect(body).toMatch(/catch/);
     expect(body).toMatch(/traceRecorder\.lifecycle/);
     expect(body).not.toMatch(/return failed/);
@@ -157,7 +159,7 @@ describe('账本接线', () => {
 
   it('⭐ opsStatus 契约有、handler 也有', () => {
     expect(TYPES).toMatch(/op: 'opsStatus'/);
-    expect(IPC).toMatch(/case 'opsStatus':/);
+    expect(ipcHandles(IPC, 'opsStatus')).toBe(true);
   });
 
   it('⭐⭐ 迁移 1.2.19 登记进了 runner(只写 schema 不登记 = 表永远不建)', () => {
@@ -167,6 +169,6 @@ describe('账本接线', () => {
 
   it('⭐ 状态页走 opsStatus,且「状态」类真的渲染它', () => {
     expect(read('src/modules/x/XOpsStatus.tsx')).toMatch(/op: 'opsStatus'/);
-    expect(read('src/modules/x/XOpsView.tsx')).toMatch(/category === 'status' && <XOpsStatus \/>/);
+    expect(read('src/modules/x/XOpsView.tsx')).toMatch(/category === 'status' && <XOpsStatus key=\{accountKey\} wsId=\{workspaceId\} \/>/);
   });
 });

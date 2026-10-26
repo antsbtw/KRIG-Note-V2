@@ -35,6 +35,9 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { XOpsStatus } from './XOpsStatus';
 import { XOpsPeople } from './XOpsPeople';
 import { BgIndicator } from './XBgStatus';
+import { XAccountBadge } from './XAccountBadge';
+import { XSpotCard } from './XSpotCard';
+import type { WsAccount } from './x-account';
 
 /** ⚠️ 标签与 id 同在一处 —— 分开写两份必漂 */
 type OpsCategory = 'status' | 'people' | 'tweets';
@@ -47,6 +50,12 @@ const OPS_CATEGORIES: ReadonlyArray<{ id: OpsCategory; label: string; hint: stri
 export function XOpsView({ workspaceId, slot }: ViewComponentProps): ReactElement {
   const [category, setCategory] = useState<OpsCategory>('status');
   const [fullscreen, setFullscreen] = useState(false);
+  /**
+   * ⭐ 当前号的数字 id —— 关系按号存(1.2.27),号变了「状态」「人」要按新号重查(key 变 → 重挂)。
+   * 'none' = 还没认出:面板照常挂,各自把「还没认出登录号」的原因报出来。
+   */
+  const [accountKey, setAccountKey] = useState('none');
+  const onAccount = useCallback((a: WsAccount | null) => setAccountKey(a?.restId ?? 'none'), []);
 
   /** ⭐ 全屏时 Esc 退出 —— 只在全屏期间挂监听,免得抢别的 view 的 Esc */
   useEffect(() => {
@@ -72,8 +81,8 @@ export function XOpsView({ workspaceId, slot }: ViewComponentProps): ReactElemen
     <div style={fullscreen ? { ...S.root, ...S.fullscreen } : S.root}>
       <div style={S.header}>
         <span style={S.title}>📊 运营</span>
-        {/* ⭐ 运营以本 ws 登录的号为中心 —— 号的读取还没接,先如实写 ws */}
-        <span style={S.sub}>{workspaceId} · 登录号待接入</span>
+        {/* ⭐ 运营以本 ws 登录的号为中心(用户 10-07)—— 从 X 页面认号(用户 10-16 选 A) */}
+        <XAccountBadge wsId={workspaceId} onAccount={onAccount} />
         {/* ⭐ 后台采集此刻在不在跑 —— 任何页都看得见(用户 10-14) */}
         <BgIndicator wsId={workspaceId} />
         <span style={{ flex: 1 }} />
@@ -104,9 +113,11 @@ export function XOpsView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         ))}
       </div>
 
+      {/* ⭐ 右键「查库」抽查卡片(2026-10-16)—— 任何大类下都在最上面 */}
+      <XSpotCard wsId={workspaceId} />
       <div style={S.body}>
-        {category === 'status' && <XOpsStatus />}
-        {category === 'people' && <XOpsPeople workspaceId={workspaceId} />}
+        {category === 'status' && <XOpsStatus key={accountKey} wsId={workspaceId} />}
+        {category === 'people' && <XOpsPeople key={accountKey} workspaceId={workspaceId} />}
         {category === 'tweets' && (
         <div style={S.placeholder}>
           <div style={{ fontSize: 13, color: 'var(--text-primary, #ddd)' }}>{current.label}</div>

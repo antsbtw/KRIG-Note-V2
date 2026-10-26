@@ -233,9 +233,22 @@ export function auditUserPayload(text: string, seqFrom = 0): XUserAudit {
    * ⚠️⚠️ X 翻到底会发 `TimelineTerminateTimeline`,**但仍附带游标**
    * (值还在倒退)—— 光看游标会以为还能翻。
    */
-  const terminated = collectBy(root, (o) =>
+  /**
+   * ⚠️⚠️ 2026-10-19 真机:**只认 `direction: Bottom`**。我自己的 followers 第一页带着
+   * `{type: TimelineTerminateTimeline, direction: Top}`(= 上面没有更新的了)+ 一个正常的 Bottom 游标,
+   * 原先见 terminate 不看方向就判到头 → 约 5000 人的名单第一页 50 人就停。
+   * 真到头的那页(别人号 71 人)是 Top、Bottom 两条都有。
+   * 没带 direction 的保持原判(算到头),但记一条 problem —— 不认识的形状不静默。
+   */
+  const terminates = collectBy(root, (o) =>
     str(o.type) === 'TimelineTerminateTimeline'
-    || str(o.entryType) === 'TimelineTerminateTimeline').length > 0;
+    || str(o.entryType) === 'TimelineTerminateTimeline');
+  const noDirection = terminates.filter((o) => str(o.direction) === '');
+  const terminated = noDirection.length > 0
+    || terminates.some((o) => str(o.direction).toLowerCase() === 'bottom');
+  if (noDirection.length > 0) {
+    problems.push('TimelineTerminateTimeline 没带 direction —— 按「到头了」算;若名单其实没完,看这条');
+  }
 
   if (items.length === 0) {
     problems.push('这个载荷里**一个人都没解出来** —— 可能不是人流载荷,或结构变了');

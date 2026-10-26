@@ -94,6 +94,8 @@ export async function harvestPage(
 
   // ── ① 先装腿 ──
   const legs = await deps.startAcquire(pageId, plan.noisyUrlSubstrings);
+  /** ⭐ 诊断:接口请求计数的起点 —— 收尾时相减,只算这一跑的 */
+  const apiBefore = deps.apiSeen?.(pageId) ?? {};
 
   /**
    * ── ② 再去页面 ──
@@ -199,14 +201,38 @@ export async function harvestPage(
   const cdpSettle = { waitedMs: deps.now() - settleStart, leftInFlight: deps.cdpInFlight(pageId) };
 
   // ── ⑤ 停止采集,出报告 ──
+  const rawHeld = deps.rawHeld?.(pageId);
   const acq = deps.finishAcquire(pageId, t0);
   const pages = countPages(acq.items, pageWant);
+  const apiSeen = diffCounts(apiBefore, deps.apiSeen?.(pageId));
+  const completeness = apiSeen === undefined || pageWant.length === 0
+    ? undefined : { seen: countSeenPages(apiSeen, pageWant), captured: pages };
 
   /**
    * ⭐⭐ `problems` —— 空才算采全。
    * ⚠️ 每条都要能指向**该查哪里**,不是泛泛说「失败了」。
    */
   const problems: string[] = [...acq.problems];
+  /**
+   * ⭐⭐⭐ 对账:浏览器收到了、我们没采到 = 漏采(用户 10-16:「必须保证的哦」)。
+   * ⚠️ 放第一条 —— 它说明下面的数字不是全部。
+   */
+  /**
+   * ⭐⭐ 反方向也要报:采到的比浏览器**这一跑**收到的还多 = 混进了不属于这一跑的数据
+   * (2026-10-16 真机:钩子池残留上一跑的 2 页,「采到 3 页 / 浏览器收到 1 次」,0 轮就收工)。
+   */
+  if (completeness !== undefined && completeness.captured > completeness.seen) {
+    problems.unshift(
+      `⚠️ 采到 ${completeness.captured} 页,比浏览器这一跑收到的 ${completeness.seen} 次还多`
+      + ' —— 混进了不属于这一跑的数据(上一跑残留?),这一跑的结果不可信',
+    );
+  }
+  if (completeness !== undefined && completeness.seen > completeness.captured) {
+    problems.unshift(
+      `⚠️ 漏采:浏览器收到目标数据 ${completeness.seen} 次,只采到 ${completeness.captured} 页`
+      + ` —— 少的 ${completeness.seen - completeness.captured} 页丢在采集层(不是站点没给)`,
+    );
+  }
   if (pageWant.length > 0 && pages === 0 && acq.items.length > 0) {
     problems.push(
       `采到 ${acq.items.length} 条响应,但**没有一条**是目标页面的数据`
@@ -245,5 +271,31 @@ export async function harvestPage(
     elapsedMs: deps.now() - t0,
     legs: acq.legs,
     cdpSettle,
+    apiSeen,
+    completeness,
+    rawHeld,
   };
+}
+
+/** 浏览器收到的目标数据次数:命中页面判据、状态 200、没被策略挡、没失败(键 = `方法 路径 状态[ 备注]`) */
+function countSeenPages(seen: Readonly<Record<string, number>>, want: readonly string[]): number {
+  let n = 0;
+  for (const [key, count] of Object.entries(seen)) {
+    const [, path, status, ...rest] = key.split(' ');
+    if (status === '200' && rest.length === 0 && path !== undefined && matchPage(path, want)) n += count;
+  }
+  return n;
+}
+
+/** 收尾减起点 —— 只留这一跑新增的;没给计数器就是 undefined(不报) */
+function diffCounts(
+  before: Readonly<Record<string, number>>, after: Readonly<Record<string, number>> | undefined,
+): Record<string, number> | undefined {
+  if (after === undefined) return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, n] of Object.entries(after)) {
+    const d = n - (before[k] ?? 0);
+    if (d > 0) out[k] = d;
+  }
+  return out;
 }

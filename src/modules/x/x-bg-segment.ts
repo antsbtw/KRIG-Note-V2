@@ -15,7 +15,7 @@
  */
 
 import type { BgJob, BgTab, SegmentOutcome } from './x-bg-job';
-import { mergeSegment, nextTab } from './x-bg-job';
+import { mergeSegment, nextTab, tabProgress } from './x-bg-job';
 import { PERSON_TABS, rangeStart } from './x-person-timeline';
 import { X_PAGE_NAME } from './x-pages';
 
@@ -24,7 +24,12 @@ const TAB_PAGE: Record<BgTab, string> = {
   profile: X_PAGE_NAME.profile,
   replies: X_PAGE_NAME.withReplies,
   reposts: X_PAGE_NAME.reposts,
+  /** 名单任务(2026-10-19) */
+  followers: X_PAGE_NAME.followers,
+  following: X_PAGE_NAME.following,
+  verifiedFollowers: X_PAGE_NAME.verifiedFollowers,
 };
+const LIST_LABEL: Partial<Record<BgTab, string>> = { followers: '关注者', following: '他关注的', verifiedFollowers: '蓝V关注者' };
 
 /** 一段的结果(除了并进 job,还带出给留痕/日志看的细节) */
 export type SegmentReport = {
@@ -58,6 +63,14 @@ export type RunOneResult = {
   readonly oldestAt?: string;
   /** 被限流/失败了(有话说);扛不住就停整个任务 */
   readonly failure?: string;
+  /** ⭐ 名单增量采到追上了(连续 N 个库里已有的)—— 这个名单这一轮做完 */
+  readonly caughtUp?: boolean;
+  /** 名单任务:这一段看到几个人 / 其中新的 / 对账标走了几个 */
+  readonly listStats?: { readonly seen: number; readonly fresh: number; readonly reconciled?: number; readonly note?: string };
+  /** 被限流放慢了节奏(不是失败)—— 显示用 */
+  readonly note?: string;
+  /** ⭐ 增量追上后复核还差一截 → 这个名单改全量从头翻(原因)*/
+  readonly escalate?: string;
 };
 
 export type SegmentDeps = {
@@ -66,6 +79,8 @@ export type SegmentDeps = {
    * `pageCap` 是本段最多翻几页(翻够就停这段,不是停整个页)。
    */
   runOne(input: {
+    /** 哪个标签页(名单任务要知道记进哪个名单) */
+    readonly tab: BgTab;
     readonly page: string;
     readonly handle: string;
     readonly resumeCursor?: string;
@@ -91,6 +106,9 @@ export type SegmentDeps = {
  */
 export function tabDoneFrom(r: RunOneResult): boolean {
   if (r.exhausted) return true;
+  if (r.caughtUp) return true;
+  /** 被限流歇着 ≠ 到底(下段接着翻) */
+  if (r.note !== undefined && r.failure === undefined && /限流/.test(r.note)) return false;
   // 页数上限停 → 没到底(还要续)。其余的「停」里,到起点那种才算 done。
   if (/上限/.test(r.stopReason)) return false;
   if (/采到.*之前|到.*起点|范围/.test(r.stopReason)) return true;
@@ -102,7 +120,7 @@ export function tabDoneFrom(r: RunOneResult): boolean {
 /**
  * ⭐⭐ 跑一个任务的一段。
  * @param job 当前任务
- * @param pageCap 本段最多翻几页(来自 bg.pages_per_segment 设置)
+ * @param pageCap 本段最多翻几页(来自节奏自调 x_pace,2026-10-20)
  * @param now 时间源(注入,便于测)
  */
 export async function runSegment(
@@ -115,21 +133,24 @@ export async function runSegment(
   }
 
   const page = TAB_PAGE[tab];
-  const label = PERSON_TABS.find((t) => t.name === page)?.label ?? tab;
+  const label = LIST_LABEL[tab] ?? PERSON_TABS.find((t) => t.name === page)?.label ?? tab;
   const start = rangeStart(job.range, now); // 'all' → undefined(没有时间终点,只能靠 exhausted)
-  const resumeCursor = job[tab].cursor;
+  const resumeCursor = tabProgress(job, tab).cursor;
   deps.onProgress?.(`采${label}…${resumeCursor ? '(从断点续)' : ''}`);
 
-  const r = await deps.runOne({ page, handle: job.handle, resumeCursor, start, pageCap });
+  const r = await deps.runOne({ tab, page, handle: job.handle, resumeCursor, start, pageCap });
 
   const out: SegmentOutcome = {
     tab,
     pages: r.pages,
     saved: r.saved,
-    nextCursor: r.failure !== undefined ? job[tab].cursor : r.nextCursor,
-    tabDone: r.failure === undefined && tabDoneFrom(r),
+    nextCursor: r.failure !== undefined ? tabProgress(job, tab).cursor : r.escalate !== undefined ? undefined : r.nextCursor,
+    tabDone: r.failure === undefined && r.escalate === undefined && tabDoneFrom(r),
+    escalate: r.escalate,
     oldestAt: r.oldestAt,
     failed: r.failure,
+    listStats: r.listStats,
+    note: r.note,
   };
   const next = mergeSegment(job, out, now);
   const note = r.failure !== undefined

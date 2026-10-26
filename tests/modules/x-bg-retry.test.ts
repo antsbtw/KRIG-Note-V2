@@ -8,6 +8,7 @@
  *  ④ 判据与人卡同一份(worthReloadRetry)
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flowBlock } from './_x-ipc-wiring';
 
 type R = { reached: true; records: unknown[]; paging: { rounds: number; stopReason: string }; exhausted: boolean; nextCursor?: string };
 const queue: R[] = [];
@@ -71,7 +72,9 @@ describe('⭐⭐ 后台重载重试一次', () => {
     expect(worthReloadRetry('429 限流', 0)).toBe(false);
     expect(worthReloadRetry(NO_AUTH, 1)).toBe(true);
     expect(worthReloadRetry('HTTP 403', 2)).toBe(false);
-    const page = readFileSync(join(process.cwd(), 'src/modules/x/XOpsPeople.tsx'), 'utf8');
-    expect(page).toMatch(/const authFail = worthReloadRetry\(why, run\.paging\?\.rounds \?\? 0\);/);
+    /** 2026-10-26 人卡采主页搬到主进程流程 x.person.collectRange(x-flows.ts) */
+    const flow = flowBlock('x.person.collectRange');
+    expect(flow.length).toBeGreaterThan(1000);
+    expect(flow).toMatch(/const authFail = worthReloadRetry\(why, run\.paging\?\.rounds \?\? 0\);/);
   });
 });

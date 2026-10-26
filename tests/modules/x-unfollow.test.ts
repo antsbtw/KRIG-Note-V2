@@ -5,17 +5,23 @@
  * 页面上的点击是否真的点对,只有真机验得出(脚本自己的逻辑在 x-dom-scripts.test 里用假页面跑过)。
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  SETTING_DEFS, mergeSettings, validateSetting, unfollowGate, localDayStart,
+  SETTING_DEFS, mergeSettings, validateSetting, unfollowGate, followGate, localDayStart,
 } from '@modules/x/x-ops-settings';
 
 const read = (p: string): string => readFileSync(join(process.cwd(), p), 'utf8');
 const S = {
   'unfollow.daily_cap': 50, 'unfollow.min_gap_sec': 20, 'collect.live_page_cap': 30,
-  // 2026-10-13 (3b):后台采集节奏变量
-  'bg.pages_per_segment': 10, 'bg.segment_gap_sec': 120,
+  // ⚠️ 后台采集节奏(bg.*)2026-10-20 起不是设置了,由 x_pace 按限流自调
+  // 2026-10-16 蓝V互关 M4:关注的节奏与回访天数
+  'follow.daily_cap': 400, 'follow.min_gap_sec': 60, 'follow.jitter_sec': 30, 'follow.revisit_days': 7,
+  // 2026-10-17 求关:连续 15 个歇 15 分钟(用户选的);准备时采他主页 2 页
+  'follow.burst_size': 15, 'follow.burst_rest_min': 15, 'ask.collect_pages': 2,
+  // 2026-10-19 第 4 阶段查回关:连续 30 个老关注者算追上(沿用 09-19 快速增量阈值);一次最多 20 页
+  'follow.check_known_run': 30, 'follow.check_max_pages': 20,
 };
 
 describe('设置', () => {
@@ -38,12 +44,45 @@ describe('设置', () => {
   });
 });
 
+describe('⭐⭐⭐ 关注闸门(10-17 改:没有「两次最小间隔」,连续满 15 个歇 15 分钟)', () => {
+  const now = new Date('2026-10-17T12:00:00Z');
+  /** 每隔 1 分钟关一个,最新那个在 ago 分钟前 */
+  const series = (n: number, ago: number): string[] =>
+    Array.from({ length: n }, (_, i) => new Date(now.getTime() - (ago + i) * 60_000).toISOString());
+
+  it('⭐ 用户 10-17:「x没有这个限制」—— 刚关完一个马上关下一个,放行', () => {
+    expect(followGate(S, 2, [new Date(now.getTime() - 47_000).toISOString()], now).allowed).toBe(true);
+    expect(followGate(S, 14, series(14, 0), now).allowed).toBe(true);
+  });
+
+  it('⭐⭐ 连续关满 15 个 → 歇 15 分钟,给出还要等几秒;提示说清是我们的设置', () => {
+    const g = followGate(S, 15, series(15, 2), now);
+    expect(g.allowed).toBe(false);
+    expect(g.waitSec).toBe(13 * 60);
+    expect(g.reason).toContain('连续关注 15 个');
+    expect(g.reason).toContain('我们的设置');
+    expect(g.reason).not.toContain('可改');
+  });
+
+  it('歇够了 → 连续数清零,放行;中间断过 15 分钟的不算连续', () => {
+    expect(followGate(S, 15, series(15, 15), now).allowed).toBe(true);
+    const broken = [...series(10, 0), ...series(5, 40)];
+    expect(followGate(S, 15, broken, now).allowed).toBe(true);
+  });
+
+  it('每日到 400(X 公布的每天关注上限)才提醒;默认是 400 不是 30(用户 10-22 目标每天新增 200~300 互关)', () => {
+    expect(followGate(S, 400, [], now)).toMatchObject({ allowed: false });
+    expect(followGate(S, 30, [], now).allowed).toBe(true);
+    expect(SETTING_DEFS.find((d) => d.key === 'follow.daily_cap')!.default).toBe(400);
+  });
+});
+
 describe('⭐⭐⭐ 取关闸门', () => {
   const now = new Date('2026-10-10T12:00:00Z');
-  it('到了每日上限就不许,并说清楚(可在设置里改)', () => {
+  it('到了每日上限 → allowed=false 带提醒(调用方只提醒不拦,用户 10-21)', () => {
     const g = unfollowGate(S, 50, undefined, now);
     expect(g.allowed).toBe(false);
-    expect(g.reason).toContain('上限 50');
+    expect(g.reason).toContain('平时的量 50');
     expect(unfollowGate({ ...S, 'unfollow.daily_cap': 60 }, 50, undefined, now).allowed).toBe(true);
   });
   it('离上次太近就不许,并给出还要等几秒', () => {
@@ -61,32 +100,35 @@ describe('⭐⭐⭐ 取关闸门', () => {
 describe('⭐⭐⭐ 取关流程(页面)', () => {
   const PAGE = read('src/modules/x/XOpsPeople.tsx');
   const fn = PAGE.slice(PAGE.indexOf('const unfollow = useCallback'), PAGE.indexOf('/** 单击:选中'));
+  /**
+   * ⭐ 2026-10-26 取关核心搬到主进程 x-person-act.ts unfollowOn(能力 x.person.unfollow;运营人卡 + 任务页共用一份)。
+   * 占网页 / 暂停检查在执行器(page / preflight),行为见 x-person-act.test.ts;这里钉函数里的顺序和留痕。
+   */
+  const RUN = read('src/modules/x/x-person-act.ts');
+  const core = RUN.slice(RUN.indexOf('export async function unfollowOn'));
 
-  it('顺序:暂停检查 → 忙检查 → 闸门 → 去主页 → 点 → 记录 → 核对', () => {
-    expect(fn.length).toBeGreaterThan(1500);
-    const at = (s: string): number => { const i = fn.indexOf(s); expect(i, `找不到 ${s}`).toBeGreaterThan(-1); return i; };
+  it('顺序:页面调主进程取关 → 显示核对;主进程里:闸门 → 去主页 → 点 → 记录 → 同一把锁里核对', () => {
+    expect(fn.length).toBeGreaterThan(400);
+    expect(core.length).toBeGreaterThan(1200);
+    const at = (src: string, s: string): number => { const i = src.indexOf(s); expect(i, `找不到 ${s}`).toBeGreaterThan(-1); return i; };
+    const page = ['await unfollowPerson(workspaceId, p)', "if ('blocked' in r)", 'if (r.halted)', 'showVerify(p, r.verify)'].map((x) => at(fn, x));
+    expect(page).toEqual([...page].sort((a, b) => a - b));
     const order = [
-      'if (unfollowPaused !== null)',
-      'getXHostBusy(wcId)',
-      "op: 'unfollowGate'",
-      'if (!gv.allowed)',
-      "op: 'goto'",
-      'scriptId: X_SCRIPTS.unfollow',
-      "op: 'logAction'",
-      'await runVerify(p);',
-    ].map(at);
+      'await readUnfollowGate(',
+      'gate.allowed ? undefined : gate.reason',
+      'ports.goto(X_PAGE_NAME.profile',
+      'ports.runScript(X_SCRIPTS.unfollow',
+      'await appendAction({',
+      'await verifyPersonOn(wcId, who)',
+    ].map((x) => at(core, x));
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it('⭐⭐ 成功失败都留记录;不成功(且不是「本来就没关注」)就暂停,要人点恢复', () => {
-    expect(fn).toMatch(/result: result\.done \? 'ok' : 'failed'/);
-    expect(fn).toMatch(/\} else \{\s*setUnfollowPaused\(/);
-    expect(PAGE).toMatch(/onClick=\{\(\) => \{ setUnfollowPaused\(null\);/);
-  });
-
-  it('⭐⭐ 取关期间登记忙,结束(含出错)一定清掉', () => {
-    expect(fn).toMatch(/setXHostBusy\(wcId, UNFOLLOW_BUSY\)/);
-    expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);/);
+  it('⭐⭐ 成功失败都留记录;不成功(且不是「本来就没关注」)就暂停(主进程一份),要人点恢复', () => {
+    expect(core).toMatch(/result: result\.done \? 'ok' : 'failed'/);
+    expect(core).toMatch(/haltByWs\.set\(wsId, halted\)/);
+    expect(fn).toMatch(/if \(r\.halted\) \{ setUnfollowPaused\(r\.halted\); return; \}/);
+    expect(PAGE).toMatch(/onClick=\{\(\) => \{ void resumeUnfollowOf\(workspaceId\)/);
   });
 
   it('⭐ 只有「我关注他」的人才出现取关入口', () => {
@@ -94,13 +136,15 @@ describe('⭐⭐⭐ 取关流程(页面)', () => {
     expect(PAGE).toMatch(/\{p\.i_follow === true && \(\s*<button type="button" style=\{S\.btn\} disabled=\{unfollowing\} onClick=\{\(\) => onUnfollow\(p\)\}/);
   });
 
-  it('⭐ 接线:设置 / 闸门 / 记录三个 op 契约有、handler 有;迁移登记了', () => {
+  it('⭐ 接线:设置 / 闸门两个 op 契约有、handler 有;记动作在主进程当场记(logAction op 2026-10-26 退役);迁移登记了', () => {
     const TYPES = read('src/modules/x/x-data-types.ts');
     const IPC = read('src/modules/x/x-data-ipc.ts');
-    for (const op of ['opsSettings', 'setOpsSetting', 'unfollowGate', 'logAction']) {
+    for (const op of ['opsSettings', 'setOpsSetting', 'unfollowGate']) {
       expect(TYPES).toMatch(new RegExp(`op: '${op}'`));
-      expect(IPC).toMatch(new RegExp(`case '${op}':`));
+      expect(ipcHandles(IPC, op), op).toBe(true);
     }
+    expect(TYPES).not.toMatch(/op: 'logAction'/);
+    expect(read('src/modules/x/x-person-act.ts')).toMatch(/await appendAction\(\{\s*action: 'unfollow'/);
     expect(read('src/storage/migrations/x-runner.ts')).toMatch(/version: '1\.2\.24'[\s\S]{0,200}up: x_migration_1_2_24/);
   });
 

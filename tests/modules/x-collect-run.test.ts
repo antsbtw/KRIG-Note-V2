@@ -1355,6 +1355,36 @@ describe('一个入口:响应里有什么就产出什么', () => {
     expect(r.paging?.rounds).toBeLessThanOrEqual(3);
   });
 
+  it('⭐⭐⭐ 每页都带 direction: Top 的 terminate 不是到头 —— 接着翻到 Bottom 那页(2026-10-19 真机)', async () => {
+    /**
+     * ⚠️⚠️ 我自己的 followers(约 5000 人)第一页:`{type: TimelineTerminateTimeline, direction: Top}` + 正常 Bottom 游标。
+     * 原先不看方向,第一页 50 人就停,停因写「X 说名单到头了」—— 查回关全靠这份名单,停在第一页等于查不全。
+     */
+    const page = (ids: number[], cursor: string, bottom: boolean): string => JSON.stringify({ data: { user: { result: { timeline: { timeline: { instructions: [
+      { type: 'TimelineClearCache' },
+      { type: 'TimelineTerminateTimeline', direction: 'Top' },
+      ...(bottom ? [{ type: 'TimelineTerminateTimeline', direction: 'Bottom' }] : []),
+      { type: 'TimelineAddEntries', entries: [
+        ...ids.map((i) => ({ entryId: `user-${i}`, content: { itemContent: { user_results: { result: {
+          rest_id: `${700 + i}`, core: { screen_name: `top${i}`, name: `名字${i}` }, legacy: {},
+        } } } } })),
+        { entryId: 'cursor-bottom', content: { cursorType: 'Bottom', value: cursor } },
+        { entryId: 'cursor-top', content: { cursorType: 'Top', value: `-1|${cursor}` } },
+      ] },
+    ] } } } } } });
+    let n = 0;
+    const r = await runCollect({
+      async harvest(plan) {
+        if (plan.gotoPage) return { items: [] };
+        n += 1;
+        return { items: [seedItem(FOLLOWERS, page([n], `c${n}`, n >= 4))] };
+      },
+      async runScript() { return { ok: true }; },
+    }, { wantPages: 100, depth: 'as-is' });
+    expect(r.paging?.rounds, '第一页就停 = 只认了 Top 的 terminate').toBeGreaterThanOrEqual(3);
+    expect(r.paging?.stopReason).toContain('到头');
+  });
+
   it('⭐⭐⭐ 人流名单滚到底后**仍要翻页** —— 翻页产出率高一个数量级', async () => {
     /**
      * ⚠️⚠️ 用户 2026-10-06 原话:「提取完毕怎么还在翻页呢?没有逻辑吗?」

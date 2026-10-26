@@ -64,6 +64,12 @@ export function traceHarvest(pageId: PageId, url: string, rep: HarvestReport): v
       legs: rep.legs,
       /** ⭐ 收尾前等 CDP 在途取回:等了多久 / 还剩几条 —— 种子没头时先看这个 */
       cdpSettle: rep.cdpSettle,
+      /** ⭐ 诊断:浏览器实际发出的接口请求 —— 与 endpoints(收到的)对照找漏采 */
+      apiSeen: rep.apiSeen,
+      /** ⭐⭐ 对账:浏览器收到几次目标数据 / 我们采到几页 —— 不等就是漏采 */
+      completeness: rep.completeness,
+      /** 诊断:合并去重前两条腿池子里各几条 */
+      rawHeld: rep.rawHeld,
       problems: rep.problems,
       /**
        * ⭐⭐ **收到的是什么** —— 2026-10-04 补。

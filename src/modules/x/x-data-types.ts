@@ -52,7 +52,11 @@ export type XDataInvoke =
   | {
       readonly op: 'saveTweets';
       readonly records: readonly TweetRecord[];
-      readonly ctx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string };
+      /**
+       * ⭐ wcId = 采集用的那个 X 网页 —— 推文作者的关系(关注/被关注)是**它登录的号**看到的,
+       * 主进程据此认号(1.2.27);不给就不写关系(如实报 skippedReason)。
+       */
+      readonly ctx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string; readonly wcId?: number };
     }
   /**
    * ⭐⭐⭐ **采到的 X 用户落库** —— 2026-10-05。
@@ -68,10 +72,24 @@ export type XDataInvoke =
    * 所以必须是**稳定的词**(followers / following / verifiedFollowers)——
    * 今天写 'followers' 明天写 '关注者' 会让同一个名单记成两个。
    */
+  /**
+   * ⭐⭐⭐ **一页一存、存完回读**(2026-10-16,逐页账)—— 走与 saveTweets / saveUsers **同一条**存库路径
+   * (记账、留痕、按号写关系都照旧),之后回读:返回库里**查得到**的 id(推文 tweet_id / 人 rest_id)。
+   * 用户:「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了」
+   */
+  | {
+      readonly op: 'savePageVerify';
+      readonly tweets: readonly TweetRecord[];
+      readonly tweetCtx: { readonly source: string; readonly searchRecipe?: string; readonly wsId?: string; readonly wcId?: number };
+      readonly users: readonly XUserRecord[];
+      /** 名单页才有;推文页存作者走 tweetCtx */
+      readonly userCtx?: { readonly listSource: string; readonly wsId?: string; readonly wcId?: number };
+    }
   | {
       readonly op: 'saveUsers';
       readonly records: readonly XUserRecord[];
-      readonly ctx: { readonly listSource: string; readonly wsId?: string };
+      /** ⭐ wcId 同 saveTweets:名单里的关系是这个网页登录的号看到的 */
+      readonly ctx: { readonly listSource: string; readonly wsId?: string; readonly wcId?: number };
     }
   /**
    * ⭐⭐⭐ **断点续采:读上次停在哪** —— 2026-10-07。
@@ -101,30 +119,100 @@ export type XDataInvoke =
    * ⭐⭐ 运营 → 状态 的全部数字(2026-10-07)—— 返回 `OpsStatus`(x-ops-status.ts)。
    * 人数 / 推文数 / 各名单更新时间 / 近几天账本 / 还没采集的类别。
    */
-  | { readonly op: 'opsStatus' }
+  | { readonly op: 'opsStatus'; readonly wsId: string }
+  /**
+   * ⭐⭐ 认号(2026-10-16,1.2.27)—— 读这个 ws 的 X 网页登录的是谁;还没数字 id 时会开一次自己的主页。
+   * 返回 `IdentifyResult`(x-account-repo.ts)。
+   */
+  | { readonly op: 'identifyAccount'; readonly wsId: string }
+  /** ⭐ 这个 ws 记的登录号(只读库,不碰页面)—— 返回 `WsAccount | null` */
+  | { readonly op: 'wsAccount'; readonly wsId: string }
   /** ⭐ 运营 → 人:关系概览(每组人数 + 其中蓝V)—— 返回 `PeopleOverview` */
-  | { readonly op: 'peopleOverview' }
+  | { readonly op: 'peopleOverview'; readonly wsId: string }
   /** ⭐ 运营 → 人:列表 —— 返回 `{ total, rows }`;total 是命中总数,rows 最多 limit 条 */
-  | { readonly op: 'queryPeople'; readonly filter: PeopleFilter; readonly limit: number; readonly start: number }
+  | { readonly op: 'queryPeople'; readonly wsId: string; readonly filter: PeopleFilter; readonly limit: number; readonly start: number }
   /** ⭐ 运营 → 人卡:按数字 id 取一个人 —— 返回 `PersonDetail | null` */
-  | { readonly op: 'personDetail'; readonly restId: string }
+  | { readonly op: 'personDetail'; readonly wsId: string; readonly restId: string }
   /** ⭐ 排除 / 取消排除(人的决定,source = human)—— 返回 `{ restId, excluded }` */
-  | { readonly op: 'setExcluded'; readonly restId: string; readonly excluded: boolean }
+  | { readonly op: 'setExcluded'; readonly restId: string; readonly excluded: boolean; readonly reason?: string }
   /** ⭐ 写一个人的全部标签(整组替换)—— 返回清洗后的标签 */
   | { readonly op: 'setTags'; readonly restId: string; readonly tags: readonly string[] }
   /** ⭐ 标签目录(有哪些标签、各几人)—— 返回 `Array<{ tag, count }>` */
   | { readonly op: 'tagCatalog' }
+  /** ⭐ 任务「蓝V互关」概况(三件事各做到哪了)—— 返回 `BlueMutualOverview` */
+  | { readonly op: 'blueMutualOverview'; readonly wsId: string }
+  /** ⭐ 2 求关:候选名单 / 关注进度+回访 / 关注队列(加入、状态、暂停继续清空)—— 2026-10-16 M4 */
+  | { readonly op: 'blueMutualCandidates'; readonly wsId: string; readonly limit: number }
+  | { readonly op: 'blueMutualFollowProgress'; readonly wsId: string }
+  | { readonly op: 'followQueueAdd'; readonly wsId: string; readonly items: ReadonlyArray<{ readonly restId: string; readonly handle: string; readonly reason?: string }> }
+  | { readonly op: 'followQueueStatus'; readonly wsId: string }
+  /**
+   * ⭐ 第 4 阶段(2026-10-19):查回关 / 求关对象回关状态 / 一个人的互动时间线
+   * followCheckRun 现在查一次(每天自动的那次在主进程定时跑);askFollowStatus 求关名单 + 上次查的结果
+   */
+  | { readonly op: 'followCheckRun'; readonly wsId: string }
+  | { readonly op: 'askFollowStatus'; readonly wsId: string }
+  | { readonly op: 'personTimeline'; readonly wsId: string; readonly restId: string }
+  /** ⭐ 求关:准备一个人 —— 采他主页最新一页、选推文(或放弃)—— 返回 `AskPrepared`(2026-10-17) */
+  | { readonly op: 'askPrepare'; readonly wsId: string; readonly restId: string; readonly handle: string }
+  /** ⭐⭐ 求关:三个动作(点赞 → 留言 → 关注),每步核对,哪步没成停在哪步 —— 返回 `AskRunResult`(2026-10-17) */
+  | { readonly op: 'askRun'; readonly wsId: string; readonly restId: string; readonly handle: string;
+      readonly tweetId: string; readonly tweetText: string; readonly pickKind: 'tweet' | 'bio-latest' | 'other'; readonly reply: string;
+      /** Gemma 原稿(用了草拟才有) */
+      readonly aiText?: string;
+      /** engage = 已互关的日常互动(点赞 + 回复,不关注,记 x_engage) */
+      readonly mode?: 'ask' | 'engage' | 'vpn' }
+  /** ⭐ 互动卡准备(2026-10-22):采他主页、核对还是不是互关、选一条(他找过我就回那条) */
+  | { readonly op: 'engagePrepare'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly hisTweetId?: string }
+  /** ⭐ 第 3 件事(2026-10-22):已互关蓝V的互动四组 + 互动队列;采互动(三条搜索,最近 90 天) */
+  | { readonly op: 'engageOverview'; readonly wsId: string; readonly limit: number }
+  | { readonly op: 'engageCollect'; readonly wsId: string }
+  /** ⭐ 求关留言 Gemma 草拟(2026-10-21):范例取你亲手写过的;回 AskDraft */
+  | { readonly op: 'askDraft'; readonly wsId: string; readonly tweetText: string; readonly name?: string; readonly bio?: string; readonly mode?: 'ask' | 'engage' | 'vpn'; readonly context?: string;
+      /** 回复求助要知道是哪条(按它的配方打试用链接的来源标识) */
+      readonly tweetId?: string;
+      /** ⭐ 按你的点评改上一版;keep = 以后都这样(2026-10-22) */
+      readonly revise?: { readonly previous: string; readonly note: string; readonly keep: boolean } }
+  /** 你对 AI 草稿的长期要求:列出 / 停掉 / 恢复 */
+  | { readonly op: 'draftRules'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn' }
+  /** ⭐ 任务「VPN求助」(2026-10-23):找一轮 / 判断 / 名单 / 推翻 / 回复卡准备 */
+  | { readonly op: 'vpnFind'; readonly wsId: string }
+  | { readonly op: 'vpnJudge'; readonly wsId: string; readonly limit: number }
+  | { readonly op: 'vpnOverview'; readonly wsId: string }
+  | { readonly op: 'vpnHuman'; readonly wsId: string; readonly tweetId: string; readonly human: 'accept' | 'reject' }
+  | { readonly op: 'vpnPrepare'; readonly wsId: string; readonly tweetId: string }
+  /** 互动前先过一轮:他 2 小时内有没有动静(用户 10-23) */
+  | { readonly op: 'engageScreen'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly hisAt?: string }
+  /** 先放一放:这几天别再列他(用户 10-23) */
+  | { readonly op: 'deferPerson'; readonly wsId: string; readonly restId: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly tweetId?: string }
+  | { readonly op: 'draftRuleActive'; readonly wsId: string; readonly id: string; readonly active: boolean }
+  /** ⭐ 互动卡换了一条 → 重新读那条的来龙去脉(找原帖;库里缺就开详情页补采) */
+  | { readonly op: 'engageThread'; readonly wsId: string; readonly restId: string; readonly tweetId: string }
+  /** 左边 X 网页正在看的这条帖子(用户 10-22:「看到一个帖子不错,我可以选择它,然后再由AI草拟留言」) */
+  | { readonly op: 'leftTweet'; readonly wsId: string }
+  | { readonly op: 'followQueueControl'; readonly wsId: string; readonly action: 'pause' | 'resume' | 'clear' }
+  /**
+   * ⭐⭐⭐ 搜索:让页面自己翻页、只截获,每页逐页账(2026-10-16 真机 30 页全对)—— 操作台的搜索页走它。
+   * 返回 `SearchScrollReport`(x-search-scroll.ts)。wantPages ≤ 40(SearchTimeline ~50 次/15 分钟)。
+   */
+  | { readonly op: 'searchScroll'; readonly wcId: number; readonly q: string; readonly f?: 'latest' | 'top'; readonly wantPages: number; readonly maxMs: number; readonly ownToken?: string }
+  /** ⭐ 抽查(2026-10-16):有没有比 after 新的右键「查库」请求 —— 返回 `SpotRequest | null` */
+  | { readonly op: 'spotCheckPoll'; readonly wsId: string; readonly after: number }
+  /** ⭐ 抽查:按推文 id / 人的 handle 查库 —— 返回 `SpotResult` */
+  | { readonly op: 'spotCheckLookup'; readonly wsId: string; readonly kind: 'tweet' | 'person'; readonly tweetId?: string; readonly handle?: string }
+  /** ⭐ 扫一遍互关倾向(算法层,1.2.30)—— 返回 `IntentScanReport` */
+  | { readonly op: 'scanMutualIntent' }
+  /** ⭐ 人标「有/无互关倾向」(source = human,算法不能覆盖) */
+  | { readonly op: 'setMutualIntent'; readonly restId: string; readonly value: boolean }
   /**
    * ⭐⭐ 打开主页时核对一个人(2026-10-09)—— 载荷解析在 renderer 做(auditUserPayload),
    * 这里只写库。返回 `{ isNew, changes }`。
    */
-  | { readonly op: 'refreshPerson'; readonly record: XUserRecord }
+  | { readonly op: 'refreshPerson'; readonly record: XUserRecord; readonly wcId: number }
   /** ⭐ 他的推文(人卡用)—— 返回 `{ total, rows }`,按作者数字 id 查 */
   | { readonly op: 'personTweets'; readonly restId: string; readonly limit: number }
   /** ⭐ 他的朋友圈(从推文现算)—— 返回 `{ tweets, people, rows }` */
-  | { readonly op: 'friendCircle'; readonly restId: string; readonly limit: number }
-  /** ⭐ 采一个人时的**进度**落留痕(翻到第几页 / 歇 / 限流等待)—— 运行中也看得见 */
-  | { readonly op: 'logPersonProgress'; readonly entry: { readonly handle: string; readonly tab: string; readonly attempt: number; readonly msg: string } }
+  | { readonly op: 'friendCircle'; readonly wsId: string; readonly restId: string; readonly limit: number }
   /**
    * ⭐⭐ 人卡采一个标签页 —— 采集在**主进程**跑(`x-person-collect.ts` → collectOnWebview,2026-10-13 3a)。
    * 回 `CollectOnWebviewResult`(去没去到页 / 推文 / 翻页账);存库、采集记录、重试仍由 renderer 做。
@@ -135,30 +223,61 @@ export type XDataInvoke =
       /** 范围起点 ISO;不给 = 全部 */
       readonly start?: string;
       readonly pageCap: number; readonly attempt: number;
+      /** ⭐ 界面已占住网页(人卡采主页):带上它的锁,能力执行器只核对、不再申请(Module5-04 第 3 步 3b) */
+      readonly ownToken?: string;
     }
   /** 正在跑的那次采集的最新一句进度(renderer 每秒问一次);没在跑回 null */
   | { readonly op: 'personCollectProgress'; readonly wcId: number }
   /** 人点了停止 —— 立标记,翻页每轮开头 / 歇着时每秒都会看 */
   | { readonly op: 'cancelPersonCollect'; readonly wcId: number }
-  /** ⭐ 采一个人某个标签页的结果落留痕(页数 / 条数 / 停因)*/
-  | {
-      readonly op: 'logPersonCollect';
-      readonly entry: {
-        readonly restId: string; readonly handle: string; readonly range: string; readonly tab: string;
-        readonly pages: number; readonly records: number; readonly inserted: number; readonly stopReason: string;
-      };
-    }
   /**
-   * ⭐⭐ renderer → 主进程:把 X 网页登记(ws→wcId)与「忙」同步过去(`x-host-sync.ts`)。
+   * ⭐⭐ renderer → 主进程:把 X 网页登记(ws→wcId)同步过去(`x-host-sync.ts`)。
    * ⚠️ 登记表每进程一份,后台 runner 在主进程 —— 不同步它永远看不到 X 网页。
    * wcId: null = 这个 ws 的 X 网页卸了。
    */
   | { readonly op: 'syncHost'; readonly wsId: string; readonly wcId: number | null }
-  | { readonly op: 'syncBusy'; readonly wcId: number; readonly reason: string | null }
-  /** ⭐ 后台此刻在不在用这个 webview 采(人手动操作前先问一句);回 `{ handle } | null` */
-  | { readonly op: 'bgBusy'; readonly wcId: number }
+  /**
+   * ⭐⭐⭐ X 网页占用(x-page-lock,Module5-04 第 1 步)—— renderer 不再自己写「忙」(syncBusy 已退役)。
+   * pageAcquire 回 `{ ok: true, token } | { ok: false, why }`;pageRelease 只放得掉自己的 token;
+   * pageBusy 回占用者在干什么(string)或 null。申请方窗口关掉,它的锁主进程自己收回。
+   */
+  | { readonly op: 'pageAcquire'; readonly wcId: number; readonly purpose: string }
+  | { readonly op: 'pageRelease'; readonly token: string }
+  | { readonly op: 'pageBusy'; readonly wcId: number }
+  /**
+   * ⭐⭐ 第 4 步 4a(2026-10-26):取关 / 核对 / 左边打开某页都在主进程(能力 x.person.unfollow / verify / x.page.open)
+   * renderer 不再自己 webDomInvoke 驱动网页
+   */
+  | { readonly op: 'personVerify'; readonly wsId: string; readonly restId: string; readonly handle: string }
+  | { readonly op: 'personUnfollow'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly reason?: string }
+  | { readonly op: 'unfollowHalt'; readonly wsId: string }
+  | { readonly op: 'unfollowResume'; readonly wsId: string }
+  | { readonly op: 'pageOpen'; readonly wsId: string; readonly page: 'profile' | 'status'; readonly handle?: string; readonly tweetId?: string }
+  /**
+   * ⭐⭐ 第 4 步 4b(2026-10-26):原来写在界面里的循环搬到主进程当流程(x-flows.ts);界面只开始 / 看进度 / 叫停
+   */
+  | { readonly op: 'engageScreenBatch'; readonly wsId: string; readonly people: ReadonlyArray<{ restId: string; handle: string; hisAt?: string }> }
+  | { readonly op: 'vpnJudgeAll'; readonly wsId: string }
+  | { readonly op: 'blueMutualFind'; readonly wsId: string; readonly pages: number }
+  | { readonly op: 'personCollectRange'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly range: string }
+  | { readonly op: 'flowRuns'; readonly scope?: string }
+  | { readonly op: 'flowStop'; readonly flow: string; readonly scope: string }
+  | { readonly op: 'cardsStart'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly people: ReadonlyArray<{ restId: string; handle: string; name?: string; hisTweetId?: string }> }
+  | { readonly op: 'cardsState'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn' }
+  | { readonly op: 'cardsAdvance'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly index: number; readonly outcome: string }
+  | { readonly op: 'cardsEnd'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn' }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
-  | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string }
+  /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
+  | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }
+  /**
+   * ⭐ 关系采集任务(2026-10-20):读现状 → 比对库 → 定策略 → 建任务开跑;不给 restId = 我自己
+   * relationJobs 这个号的关系采集任务;paceStatus 节奏(AI 自调,只读)
+   */
+  | { readonly op: 'relationStart'; readonly wsId: string; readonly restId?: string; readonly handle?: string }
+  | { readonly op: 'relationJobs'; readonly wsId: string }
+  | { readonly op: 'paceStatus' }
+  /** ⭐ 人卡「他的名单」:三个名单各多少人 + 其中的求关候选(2026-10-19) */
+  | { readonly op: 'personLists'; readonly wsId: string; readonly restId: string; readonly limit: number }
   /** 列任务;给 restId 只列这个人的,给 wsId 只列这个号的 */
   | { readonly op: 'bgListJobs'; readonly wsId?: string; readonly restId?: string }
   /** ⭐ 此刻在不在跑(runner 内存态)+ 这个号各状态任务数;回 `BgStatusView` */
@@ -172,15 +291,11 @@ export type XDataInvoke =
   | { readonly op: 'setOpsSetting'; readonly key: string; readonly value: number }
   /** ⭐ 现在能不能取关(每日上限 + 最小间隔)—— dayStartIso 由 renderer 按本地时区给 */
   | { readonly op: 'unfollowGate'; readonly dayStartIso: string }
-  /** ⭐ 记一条动作(只追加)*/
-  | {
-      readonly op: 'logAction';
-      readonly entry: {
-        readonly action: 'unfollow'; readonly targetRestId: string; readonly targetHandle: string;
-        readonly decidedBy: 'human' | 'ai'; readonly result: 'ok' | 'failed';
-        readonly reason?: string; readonly detail?: string;
-      };
-    };
+  /**
+   * ⚠️ 2026-10-26 logAction / logPersonProgress / logPersonCollect 退役(Module5-04 第 4 步):
+   * 取关和采主页搬进主进程,动作 / 进度 / 每个标签页的结果由主进程当场记,不再由界面上报。
+   */
+  ;
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:

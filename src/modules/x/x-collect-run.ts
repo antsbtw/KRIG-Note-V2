@@ -15,15 +15,26 @@
  */
 
 import {
-  auditTimelinePayload, summarizeAudits, mergeExpandedText,
+  auditTimelinePayload, summarizeAudits, mergeExpandedText, nextPageCursorOf,
   type TimelineAudit, type TweetAudit,
   type TweetRecord,
 } from './x-timeline-audit';
 import { judgeTweet, decideFetch, type FetchDepth, type TweetNeed } from './x-fetch-plan';
 import { carriesTweets, carriesUsers, X_NOISY_URLS, X_PAGE_MATCHERS, X_PAGE_NAME } from './x-pages';
 import { dispatchPayloads, type PayloadKind } from './x-payload-dispatch';
-import type { XUserAudit } from './x-user-audit';
+import type { XUserAudit, XUserRecord } from './x-user-audit';
 import { X_SCRIPTS } from './x-dom-scripts';
+import { directionWrong, pageProblem, type PageLedgerRow } from './x-page-ledger';
+import { censusByManual, X_MANUAL } from './x-manual';
+import { orderedByTime } from '@platform/main/web-capability/manual';
+import { tapPage } from './x-page-tap';
+
+/** 短指纹(FNV-1a,8 位十六进制)—— 只为在报告里分辨两个长得像的游标,不做安全用途 */
+export function shortHash(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i += 1) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
 
 /** ⭐ 一次采集回来的东西 —— 与底座 `HarvestReport` 同形,只取用得上的 */
 export type RunHarvest = {
@@ -62,6 +73,9 @@ export type RunHarvest = {
   readonly scrolledPx?: number;
   readonly reachedBottom?: boolean;
   readonly stopReason?: string;
+  /** ⭐⭐ 对账(底座 HarvestReport 同名字段):浏览器收到几次目标数据 / 采到几页 */
+  readonly completeness?: { readonly seen: number; readonly captured: number };
+  readonly problems?: readonly string[];
 };
 
 /**
@@ -118,6 +132,14 @@ export type RunDeps = {
    * 一条退避测试就要等好几秒,没人会愿意跑。
    */
   wait?(ms: number): Promise<void>;
+  /**
+   * ⭐⭐⭐ **一页一存、存完回读**(2026-10-16,逐页账)——
+   * 用户:「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了,一页数据不完整,再往下翻页又有什么意义呢?」
+   * 存这一页解出的推文 / 人,然后**回读**:返回库里**查得到**的 id(推文 tweet_id / 人 rest_id)。
+   * ⚠️ 可选 —— 不给就只对到解析层(逐页账里「入库」显示 —)。
+   */
+  savePage?(p: { readonly page: number; readonly tweets: readonly TweetRecord[]; readonly users: readonly XUserRecord[] }):
+    Promise<{ readonly inDb: readonly string[] } | { readonly error: string }>;
 };
 
 export type RunResult = {
@@ -173,6 +195,11 @@ export type RunResult = {
       /** ⭐ true = 脚本直接回了 body(主路);false = 走 harvest 兜底 */
       readonly viaBody?: boolean;
     }>;
+    /**
+     * ⭐⭐⭐ **逐页账**(2026-10-16)—— 每页:X 列了什么 / 解出没有 / 库里有没有 / 方向对不对。
+     * 种子页记 page 0。一页对不上会重采一次,还不对就停在这页(停因写清是哪一层)。
+     */
+    readonly ledger?: readonly PageLedgerRow[];
   } | null;
   /** ⭐ 逐篇补正文的结果 —— 成/败都记 */
   readonly fetched: ReadonlyArray<{
@@ -380,6 +407,97 @@ export type PagingState = {
   readonly emptyRounds: number;
 };
 
+/** 这一页里 X 的目标载荷(推文 / 名单)—— 逐页账只清点这些 */
+function targetItems(one: RunHarvest): RunHarvest['items'] {
+  return one.items.filter((it) => carriesTweets(it.url) || carriesUsers(it.url));
+}
+
+/**
+ * 这一页是不是**按时间倒序**的 —— 只有这种页判翻页方向才有意义。
+ * ⚠️ 首页推荐流(HomeTimeline)、搜索「热门」(product=Top)、推文详情不是按时间排的,判了会误报。
+ */
+export function isChronological(url: string): boolean {
+  /** ⭐ P2(2026-10-19):哪些页按时间排挪进说明书 data.orderedByTime */
+  return orderedByTime(X_MANUAL.data.orderedByTime, url);
+}
+
+/** 这一页推文的发布时间(去掉置顶)—— 判翻页方向 */
+export function pageTimes(got: readonly TimelineAudit[]): number[] {
+  return got.flatMap((a) => a.items)
+    .filter((t) => t.record.pinned !== true && t.record.createdAt)
+    .map((t) => Date.parse(t.record.createdAt as string))
+    .filter((n) => !Number.isNaN(n));
+}
+
+/**
+ * ⭐⭐⭐ 给一页记账:清点 X 列的 → 逐条核对解出 → (有 savePage 就)存并回读 → 判方向。
+ * 纯编排,不翻页不重试 —— 重试由调用方决定(一页对不上重采一次,还不对就停)。
+ */
+export async function ledgerFor(
+  deps: RunDeps, page: number, label: string, one: RunHarvest,
+  got: readonly TimelineAudit[], prevNewestMs: number | undefined,
+  cursorBrief: string | undefined, retried: boolean,
+): Promise<PageLedgerRow> {
+  const tweetIds = new Set<string>(); const userIds = new Set<string>(); const promoted = new Set<string>();
+  let tombstones = 0; const other: Record<string, number> = {};
+  let nextCursor: string | undefined;
+  const targets = targetItems(one);
+  tapPage({ page, label, items: targets.map((it) => ({ url: it.url, status: it.status, text: it.text })) });
+  const manualDiffs: string[] = [];
+  for (const it of targets) {
+    /**
+     * ⭐⭐ 照说明书清点(P2 2026-10-19 切换)。切换前:基线样本 20 份 + 随机 1 万份与旧 censusPage 逐条一致,
+     * 真机并跑两轮(搜索 4 页 / 转发 3 页)报告「逐页与旧账一致」。
+     */
+    const c = censusByManual(it.text);
+    if (!c) { other['非JSON响应'] = (other['非JSON响应'] ?? 0) + 1; continue; }
+    c.tweetIds.forEach((x) => tweetIds.add(x)); c.userIds.forEach((x) => userIds.add(x));
+    c.promotedIds.forEach((x) => promoted.add(x)); tombstones += c.tombstones;
+    for (const [k, n] of Object.entries(c.other)) other[k] = (other[k] ?? 0) + n;
+    if (c.cursors.bottom) nextCursor = c.cursors.bottom;
+    /** 说明书算的「往下」游标 vs 翻页实际用的(nextPageCursorOf,说明书外登记过)—— 逐份比,只比推文载荷 */
+    if (carriesTweets(it.url)) {
+      const used = nextPageCursorOf(JSON.parse(it.text));
+      const down = c.cursors.bottom ?? '';
+      if (used !== down) manualDiffs.push(`游标:说明书 down ${down ? `#${shortHash(down)}` : '(无)'} / 翻页用 ${used ? `#${shortHash(used)}` : '(无)'}`);
+    }
+  }
+  if (manualDiffs.length > 0) {
+    console.warn(`[x.manual] 第 ${page} 页(${label})说明书的往下游标与翻页所用不一致:${manualDiffs.join(';')}`);
+  }
+  /**
+   * ⚠️ 推文页里夹着的人(推荐关注之类的卡片)不是这一页采的对象 —— 单独计数,不进对账;
+   * 只有**名单页**(一条推文都没有)才对人。用户:「如果采人,就查找人,如果采推文,就查找推文」
+   */
+  const isTweetPage = tweetIds.size > 0;
+  if (isTweetPage && userIds.size > 0) { other['推荐的人'] = userIds.size; userIds.clear(); }
+  const users = isTweetPage ? [] : dispatchPayloads(one.items).users.flatMap((a) => a.items);
+  const tweets = got.flatMap((a) => a.items.map((t) => t.record));
+  const parsed = new Set<string>([...tweets.map((t) => t.id), ...users.map((u) => u.restId)].filter((x) => x !== ''));
+  const listed = [...tweetIds, ...userIds];
+  const notParsed = listed.filter((id) => !parsed.has(id));
+  let notInDb: string[] | undefined;
+  if (deps.savePage && (tweets.length > 0 || users.length > 0)) {
+    const r = await deps.savePage({ page, tweets, users });
+    if ('error' in r) {
+      notInDb = listed.filter((id) => parsed.has(id));
+      other[`存库出错:${r.error.slice(0, 40)}`] = 1;
+    } else {
+      const inDb = new Set(r.inDb);
+      notInDb = listed.filter((id) => parsed.has(id) && !inDb.has(id));
+    }
+  }
+  return {
+    page, label, xTweets: tweetIds.size, xUsers: userIds.size, promoted: promoted.size, tombstones, other,
+    notParsed, notInDb,
+    directionWrong: targetItems(one).some((it) => isChronological(it.url)) && directionWrong(prevNewestMs, pageTimes(got)),
+    cursor: cursorBrief,
+    nextCursor: nextCursor ? `${nextCursor.slice(0, 6)}…#${shortHash(nextCursor)}` : undefined,
+    retried,
+    manualDiff: manualDiffs.length > 0 ? manualDiffs.join(';') : undefined,
+  };
+}
+
 /**
  * ⭐⭐⭐ **拿游标一直翻到没有为止**。
  *
@@ -409,6 +527,10 @@ async function pageUntilDone(
    * ⚠️ 不给就用种子那一页的游标(从头采)。
    */
   resumeCursor?: string,
+  /** ⭐ 逐页账(种子页已记在里面)—— 翻页每页往里追加 */
+  ledger: PageLedgerRow[] = [],
+  /** ⭐ 种子页里最新一条推文的时间 —— 第 1 页判方向用 */
+  seedNewestMs?: number,
 ): Promise<{
   audits: TimelineAudit[];
   paging: NonNullable<RunResult['paging']>;
@@ -456,7 +578,7 @@ async function pageUntilDone(
     say(`${why} —— 跳过主动翻页`);
     return {
       audits: all,
-      paging: { rounds: 0, stopReason: why, freshTotal: 0, rounds_detail: [] },
+      paging: { rounds: 0, stopReason: why, freshTotal: 0, rounds_detail: [], ledger },
       /** ⚠️ 没有带头的种子,谈不上续采 */
       nextCursor: undefined,
       exhausted: false,
@@ -539,6 +661,9 @@ async function pageUntilDone(
   let round = 0;
   /** ⭐ 429 退避试了几次 —— 超过上限才真停 */
   let rateLimitRetries = 0;
+  /** ⭐ 逐页账:上一页最新推文时间(判方向)/ 这个游标是不是已经重采过一次 */
+  let prevNewestMs = seedNewestMs;
+  let retriedCursor: string | undefined;
   while (round < PAGING_SAFETY_ROUNDS) {
     /** ⭐ 每轮开头先看人有没有喊停 —— 停在轮次之间,已采到的都留着 */
     if (deps.cancelled?.()) {
@@ -639,9 +764,13 @@ async function pageUntilDone(
       }
     }
     say(`主动翻页 第 ${round} 页…`);
-    /** ⭐ 掐头去尾 —— 够判「变没变」,不占地方 */
+    /**
+     * ⭐ 掐头去尾 + 短指纹 —— 不占地方,又判得出「变没变」。
+     * ⚠️ 2026-10-16:只掐头去尾时,X 搜索游标头尾都一样、只有中间不同 →
+     * 报告误报「有重复的游标 → 我们这边的 bug」,把排查指错方向。指纹按整串算。
+     */
     const cursorBrief = cursor.length > 28
-      ? `${cursor.slice(0, 12)}…${cursor.slice(-12)}` : cursor;
+      ? `${cursor.slice(0, 12)}…${cursor.slice(-12)}#${shortHash(cursor)}` : cursor;
 
     /**
      * ⭐⭐⭐ **发一页 → 当场拿到这一页** —— 2026-10-06,照旧版的形状改。
@@ -719,7 +848,8 @@ async function pageUntilDone(
         const sentKeys = Object.keys(seed.requestHeaders ?? {});
         const sawAuth = sentKeys.some((k) => k.toLowerCase() === 'authorization');
         const sawCsrf = sentKeys.some((k) => k.toLowerCase() === 'x-csrf-token');
-        stopReason = `第 ${round} 轮请求失败：${r.why ?? `HTTP ${r.status ?? '?'}`}`
+        /** ⭐ 状态码总要写进去(2026-10-20):节奏自调靠「429」认限流,不能指望 why 的文案里碰巧有 */
+        stopReason = `第 ${round} 轮请求失败(HTTP ${r.status ?? '?'})：${r.why ?? '(没给原因)'}`
           + `（种子带了 ${sentKeys.length} 个请求头`
           + `，authorization=${sawAuth ? '有' : '**无**'}`
           + `，x-csrf-token=${sawCsrf ? '有' : '**无**'}）`;
@@ -749,8 +879,32 @@ async function pageUntilDone(
       say(stopReason); break;
     }
 
-    onRound(one);
     const got = auditsOf(one);
+    /**
+     * ⭐⭐⭐ **逐页账:这一页对上了才往下翻**(用户 10-16:「一页数据不完整,再往下翻页又有什么意义呢?」)
+     * 清点 X 列的 → 逐条核对解出 → 存并回读 → 判方向。
+     * 对不上:同一个游标重采一次;还对不上:停在这一页,停因写清是哪一层。
+     */
+    const isRetry = retriedCursor === cursor;
+    const row = await ledgerFor(deps, round, '翻页', one, got, prevNewestMs, cursorBrief, isRetry);
+    const problem = pageProblem(row);
+    if (problem !== undefined && !isRetry) {
+      say(`⚠️ ${problem} —— 重采这一页`);
+      retriedCursor = cursor;
+      seenCursors.delete(cursor);
+      round -= 1;
+      continue;
+    }
+    ledger.push(row);
+    onRound(one);
+    const times = pageTimes(got);
+    if (times.length > 0) prevNewestMs = Math.max(...times);
+    if (problem !== undefined) {
+      stopReason = `${problem}(重采后仍对不上 —— 停在这一页,不往下翻)`;
+      /** ⭐ 这一页解出的照样收下(已经存了);但不往下翻 */
+      all.push(...got);
+      say(stopReason); break;
+    }
     /**
      * ⭐⭐⭐ 判据是「**有没有没见过的推**」,不是「这一页有几条推」。
      *
@@ -859,7 +1013,7 @@ async function pageUntilDone(
    */
   return {
     audits: all,
-    paging: { rounds: round, stopReason, freshTotal: seenKeys.size - seedCount, rounds_detail: roundsDetail },
+    paging: { rounds: round, stopReason, freshTotal: seenKeys.size - seedCount, rounds_detail: roundsDetail, ledger },
     /**
      * ⭐⭐⭐ **把手里那个游标带出去** —— 下次从这里续。
      * ⚠️ X 说到头了就**不带**:那时续采没有意义,下次该从头采拿新增。
@@ -1082,24 +1236,36 @@ export async function runCollect(
    * 也不是我猜的「哪些页特殊」。
    */
   const isUserList = userAudits.some((a) => a.items.length > 0);
+  /**
+   * ⭐⭐⭐ 逐页账从种子页开始(page 0)—— 种子页就对不上,翻页没有意义,直接停。
+   */
+  const ledger: PageLedgerRow[] = [];
+  const seedRow = await ledgerFor(deps, 0, '种子', rep, audits, undefined, undefined, false);
+  ledger.push(seedRow);
+  const seedProblem = pageProblem(seedRow);
+  const seedTimes = pageTimes(audits);
   let paging: RunResult['paging'] = null;
   /** ⭐ 断点续采:停下来时手里那个游标 + X 有没有说到头 */
   let nextCursor: string | undefined;
   let exhausted = false;
-  if (scrolledToBottom && gotSomething && !isUserList) {
+  if (seedProblem !== undefined) {
+    say(`⚠️ ${seedProblem} —— 种子页就对不上,不往下翻`);
+    paging = { rounds: 0, stopReason: `${seedProblem}(种子页就对不上,不往下翻)`, freshTotal: 0, rounds_detail: [], ledger };
+  } else if (scrolledToBottom && gotSomething && !isUserList) {
     say('滚到底了 —— 这一页已经采完,跳过翻页');
     paging = {
       rounds: 0,
       stopReason: '滚到底了,无需翻页（这一页已经采完）',
       freshTotal: 0,
       rounds_detail: [],
+      ledger,
     };
   } else if (deps.runScript) {
     const r = await pageUntilDone(deps, audits, rep, say, (one) => {
       totalResponses += one.items.length;
       /** ⭐ 翻页回来的用户也收下 —— 名次接着往下编 */
       takeUsers(one);
-    }, opts.resumeCursor);
+    }, opts.resumeCursor, ledger, seedTimes.length > 0 ? Math.max(...seedTimes) : undefined);
     audits = r.audits;
     paging = r.paging;
     nextCursor = r.nextCursor;

@@ -75,41 +75,20 @@ export function subscribeXHost(cb: Listener): () => void {
 }
 
 /**
- * ⭐⭐ X 网页「正忙」—— 2026-10-08 运营的人页加了「点人 → X 网页跳到他主页」。
- *
- * ⚠️ 操作台正在用这个 webview 采集时,跳走会**打断采集**(载荷监听挂在当前页上)。
- * 所以采集方登记「忙」,想导航的一方先问一句;忙就不跳,并且**说出来**为什么没跳。
- * 按 wcId 记 —— 忙的是那个 webview,不是哪个 ws。
+ * ⚠️ 2026-10-23:「X 网页正忙」不在这里了 —— 改成主进程的资源锁(`x-page-lock.ts`,Module5-04 第 1 步)。
+ * 原来这里一张 `wcId → 原因` 的表谁都能写、谁都能清,renderer 那份还同步过去覆盖主进程那份:
+ * 查回关标了忙 → 操作台盖掉 → 操作台结束清掉 → 查回关还在跑,别人看不见忙。
+ * renderer 要占网页:`acquireXPage` / `releaseXPage`(x-unfollow-run.ts,走 IPC)。
  */
-const busyByWc = new Map<number, string>();
-
-export function setXHostBusy(wcId: number, reason: string | null): void {
-  if (reason === null) {
-    if (!busyByWc.delete(wcId)) return;
-  } else {
-    if (busyByWc.get(wcId) === reason) return;
-    busyByWc.set(wcId, reason);
-  }
-  notify();
-}
-
-/** 返回忙的原因;不忙返回 null */
-export function getXHostBusy(wcId: number): string | null {
-  return busyByWc.get(wcId) ?? null;
-}
 
 /**
  * ⭐⭐ 全部登记的快照 —— 给 `x-host-sync`(renderer→主进程同步)比对用。
  *
  * ⚠️⚠️ 为什么要同步(2026-10-14 第 4 步读代码发现):本表是**模块级 Map,每个进程各一份**。
- * 登记只发生在 renderer(XWebView/人卡/操作台),而后台 runner 跑在**主进程**,
+ * 登记只发生在 renderer(XWebView),而后台 runner 跑在**主进程**,
  * 读到的是主进程那份 —— 恒空 → runner 把每个 ws 都当「没开 X 网页」跳过,
  * 一页不采、不报错;「忙就让路」也恒不生效。runner 的测试在同一进程里直接 set,所以全绿。
  */
 export function listXHostStates(): ReadonlyMap<string, XHostState> {
   return new Map(stateByWs);
-}
-
-export function listXHostBusy(): ReadonlyMap<number, string> {
-  return new Map(busyByWc);
 }

@@ -34,6 +34,8 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import type { ViewComponentProps } from '@slot/view-type-registry/view-definition';
 import type { HostHandle, HostProps } from '@capabilities/web-rendering';
 import { setXHostState, clearXHostState } from './x-host-registry';
+import { setSpot, type SpotReq } from './x-spot-store';
+import { xDataCall } from './x-data-types';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -45,6 +47,8 @@ const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
  * ⚠️ 不 import renderer.ts:那会把 registerView 的副作用拖进来(循环引用)。
  */
 const X_OPS_VIEW_ID = 'x-ops-view';
+/** ⭐ 任务的 view id —— 与 `renderer.ts` 同一个字面量 */
+const X_TASK_VIEW_ID = 'x-task-view';
 
 type WebRenderingApi = {
   Host: React.ForwardRefExoticComponent<HostProps & React.RefAttributes<HostHandle>>;
@@ -93,6 +97,26 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
   }, [workspaceId]);
 
   useEffect(() => () => clearXHostState(workspaceId), [workspaceId]);
+
+  /**
+   * ⭐⭐ 抽查(2026-10-16):右键「查库」后,主进程存下请求;这里每秒问一次(X 无推送通道)。
+   * 拿到就交给运营面板;右栏不是运营就打开它(用户选 A:「没开就自动打开」)。
+   */
+  useEffect(() => {
+    let after = 0;
+    let alive = true;
+    const t = setInterval(() => {
+      void xDataCall({ op: 'spotCheckPoll', wsId: workspaceId, after }).then((r) => {
+        if (!alive || r.status !== 'ok' || r.value === null) return;
+        const req = r.value as SpotReq;
+        after = req.seq;
+        setSpot(workspaceId, req);
+        const bus = workspaceManager.getBus(workspaceId);
+        if (bus && workspaceManager.get(workspaceId)?.slotBinding.right !== X_OPS_VIEW_ID) bus.slot.openRight(X_OPS_VIEW_ID);
+      });
+    }, 1000);
+    return () => { alive = false; clearInterval(t); };
+  }, [workspaceId]);
 
   /**
    * ⊞ 右栏视图切换 —— ⭐ 复用**全局 SlotPicker**,不自造 toggle 逻辑
@@ -160,6 +184,19 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
     else bus.slot.openRight(X_OPS_VIEW_ID);
   }, [workspaceId]);
 
+  /** ⭐⭐ 「任务」按钮(2026-10-16)—— 与运营同一手法:读「右栏现在装的是谁」 */
+  const taskOpen = useSyncExternalStore(
+    (cb) => workspaceManager.subscribe(cb),
+    () => workspaceManager.get(workspaceId)?.slotBinding.right === X_TASK_VIEW_ID,
+  );
+  const handleToggleTask = useCallback(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    const openNow = workspaceManager.get(workspaceId)?.slotBinding.right === X_TASK_VIEW_ID;
+    if (openNow) bus.slot.closeRight();
+    else bus.slot.openRight(X_TASK_VIEW_ID);
+  }, [workspaceId]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 顶条:地址显示 + 召出右栏 */}
@@ -194,6 +231,21 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
           }}
         >
           📊 运营
+        </button>
+        {/* ⭐ 编排好的业务流程(蓝V互关 …):开/关右栏的「任务」 */}
+        <button
+          type="button"
+          onClick={handleToggleTask}
+          title={taskOpen ? '关闭任务' : '打开任务'}
+          style={{
+            background: taskOpen ? 'var(--accent-bg, #2d4a6b)' : 'transparent',
+            border: '1px solid var(--border-color, #444)',
+            borderRadius: 4,
+            color: taskOpen ? 'var(--text-primary, #ddd)' : 'var(--text-secondary, #aaa)',
+            cursor: 'pointer', fontSize: 12, padding: '3px 8px', flex: '0 0 auto',
+          }}
+        >
+          📋 任务
         </button>
         {/* ⭐ 最高频动作:直接开/关操作台,不必去 picker 里认名字 */}
         <button

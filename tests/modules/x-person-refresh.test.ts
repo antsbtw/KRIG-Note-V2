@@ -7,6 +7,7 @@
  * SQL 语义已在临时库验过(回关 / 改名 / 旧观察不改 / 一致)。
  */
 import { describe, it, expect } from 'vitest';
+import { capBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -43,9 +44,16 @@ describe('buildPersonRefresh', () => {
   });
 
   it('⭐⭐ 只写有值的字段:空字符串与没给的不写', () => {
-    const q = buildPersonRefresh(rec({ following: true }), NOW);
-    expect(q.sql).toContain('i_follow = IF');
-    expect(q.sql).not.toMatch(/display_name|bio|follows_me|followers_count/);
+    const q = buildPersonRefresh(rec({ isBlueVerified: true }), NOW);
+    expect(q.sql).toContain('is_blue_verified = IF');
+    expect(q.sql).not.toMatch(/display_name|bio|followers_count/);
+  });
+
+  it('⭐⭐⭐ 关系不写人表(1.2.27):载荷带了关系也不出现在人表 SQL 里 —— 它按号写 x_relation', () => {
+    const q = buildPersonRefresh(rec({ following: true, followedBy: false }), NOW);
+    expect(q.sql).not.toMatch(/\bi_follow\b|\bfollows_me\b/);
+    expect(PERSON_REFRESH_FIELDS).not.toContain('i_follow');
+    expect(PERSON_REFRESH_FIELDS).not.toContain('follows_me');
   });
 
   it('⭐⭐⭐ 旧观察不覆盖新的:都带时间条件;fetched_at 只赋值一次且最后;曾用名在改 handle 之前', () => {
@@ -60,17 +68,26 @@ describe('buildPersonRefresh', () => {
 });
 
 describe('diffPerson', () => {
-  it('关系变化、改名、蓝V 变化要报出来;一致就是空', () => {
-    const before = { handle: 'guy', i_follow: true, follows_me: false, is_blue_verified: true, fetched_at: '2026-10-07T00:00:00Z' };
-    expect(diffPerson(before, rec({ following: true, followedBy: true }), NOW).changes).toEqual(['关系 我关注·他没回关 → 互关']);
-    expect(diffPerson(before, rec({ handle: 'New' }), NOW).changes).toEqual(['改名 @guy → @new']);
-    expect(diffPerson(before, rec({ isBlueVerified: false }), NOW).changes).toEqual(['不再是蓝V']);
-    expect(diffPerson(before, rec({ following: true }), NOW).changes).toEqual([]);
+  it('关系变化(按号)、改名、蓝V 变化要报出来;一致就是空', () => {
+    const before = { handle: 'guy', is_blue_verified: true, fetched_at: '2026-10-07T00:00:00Z' };
+    const rel = { before: { i_follow: true, follows_me: false } };
+    expect(diffPerson(before, rec({ following: true, followedBy: true }), NOW, rel).changes).toEqual(['关系 我关注·他没回关 → 互关']);
+    expect(diffPerson(before, rec({ handle: 'New' }), NOW, rel).changes).toEqual(['改名 @guy → @new']);
+    expect(diffPerson(before, rec({ isBlueVerified: false }), NOW, rel).changes).toEqual(['不再是蓝V']);
+    expect(diffPerson(before, rec({ following: true }), NOW, rel).changes).toEqual([]);
     expect(diffPerson(null, rec({}), NOW).isNew).toBe(true);
   });
 
+  it('⭐⭐ 这次关系没写(认不出号)→ 不许报关系变化:「没写」不能说成「变了」', () => {
+    const before = { handle: 'guy', fetched_at: '2026-10-07T00:00:00Z' };
+    expect(diffPerson(before, rec({ following: false, followedBy: false }), NOW).changes).toEqual([]);
+    /** 这个号以前没记过他(before:null)→ 从「关系不明」变成看到的关系 */
+    expect(diffPerson(before, rec({ following: true, followedBy: true }), NOW, { before: null }).changes)
+      .toEqual(['关系 关系不明 → 互关']);
+  });
+
   it('⭐⭐⭐ 观察比库里旧(SQL 没写)就不许报变化 —— 临时库实测第一版报了假变化', () => {
-    const before = { handle: 'guy', i_follow: true, follows_me: true, fetched_at: '2026-10-09T02:00:00Z' };
+    const before = { handle: 'guy', fetched_at: '2026-10-09T02:00:00Z' };
     const d = diffPerson(before, rec({ following: false, followedBy: false }), '2026-10-01T00:00:00Z');
     expect(d).toEqual({ isNew: false, stale: true, changes: [] });
   });
@@ -82,21 +99,32 @@ describe('接线', () => {
 
   it('⭐⭐ 核对:去主页 + 只等主页资料那一条 + 不多滚 + 有时限', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
-    expect(fn.length).toBeGreaterThan(500);
-    expect(fn).toMatch(/gotoPage: \{ name: X_PAGE_NAME\.profile/);
-    expect(fn).toMatch(/pageUrlIncludes: \[PROFILE_ENDPOINT\], wantPages: 1, maxRounds: 3, maxMs: 10_000/);
+    expect(fn.length).toBeGreaterThan(200);
+    expect(fn).toMatch(/await verifyPerson\(workspaceId, p\)/);
+    /** 2026-10-26 去主页读资料搬到主进程 x-person-act.ts verifyPersonOn(运营核对 + 取关后核对共用) */
+    const RUN = read('src/modules/x/x-person-act.ts');
+    const vf = RUN.slice(RUN.indexOf('export async function verifyPersonOn'), RUN.indexOf('export type FollowDone'));
+    expect(vf.length).toBeGreaterThan(200);
+    /** 第 5 步(10-26):读主页资料一份 = x-person-profile.ts readProfileOn(核对 / 关系采集 / 认号共用) */
+    expect(vf).toMatch(/await readProfileOn\(wcId, who\)/);
+    const PF = read('src/modules/x/x-person-profile.ts');
+    const rd = PF.slice(PF.indexOf('export async function readProfileOn'));
+    expect(rd.length).toBeGreaterThan(300);
+    expect(rd).toMatch(/gotoPage: \{ name: X_PAGE_NAME\.profile/);
+    expect(rd).toMatch(/pageUrlIncludes: \[PROFILE_ENDPOINT\], wantPages: 1, maxRounds: 3, maxMs: 10_000/);
     expect(PROFILE_ENDPOINT).toBe('UserByScreenName');
   });
 
-  it('⭐⭐⭐ 操作台采集中不跳;自己核对期间登记忙,结束(含出错)一定清掉', () => {
+  it('⭐⭐⭐ 操作台采集中不跳;自己核对期间占住网页,结束(含出错)一定放掉', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
-    expect(fn).toMatch(/if \(busy !== null && busy !== VERIFY_BUSY\)/);
-    expect(fn.indexOf('setXHostBusy(wcId, VERIFY_BUSY)')).toBeGreaterThan(-1);
     /**
-     * ⚠️ 第一版只看「finally 后 80 字内出现清忙」—— 注入「把它挪到 finally 块外面」仍全绿
-     * (还在 80 字内),而那样一出错就永远挂着「忙」。改成钉 **finally 块本身**的内容。
+     * 2026-10-26 起占网页在执行器(能力 x.person.verify 声明 page,结束含出错一定放 —— 执行器测试 + x-person-act.test 钉着);
+     * 界面这边:被占着 → 说「没跳转」,不留「核对中」的残影
      */
-    expect(fn).toMatch(/\} finally \{\s*setXHostBusy\(wcId, null\);\s*\}/);
+    expect(fn).toMatch(/if \('refused' in r\) \{\s*setVerify\(\(v\) => \{ const n = \{ \.\.\.v \}; delete n\[p\.rest_id\]; return n; \}\);/);
+    const CAPS = read('src/modules/x/x-capabilities-act.ts');
+    const vb = CAPS.slice(CAPS.indexOf("id: 'x.person.verify'"), CAPS.indexOf("id: 'x.person.unfollow'"));
+    expect(vb).toMatch(/page: \(i\) => `核对 @\$\{i\.handle\}`/);
   });
 
   it('⭐⭐ 一次只核对一个;核对中再点只记住最后一个', () => {
@@ -107,8 +135,16 @@ describe('接线', () => {
 
   it('⭐ refreshPerson:契约 + handler;新人记账', () => {
     expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'refreshPerson'/);
-    const body = IPC.slice(IPC.indexOf("case 'refreshPerson':"), IPC.indexOf("case 'refreshPerson':") + 1200);
-    expect(body).toMatch(/source: 'profile-refresh'/);
-    expect(body).toMatch(/if \(d\.isNew\)/);
+    /** 2026-10-24 迁到能力 x.person.refresh */
+    void IPC;
+    const body = capBlock('x.person.refresh');
+    expect(body.length).toBeGreaterThan(100);
+    /** 第 5 步(10-26):刷新落库一份 = x-save-batch savePersonRefresh(新人记账在它里面) */
+    expect(body).toMatch(/savePersonRefresh\(i\.record, await accountForWrite\(i\.wcId\)\)/);
+    const SB = read('src/modules/x/x-save-batch.ts');
+    const sp = SB.slice(SB.indexOf('export async function savePersonRefresh'));
+    expect(sp.length).toBeGreaterThan(200);
+    expect(sp).toMatch(/source: 'profile-refresh'/);
+    expect(sp).toMatch(/if \(d\.isNew\)/);
   });
 });

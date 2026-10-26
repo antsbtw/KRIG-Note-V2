@@ -21,6 +21,7 @@
 import { runCollect, type RunDeps } from './x-collect-run';
 import { newestOwn, timeWindowStop } from './x-person-timeline';
 import type { TweetRecord } from './x-timeline-audit';
+import { pageProblem, type PageLedgerRow } from './x-page-ledger';
 
 /** 对一个 webview 的三个真动作 —— 主进程里由 `x-collect-ports.ts` 接到能力层 */
 export type WebviewPorts = {
@@ -51,6 +52,11 @@ export type CollectOnWebviewHooks = {
   onProgress(msg: string): void;
   /** 等一会儿(限流退避 / 随机停顿)—— ⚠️ 调用方负责「等的时候也能被叫停」 */
   wait(ms: number): Promise<void>;
+  /**
+   * ⭐⭐⭐ 一页一存、存完回读(2026-10-16,逐页账)—— 交给 runCollect 每页调;返回库里查得到的 id 与新增数。
+   * 不给就只对到解析层。
+   */
+  savePage?(tweets: readonly TweetRecord[]): Promise<{ readonly inDb: readonly string[]; readonly inserted: number }>;
 };
 
 export type CollectOnWebviewResult =
@@ -68,6 +74,12 @@ export type CollectOnWebviewResult =
       readonly exhausted: boolean;
       /** 翻页前沿:最后一页里他自己最新那条的时间(没翻页时 undefined)—— 后台进度「采到」用 */
       readonly frontierAt?: string;
+      /** ⭐ 逐页账(2026-10-16)—— 每页 X 列的 / 解析 / 入库 / 方向 */
+      readonly ledger: readonly PageLedgerRow[];
+      /** ⭐ 有一页对不上(重采后仍不对)—— 第一条问题;后台据此判这一段失败(异常即停) */
+      readonly ledgerProblem?: string;
+      /** ⭐ 每页存库时累计的新增条数 —— 每页已经先存过,最后整批再存时「新增」会是 0,进度要用这个 */
+      readonly pageInserted: number;
     };
 
 /**
@@ -91,7 +103,13 @@ export async function collectOnWebview(
    */
   const stop = timeWindowStop(input.restId, input.start, input.pageCap);
   let frontierAt: string | undefined;
+  let pageInserted = 0;
   const run = await runCollect({
+    savePage: hooks.savePage ? async ({ tweets }) => {
+      const r = await hooks.savePage!(tweets);
+      pageInserted += r.inserted;
+      return { inDb: r.inDb };
+    } : undefined,
     harvest: ports.harvest,
     runScript: ports.runScript,
     stopPaging: (st) => {
@@ -125,5 +143,8 @@ export async function collectOnWebview(
     nextCursor: run.nextCursor,
     exhausted: run.exhausted ?? false,
     frontierAt,
+    ledger: run.paging?.ledger ?? [],
+    ledgerProblem: (run.paging?.ledger ?? []).map(pageProblem).find((x) => x !== undefined),
+    pageInserted,
   };
 }

@@ -38,6 +38,23 @@ export const X_SCRIPTS = {
    */
   unfollow: 'x.unfollowOnProfile' as ScriptId,
   /**
+   * ⭐⭐ 在**他的主页**上关注(2026-10-16,蓝V互关 M4)—— 取关的反向:点 `<id>-follow` → 等它变成 `<id>-unfollow` 才算成。
+   * ⚠️ 按他的数字 id 定位,不会点到页面上别人的按钮;本来就关注着 → 不点,如实回 already-following。
+   */
+  follow: 'x.followOnProfile' as ScriptId,
+  /**
+   * ⭐⭐ 求关三个动作之一:在**单篇推文页**给这条推文点赞(2026-10-17)。
+   * 按推文 id 找到它自己那张卡(时间链接指向 `/status/<id>`)→ 点 like → 等它变成 unlike 才算成。
+   */
+  likeTweet: 'x.likeTweetOnStatus' as ScriptId,
+  /** ⭐ 求关:单篇页的回复框在不在、里面有没有残留(只读不写)—— 有残留就不往里贴,免得把两段拼在一起发出去 */
+  replyBoxState: 'x.replyBoxState' as ScriptId,
+  /**
+   * ⭐⭐ 求关:点回复框旁的发送按钮 → 等我的回复**真的出现在页面上**(我的号发的、正文对得上)才算成,并读回它的 id。
+   * ⚠️ 只点**发送**;框里是什么由调用方先贴好并核对过(web.input 的 exact 校验)。
+   */
+  sendReply: 'x.sendReplyInline' as ScriptId,
+  /**
    * ⭐⭐⭐ **滚不动时跳到最后一张卡片** —— 虚拟列表的抢救动作。
    *
    * ── 用户 2026-09-19 原话 ──
@@ -56,6 +73,18 @@ export const X_SCRIPTS = {
    * 参数走 `JSON.stringify`,绝不拼进脚本文本。
    */
   fetchNextPage: 'x.fetchNextPage' as ScriptId,
+  /**
+   * ⭐⭐ **认号**(2026-10-16,蓝V互关 M0)—— 这个 X 网页此刻登录的是哪个号。
+   * 用户选 A:从页面认(左侧「个人资料」链接 + 账号切换按钮),不碰登录凭据。
+   * ⚠️ 只读不点;两处标记原样回报,判断在 `x-account.ts::parseWhoAmI`。
+   * ⚠️ data-testid 是 X 的页面结构,真机才验得出。
+   */
+  whoAmI: 'x.whoAmI' as ScriptId,
+  /**
+   * ⭐⭐ 抽查(2026-10-16):右键那一点下面是哪条推文 / 哪个人 —— 只读不点。
+   * 用户:「在左边x的原图增加关联方法,增加一个右键菜单,由用户抽查」
+   */
+  spotTarget: 'x.spotTarget' as ScriptId,
 } as const;
 
 /**
@@ -321,6 +350,175 @@ const FETCH_NEXT_PAGE_SCRIPT = (params: ScriptParams): string => {
   ].join('\n');
 };
 
+/**
+ * ⭐ 关注脚本正文 —— 返回 state:followed / already-following / no-button / no-switch / bad-id / error
+ */
+const FOLLOW_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var id = __ID__;
+      if (!/^\d+$/.test(id)) { resolve({ done: false, state: 'bad-id' }); return; }
+      var q = function (suffix) { return document.querySelector('[data-testid="' + id + suffix + '"]'); };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 200); };
+        tick();
+      };
+      waitFor(function () { return q('-follow') || q('-unfollow'); }, 6000, function (btn) {
+        if (!btn) { resolve({ done: false, state: 'no-button' }); return; }
+        if (btn.getAttribute('data-testid') === id + '-unfollow') { resolve({ done: false, state: 'already-following' }); return; }
+        btn.click();
+        waitFor(function () { return q('-unfollow'); }, 6000, function (after) {
+          resolve(after ? { done: true, state: 'followed' } : { done: false, state: 'no-switch' });
+        });
+      });
+    } catch (e) { resolve({ done: false, state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/**
+ * ⭐ 点赞脚本正文(String.raw:反斜杠原样到浏览器)。__ID__ = 推文数字 id(JSON)。
+ * state:liked / already-liked / no-tweet / no-button / no-switch / bad-id / error
+ */
+const LIKE_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var id = __ID__;
+      if (!/^\d+$/.test(id)) { resolve({ state: 'bad-id' }); return; }
+      var own = new RegExp('/status/' + id + '(?:$|[/?#])');
+      var card = function () {
+        var arts = document.querySelectorAll('article[data-testid="tweet"]');
+        for (var i = 0; i < arts.length; i++) {
+          var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
+          for (var j = 0; j < ts.length; j++) {
+            var a = ts[j].closest('a');
+            if (a && own.test(a.getAttribute('href') || '')) return arts[i];
+          }
+        }
+        return null;
+      };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 200); };
+        tick();
+      };
+      waitFor(card, 10000, function (art) {
+        if (!art) { resolve({ state: 'no-tweet' }); return; }
+        if (art.querySelector('[data-testid="unlike"]')) { resolve({ state: 'already-liked' }); return; }
+        var btn = art.querySelector('[data-testid="like"]');
+        if (!btn) { resolve({ state: 'no-button' }); return; }
+        btn.click();
+        waitFor(function () { return art.querySelector('[data-testid="unlike"]'); }, 6000, function (after) {
+          resolve({ state: after ? 'liked' : 'no-switch' });
+        });
+      });
+    } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/** ⭐ 回复框现状(无参数,只读) */
+const REPLY_BOX_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    var t0 = Date.now();
+    var tick = function () {
+      var boxes = document.querySelectorAll('[data-testid="tweetTextarea_0"]');
+      if (boxes.length > 0) { resolve({ found: true, count: boxes.length, text: (boxes[0].textContent || '').trim() }); return; }
+      if (Date.now() - t0 > 8000) { resolve({ found: false }); return; }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+})();`;
+
+/**
+ * ⭐ 发送回复脚本正文。__NEEDLE__ = 回复正文里的字和表情(只留字母 / 汉字 / 数字 / 表情,前 16 个);__ME__ = 我的 handle(小写)。
+ * ⚠️ X 把表情渲染成 <img alt="👍">,textContent 里没有 —— 页面这边用 textOf 把图片的 alt 按原位拼回去再比
+ * (用户 10-21:只回一个 👍 也是允许的,不能因为核对不了就禁掉)。
+ * state:sent(带 replyId)/ unseen(框清空了但页面上没看到我的回复)/ no-button / disabled / not-sent / error
+ */
+const SEND_REPLY_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var needle = __NEEDLE__, me = __ME__;
+      var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, ''); };
+      var textOf = function (el) {
+        var out = '';
+        el.childNodes.forEach(function (n) {
+          if (n.nodeType === 3) out += n.nodeValue;
+          else if (n.nodeType === 1) out += n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : textOf(n);
+        });
+        return out;
+      };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var el = get(); if (el) { then(el); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 250); };
+        tick();
+      };
+      var mine = function () {
+        var arts = document.querySelectorAll('article[data-testid="tweet"]');
+        for (var i = 0; i < arts.length; i++) {
+          var tx = arts[i].querySelector('[data-testid="tweetText"]');
+          if (!tx || norm(textOf(tx)).indexOf(needle) === -1) continue;
+          var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
+          for (var j = 0; j < ts.length; j++) {
+            var a = ts[j].closest('a');
+            var m = a ? /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+            if (m && m[1].toLowerCase() === me) return m[2];
+          }
+        }
+        return null;
+      };
+      if (!needle || !me) { resolve({ state: 'error', why: 'no-needle-or-me' }); return; }
+      if (mine()) { resolve({ state: 'error', why: 'already-on-page' }); return; }
+      waitFor(function () {
+        var b = document.querySelector('[data-testid="tweetButtonInline"]');
+        return b && b.getAttribute('aria-disabled') !== 'true' && !b.disabled ? b : null;
+      }, 5000, function (btn) {
+        if (!btn) { resolve({ state: document.querySelector('[data-testid="tweetButtonInline"]') ? 'disabled' : 'no-button' }); return; }
+        btn.click();
+        waitFor(mine, 15000, function (rid) {
+          if (rid) { resolve({ state: 'sent', replyId: rid }); return; }
+          var box = document.querySelector('[data-testid="tweetTextarea_0"]');
+          resolve({ state: box && norm(textOf(box)) !== '' ? 'not-sent' : 'unseen' });
+        });
+      });
+    } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/** 回复正文里拿来认「这是我刚发的那条」的字和表情 —— 与脚本里 norm 同一规则(按字符截,不把表情截半) */
+export function replyNeedle(text: string): string {
+  return [...text.replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, '')].slice(0, 16).join('');
+}
+
+/** ⭐ 抽查脚本正文 —— String.raw:反斜杠原样保留 */
+const SPOT_TARGET_SRC = String.raw`(function () {
+  try {
+    var x = __X__, y = __Y__, kind = __KIND__;
+    if (!isFinite(x) || !isFinite(y)) return { why: 'bad-point' };
+    var el = document.elementFromPoint(x, y);
+    if (!el) return { why: 'no-element' };
+    if (kind === 'person') {
+      var cell = el.closest('[data-testid="UserCell"]');
+      if (!cell) return { why: 'no-user-cell' };
+      var links = cell.querySelectorAll('a[href^="/"]');
+      for (var i = 0; i < links.length; i++) {
+        var h = (links[i].getAttribute('href') || '').split('/')[1] || '';
+        if (/^[A-Za-z0-9_]{1,15}$/.test(h)) return { handle: h, text: (cell.textContent || '').slice(0, 120) };
+      }
+      return { why: 'no-handle' };
+    }
+    var art = el.closest('article[data-testid="tweet"]');
+    if (!art) return { why: 'no-tweet' };
+    var t = art.querySelector('a[href*="/status/"] time');
+    var a = t ? t.closest('a') : art.querySelector('a[href*="/status/"]');
+    var m = a ? /\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+    if (!m) return { why: 'no-status-link' };
+    var tx = art.querySelector('[data-testid="tweetText"]');
+    return { tweetId: m[2], handle: m[1], text: tx ? (tx.textContent || '').slice(0, 120) : '' };
+  } catch (e) { return { why: String(e) }; }
+})();`;
+
 /** ⭐ 注册表 —— 由 `main.ts` 在启动时 push 给底座 */
 /**
  * ⭐ 取关脚本 —— 参数(数字 id)走 JSON 绑定,且脚本里再校验只能是数字。
@@ -365,6 +563,57 @@ const buildUnfollowScript = (params: Readonly<Record<string, unknown>>): string 
 };
 
 export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_SCRIPTS.likeTweet,
+    purpose: 'X:在单篇推文页给这条推文点赞(点 like → 等它变成 unlike)',
+    /** ⚠️ 字符串参数用**函数**替换:直接给替换串时 `$&` `$'` 会被 replace 当成特殊模式 */
+    build: (params) => LIKE_SRC.replace('__ID__', () => JSON.stringify(String(params.tweetId ?? ''))),
+  },
+  {
+    id: X_SCRIPTS.replyBoxState,
+    purpose: 'X:单篇页的回复框在不在、里面有没有残留(只读)',
+    build: () => REPLY_BOX_SRC,
+  },
+  {
+    id: X_SCRIPTS.sendReply,
+    purpose: 'X:点回复框的发送 → 等我的回复真的出现在页面上,读回它的 id',
+    build: (params) => SEND_REPLY_SRC
+      .replace('__NEEDLE__', () => JSON.stringify(String(params.needle ?? '')))
+      .replace('__ME__', () => JSON.stringify(String(params.me ?? '').toLowerCase())),
+  },
+  {
+    id: X_SCRIPTS.follow,
+    purpose: 'X:在他的主页上关注(点 Follow → 等按钮变成 Following)',
+    /** ⚠️ 参数(数字 id)走 JSON 绑定,脚本里再校验只能是数字;正文 String.raw(防转义被吃) */
+    build: (params) => FOLLOW_SRC.replace('__ID__', JSON.stringify(String(params.restId ?? ''))),
+  },
+  {
+    id: X_SCRIPTS.spotTarget,
+    purpose: 'X:右键那一点下面的推文 id / 人的 handle(抽查用,只读不点)',
+    /**
+     * ⚠️ 参数(坐标、要找推文还是人)走 JSON 绑定替换占位符;正文用 String.raw,反斜杠原样到浏览器
+     * (`project-x-inject-template-escape`:模板字面量会吃掉 `\/`)。守卫:x-spot-check.test 真编译一遍。
+     */
+    build: (params) => SPOT_TARGET_SRC
+      .replace('__X__', JSON.stringify(Number(params.x)))
+      .replace('__Y__', JSON.stringify(Number(params.y)))
+      .replace('__KIND__', JSON.stringify(String(params.kind ?? 'tweet'))),
+  },
+  {
+    id: X_SCRIPTS.whoAmI,
+    purpose: 'X:读这个网页此刻登录的号(个人资料链接 href + 账号切换按钮文字),只读不点',
+    /** ⚠️ **无参数** —— 没有运行时值就没有拼串的机会(`inject-template-escape` 那道闸) */
+    build: () => [
+      '(function () {',
+      '  try {',
+      `    var a = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');`,
+      `    var b = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');`,
+      "    return { profileHref: a ? a.getAttribute('href') || undefined : undefined,",
+      "      switcherText: b ? (b.textContent || '').slice(0, 200) : undefined };",
+      '  } catch (e) { return { why: String(e) }; }',
+      '})();',
+    ].join('\n'),
+  },
   {
     id: X_SCRIPTS.unfollow,
     purpose: 'X:在他的主页上取关(点 Following → 确认 Unfollow → 等按钮变回 Follow)',

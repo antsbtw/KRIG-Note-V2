@@ -3,6 +3,7 @@
  * 用户:「主要是观察这个用户主要和哪些用户互动，找到它的朋友圈。」
  */
 import { describe, it, expect } from 'vitest';
+import { capOfOp, flowBlock, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { computeCircle, looksChinese, CIRCLE_WEIGHTS } from '@modules/x/x-friend-circle';
@@ -64,35 +65,36 @@ describe('接线', () => {
     const fn = REPO.slice(REPO.indexOf('export async function readFriendCircle'));
     expect(fn).toMatch(/FROM x_tweet WHERE author_rest_id = \$id;/);
     expect(fn).toMatch(/WHERE in_reply_to_user_id = \$id AND author_rest_id != \$id/);
-    expect(fn).toMatch(/FROM x_author WHERE rest_id IN \$ids/);
+    /** ⭐ 1.2.27:关系按号 —— 从「人表 + 当前号的关系」查,并带上号 */
+    expect(fn).toMatch(/FROM \$\{PEOPLE_WITH_RELATION\} WHERE rest_id IN \$ids`, \{ ids: top\.map\(\(e\) => e\.id\), acct: account \}/);
   });
   it('⭐ friendCircle:契约 + handler;人卡调用;渲染端不引 main 侧的 repo', () => {
     expect(read('src/modules/x/x-data-types.ts')).toMatch(/op: 'friendCircle'/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'friendCircle':/);
+    expect(ipcHandles(read('src/modules/x/x-data-ipc.ts'), 'friendCircle')).toBe(true);
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    expect(PAGE).toMatch(/op: 'friendCircle', restId, limit: 30/);
+    expect(PAGE).toMatch(/op: 'friendCircle', wsId, restId, limit: 30/);
     expect(PAGE).not.toContain("from './x-people-repo'");
   });
 });
 
 describe('⭐ 采集结果落留痕 + 页数上限可设(2026-10-10)', () => {
   it('每个标签页的页数 / 条数 / 停因都落留痕', () => {
-    const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    /** 2026-10-12 起每次尝试都记,重试那次带「[第 2 次]」前缀 */
-    expect(PAGE).toMatch(/op: 'logPersonCollect',[\s\S]{0,300}stopReason: `\$\{attempt > 1 \? '\[第 2 次\] ' : ''\}\$\{why\}`/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'logPersonCollect':[\s\S]{0,400}event: 'x-person-collect'/);
+    /** 2026-10-12 起每次尝试都记,重试那次带「[第 2 次]」前缀;2026-10-26 起在主进程流程里直接留痕(不再经 IPC 上报) */
+    const flow = flowBlock('x.person.collectRange');
+    expect(flow).toMatch(/stopReason: `\$\{attempt > 1 \? '\[第 2 次\] ' : ''\}\$\{why\}`/);
+    expect(flow).toMatch(/traceRecorder\.lifecycle\(\{ layer: 'web\.net', event: 'x-person-collect'/);
   });
   it('当场采的页数上限读设置(默认 30,用户可调)', async () => {
     const { SETTING_DEFS } = await import('@modules/x/x-ops-settings');
     expect(SETTING_DEFS.find((d) => d.key === 'collect.live_page_cap')?.default).toBe(30);
-    expect(read('src/modules/x/XOpsPeople.tsx')).toMatch(/settingsRef\.current\?\.\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP/);
+    expect(flowBlock('x.person.collectRange')).toMatch(/\(await readSettings\(\)\)\.settings\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP/);
   });
 });
 
 describe('⭐⭐ 第一次翻页就 403 → 重载这一页再试一次(2026-10-12)', () => {
   /** 真机:帖子页那条响应只被页面钩子收到、CDP 没收到 → 翻页模板没鉴权头 → 403,只翻 1 页就停 */
-  const PAGE = read('src/modules/x/XOpsPeople.tsx');
-  const fn = PAGE.slice(PAGE.indexOf('const collectTweets'), PAGE.indexOf('/** ⭐ 选时间范围的小框'));
+  /** 2026-10-26 搬到主进程流程 x.person.collectRange(行为见 x-flows.test.ts:第一次被拒重载再试) */
+  const fn = flowBlock('x.person.collectRange');
   it('最多两次;只在「第一轮就 403」时重试;第一次采到的照样存', () => {
     expect(fn).toMatch(/for \(let attempt = 1; attempt <= 2; attempt \+= 1\)/);
     // 2026-10-13 (3b):403 根治后失败语改成「没带鉴权头」(不含 HTTP 403),重试判断两种措辞都认
@@ -100,9 +102,12 @@ describe('⭐⭐ 第一次翻页就 403 → 重载这一页再试一次(2026-10-
     expect(fn).toMatch(/const authFail = worthReloadRetry\(why, run\.paging\?\.rounds \?\? 0\);/);
     const TL = readFileSync(join(process.cwd(), 'src/modules/x/x-person-timeline.ts'), 'utf8');
     expect(TL).toMatch(/return \/HTTP 403\|没带鉴权头\/\.test\(stopReason\) && rounds <= 1;/);
-    expect(fn).toMatch(/if \(authFail && attempt === 1 && !cancelCollect\.current\) continue;/);
+    expect(fn).toMatch(/if \(authFail && attempt === 1 && !f\.stopped\(\)\) continue;/);
     /** 存库在判断重试之前 —— 第一次的推文不丢 */
-    expect(fn.indexOf("op: 'saveTweets'")).toBeLessThan(fn.indexOf('if (authFail && attempt === 1'));
+    /** 第一次采到的照样存:存在「要不要重试」之前。⚠️ 先要求找得到 —— 找不到是 -1,恒小于后面(2026-10-26 换写法时这里假绿过) */
+    const saveAt = fn.indexOf("f.call('x.tweet.save'");
+    expect(saveAt).toBeGreaterThan(-1);
+    expect(saveAt).toBeLessThan(fn.indexOf('if (authFail && attempt === 1'));
   });
 });
 
@@ -110,13 +115,13 @@ describe('⭐ 采集进度也落留痕(2026-10-12)', () => {
   it('每条进度消息(翻到第几页 / 歇 / 限流)都写 x-person-progress', () => {
     /**
      * ⭐ 2026-10-13(3a)翻页搬到主进程:每句进度由主进程**当场**写留痕(不靠 renderer 问没问到)。
-     * 两处写同一个事件:主进程采集的 onProgress、以及 logPersonProgress op —— 都经 tracePersonProgress。
+     * 主进程采集的 onProgress 经 tracePersonProgress 写(2026-10-26 起界面不再上报进度,logPersonProgress op 退役)。
      */
     const MAIN = read('src/modules/x/x-person-collect.ts');
     expect(MAIN).toMatch(/onProgress: \(m\) => \{[\s\S]{0,200}tracePersonProgress\(/);
     const t = MAIN.slice(MAIN.indexOf('export function tracePersonProgress('), MAIN.indexOf('export async function collectPersonTab('));
     expect(t.length, '切片空了 —— 断言会恒真').toBeGreaterThan(50);
     expect(t).toMatch(/event: 'x-person-progress'/);
-    expect(read('src/modules/x/x-data-ipc.ts')).toMatch(/case 'logPersonProgress':[\s\S]{0,200}tracePersonProgress\(p\.entry\)/);
+    expect(read('src/modules/x/x-data-ipc.ts')).not.toMatch(/logPersonProgress/);
   });
 });

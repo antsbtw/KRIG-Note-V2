@@ -11,7 +11,8 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
-import type { BgJob, BgRange, BgStatus, BgTabProgress } from './x-bg-job';
+import type { BgJob, BgKind, BgRange, BgStatus, BgTabProgress } from './x-bg-job';
+import type { RelPlan } from './x-relation-plan';
 
 /** 库里一行的扁平形状 */
 type Row = {
@@ -20,9 +21,22 @@ type Row = {
   profile_cursor?: string; profile_oldest_at?: unknown; profile_done?: boolean;
   replies_cursor?: string; replies_oldest_at?: unknown; replies_done?: boolean;
   reposts_cursor?: string; reposts_oldest_at?: unknown; reposts_done?: boolean;
+  kind?: BgKind;
+  followers_cursor?: string; followers_done?: boolean;
+  following_cursor?: string; following_done?: boolean;
+  verified_cursor?: string; verified_done?: boolean;
+  target_self?: boolean; plan_json?: string; stats_json?: string;
   last_error?: string; total_pages?: number; total_saved?: number;
   created_at?: unknown; updated_at?: unknown; last_segment_at?: unknown;
 };
+
+/** ⚠️ 坏 JSON 不吞:抛出来说是哪一行哪一列(fail loud) */
+function parseJson<T>(v: string | undefined, col: string, id: string): T | undefined {
+  if (v === undefined || v === null || v === '') return undefined;
+  try { return JSON.parse(v) as T; } catch (e) {
+    throw new Error(`[x.bg] 任务 ${id} 的 ${col} 不是合法 JSON:${e instanceof Error ? e.message : String(e)}`);
+  }
+}
 
 const iso = (v: unknown): string | undefined =>
   v === undefined || v === null ? undefined : String(v);
@@ -39,6 +53,15 @@ function rowToJob(r: Row): BgJob {
     profile: tab(r.profile_cursor, r.profile_oldest_at, r.profile_done),
     replies: tab(r.replies_cursor, r.replies_oldest_at, r.replies_done),
     reposts: tab(r.reposts_cursor, r.reposts_oldest_at, r.reposts_done),
+    ...(r.kind === 'lists' ? {
+      kind: 'lists' as const,
+      followers: tab(r.followers_cursor, undefined, r.followers_done),
+      following: tab(r.following_cursor, undefined, r.following_done),
+      verifiedFollowers: tab(r.verified_cursor, undefined, r.verified_done),
+      self: r.target_self === true,
+      plan: parseJson(r.plan_json, 'plan_json', r.id),
+      stats: parseJson(r.stats_json, 'stats_json', r.id),
+    } : {}),
     lastError: r.last_error,
     totalPages: r.total_pages ?? 0,
     totalSaved: r.total_saved ?? 0,
@@ -53,6 +76,8 @@ const SELECT_COLS = `record::id(id) AS id, rest_id, handle, ws_id, range, status
   profile_cursor, profile_oldest_at, profile_done,
   replies_cursor, replies_oldest_at, replies_done,
   reposts_cursor, reposts_oldest_at, reposts_done,
+  kind, followers_cursor, followers_done, following_cursor, following_done, verified_cursor, verified_done,
+  target_self, plan_json, stats_json,
   last_error, total_pages, total_saved, created_at, updated_at, last_segment_at`;
 
 /**
@@ -61,27 +86,44 @@ const SELECT_COLS = `record::id(id) AS id, rest_id, handle, ws_id, range, status
  */
 export async function createJob(input: {
   restId: string; handle: string; wsId: string; range: BgRange;
+  /** 不给 = timeline(帖子/回复/转发);lists = 他的三个名单(2026-10-19,range 固定 all) */
+  kind?: BgKind;
+  /** ⭐ 关系采集(2026-10-20):读到的现状 + 每个名单的策略;跳过的名单建任务时就标到底 */
+  plan?: RelPlan;
 }): Promise<{ id: string; created: boolean }> {
   const db = getXDB();
+  const kind = input.kind ?? 'timeline';
+  /** ⚠️ 去重要分种类:同一个人的「采全部推文」和「采名单」是两件事,不能互相挡 */
   const [existing] = await db.query<[Array<{ id: string }>]>(
     `SELECT record::id(id) AS id FROM x_bg_job
-       WHERE rest_id = $rid AND range = $range AND status != 'done' AND status != 'failed' LIMIT 1`,
-    { rid: input.restId, range: input.range },
+       WHERE rest_id = $rid AND range = $range AND status != 'done' AND status != 'failed'
+         AND (IF $kind = 'lists' THEN kind = 'lists' ELSE kind = NONE OR kind = 'timeline' END) LIMIT 1`,
+    { rid: input.restId, range: input.range, kind },
   );
   const found = (existing ?? [])[0];
   if (found) return { id: found.id, created: false };
 
-  const id = `${input.restId}_${input.range}_${Date.now().toString(36)}`;
+  const id = `${input.restId}_${kind === 'lists' ? 'lists' : input.range}_${Date.now().toString(36)}`;
   const now = new Date().toISOString();
-  await db.query(
+  const [rows] = await db.query<[unknown[]]>(
     `UPSERT type::record('x_bg_job', $id) SET
        rest_id = $rid, handle = $handle, ws_id = $ws, range = $range, status = 'queued',
+       kind = $kind,
        profile_done = false, replies_done = false, reposts_done = false,
+       followers_done = $fd, following_done = $gd, verified_done = $vd,
+       target_self = $target_self, plan_json = $plan,
        total_pages = 0, total_saved = 0,
        created_at = type::datetime($now), updated_at = type::datetime($now)`,
-    { id, rid: input.restId, handle: input.handle, ws: input.wsId, range: input.range, now },
+    {
+      id, rid: input.restId, handle: input.handle, ws: input.wsId, range: input.range, kind, now,
+      fd: input.plan?.tabs.followers.mode === 'skip', gd: input.plan?.tabs.following.mode === 'skip', vd: input.plan?.tabs.verifiedFollowers.mode === 'skip',
+      /** ⚠️ 参数不能叫 $self —— SurrealDB 保留字,值被静默吞掉(2026-10-20 临时库实测) */
+      target_self: input.plan ? input.plan.self : undefined,
+      plan: input.plan ? JSON.stringify(input.plan) : undefined,
+    },
   );
-  console.log(`[x.bg] 建后台任务 ${id}：@${input.handle} ${input.range}`);
+  if (!rows || rows.length !== 1) throw new Error(`[x.bg] 任务 ${id} 没写进库`);
+  console.log(`[x.bg] 建后台任务 ${id}：@${input.handle} ${kind === 'lists' ? '名单' : input.range}`);
   return { id, created: true };
 }
 
@@ -144,6 +186,9 @@ export async function saveJob(job: BgJob): Promise<void> {
        profile_cursor = $pc, profile_oldest_at = (IF $po = NONE THEN NONE ELSE type::datetime($po) END), profile_done = $pd,
        replies_cursor = $rc, replies_oldest_at = (IF $ro = NONE THEN NONE ELSE type::datetime($ro) END), replies_done = $rd,
        reposts_cursor = $xc, reposts_oldest_at = (IF $xo = NONE THEN NONE ELSE type::datetime($xo) END), reposts_done = $xd,
+       followers_cursor = $fc, followers_done = $fd, following_cursor = $gc, following_done = $gd,
+       verified_cursor = $vc, verified_done = $vd,
+       stats_json = $stats, plan_json = $plan_json,
        last_error = $err, total_pages = $pages, total_saved = $saved,
        updated_at = type::datetime($now),
        last_segment_at = (IF $seg = NONE THEN NONE ELSE type::datetime($seg) END)`,
@@ -152,6 +197,11 @@ export async function saveJob(job: BgJob): Promise<void> {
       pc: job.profile.cursor, po: job.profile.oldestAt, pd: job.profile.done,
       rc: job.replies.cursor, ro: job.replies.oldestAt, rd: job.replies.done,
       xc: job.reposts.cursor, xo: job.reposts.oldestAt, xd: job.reposts.done,
+      fc: job.followers?.cursor, fd: job.followers?.done, gc: job.following?.cursor, gd: job.following?.done,
+      vc: job.verifiedFollowers?.cursor, vd: job.verifiedFollowers?.done,
+      stats: job.stats ? JSON.stringify(job.stats) : undefined,
+      /** 策略会变(增量追上后复核还差一截 → 改全量),要存回去 */
+      plan_json: job.plan ? JSON.stringify(job.plan) : undefined,
       err: job.lastError, pages: job.totalPages, saved: job.totalSaved,
       now,
       seg: job.lastSegmentAt,

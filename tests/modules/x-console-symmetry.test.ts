@@ -565,7 +565,8 @@ describe('⭐⭐⭐ 采集是**一步到底**,不是多步流程', () => {
 
   it('⭐ 没采过时给出三步说明 —— 人要知道先做什么', () => {
     const s = panel();
-    const i2 = s.indexOf('{!running && !report && (');
+    /** 2026-10-16:多一个条件 —— 滚动截获的结果在界面上时也不显示说明(原意不变:没采过才给说明) */
+    const i2 = s.indexOf('{!running && !report && !scrollDone && (');
     expect(i2, '没有引导文案').toBeGreaterThan(-1);
     const block = s.slice(i2, s.indexOf(')}', i2));
     expect(block, '没说要先选页面').toMatch(/选好页面|控制/);

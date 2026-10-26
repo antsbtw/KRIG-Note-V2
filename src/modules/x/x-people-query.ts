@@ -11,7 +11,11 @@
  * ② 身份是 rest_id(schema 1.2.20),人卡按 rest_id 取,不按 handle
  * ③ 时间在 SQL 里转字符串 —— SDK 原样给 DateTime 类,过不了 IPC
  * ④ 用户输入一律走参数,不拼进 SQL
+ * ⑤ ⭐⭐ 关系(i_follow / follows_me)是**当前号**的(2026-10-16,1.2.27):一律从 `PEOPLE_WITH_RELATION`
+ *    查(人表 + 这个号的 x_relation),`$acct` = 号的数字 id。不许再 `FROM x_author` 读关系。
  */
+
+import { PEOPLE_WITH_RELATION, PERSON_WITH_RELATION } from './x-account';
 
 /** 关系分组 —— 方向都从「我」出发说 */
 export type PeopleGroup = 'all' | 'mutual' | 'iWait' | 'theyWait' | 'none' | 'unknown';
@@ -103,11 +107,13 @@ export type PeopleFilter = {
   readonly text: string;
   /** 标签关键词 —— 有任何一个标签**包含**它就算命中(「客户」也命中「潜在客户」) */
   readonly tag: string;
+  /** ⭐ 只看有互关倾向的(1.2.30,蓝V互关 M2)—— 人/AI/算法任一定为「有」 */
+  readonly intentOnly: boolean;
   readonly sort: PeopleSort;
 };
 
 export const DEFAULT_PEOPLE_FILTER: PeopleFilter = {
-  scope: 'in', group: 'all', blueOnly: false, cnText: false, text: '', tag: '', sort: 'followersDesc',
+  scope: 'in', group: 'all', blueOnly: false, cnText: false, text: '', tag: '', intentOnly: false, sort: 'followersDesc',
 };
 
 /** 中文字符 —— 走参数,免得在 SQL 字符串里层层转义 */
@@ -141,17 +147,23 @@ export type PersonRow = {
   readonly tags?: readonly string[];
   /** 被哪些配方找到的(系统记录,与人手打的标签分开)*/
   readonly found_via_recipes?: readonly string[];
+  /** ⭐ 互关倾向(1.2.30):值 / 谁定的(human·ai·rule)/ 依据原句 */
+  readonly mutual_intent?: boolean;
+  readonly mutual_intent_source?: string;
+  readonly mutual_intent_evidence?: string;
 };
 
 const LIST_FIELDS = `rest_id, handle, display_name, avatar, bio, followers_count,
   is_blue_verified, i_follow, follows_me, excluded, tags, found_via_recipes,
+  mutual_intent, mutual_intent_source, mutual_intent_evidence,
   (IF account_created_at != NONE THEN <string> account_created_at ELSE NONE END) AS account_created_at`;
 
 export function buildPeopleQuery(
-  f: PeopleFilter, limit: number, start: number,
+  account: string, f: PeopleFilter, limit: number, start: number,
 ): { readonly sql: string; readonly vars: Record<string, unknown> } {
+  if (account === '') throw new Error('[x.people] 没有号的数字 id —— 关系是按号存的,不知道看哪个号');
   const where: string[] = [];
-  const vars: Record<string, unknown> = { limit, start };
+  const vars: Record<string, unknown> = { limit, start, acct: account };
   const g = PEOPLE_GROUPS.find((x) => x.id === f.group);
   if (g === undefined) throw new Error(`[x.people] 不认识的分组 ${String(f.group)}`);
   const scope = SCOPE_WHERE[f.scope];
@@ -159,6 +171,7 @@ export function buildPeopleQuery(
   where.push(scope);
   if (g.where !== '') where.push(g.where);
   if (f.blueOnly) where.push('is_blue_verified = true');
+  if (f.intentOnly) where.push('mutual_intent = true');
   if (f.cnText) { where.push(CN_WHERE); vars.cn = CN_REGEX; vars.ja = JA_REGEX; }
   const text = f.text.trim().toLowerCase().replace(/^@/, '');
   if (text !== '') {
@@ -180,8 +193,8 @@ export function buildPeopleQuery(
   const sort = PEOPLE_SORTS.find((x) => x.id === f.sort) ?? PEOPLE_SORTS[0];
   const w = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
   return {
-    sql: `SELECT count() AS n FROM x_author ${w} GROUP ALL;
-SELECT ${LIST_FIELDS} FROM x_author ${w} ORDER BY ${sort.order} LIMIT $limit START $start;`,
+    sql: `SELECT count() AS n FROM ${PEOPLE_WITH_RELATION} ${w} GROUP ALL;
+SELECT ${LIST_FIELDS} FROM ${PEOPLE_WITH_RELATION} ${w} ORDER BY ${sort.order} LIMIT $limit START $start;`,
     vars,
   };
 }
@@ -202,7 +215,8 @@ export type PeopleOverview = Readonly<Record<PeopleGroup, { readonly total: numb
   readonly excludedTotal: number;
 };
 
-export function buildOverviewQuery(): string {
+export function buildOverviewQuery(account: string): { readonly sql: string; readonly vars: Record<string, unknown> } {
+  if (account === '') throw new Error('[x.people] 没有号的数字 id —— 关系是按号存的,不知道看哪个号');
   const inScope = SCOPE_WHERE.in;
   const cols = PEOPLE_GROUPS.flatMap((g) => {
     const cond = g.where === '' ? inScope : `${inScope} AND ${g.where}`;
@@ -212,7 +226,7 @@ export function buildOverviewQuery(): string {
     ];
   });
   cols.push(`count(${SCOPE_WHERE.excluded}) AS excluded_total`);
-  return `SELECT ${cols.join(', ')} FROM x_author GROUP ALL;`;
+  return { sql: `SELECT ${cols.join(', ')} FROM ${PEOPLE_WITH_RELATION} GROUP ALL;`, vars: { acct: account } };
 }
 
 export function parseOverview(res: readonly unknown[]): PeopleOverview {
@@ -233,8 +247,9 @@ export const SET_TAGS_SQL = `UPDATE type::record('x_author', $rest_id) SET tags 
 /** 标签目录的原料:所有带标签的人的标签 */
 export const TAG_ROWS_SQL = 'SELECT tags FROM x_author WHERE array::len(tags ?? []) > 0;';
 
+/** 人的排除 / 取消排除;$reason 没给就是 NONE(求关卡「跳过此人」会写「求关时跳过」,2026-10-21) */
 export const SET_EXCLUDED_SQL = `UPDATE type::record('x_author', $rest_id) SET
-  excluded = $excluded, excluded_source = 'human', excluded_at = time::now()
+  excluded = $excluded, excluded_source = 'human', excluded_reason = $reason, excluded_at = time::now()
   RETURN rest_id, excluded;`;
 
 /** 人卡 —— 全量字段,按 rest_id 取 */
@@ -255,7 +270,7 @@ export const PERSON_DETAIL_SQL = `SELECT ${LIST_FIELDS}, location, website, foll
   is_verified, is_protected, handle_history, excluded_source,
   (IF fetched_at != NONE THEN <string> fetched_at ELSE NONE END) AS fetched_at,
   (IF excluded_at != NONE THEN <string> excluded_at ELSE NONE END) AS excluded_at
-  FROM type::record('x_author', $rest_id);`;
+  FROM ${PERSON_WITH_RELATION};`;
 
 /** 关系的说法 —— 列表与人卡共用一份 */
 export function relationLabel(p: { readonly i_follow?: boolean; readonly follows_me?: boolean }): string {

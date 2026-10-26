@@ -16,6 +16,9 @@
  * ⚠️ 与实时写入用**同一套**纯函数(authorsFromTweets / buildAuthorUpsert / recipeNameForQuery),
  * 不另写一份。⚠️ 用 CJS(main 函数,不用顶层 await)—— .mts 会让 SDK 双包,RecordId 被编成 {}。
  * DBN 环境变量可指定别的 database(演练用)。
+ *
+ * ⚠️⚠️ 2026-10-16(schema 1.2.27)起:关系(我关注/关注我)按号存 x_relation,buildAuthorUpsert **不再写关系**。
+ * 本脚本只补人的资料与配方来源,**不补关系**(推文是哪个号看到的,旧数据里没记,补了就是猜)。
  */
 import { Surreal } from 'surrealdb';
 import { readFileSync } from 'node:fs';
@@ -122,9 +125,7 @@ async function main(): Promise<void> {
       SELECT count() AS n FROM x_author GROUP ALL;`);
     const l = ledger?.[0]?.ins ?? 0;
     console.log(`对账:人 表 ${au?.n ?? 0} · 账本 ${l} ${au?.n === l ? '✓ 对上' : `⚠️ 差 ${(au?.n ?? 0) - l}`}`);
-    const [[g]] = await db.query<any[]>(`SELECT count(i_follow = false AND follows_me = false) AS none,
-      count(i_follow != true AND follows_me != true AND (i_follow = NONE OR follows_me = NONE)) AS unknown FROM x_author GROUP ALL`);
-    console.log(`互不关注 ${g?.none ?? 0} · 关系不明 ${g?.unknown ?? 0}`);
+    /** ⚠️ 关系分组不在这里数了:关系按号存(1.2.27),要看哪个号的去运营面板 */
   } finally {
     await db.close();
   }

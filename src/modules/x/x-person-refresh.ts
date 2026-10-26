@@ -15,6 +15,8 @@
  * ③ 旧的观察不覆盖新的 —— fetched_at 放最后赋值(SET 按顺序执行)
  * ④ 人工字段 / 名单字段一个都不碰
  * ⑤ handle 变了,旧的进曾用名(只加不减)
+ * ⑥ 关系(我关注他/他关注我)**不写人表**(2026-10-16,1.2.27):按号写 x_relation(`writeRelations`),
+ *    这里只负责拿旧关系算「关系变化」
  */
 
 import { normalizeHandle } from '@shared/types/x-timeline-types';
@@ -55,8 +57,6 @@ const FIELDS: ReadonlyArray<readonly [string, (r: XUserRecord) => unknown]> = [
   ['is_blue_verified', (r) => r.isBlueVerified],
   ['is_verified', (r) => r.isVerified],
   ['is_protected', (r) => r.isProtected],
-  ['i_follow', (r) => r.following],
-  ['follows_me', (r) => r.followedBy],
 ];
 
 /** 导出给守卫:核对写库可能碰到的全部字段 */
@@ -102,16 +102,20 @@ export function buildPersonRefresh(
   };
 }
 
-/** 核对前的样子(RETURN BEFORE 拿到的) */
+/** 核对前的样子(RETURN BEFORE 拿到的)—— 人表那一行 */
 export type PersonBefore = {
   readonly handle?: string;
-  readonly i_follow?: boolean;
-  readonly follows_me?: boolean;
   readonly is_blue_verified?: boolean;
   readonly followers_count?: number;
   readonly following_count?: number;
   readonly fetched_at?: unknown;
 } | null | undefined;
+
+/** 核对前这个号与他的关系(x_relation 的 RETURN BEFORE);null = 这个号以前没记过他 */
+export type RelationBefore = {
+  readonly i_follow?: boolean;
+  readonly follows_me?: boolean;
+} | null;
 
 const relation = (iFollow?: boolean, followsMe?: boolean): string => {
   if (iFollow === true && followsMe === true) return '互关';
@@ -127,6 +131,8 @@ const relation = (iFollow?: boolean, followsMe?: boolean): string => {
  */
 export function diffPerson(
   before: PersonBefore, r: XUserRecord, observedAt: string,
+  /** ⚠️ 不给 = 这次关系没写(认不出号)→ 不报关系变化;给了 before:null = 这个号以前没记过他 */
+  rel?: { readonly before: RelationBefore },
 ): { readonly isNew: boolean; readonly stale: boolean; readonly changes: string[] } {
   if (before === null || before === undefined) return { isNew: true, stale: false, changes: [] };
   /**
@@ -139,11 +145,12 @@ export function diffPerson(
     return { isNew: false, stale: true, changes: [] };
   }
   const changes: string[] = [];
-  const iF = r.following ?? before.i_follow;
-  const fM = r.followedBy ?? before.follows_me;
-  const was = relation(before.i_follow, before.follows_me);
-  const now = relation(iF, fM);
-  if (was !== now) changes.push(`关系 ${was} → ${now}`);
+  if (rel !== undefined) {
+    const old = rel.before ?? {};
+    const was = relation(old.i_follow, old.follows_me);
+    const now = relation(r.following ?? old.i_follow, r.followedBy ?? old.follows_me);
+    if (was !== now) changes.push(`关系 ${was} → ${now}`);
+  }
   const h = normalizeHandle(r.handle);
   if (before.handle !== undefined && before.handle !== h) changes.push(`改名 @${before.handle} → @${h}`);
   if (r.isBlueVerified !== undefined && before.is_blue_verified !== undefined && r.isBlueVerified !== before.is_blue_verified) {

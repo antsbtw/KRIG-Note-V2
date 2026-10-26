@@ -13,6 +13,7 @@
  * ⭐ 本版**零业务依赖**:只认 URL 与判据,不认采集、不认库表。
  */
 
+import { X_MANUAL } from './x-manual';
 import type {
   AnchorName,
   PageResolver,
@@ -250,6 +251,8 @@ export const X_PAGE_NAME = {
   withReplies: 'x.withReplies',
   /** ⭐ 个人主页的「转发」标签页(2026-10-10)*/
   reposts: 'x.reposts',
+  /** ⭐ 单篇推文 —— 求关:去这条推文点赞 / 留言(2026-10-17) */
+  status: 'x.status',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,
@@ -400,18 +403,15 @@ export function carriesUsers(url: string): boolean {
  * ⚠️ 只挡**确定不要**的:视频流、图片、埋点。
  * 不确定的宁可采进来 —— 挡错了是**静默丢数据**,比多采几条坏得多。
  */
-export const X_NOISY_URLS: readonly string[] = [
-  'video.twimg.com',      // 视频分片(.m4s/.mp4/.m3u8)
-  'pbs.twimg.com',        // 图片
-  'abs.twimg.com',        // 前端静态资源
-  '/i/api/1.1/jot/',      // 埋点
-  'promoted_content/log', // 广告埋点
-];
+/** ⭐ P2(2026-10-19):清单本身挪进说明书 `manual/x.manual.json` 的 data.noise,每条带「为什么」 */
+export const X_NOISY_URLS: readonly string[] = X_MANUAL.data.noise.map((n) => n.url);
 
 /** 本模块用到的语义锚点名 —— 与锚点表同一份常量,不各写一份 */
 export const X_ANCHORS = {
   /** 一条推文的容器 */
   tweetArticle: 'x.tweetArticle' as AnchorName,
+  /** 单篇推文页上的回复框(求关留言往这里贴,2026-10-17) */
+  replyBox: 'x.replyBox' as AnchorName,
 } as const;
 
 /**

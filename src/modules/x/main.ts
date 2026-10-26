@@ -48,7 +48,13 @@ import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
 import { registerXDataIpc } from './x-data-ipc';
 import { bgRunnerHealth, startBgRunner, stopBgRunner } from './x-bg-runner';
+import { startDevInbox, stopDevInbox } from './x-dev-inbox';
+import { startDailyUpkeep, stopDailyUpkeep } from './x-daily-upkeep';
+import { registerSpotCheckMenu } from './x-spot-check';
+import { startFollowQueue, stopFollowQueue } from './x-follow-queue';
 import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
+import { listLocks } from '@platform/main/flow/resource-lock';
+import { registerXCapabilities } from './x-capabilities';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -103,8 +109,25 @@ export function registerXModule(): void {
    */
   startBgRunner();
   app.on('before-quit', stopBgRunner);
+  /** ⭐ 开发测试收件箱(只在未打包时启用;2026-10-16 用户授权我自己跑测试)—— 同样自启、before-quit 自停 */
+  startDevInbox();
+  app.on('before-quit', stopDevInbox);
+  /** ⭐ 每天自动:查回关(用户 10-19 选)+ 我自己的关系采集(10-21)—— 自启、before-quit 自停,timer unref */
+  startDailyUpkeep();
+  app.on('before-quit', stopDailyUpkeep);
+  /** ⭐ 右键「查库」抽查(2026-10-16)—— 经平台的网页右键扩展口,删 X 目录这一项就没了 */
+  registerSpotCheckMenu();
+  /** ⭐ 关注队列(2026-10-16,蓝V互关 M4)—— 自启、before-quit 自停,timer unref */
+  startFollowQueue();
+  app.on('before-quit', stopFollowQueue);
   /** ⭐ 后台采集状态进运行体检(黑匣子)—— X 自己登记,宿主不认识 X 内部 */
   registerHealthProbe('x.bg', bgRunnerHealth);
+  /** ⭐⭐ X 的能力登记进平台能力目录(Module5-04 第 2 步)—— 删 X 目录这一行就没了 */
+  registerXCapabilities();
+  /** ⭐ 此刻谁占着哪个 X 网页(x-page-lock)—— 卡住复盘时看「是不是有人占着不放」 */
+  registerHealthProbe('x.page-lock', () => ({
+    held: listLocks().map((h) => ({ resource: h.resource, purpose: h.purpose, caller: h.caller, sinceSec: Math.round((Date.now() - h.since) / 1000) })),
+  }));
 }
 
 

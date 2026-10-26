@@ -62,6 +62,18 @@ export function lookupWebContents(pageId: PageId): WebContents | null {
   return wc;
 }
 
+/**
+ * 反向:wc → pageId。给诊断日志(`diagnostics/logs`)给每条网页日志标上 pageId 用。
+ *
+ * 遍历即可:表里只有能力层登记过的页面(个位数)。没登记过 → null(日志照记,只是不带 pageId)。
+ * ⚠️ 同一 wc 登记过多次(重新导航后换了新 pageId)时取**最后**绑定的那个 —— Map 按插入序遍历。
+ */
+export function pageIdOfWebContents(wc: WebContents): PageId | null {
+  let found: PageId | null = null;
+  for (const [pageId, w] of hosts) if (w === wc) found = pageId;
+  return found;
+}
+
 /** 解绑(页面确实没了时)。目前无人调用 —— 留给将来真正接上生命周期时用 */
 export function unbindPageHost(pageId: PageId): void {
   hosts.delete(pageId);

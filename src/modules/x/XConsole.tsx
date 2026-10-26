@@ -52,9 +52,11 @@ import { describePayload } from './x-payload-shape';
 import { exportAuditText } from './x-audit-export';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { runCollect, type RunResult } from './x-collect-run';
-import { buildRunReport } from './x-run-report';
+import { buildRunReport, completenessLine } from './x-run-report';
+import { statsLine } from './x-batch-stats';
+import { ledgerLine } from './x-page-ledger';
 import { recipeToQuery } from './x-recipe-query';
-import { setXHostBusy } from './x-host-registry';
+import { acquireXPage, releaseXPage } from './x-unfollow-run';
 import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { FetchDepth, TweetNeed } from './x-fetch-plan';
 
@@ -215,17 +217,21 @@ export function XConsole(
    */
   const [running, setRunning] = useState(false);
   /**
-   * ⭐ 采集中登记「X 网页正忙」—— 运营的人页点人会让 X 网页跳到他主页,
+   * ⭐ 采集中占住 X 网页(主进程的锁,x-page-lock)—— 运营的人页点人会让 X 网页跳到他主页,
    * 采集途中跳走会打断采集(2026-10-08)。
+   * ⚠️⚠️ 2026-10-23 起开采前先申请、被占着就不开采:原来是 useEffect 里直接写「忙」,
+   * 会盖掉后台查回关的忙、结束时再清掉(Module5-04 §1.3 bug 1)。申请 / 放锁在下面「采这一页」的 onClick 里。
+   * 被占着 → 不开采,在按钮旁说出是谁占着(lockNote)。
    */
-  useEffect(() => {
-    if (wcId == null || !running) return;
-    setXHostBusy(wcId, '操作台正在采集');
-    return () => setXHostBusy(wcId, null);
-  }, [wcId, running]);
+  const [lockNote, setLockNote] = useState<string | null>(null);
   /** ⭐ 采够几页就停 —— 用户 2026-10-03:「每次采集 10 页」 */
   const [pagesWanted, setPagesWanted] = useState('10');
   const [report, setReport] = useState<HarvestReport | null>(null);
+  /**
+   * ⭐ 滚动截获的结果(2026-10-16)—— 采完要**留在界面上**:原先进度行只在「采集中」显示,
+   * 搜索页走新分支后采完界面回到使用说明,用户:「没有采集信息?」
+   */
+  const [scrollDone, setScrollDone] = useState<{ head: string; lines: string[]; tail: string } | null>(null);
   /**
    * ⭐⭐ **完整性核对**结果 —— 用户 2026-10-02:
    * 「关键是**核对爬取的数据完整没有**。」
@@ -360,7 +366,12 @@ export function XConsole(
     users: number;
     saved: { inserted: number; updated: number; skippedNoHandle: number; skippedNoRestId?: number; failed: unknown[] } | null;
     reason: string;
+    /** ⭐ 按页存时累计的新增 / 更新(2026-10-19)—— 「入库 新」看它;saved 是采完整批重存那一遍(每页存过,新增必为 0) */
+    pageInserted: number;
+    pageUpdated: number;
   } | null>(null);
+  /** 这一跑按页存的累计 —— savePage 回调里加,采完写进 userRun */
+  const pageSaved = useRef({ inserted: 0, updated: 0 });
   /** ⭐⭐ 研判与执行的账:做了 / 这次不做 / 根本补不了 —— 三类分开 */
   const [plan, setPlan] = useState<{
     depth: FetchDepth;
@@ -801,8 +812,12 @@ export function XConsole(
                   /** ⚠️ 不看 busy:这**就是**那个长操作 */
                   disabled={wcId == null || running}
                   onClick={async () => {
+                    const lock = await acquireXPage(wcId!, '操作台正在采集');
+                    if (!lock.ok) { setLockNote(`没开采:${lock.why}`); return; }
+                    setLockNote(null);
                     setRunning(true);
                     setReport(null);
+                    setScrollDone(null);
                     setAudit(null);
                     setAuditFile(null);
                     setPlan(null);
@@ -830,6 +845,44 @@ export function XConsole(
                       const origin = identified === null
                         ? null
                         : { name: identified.name, params: identified.params };
+
+                      /**
+                       * ⭐⭐⭐ **搜索页:让页面自己翻页、只截获**(2026-10-16)—— 用户:「配方搜索,然后把所有的推文
+                       * 采集下来,这是基本函数/功能,必须保证的哦。」社区:重放 SearchTimeline 需页面现场生成的
+                       * transaction-id,否则 404;真机滚动截获 30 页 600 条,对账 30/30、逐页账全对。
+                       * ⚠️ 页数上限 40(SearchTimeline ~50 次/15 分钟);每页都过逐页账、存库回读。
+                       */
+                      if (origin?.name === X_PAGE_NAME.search && (origin.params.q ?? '') !== '') {
+                        setStep('滚动截获:让页面自己翻页,每页对账、存库、回读…');
+                        const sr = await xDataCall({
+                          op: 'searchScroll', wcId: wcId!, q: origin.params.q ?? '',
+                          f: origin.params.f === 'top' ? 'top' : 'latest',
+                          wantPages: Math.min(Math.max(Number(pagesWanted) || 10, 1), 40),
+                          maxMs: 10 * 60_000,
+                          ownToken: lock.token,
+                        });
+                        setLog((l) => [{ at: new Date().toLocaleTimeString(), label: '滚动截获', result: sr }, ...l].slice(0, 50));
+                        if (sr.status === 'failed') { setStep(`滚动截获失败:${sr.reason}`); return; }
+                        const v = sr.value as {
+                          ok: boolean; why?: string; rateLimited: boolean; reportFile?: string;
+                          totals?: { pages: number; xTweets: number; notParsed: number; notInDb: number; badPages: number };
+                          stats?: Parameters<typeof statsLine>[0];
+                          pages?: Array<Parameters<typeof ledgerLine>[0] & { newest?: string; oldest?: string }>;
+                        };
+                        if (!v.ok) {
+                          setScrollDone({ head: `⚠️ 滚动截获没跑:${v.why ?? '?'}`, lines: [], tail: '' });
+                          return;
+                        }
+                        const t = v.totals;
+                        setScrollDone({
+                          head: (t ? `${t.badPages === 0 ? '✓' : '⚠️'} 滚动截获 ${t.pages} 页 · X 列 ${t.xTweets} · 解析缺 ${t.notParsed} · 入库缺 ${t.notInDb}`
+                            + (t.badPages > 0 ? ` · ${t.badPages} 页对不上` : ' · 每页都对上了') : '滚动截获完成')
+                            + (v.rateLimited ? ' · ⚠️ 撞了 429' : ''),
+                          lines: (v.pages ?? []).map((p) => `${ledgerLine(p)}  ${p.newest ? new Date(p.newest).toLocaleTimeString() : ''} ~ ${p.oldest ? new Date(p.oldest).toLocaleTimeString() : ''}`),
+                          tail: (v.stats ? `本批:${statsLine(v.stats)}` : '') + (v.reportFile ? `\n报告:${v.reportFile}` : ''),
+                        });
+                        return;
+                      }
 
                       /**
                        * ⭐⭐⭐ **开跑前读断点** —— 2026-10-07。
@@ -868,6 +921,7 @@ export function XConsole(
                         }
                       }
 
+                      pageSaved.current = { inserted: 0, updated: 0 };
                       const run = await runCollect({
                         harvest: async (plan) => {
                           const rr = await window.electronAPI!.webDomInvoke({
@@ -976,6 +1030,29 @@ export function XConsole(
                         cancelled: () => cancelRef.current,
                         onProgress: setStep,
                         /**
+                         * ⭐⭐⭐ 一页一存、存完回读(2026-10-16,逐页账)—— 用户:
+                         * 「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了」
+                         * ⚠️ 来源 / 配方 / 名单的取法与最后统一存库那里**同一套**(origin 优先,identified 兜底)。
+                         * 最后那次统一存库仍保留(补回来的长文正文要并进去),重复存是幂等的。
+                         */
+                        savePage: async ({ tweets, users }) => {
+                          const pageName = origin?.name ?? identified?.name ?? '';
+                          const listSource = X_USER_LIST_PAGES[pageName] ?? '';
+                          const sv = await xDataCall({
+                            op: 'savePageVerify',
+                            tweets: tweets.filter((t) => t.id !== ''),
+                            tweetCtx: { source: pageName, searchRecipe: origin?.params.q, wcId: wcId ?? undefined },
+                            /** ⚠️ 不是名单页就不存人(与最后统一存库同口径:人只从名单页存) */
+                            users: listSource !== '' ? users : [],
+                            userCtx: listSource !== '' ? { listSource, wcId: wcId ?? undefined } : undefined,
+                          });
+                          if (sv.status === 'failed') return { error: sv.reason };
+                          const v = sv.value as { inDb: string[]; usersInserted?: number; usersUpdated?: number };
+                          pageSaved.current.inserted += v.usersInserted ?? 0;
+                          pageSaved.current.updated += v.usersUpdated ?? 0;
+                          return { inDb: v.inDb };
+                        },
+                        /**
                          * ⭐⭐ **被限流时的等待** —— 2026-10-06。
                          * ⚠️ 等待期间**每秒看一次有没有人点停止** ——
                          * 退避可能几分钟,干等着不响应停止键最招人烦。
@@ -1003,6 +1080,10 @@ export function XConsole(
                        * 不是「哪个字段没解出来」。
                        */
                       if (run.rateLimit) setStep(run.rateLimit);
+                      /** ⭐⭐ 漏采要当场看得见(用户 10-16:「必须保证的哦」)—— 不等人去翻报告 */
+                      else if (run.harvest?.completeness && run.harvest.completeness.seen > run.harvest.completeness.captured) {
+                        setStep(completenessLine(run.harvest.completeness));
+                      }
                       if (run.harvest) setReport(run.harvest as HarvestReport);
                       setTotalResponses(run.totalResponses);
                       setPaging(run.paging);
@@ -1035,6 +1116,8 @@ export function XConsole(
                              */
                             source: origin?.name ?? identified?.name ?? '',
                             searchRecipe: origin?.params.q,
+                            /** ⭐ 作者的关系是这个网页登录的号看到的 —— 主进程据此认号(1.2.27) */
+                            wcId: wcId ?? undefined,
                           },
                         });
                         setLog((l) => [{
@@ -1060,7 +1143,14 @@ export function XConsole(
                            * 而那条语句**不报错也不写**。
                            * ⭐ 现在以「失败条数」为准:有失败就直说,别只报好消息。
                            */
-                          const v = sv.value as { inserted: number; updated: number; failed: Array<{ why: string }> };
+                          const v = sv.value as { inserted: number; updated: number; failed: Array<{ why: string }>; statsLine?: string };
+                          /** ⭐ 本批统计(推文数 / 发推的人数 / 人的特征)—— 用户 10-16 要的,对漏采用 */
+                          /** ⚠️ 漏采警告并进同一行 —— 分开 setStep 的话后一句会盖掉前一句 */
+                          const leak = run.harvest?.completeness;
+                          if (v.statsLine) {
+                            setStep(`本批:${v.statsLine}`
+                              + (leak && leak.seen > leak.captured ? ` ｜ ${completenessLine(leak)}` : ''));
+                          }
                           if (v.failed.length > 0) {
                             setStep(`⚠️ ${v.failed.length} 条没入库：${v.failed[0]?.why ?? ''}`);
                           } else if (v.inserted + v.updated === 0 && records.length > 0) {
@@ -1091,7 +1181,8 @@ export function XConsole(
                          */
                         const listSource = X_USER_LIST_PAGES[origin?.name ?? identified?.name ?? ''] ?? '';
                         const su = await xDataCall({
-                          op: 'saveUsers', records: users, ctx: { listSource },
+                          /** ⭐ wcId:名单里的关系是这个网页登录的号看到的(1.2.27) */
+                          op: 'saveUsers', records: users, ctx: { listSource, wcId: wcId ?? undefined },
                         });
                         setLog((l) => [{
                           at: new Date().toLocaleTimeString(), label: '落库（人）', result: su,
@@ -1106,6 +1197,8 @@ export function XConsole(
                             })
                             : null,
                           reason: su.status === 'ok' ? '' : (su as { reason?: string }).reason ?? '',
+                          pageInserted: pageSaved.current.inserted,
+                          pageUpdated: pageSaved.current.updated,
                         });
                         /** ⭐⭐ 一个都没存进去 = 失败,别让它看着像成功 */
                         if (su.status !== 'ok') {
@@ -1222,6 +1315,7 @@ export function XConsole(
                         if (w.status === 'ok') setAuditFile((w.value as { file: string }).file);
                       }
                     } finally {
+                      await releaseXPage(lock.token);
                       setRunning(false);
                     }
                   }}
@@ -1230,6 +1324,7 @@ export function XConsole(
                 >
                   {running ? '采集中…' : '采这一页'}
                 </button>
+                {lockNote && <strong style={{ color: '#d88' }}>{lockNote}</strong>}
                 {/*
                   ⭐⭐⭐ **开采前先说清楚「这是哪个名单」** —— 2026-10-07。
                   ⚠️⚠️ 用户连着三次采到了同一个名单(following),
@@ -1376,8 +1471,11 @@ export function XConsole(
                     解出 <strong>{userRun.users}</strong> 人
                     {userRun.saved !== null && (
                       <>
-                        　·　入库 新 <strong>{userRun.saved.inserted}</strong>
-                        　·　更新 <strong>{userRun.saved.updated}</strong>
+                        　·　入库 新 <strong>{userRun.pageInserted}</strong>
+                        　·　更新 <strong>{userRun.pageUpdated}</strong>
+                        <span style={{ opacity: 0.6 }} title="每页采到就存一次(新增算在上面);采完再整批存一遍,那一遍的新增必然是 0">
+                          {'　'}(按页存;采完整批复存:新 {userRun.saved.inserted} / 更新 {userRun.saved.updated})
+                        </span>
                         {userRun.saved.skippedNoHandle > 0 && (
                           <>　·　<span style={{ opacity: 0.8 }}>
                             无 handle 挡下 {userRun.saved.skippedNoHandle}
@@ -1454,7 +1552,16 @@ export function XConsole(
                   ))}
                 </div>
               )}
-              {!running && !report && (
+              {!running && scrollDone && (
+                <div style={S.diagnose}>
+                  <strong>{scrollDone.head}</strong>
+                  {scrollDone.lines.length > 0 && (
+                    <pre style={{ fontSize: 11, margin: '6px 0', whiteSpace: 'pre-wrap' }}>{scrollDone.lines.join('\n')}</pre>
+                  )}
+                  {scrollDone.tail !== '' && <div style={{ whiteSpace: 'pre-wrap', opacity: 0.85 }}>{scrollDone.tail}</div>}
+                </div>
+              )}
+              {!running && !report && !scrollDone && (
                 <div style={S.todo}>
                   ① 去「控制」那栏选好页面（或左栏自己导航到想采的页）<br />
                   ② 回来点「采这一页」—— 重载、滚动、展开折叠的推文、
@@ -1489,6 +1596,10 @@ export function XConsole(
                     ⭐ 人要知道的是「采到几条推文」,响应数是排查用的,放后面。
                   */}
                   <div style={S.statRow}>
+                    {/* ⭐ 名单页采的是人 —— 只摆「推文 0 / 载荷 0」会让人以为啥都没采到(用户 10-19 截图:「怎么感觉这个方法又失效啦?」) */}
+                    {userRun !== null && (
+                      <Stat label="人" v={userRun.users} tone={userRun.users > 0 ? 'good' : 'idle'} hint={`名单 ${userRun.listSource} 解出的人数(去重)`} />
+                    )}
                     <Stat
                       label="推文"
                       v={audit?.uniqueTweets ?? 0}
@@ -2086,6 +2197,14 @@ function RecipeEditor(
             onChange={(e) => set('includeReplies', e.target.checked)}
           />
           {' '}连回复一起（filter:replies）
+        </label>
+        <label style={{ fontSize: 11 }} title="蓝V互关配方用;语法未经真机验证,第一次搜要看结果是不是全是蓝V">
+          <input
+            type="checkbox"
+            checked={r.blueOnly ?? false}
+            onChange={(e) => set('blueOnly', e.target.checked)}
+          />
+          {' '}只看蓝V作者（filter:blue_verified）
         </label>
         <label style={{ fontSize: 11 }}>
           <input

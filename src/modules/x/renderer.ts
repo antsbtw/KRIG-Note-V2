@@ -35,6 +35,7 @@ import { registerView } from '@slot/view-type-registry/register-view';
 import { XWebView } from './XWebView';
 import { XWorkbenchView } from './XWorkbenchView';
 import { XOpsView } from './XOpsView';
+import { XTaskView } from './XTaskView';
 import { registerXCommands } from './x-commands';
 import { startXHostSync } from './x-host-sync';
 
@@ -42,6 +43,7 @@ import { startXHostSync } from './x-host-sync';
 export const X_WEB_VIEW_ID = 'x-web-view';
 export const X_WORKBENCH_VIEW_ID = 'x-workbench-view';
 export const X_OPS_VIEW_ID = 'x-ops-view';
+export const X_TASK_VIEW_ID = 'x-task-view';
 
 /** ① 左栏:X 的网页 */
 registerView({
@@ -111,6 +113,25 @@ registerView({
      * ⚠️ 运营没有自己的 navSide 面板内容 —— 切过来收起 navSide,
      * 且禁止点已激活 tab 展开一栏空的(与 X 网页同款)。
      */
+    navSideOnSwitch: 'collapse',
+    navSideDisabled: true,
+  },
+});
+
+/**
+ * ④ 任务 —— 编排好的业务流程(2026-10-16),与运营同级
+ * 用户:「操作台是后台,应该把编排好的流程放在主页面了。是否增加一个和运营同级的task(任务),这个任务就是蓝V互关」
+ * ⭐ 同运营:上 navSide(能开左栏)+ 自动进 SlotPicker(能开右栏);X 网页顶条「📋 任务」开/关右栏。
+ */
+registerView({
+  id: X_TASK_VIEW_ID,
+  install: [],
+  component: XTaskView,
+  navSideTab: {
+    label: '任务',
+    icon: '📋',
+    /** ⭐ 6.6 —— 紧挨运营(6.5) */
+    order: 6.6,
     navSideOnSwitch: 'collapse',
     navSideDisabled: true,
   },

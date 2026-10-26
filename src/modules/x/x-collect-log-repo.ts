@@ -42,7 +42,7 @@ export async function appendCollectLog(e: CollectLogEntry): Promise<void> {
 }
 
 /** ⭐⭐ 运营 → 状态 要的全部数字,一次查齐 */
-export async function readOpsStatus(): Promise<OpsStatus> {
-  const q = buildOpsStatusQuery();
+export async function readOpsStatus(account: string): Promise<OpsStatus> {
+  const q = buildOpsStatusQuery(account);
   return parseOpsStatus(await getXDB().query<unknown[]>(q.sql, q.vars));
 }

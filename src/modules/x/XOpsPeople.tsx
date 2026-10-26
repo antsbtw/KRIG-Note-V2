@@ -25,27 +25,21 @@
  * ⚠️ 操作台采集中不跳(跳走会打断采集),并说出来;已经在他主页就不重载。
  */
 
-import {
-  useCallback, useEffect, useRef, useState, useSyncExternalStore,
-  type CSSProperties, type ReactElement,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
-import { getXHostBusy, setXHostBusy, subscribeXHost, getXHostState } from './x-host-registry';
-import { auditUserPayload, type XUserRecord } from './x-user-audit';
-import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
-import type { CollectOnWebviewResult } from './x-collect-on-webview';
+import { subscribeXHost, getXHostState } from './x-host-registry';
+import type { XUserRecord } from './x-user-audit';
+
 import type { CirclePerson } from './x-friend-circle';
-import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
-import { X_SCRIPTS } from './x-dom-scripts';
+import { LIVE_PAGE_CAP, TIMELINE_RANGES, type TimelineRange } from './x-person-timeline';
+import { resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson, type UnfollowOutcome, type VerifyOutcome } from './x-unfollow-run';
+import { runFlow, stopFlow } from './x-flow-ui';
+import { XPersonTimeline } from './XPersonTimeline';
+import { XPersonLists } from './XPersonLists';
 import { describeProgress, type BgJob } from './x-bg-job';
 import { useBgStatus } from './XBgStatus';
-import { SETTING_DEFS, localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
-import {
-  DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup,
-  type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort,
-  type PersonDetail, type PersonRow, type PersonTweet,
-} from './x-people-query';
+import { localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
+import { DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup, type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort, type PersonDetail, type PersonRow, type PersonTweet } from './x-people-query';
 
 const PAGE = 200;
 /** 宽于此就并排显示列表与人卡 */
@@ -53,17 +47,8 @@ const WIDE = 760;
 
 const fmt = (n: number | undefined): string => (n === undefined ? '—' : n.toLocaleString());
 
-/**
- * ⭐⭐ 后台此刻在不在用这个 X 网页采(2026-10-14 第 4 步)—— 人手动操作前先问主进程。
- * ⚠️ 后台 runner 在主进程,它的「正在用」不在本进程的 x-host-registry 里;
- * 不问就会和后台抢同一个 webview(跳走会打断后台那一段)。问不到也说出来,不当成「不忙」。
- */
-async function bgBusyNote(wcId: number): Promise<string | null> {
-  const r = await xDataCall({ op: 'bgBusy', wcId });
-  if (r.status !== 'ok') return `问不到后台状态(${r.reason})`;
-  const v = r.value as { handle: string } | null;
-  return v ? `后台正在采 @${v.handle}(可在人卡暂停)` : null;
-}
+/** 互关倾向是谁定的 —— 人 > AI > 算法 */
+const INTENT_SOURCE: Readonly<Record<string, string>> = { human: '你标的', ai: 'AI', rule: '算法' };
 
 export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactElement {
   const [overview, setOverview] = useState<PeopleOverview | null>(null);
@@ -109,11 +94,11 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   const [followNote, setFollowNote] = useState<string | null>(null);
 
   const loadOverview = useCallback(() => {
-    void xDataCall({ op: 'peopleOverview' }).then((r) => {
+    void xDataCall({ op: 'peopleOverview', wsId: workspaceId }).then((r) => {
       if (r.status === 'ok') setOverview(r.value as PeopleOverview);
       else setErr(r.reason);
     });
-  }, []);
+  }, [workspaceId]);
   /**
    * ⭐ 当前筛选的最新值 —— 核对是异步的,回来时要按**那一刻**的分组判断要不要移出列表。
    * (用 ref:runVerify 是 useCallback,直接读 filter 会拿到旧值)
@@ -146,75 +131,46 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   /**
    * ⭐⭐ 让 X 网页打开这个人的主页,并**顺手核对**。
    * ⚠️ 不跳的情况都说出来:X 网页没开 / 操作台正在采集(跳走会打断采集)。
-   * ⚠️ 核对期间登记「忙」,免得操作台同时在这个页面上采。
+   * ⚠️ 核对在主进程(能力 x.person.verify,2026-10-26 第 4 步):期间占住 X 网页,免得操作台 / 后台同时在这个页面上采;
+   *    被占着就不跳,说出是谁。
    */
-  const VERIFY_BUSY = '运营正在核对这个人';
-  const runVerify = useCallback(async (p: PersonRow): Promise<void> => {
-    if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
-    const busy = getXHostBusy(wcId);
-    if (busy !== null && busy !== VERIFY_BUSY) { setFollowNote(`${busy},没跳转(跳走会打断采集)`); return; }
-    const bg = await bgBusyNote(wcId);
-    if (bg !== null) { setFollowNote(`${bg},没跳转(跳走会打断采集)`); return; }
-    setFollowNote(null);
-    setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
-    setXHostBusy(wcId, VERIFY_BUSY);
-    let result: { kind: 'same' | 'changed' | 'new' | 'miss'; text: string };
-    try {
-      const h = await window.electronAPI!.webDomInvoke({
-        op: 'harvest', pageRef: { wcId },
-        plan: {
-          gotoPage: { name: X_PAGE_NAME.profile, params: { handle: p.handle } },
-          /** 只等主页资料那一条;来了就停,最多 3 轮、10 秒 */
-          pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
-          noisyUrlSubstrings: X_NOISY_URLS,
-        },
-      });
-      if (h.status === 'failed') {
-        result = { kind: 'miss', text: `没读到:${h.reason ?? '原因未知'}` };
-      } else {
-        const rep = h.value as { items?: Array<{ url: string; text: string }>; problems?: string[] };
-        const items = (rep.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
-        const users = items.flatMap((it) => auditUserPayload(it.text).items);
-        const rec = pickProfileUser(users, p.handle, p.rest_id);
-        if (!rec) {
-          /** ⚠️ 把采集层报的原因也带上(如「没能去到这一页」)—— 不只说「没来」 */
-          const why = rep.problems?.[0];
-          result = { kind: 'miss', text: items.length === 0
-            ? `没读到(主页资料那条请求没来${why ? `:${why}` : ''})` : '没读到(载荷里找不到这个人)' };
-        } else {
-          const r = await xDataCall({ op: 'refreshPerson', record: rec });
-          if (r.status === 'failed') {
-            result = { kind: 'miss', text: `没写进库:${r.reason}` };
-          } else {
-            const d = r.value as { isNew: boolean; changes: string[] };
-            patchRow(rec);
-            setCardRev((v) => v + 1);
-            /**
-             * ⭐⭐ 关系变了、已不属于当前这组 → 立刻移出列表、总数减一,并说清楚去了哪
-             * (2026-10-09 截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」里)。
-             */
-            const g = filterRef.current.group;
-            const iF = rec.following ?? p.i_follow;
-            const fM = rec.followedBy ?? p.follows_me;
-            if (!inGroup(g, iF, fM)) {
-              setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
-              setTotal((t) => (t === null ? t : t - 1));
-              setMoved(`@${p.handle} 关系变为「${relationLabel({ i_follow: iF, follows_me: fM })}」,已移出「${PEOPLE_GROUPS.find((x) => x.id === g)?.label}」`);
-            }
-            if (d.changes.length > 0 || d.isNew) loadOverview();
-            result = d.isNew ? { kind: 'new', text: '库里没有,已补进来' }
-              : d.changes.length > 0 ? { kind: 'changed', text: `有变化:${d.changes.join(';')}(已更新)` }
-                : { kind: 'same', text: '刚核对,与库里一致' };
-          }
+  /** 核对结果显示到人卡 / 列表(取关后的核对结果也走这里) */
+  const showVerify = useCallback((p: PersonRow, r: VerifyOutcome): void => {
+    const result = { kind: r.kind, text: r.text };
+    {
+      if (r.kind !== 'miss') {
+        const rec = r.rec;
+        patchRow(rec);
+        setCardRev((v) => v + 1);
+        /**
+         * ⭐⭐ 关系变了、已不属于当前这组 → 立刻移出列表、总数减一,并说清楚去了哪
+         * (2026-10-09 截图:jess01239 已是「互不关注」却还留在「我关注·他没回关」里)。
+         */
+        const g = filterRef.current.group;
+        const iF = rec.following ?? p.i_follow;
+        const fM = rec.followedBy ?? p.follows_me;
+        if (!inGroup(g, iF, fM)) {
+          setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
+          setTotal((t) => (t === null ? t : t - 1));
+          setMoved(`@${p.handle} 关系变为「${relationLabel({ i_follow: iF, follows_me: fM })}」,已移出「${PEOPLE_GROUPS.find((x) => x.id === g)?.label}」`);
         }
+        if (r.changes.length > 0 || r.kind === 'new') loadOverview();
       }
-    } catch (e) {
-      result = { kind: 'miss', text: `没读到:${e instanceof Error ? e.message : String(e)}` };
-    } finally {
-      setXHostBusy(wcId, null);
     }
     setVerify((v) => ({ ...v, [p.rest_id]: { ...result, at: Date.now() } }));
-  }, [wcId, loadOverview]);
+  }, [loadOverview]);
+  const runVerify = useCallback(async (p: PersonRow): Promise<void> => {
+    if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
+    setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
+    const r = await verifyPerson(workspaceId, p);
+    if ('refused' in r) {
+      setVerify((v) => { const n = { ...v }; delete n[p.rest_id]; return n; });
+      setFollowNote(`${r.refused},没跳转(跳走会打断采集)`);
+      return;
+    }
+    setFollowNote(null);
+    showVerify(p, r);
+  }, [wcId, workspaceId, showVerify]);
 
   /** ⭐ 一次只核对一个;核对中又点了别人,只记住**最后点的那个** */
   const openInX = useCallback((p: PersonRow): void => {
@@ -244,100 +200,24 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
    * ⚠️ 2026-10-10 第一版只滚动 8 轮,每页都只拿到首屏 —— 滚动触发翻页不可靠,所以改游标翻页。
    */
   const [collect, setCollect] = useState<Record<string, { running: boolean; text: string }>>({});
-  const COLLECT_BUSY = '运营正在采他的推文';
-  const cancelCollect = useRef(false);
+  /**
+   * ⭐⭐ 整串在主进程跑(流程 x.person.collectRange,2026-10-26 第 4 步):整段占着网页、按标签页采、第一次翻页被拒就重载再试、
+   * 存库、每个标签页留痕;这里只看进度。停止 = 叫停流程(它会通知正在翻页的那次停下)。
+   */
   const collectTweets = useCallback(async (p: PersonRow, range: TimelineRange): Promise<void> => {
     if (wcId == null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: 'X 网页没开,没法采' } })); return; }
-    const busy = getXHostBusy(wcId);
-    if (busy !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${busy},先等它结束` } })); return; }
-    const bg = await bgBusyNote(wcId);
-    if (bg !== null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${bg},先等这一段结束` } })); return; }
-    const start = rangeStart(range, new Date());
     const label = TIMELINE_RANGES.find((r) => r.id === range)?.label ?? range;
-    setXHostBusy(wcId, COLLECT_BUSY);
-    cancelCollect.current = false;
-    const parts: string[] = [];
-    const say = (msg: string): void =>
-      setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `[${label}] ${parts.join(';')}${parts.length ? ';' : ''}${msg}` } }));
-    try {
-      for (const tab of PERSON_TABS) {
-        if (cancelCollect.current) { parts.push(`${tab.label}:人点了停止`); break; }
-        /**
-         * ⭐ 最多两次:第一次翻页就 403(翻页模板没带鉴权头)时,重载这一页再试一次。
-         * ⚠️ 2026-10-12 真机:帖子页那条响应只被页面钩子收到、CDP 没收到 → 模板没有鉴权头 → 403,
-         * 只翻了 1 页就停。重载后两条通道重新收一遍,大概率拿到带头的那份。第一次采到的照样存。
-         */
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
-          say(`正在采${tab.label}…${attempt > 1 ? '(重载后第 2 次)' : ''}`);
-          /**
-           * ⭐⭐ 去那一页 + runCollect 在**主进程**跑(2026-10-13 后台策略 3a:`collectOnWebview`,
-           * 与后台 runner 共用一份)。进度每句都由主进程当场写 x-person-progress 留痕;
-           * 这里每秒问一次最新那句,只为界面上滚动显示。
-           */
-          let seenSeq = 0;
-          /** ⚠️ 采完后才回来的那次问询不许再改界面(会盖掉结果那句) */
-          let done = false;
-          const poll = setInterval(() => {
-            void xDataCall({ op: 'personCollectProgress', wcId }).then((r) => {
-              if (done) return;
-              const v = r.status === 'ok' ? r.value as { seq: number; msg?: string } | null : null;
-              if (v && v.seq !== seenSeq && v.msg) { seenSeq = v.seq; say(`${tab.label}:${v.msg}`); }
-            });
-          }, 1000);
-          let res;
-          try {
-            res = await xDataCall({
-              op: 'collectPersonTab', wcId, page: tab.name, handle: p.handle, restId: p.rest_id,
-              start: start?.toISOString(),
-              pageCap: settingsRef.current?.['collect.live_page_cap'] ?? LIVE_PAGE_CAP,
-              attempt,
-            });
-          } finally {
-            done = true;
-            clearInterval(poll);
-          }
-          if (res.status === 'failed') throw new Error(res.reason);
-          const run = res.value as CollectOnWebviewResult;
-          if (!run.reached) { parts.push(`${tab.label}:没去到这一页(${run.reason})`); break; }
-          const records = [...run.records];
-          const pages = (run.paging?.rounds ?? 0) + 1;
-          const why = run.paging?.stopReason ?? '';
-          /**
-           * 第一轮翻页就被拒 = 翻页模板没带鉴权头 → 值得重载再试。
-           * ⚠️ 两种措辞都要认(2026-10-13):旧的「HTTP 403」+ 403 根治后的
-           * 「没带鉴权头」(种子一条带头的都没有时的失败语)——
-           * 只认 HTTP 403 的话,新措辞不触发重试,回复页种子没带头就只采 1 页就停
-           * (project-x-paging-403-root-cause 记过这笔连带账)。
-           */
-          const authFail = worthReloadRetry(why, run.paging?.rounds ?? 0);
-          let inserted = 0;
-          if (records.length > 0) {
-            const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name } });
-            if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); break; }
-            inserted = (sv.value as { inserted: number }).inserted;
-          }
-          /**
-           * ⭐⭐ 每个标签页(每次尝试)的结果**落留痕**(2026-10-10:停因只显示在人卡上,关了就没,
-           * 事后分不清「第一页就按时间停」还是「根本没翻页」)。成功路径也要留痕。
-           */
-          void xDataCall({
-            op: 'logPersonCollect',
-            entry: { restId: p.rest_id, handle: p.handle, range, tab: tab.name, pages, records: records.length, inserted, stopReason: `${attempt > 1 ? '[第 2 次] ' : ''}${why}` },
-          });
-          if (authFail && attempt === 1 && !cancelCollect.current) continue;
-          parts.push(`${tab.label} ${pages} 页 ${records.length} 条(新 ${inserted})${attempt > 1 ? '[重载后]' : ''}${why ? ` —— ${why}` : ''}`);
-          break;
-        }
-      }
-    } catch (e) {
-      parts.push(`出错:${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setXHostBusy(wcId, null);
-    }
-    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `[${label}] 采完:${parts.join(';')}` } }));
+    setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `[${label}] 开始…` } }));
+    const r = await runFlow(
+      { op: 'personCollectRange', wsId: workspaceId, restId: p.rest_id, handle: p.handle, range },
+      'x.person.collectRange', workspaceId,
+      (run) => { if (run.msg) setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: run.msg! } })); },
+    );
+    const text = r.status === 'ok' ? (r.value as { text: string }).text : `[${label}] 没采:${r.reason}`;
+    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text } }));
     setCardRev((v) => v + 1);
     loadOverview();
-  }, [wcId, loadOverview]);
+  }, [wcId, workspaceId, loadOverview]);
 
   /** ⭐ 选时间范围的小框 —— 第一步只开放「一个月」 */
   /**
@@ -380,88 +260,40 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     });
     loadGate();
   }, [loadGate]);
-  const saveSetting = async (key: string, value: number): Promise<void> => {
-    const r = await xDataCall({ op: 'setOpsSetting', key, value });
-    if (r.status === 'failed') { setErr(r.reason); return; }
-    setSettings((s) => (s ? { ...s, [key]: value } : s));
-    loadGate();
-  };
 
   /**
    * ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续。
    * (红线取消后挡封号风险的就剩这些;X 弹验证 / 改版时连着硬点只会更糟)
    */
+  /** ⚠️ 暂停在主进程一份(按 workspace,2026-10-26):任务页取关没成,这里也看得见;这里只是显示 */
   const [unfollowPaused, setUnfollowPaused] = useState<string | null>(null);
   const [unfollowing, setUnfollowing] = useState<string | null>(null);
-  const UNFOLLOW_BUSY = '运营正在取关';
-  const STATE_TEXT: Record<string, string> = {
-    'not-following': '本来就没关注他', 'no-button': '页面上找不到他的关注按钮', 'no-confirm': '确认框没出来',
-    'no-switch': '点了确认,按钮没变回 Follow', 'bad-id': '数字 id 不对', error: '脚本出错',
-  };
+  useEffect(() => { void unfollowHaltOf(workspaceId).then(setUnfollowPaused); }, [workspaceId]);
 
   const unfollow = useCallback(async (p: PersonRow): Promise<void> => {
-    if (unfollowPaused !== null) { setFollowNote(`取关已暂停:${unfollowPaused} —— 看过原因后点「恢复」`); return; }
     if (wcId == null) { setFollowNote('X 网页没开,没法取关'); return; }
-    const busy = getXHostBusy(wcId);
-    if (busy !== null) { setFollowNote(`${busy},先等它结束`); return; }
-    const bg = await bgBusyNote(wcId);
-    if (bg !== null) { setFollowNote(`${bg},先等这一段结束`); return; }
-    /** ① 闸门:每日上限 + 最小间隔(主进程按库里最新的数判) */
-    const g = await xDataCall({ op: 'unfollowGate', dayStartIso: localDayStart(new Date()).toISOString() });
-    if (g.status === 'failed') { setErr(g.reason); return; }
-    const gv = g.value as UnfollowGate;
-    setGate(gv);
-    if (!gv.allowed) { setFollowNote(`没取关:${gv.reason}`); return; }
-
+    /** ⭐ 闸门 / 让路 / 去主页 / 点 / 记动作 / 同一把锁里核对 / 异常即停 —— 都在主进程(能力 x.person.unfollow) */
     setUnfollowing(p.rest_id);
-    setXHostBusy(wcId, UNFOLLOW_BUSY);
-    let result: { done: boolean; state: string; why?: string } = { done: false, state: 'error' };
+    let r: UnfollowOutcome;
     try {
-      /** ② 去他的主页(取关按钮在那)*/
-      const go = await window.electronAPI!.webDomInvoke({
-        op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.profile, params: { handle: p.handle },
-      });
-      if (go.status === 'failed') {
-        result = { done: false, state: 'error', why: `没去到他的主页:${go.reason ?? ''}` };
-      } else {
-        /** ③ 在页面上点:Following → 确认 Unfollow → 等按钮变回 Follow */
-        const r = await window.electronAPI!.webDomInvoke({
-          op: 'run', pageRef: { wcId }, scriptId: X_SCRIPTS.unfollow, params: { restId: p.rest_id },
-        });
-        result = r.status === 'failed'
-          ? { done: false, state: 'error', why: r.reason ?? '' }
-          : (r.value as { done: boolean; state: string; why?: string });
-      }
-    } catch (e) {
-      result = { done: false, state: 'error', why: e instanceof Error ? e.message : String(e) };
+      r = await unfollowPerson(workspaceId, p);
     } finally {
-      setXHostBusy(wcId, null);
       setUnfollowing(null);
     }
-
-    /** ④ 留动作记录 —— 成功失败都记(只追加) */
-    const detail = result.done ? undefined : `${STATE_TEXT[result.state] ?? result.state}${result.why ? `:${result.why}` : ''}`;
-    await xDataCall({
-      op: 'logAction',
-      entry: {
-        action: 'unfollow', targetRestId: p.rest_id, targetHandle: p.handle, decidedBy: 'human',
-        result: result.done ? 'ok' : 'failed', detail,
-      },
-    });
-    loadGate();
-
-    if (result.done) {
-      setFollowNote(null);
-      /** ⑤ 取关后立刻核对 —— 读回他的主页,确认关系真变了再更新库(并按分组移出列表) */
-      await runVerify(p);
-    } else if (result.state === 'not-following') {
-      /** 本来就没关注:不算异常,核对一下把库里的「我关注」纠正过来 */
-      setFollowNote(`@${p.handle} 本来就没关注,已重新核对`);
-      await runVerify(p);
-    } else {
-      setUnfollowPaused(`@${p.handle} ${detail}`);
+    if ('blocked' in r) {
+      setFollowNote(r.blocked);
+      /** 被拒可能就是因为暂停着 —— 以主进程为准刷一下 */
+      void unfollowHaltOf(workspaceId).then(setUnfollowPaused);
+      return;
     }
-  }, [unfollowPaused, wcId, loadGate, runVerify]);
+    setGate(r.gate);
+    loadGate();
+    if (r.halted) { setUnfollowPaused(r.halted); return; }
+    if (r.done) setFollowNote(r.warning ? `⚠️ 已取关 @${p.handle},提醒:${r.warning}` : null);
+    else setFollowNote(`@${p.handle} 本来就没关注,已重新核对`);
+    /** ⑤ 取关后的核对在主进程同一把锁里做完了 —— 这里只显示(并按分组移出列表) */
+    if (r.verify) showVerify(p, r.verify);
+  }, [wcId, workspaceId, loadGate, showVerify]);
 
   /** 单击:选中 + X 网页跟着跳 —— **不开人卡** */
   const selectPerson = (p: PersonRow): void => {
@@ -519,7 +351,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   const load = useCallback(async (f: PeopleFilter, start: number) => {
     const my = ++seq.current;
     setBusy(true);
-    const r = await xDataCall({ op: 'queryPeople', filter: f, limit: PAGE, start });
+    const r = await xDataCall({ op: 'queryPeople', wsId: workspaceId, filter: f, limit: PAGE, start });
     if (my !== seq.current) return;
     setBusy(false);
     if (r.status === 'failed') { setErr(r.reason); return; }
@@ -527,7 +359,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     setErr(null);
     setTotal(v.total);
     setRows((prev) => (start === 0 ? v.rows : [...prev, ...v.rows]));
-  }, []);
+  }, [workspaceId]);
 
   const key = JSON.stringify(filter);
   /** 换了分组/筛选,「已移出」那句就不相干了 */
@@ -570,6 +402,36 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     loadOverview();
   };
 
+  /**
+   * ⭐⭐ 互关倾向(1.2.30,蓝V互关 M2)。
+   * 用户 10-16:「对有蓝V有互关倾向的(比如写了蓝V互关/浇朋友等类似属于的Bio或者帖子),进行互动求关。」
+   * 扫描 = 算法层(可重算);右键标 = 人的决定(人 > AI > 算法,算法不能覆盖)。
+   */
+  const [intentNote, setIntentNote] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const scanIntent = async (): Promise<void> => {
+    setScanning(true); setIntentNote('扫描中…');
+    const r = await xDataCall({ op: 'scanMutualIntent' });
+    setScanning(false);
+    if (r.status === 'failed') { setIntentNote(`扫描出错:${r.reason}`); return; }
+    const v = r.value as { scanned: number; hits: number; set: number; cleared: number; skippedHigher: number; failed: number; firstFailure?: string };
+    setIntentNote(`扫了 ${v.scanned.toLocaleString()} 人:有倾向 ${v.hits}(新标 ${v.set})· 不再命中清掉 ${v.cleared} · 你定过的不动 ${v.skippedHigher}`
+      + (v.failed > 0 ? ` · ⚠️ 失败 ${v.failed}:${v.firstFailure}` : ''));
+    void load(filter, 0);
+  };
+  const markIntent = async (p: PersonRow, value: boolean): Promise<void> => {
+    const r = await xDataCall({ op: 'setMutualIntent', restId: p.rest_id, value });
+    if (r.status === 'failed') { setErr(r.reason); return; }
+    setErr(null);
+    /** 只看有倾向时标成「无」→ 离开列表;否则就地改这一行 */
+    if (filter.intentOnly && !value) {
+      setRows((prev) => prev.filter((x) => x.rest_id !== p.rest_id));
+      setTotal((t) => (t === null ? t : t - 1));
+    } else {
+      setRows((prev) => prev.map((x) => (x.rest_id === p.rest_id ? { ...x, mutual_intent: value, mutual_intent_source: 'human' } : x)));
+    }
+  };
+
   const pickGroup = (g: PeopleGroup): void =>
     setFilter((f) => ({ ...f, group: f.group === g ? 'all' : g }));
 
@@ -597,13 +459,18 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             <button
               key={g.id}
               type="button"
-              onClick={() => pickGroup(g.id)}
-              style={{ ...S.cell, ...(active ? S.cellActive : null) }}
+              /**
+               * ⚠️ 点完去掉焦点(2026-10-21 用户截图):再点一次回到「全部」后,按钮焦点的深底浅边还留着,
+               * 看着像这一格仍选着,下面列的却是全部 —— 「这个数据不对呀?」。选中只认蓝边浅蓝底 + 「已选」字样。
+               */
+              onClick={(e) => { pickGroup(g.id); e.currentTarget.blur(); }}
+              style={{ ...S.cell, ...(active ? S.cellActive : null), outline: 'none' }}
               title={active ? '再点一次回到全部' : `列出「${g.label}」的人`}
             >
               <span style={S.cellLabel}>{g.label}</span>
               <span style={S.cellNum}>{v ? v.total.toLocaleString() : '…'}</span>
               <span style={S.muted}>蓝V {v ? v.blue.toLocaleString() : '…'}</span>
+              {active && <span style={{ ...S.muted, color: 'var(--accent-bar, #6b9fff)' }}>已选 · 再点回到全部</span>}
               {g.id === 'none' && <span style={S.muted}>多为配方找到的</span>}
               {g.id === 'unknown' && <span style={S.muted}>推文没带关系标记</span>}
             </button>
@@ -631,6 +498,14 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                 <input type="checkbox" checked={filter.cnText}
                   onChange={(e) => setFilter({ ...filter, cnText: e.target.checked })} /> 中文名或 bio(不含日文)
               </label>
+              <label style={S.check} title="Bio 或他自己的推文里有「互关必回 / 关注必回 / 有关必回 / 互粉…」;你右键标过的以你为准">
+                <input type="checkbox" checked={filter.intentOnly}
+                  onChange={(e) => setFilter({ ...filter, intentOnly: e.target.checked })} /> 有互关倾向
+              </label>
+              <button type="button" style={S.btn} disabled={scanning} onClick={() => void scanIntent()}
+                title="用词组扫一遍所有人的 Bio 和他自己的推文;你标过的不动,不再命中的(算法以前标的)清掉">
+                {scanning ? '扫描中…' : '扫描互关倾向'}
+              </button>
               <select
                 value={filter.scope} style={S.select}
                 onChange={(e) => { setUndo(null); setFilter({ ...filter, scope: e.target.value as PeopleScope }); }}
@@ -660,32 +535,28 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                 {catalog.map((c) => <option key={c.tag} value={c.tag}>{`${c.count} 人`}</option>)}
               </datalist>
             </div>
-            {settings && (
-              <div style={S.settingsBar}>
-                <span>取关:今日 {gate ? `${gate.todayCount}` : '…'}</span>
-                {SETTING_DEFS.map((d) => (
-                  <label key={d.key} style={S.check} title={`${d.min}–${d.max}${d.unit}`}>
-                    {d.label}
-                    <input
-                      type="number" min={d.min} max={d.max} defaultValue={settings[d.key]}
-                      style={{ ...S.input, flex: '0 0 64px' }}
-                      onBlur={(e) => {
-                        const v = Number(e.target.value);
-                        if (v !== settings[d.key]) void saveSetting(d.key, v);
-                      }}
-                    />
-                    {d.unit}
-                  </label>
-                ))}
-              </div>
-            )}
+            {/*
+              ⭐ 2026-10-20 用户:「这些是配置项,没有必要用户做配置,而是AI执行这些任务时自我优化就可以了。
+              根据限流出现的不同来调整这些参数。人参与进来,不是代表着这是一个石器时代的产品吗?」
+              → 设置输入框全部拿掉;采集节奏由 x_pace 按限流自调(任务 → 关系采集 底部只读显示)。
+            */}
+            <div style={S.settingsBar}>
+              <span>取关:今日 {gate ? `${gate.todayCount}` : '…'}</span>
+              <span style={{ opacity: 0.6 }}>· 采集节奏由 AI 按限流情况自己调</span>
+            </div>
             {unfollowPaused !== null && (
               <div style={S.error}>
                 ⏸ 取关已暂停:{unfollowPaused}(X 改版、弹验证或限流时连着硬点只会更糟)
-                <button type="button" style={S.linkBtn} onClick={() => { setUnfollowPaused(null); setFollowNote(null); }}>恢复</button>
+                <button type="button" style={S.linkBtn} onClick={() => { void resumeUnfollowOf(workspaceId).then(() => unfollowHaltOf(workspaceId)).then(setUnfollowPaused); setFollowNote(null); }}>恢复</button>
               </div>
             )}
             {followNote !== null && <div style={S.muted}>⚠️ {followNote}</div>}
+            {intentNote !== null && (
+              <div style={S.muted}>
+                🤝 {intentNote}
+                <button type="button" style={S.linkBtn} onClick={() => setIntentNote(null)} title="知道了">✕</button>
+              </div>
+            )}
             {moved !== null && (
               <div style={S.undo}>
                 {moved}
@@ -728,8 +599,16 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
                       <span style={S.muted}>粉丝 {fmt(p.followers_count)}</span>
                       {(p.tags ?? []).map((t) => <span key={t} style={S.userTag}>{t}</span>)}
                       {(p.found_via_recipes ?? []).map((r) => <span key={`r:${r}`} style={S.recipeTag}>配方:{r}</span>)}
+                      {p.mutual_intent !== undefined && p.mutual_intent !== null && (
+                        <span style={p.mutual_intent ? S.intentTag : S.muted} title={p.mutual_intent_evidence ?? ''}>
+                          {p.mutual_intent ? '🤝 互关倾向' : '无互关倾向'}({INTENT_SOURCE[p.mutual_intent_source ?? ''] ?? '?'})
+                        </span>
+                      )}
                     </div>
                     {p.bio && <div style={S.bio}>{p.bio}</div>}
+                    {p.mutual_intent === true && p.mutual_intent_evidence && (
+                      <div style={S.muted}>依据 · {p.mutual_intent_evidence}</div>
+                    )}
                     {verify[p.rest_id] && (
                       <div style={verify[p.rest_id].kind === 'changed' || verify[p.rest_id].kind === 'miss' ? S.verifyWarn : S.muted}>
                         {{ running: '⏳', same: '✓', changed: '⚠', new: '＋', miss: '?' }[verify[p.rest_id].kind]} {verify[p.rest_id].text}
@@ -756,9 +635,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             onOpenInX={(person) => openInX(person)}
             onCollect={(person) => void collectTweets(person, 'month')}
             onCancelCollect={() => {
-              cancelCollect.current = true;
-              /** ⭐ 翻页在主进程跑 —— 光立 renderer 的标记停不住它 */
-              if (wcId != null) void xDataCall({ op: 'cancelPersonCollect', wcId });
+              /** ⭐ 叫停流程:它在标签页之间停下,并通知正在翻页的那次停(x-flows.ts onStop → cancelPersonCollect) */
+              void stopFlow('x.person.collectRange', workspaceId);
             }}
             onUnfollow={(person) => void unfollow(person)}
             unfollowing={unfollowing === cardId}
@@ -806,6 +684,13 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             onClick={() => { const m = menu; setMenu(null); setRangeFor(m.p); }}
           >
             采他的帖子/回复/转发…
+          </button>
+          <button
+            type="button" style={S.menuItem}
+            onClick={() => { const m = menu; setMenu(null); void markIntent(m.p, m.p.mutual_intent !== true); }}
+            title="你的判断优先:标过之后,扫描不会再改他"
+          >
+            {menu.p.mutual_intent === true ? '标为无互关倾向' : '标为有互关倾向'}
           </button>
           {menu.p.i_follow === true && (
             <button
@@ -888,20 +773,20 @@ function PersonCard(
 
   useEffect(() => {
     setP(undefined);
-    void xDataCall({ op: 'personDetail', restId }).then((r) => {
+    void xDataCall({ op: 'personDetail', wsId, restId }).then((r) => {
       if (r.status === 'ok') { setP(r.value as PersonDetail | null); setErr(null); }
       else setErr(r.reason);
     });
-  }, [restId, rev]);
+  }, [restId, rev, wsId]);
 
   /** ⭐ 他的朋友圈 —— 从推文现算,前 30 人 */
   const [circle, setCircle] = useState<{ tweets: number; people: number; rows: CirclePerson[] } | null>(null);
   useEffect(() => {
     setCircle(null);
-    void xDataCall({ op: 'friendCircle', restId, limit: 30 }).then((r) => {
+    void xDataCall({ op: 'friendCircle', wsId, restId, limit: 30 }).then((r) => {
       if (r.status === 'ok') setCircle(r.value as { tweets: number; people: number; rows: CirclePerson[] });
     });
-  }, [restId, rev]);
+  }, [restId, rev, wsId]);
 
   /** ⭐ 他的推文 —— 按数字 id 查,最新 20 条 */
   const [tw, setTw] = useState<{ total: number; rows: PersonTweet[] } | null>(null);
@@ -993,6 +878,12 @@ function PersonCard(
           {/* ⭐ 放在「他的推文」上面 —— 下面是 20 条推文,放后面要翻很远才看得到(用户 10-15 找不到) */}
           <BgJobsSection restId={restId} wsId={wsId} msg={bgMsg} rev={bgRev} />
 
+          {/* ⭐ 2026-10-19 用户:「在人卡中增加自动采集follower/following/verified followers」—— 后台采全 + 名单里的求关候选 */}
+          <Section title="他的名单" note="关注者 / 他关注的 / 蓝V关注者">
+            <XPersonLists wsId={wsId} restId={restId} handle={p.handle} wcOpen={wcId != null}
+              onOpenInX={(x) => onOpenInX({ rest_id: x.rest_id, handle: x.handle } as PersonRow)} />
+          </Section>
+
           <Section
             title="他的推文"
             note={tw === null ? '读取中…' : tw.total === 0 ? '还没采集' : `库里 ${tw.total} 条,显示最新 ${tw.rows.length} 条`}
@@ -1056,8 +947,9 @@ function PersonCard(
             ))}
           </Section>
 
-          <Section title="我们的互动" note="还没采集">
-            <div style={S.muted}>回复往来在第 3 块采(先采「我回复过他」)。</div>
+          {/* ⭐ 第 4 阶段(2026-10-19):用户选「人卡里一个『互动』栏」—— 求关 / 回关 / 回复往来一条线 */}
+          <Section title="我们的互动" note="从早到晚">
+            <XPersonTimeline wsId={wsId} restId={restId} rev={rev} />
           </Section>
 
           <button
@@ -1219,7 +1111,7 @@ function BgJobsSection({ restId, wsId, msg, rev }: { restId: string; wsId: strin
     setTick((n) => n + 1);
   };
 
-  const rangeLabel = (id: string): string => TIMELINE_RANGES.find((x) => x.id === id)?.label ?? id;
+  const rangeLabel = (j: BgJob): string => (j.kind === 'lists' ? '他的名单(采全)' : TIMELINE_RANGES.find((x) => x.id === j.range)?.label ?? j.range);
   return (
     <Section title="后台采集" note={jobs === null ? '读取中…' : jobs.length === 0 ? '没有后台任务(右键「采他的帖子/回复/转发…」选半年/一年/全部)' : `${jobs.length} 个任务`}>
       {msg && <div style={S.muted}>{msg}</div>}
@@ -1227,7 +1119,7 @@ function BgJobsSection({ restId, wsId, msg, rev }: { restId: string; wsId: strin
       {jobs?.map((j) => (
         <div key={j.id} style={S.tweetRow}>
           <div style={S.line}>
-            <strong>{rangeLabel(j.range)}</strong>
+            <strong>{rangeLabel(j)}</strong>
             <span style={S.muted}>{j.lastSegmentAt ? `上一段 ${new Date(j.lastSegmentAt).toLocaleString()}` : '还没跑过一段'}</span>
           </div>
           <div style={S.tweetText}>{describeProgress(j)}</div>
@@ -1371,6 +1263,10 @@ const S: Record<string, CSSProperties> = {
     color: 'var(--accent-text, #8ab4f8)', background: 'var(--accent-bg, rgba(138,180,248,0.15))',
   },
   /** ⭐ 配方来源 —— 系统记录的事实,与你手打的标签样子分开(虚线框、不填色) */
+  intentTag: {
+    fontSize: 11, padding: '0 6px', borderRadius: 8,
+    background: 'rgba(80, 200, 120, 0.15)', color: '#5fc98a', border: '1px solid rgba(80, 200, 120, 0.4)',
+  },
   recipeTag: {
     display: 'inline-flex', alignItems: 'center', fontSize: 11, borderRadius: 10, padding: '0 8px',
     color: 'var(--text-secondary, #aaa)', border: '1px dashed var(--border-color, #555)',

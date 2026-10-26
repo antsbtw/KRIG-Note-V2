@@ -5,7 +5,7 @@
  */
 
 import { getXDB } from '@storage/surreal/client';
-import { mergeSettings, unfollowGate, validateSetting, type OpsSettings, type UnfollowGate } from './x-ops-settings';
+import { followGate, mergeSettings, unfollowGate, validateSetting, type OpsSettings, type UnfollowGate } from './x-ops-settings';
 
 export async function readSettings(): Promise<{ settings: OpsSettings; problems: string[] }> {
   const [rows] = await getXDB().query<[Array<{ key: string; setting_value: unknown }>]>(
@@ -25,7 +25,7 @@ export async function writeSetting(key: string, value: unknown): Promise<void> {
 }
 
 export type ActionEntry = {
-  readonly action: 'unfollow';
+  readonly action: 'unfollow' | 'follow' | 'like' | 'reply';
   readonly targetRestId: string;
   readonly targetHandle: string;
   readonly decidedBy: 'human' | 'ai';
@@ -56,4 +56,16 @@ export async function readUnfollowGate(dayStartIso: string): Promise<UnfollowGat
     SELECT <string> time::max(at) AS last FROM x_action_log
       WHERE action = 'unfollow' AND result = 'ok' GROUP ALL;`, { since: dayStartIso });
   return unfollowGate(settings, today?.n ?? 0, last?.last, new Date());
+}
+
+/** ⭐ 现在能不能关注 —— 今天成功几次 + 最近 burst_size 次成功关注的时间(判「连续满 N 个歇一会」) */
+export async function readFollowGate(dayStartIso: string): Promise<UnfollowGate & { settings: OpsSettings }> {
+  const { settings } = await readSettings();
+  /** ⚠️ 排序字段放进选择列(t),字符串另取一列(s)—— 不赌 `SELECT VALUE … ORDER BY` 的语法 */
+  const [[today], recent] = await getXDB().query<[Array<{ n: number }>, Array<{ s: string }>]>(`
+    SELECT count() AS n FROM x_action_log
+      WHERE action = 'follow' AND result = 'ok' AND at >= type::datetime($since) GROUP ALL;
+    SELECT <string> at AS s, at AS t FROM x_action_log
+      WHERE action = 'follow' AND result = 'ok' ORDER BY t DESC LIMIT $n;`, { since: dayStartIso, n: settings['follow.burst_size'] });
+  return { ...followGate(settings, today?.n ?? 0, (recent ?? []).map((r) => r.s), new Date()), settings };
 }

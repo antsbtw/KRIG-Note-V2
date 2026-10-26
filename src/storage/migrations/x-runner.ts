@@ -9,7 +9,7 @@
  */
 import type { Surreal } from 'surrealdb';
 import { compareVersions } from './runner';
-import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11, x_migration_1_2_12, x_migration_1_2_13, x_migration_1_2_14, x_migration_1_2_15, x_migration_1_2_16, x_migration_1_2_17, x_migration_1_2_18, x_migration_1_2_19, x_migration_1_2_20, x_migration_1_2_21, x_migration_1_2_22, x_migration_1_2_23, x_migration_1_2_24, x_migration_1_2_25, x_migration_1_2_26 } from '../surreal/x-schema';
+import { x_migration_1_0_0, x_migration_1_0_1, x_migration_1_0_2, x_migration_1_0_3, x_migration_1_0_4, x_migration_1_0_5, x_migration_1_0_6, x_migration_1_0_7, x_migration_1_0_8, x_migration_1_0_9, x_migration_1_1_0, x_migration_1_1_1, x_migration_1_1_2, x_migration_1_1_3, x_migration_1_1_4, x_migration_1_1_5, x_migration_1_1_6, x_migration_1_1_7, x_migration_1_1_8, x_migration_1_1_9, x_migration_1_2_0, x_migration_1_2_1, x_migration_1_2_2, x_migration_1_2_3, x_migration_1_2_4, x_migration_1_2_5, x_migration_1_2_6, x_migration_1_2_7, x_migration_1_2_8, x_migration_1_2_9, x_migration_1_2_10, x_migration_1_2_11, x_migration_1_2_12, x_migration_1_2_13, x_migration_1_2_14, x_migration_1_2_15, x_migration_1_2_16, x_migration_1_2_17, x_migration_1_2_18, x_migration_1_2_19, x_migration_1_2_20, x_migration_1_2_21, x_migration_1_2_22, x_migration_1_2_23, x_migration_1_2_24, x_migration_1_2_25, x_migration_1_2_26, x_migration_1_2_27, x_migration_1_2_28, x_migration_1_2_29, x_migration_1_2_30, x_migration_1_2_31, x_migration_1_2_32, x_migration_1_2_33, x_migration_1_2_34, x_migration_1_2_35, x_migration_1_2_36, x_migration_1_2_37, x_migration_1_2_38, x_migration_1_2_39, x_migration_1_2_40, x_migration_1_2_41 } from '../surreal/x-schema';
 
 interface XMigration {
   version: string;
@@ -252,6 +252,81 @@ const X_MIGRATIONS: XMigration[] = [
     version: '1.2.26',
     description: '后台采集任务 x_bg_job(朋友圈半年/一年/全部,断点存库跨重启)',
     up: x_migration_1_2_26,
+  },
+  {
+    version: '1.2.27',
+    description: '关系按号存 x_relation(号 × 人);x_ws_account 按 ws 定位',
+    up: x_migration_1_2_27,
+  },
+  {
+    version: '1.2.28',
+    description: '关系变化记录 x_relation_change(只在变了时追加)',
+    up: x_migration_1_2_28,
+  },
+  {
+    version: '1.2.29',
+    description: '配方加 blue_only(只看蓝V)/ include_replies(补存老勾选框)',
+    up: x_migration_1_2_29,
+  },
+  {
+    version: '1.2.30',
+    description: '人的互关倾向(人 > AI > 算法,存依据原句)',
+    up: x_migration_1_2_30,
+  },
+  {
+    version: '1.2.31',
+    description: '动作记录放开「关注」',
+    up: x_migration_1_2_31,
+  },
+  {
+    version: '1.2.32',
+    description: '求关:动作记录放开点赞 / 留言,建 x_ask',
+    up: x_migration_1_2_32,
+  },
+  {
+    version: '1.2.33',
+    description: '查回关运行记录 x_follow_check',
+    up: x_migration_1_2_33,
+  },
+  {
+    version: '1.2.34',
+    description: '后台任务加名单种类 + x_list_member',
+    up: x_migration_1_2_34,
+  },
+  {
+    version: '1.2.35',
+    description: '关系采集任务 + 节奏自调',
+    up: x_migration_1_2_35,
+  },
+  {
+    version: '1.2.36',
+    description: '采互动连续覆盖边界 x_engage_cursor',
+    up: x_migration_1_2_36,
+  },
+  {
+    version: '1.2.37',
+    description: '互动记录 x_engage',
+    up: x_migration_1_2_37,
+  },
+  {
+    version: '1.2.38',
+    description: '你对 AI 草稿的点评 x_draft_note',
+    up: x_migration_1_2_38,
+  },
+  {
+    version: '1.2.39',
+    description: '先放一放 x_defer',
+    up: x_migration_1_2_39,
+  },
+  {
+    version: '1.2.40',
+    description: '任务「VPN求助」x_vpn_post / x_vpn_reply',
+    up: x_migration_1_2_40,
+  },
+  {
+    version: '1.2.41',
+    description: '卡片队列 x_card_queue',
+    up: x_migration_1_2_41,
   },
 ];
 
