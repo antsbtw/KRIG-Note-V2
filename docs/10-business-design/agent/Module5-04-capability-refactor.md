@@ -271,3 +271,13 @@ DDL 在临时内存库实测(加字段 + 真写一行读回)。
 - 还在执行器外的定时器:后台采集(`x-bg-runner` 每段)、关注队列(`x-follow-queue` 每 2 秒)—— 它们自己占锁、只执行人排进来的事;
   要不要每段 / 每次关注也进执行记录,留到第 4 步和流程一起定。
 - 真机没验到、待自然触发的三条:巡检走执行器(caller timer)、界面「带锁进来」(人卡采推文 / 操作台采集)、界面求关发送。
+
+### 第 4 步 4a 业务界面不再直接驱动网页 —— 2026-10-26 ✅ Windows 测试机真机过
+
+- `x-person-act.ts`(主进程):`verifyPersonOn` / `unfollowOn`,从 renderer 的 `x-unfollow-run.ts` 搬过来;renderer 那个文件只剩薄壳(verifyPerson / unfollowPerson / openInLeft / 占网页)。
+- 能力:`x.page.open`(control)/ `x.person.verify`(input)/ `x.person.unfollow`(output)/ `x.unfollow.halt` / `x.unfollow.resume`。
+- 修两个旧问题:① 任务页取关后的核对没占网页 → 同一把锁里做完;② 「异常即停」人卡和任务页各管各的 → 主进程按 workspace 一份。
+- 判据之一「界面组件里没有 webDomInvoke 直调」:X 界面文件里只剩**操作台**(XConsole,13 处)——
+  操作台是测试后台、将来隐藏(记忆 feedback-x-console-is-dev-backend),不在第 4 步范围(我的判断,用户可推翻)。
+- 真机:左边打开推文 / 主页、核对 ok;有人占着 → 核对 refused;核对中别人被拒(锁上「核对 @…」);收件箱调取关 refused(对外动作);
+  暂停 / 恢复能查能调;界面认号碰上网页没开 → refused(32596977 的修复真机确认)。⚠️ 界面取关 / 核对真机没点到,待日常使用。
