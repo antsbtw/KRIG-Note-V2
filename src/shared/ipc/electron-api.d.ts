@@ -850,7 +850,7 @@ declare global {
         imageDataUrl?: string,
       ): Promise<{ success: boolean; error?: string }>;
       /** 从 SSE 缓存取最新一次 AI 完整回复 markdown(提取按钮用) */
-      aiGetLatestResponse(): Promise<string | null>;
+      aiGetLatestResponse(targetWcId?: number): Promise<string | null>;
       /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)*/
       aiExtractFull(serviceId: AIServiceId, targetWcId?: number): Promise<{
         success: boolean;
@@ -887,7 +887,7 @@ declare global {
       /** 取三服务清单(UI 下拉菜单用) */
       aiServiceList(): Promise<Array<{ id: AIServiceId; name: string; icon: string }>>;
       /** debug:SSE 拦截状态 */
-      aiSSEStatus(): Promise<AISSEStatus>;
+      aiSSEStatus(targetWcId?: number): Promise<AISSEStatus>;
       /** main → renderer 推送:Claude 流式增量(本期仅 Claude);返 unsubscribe */
       onAIResponseStream(callback: (chunk: AIStreamChunk) => void): () => void;
       /** main → renderer 推送:AI 完整回复就绪;返 unsubscribe */

@@ -67,6 +67,7 @@ import { cleanOversizedPartitionCaches } from './web-settings/partition-cache-cl
 import { authService } from './auth/auth-service';
 import { initStorage, shutdownStorageSync } from '@storage/index';
 import { registerFlowCapabilities } from './capability/flow-capabilities';
+import { registerAICapabilities } from './ai/ai-capabilities';
 import { startFlowRetention, stopFlowRetention } from './flow/flow-retention';
 import { clearLegacyGraphStorage } from './graph/migration';
 import { runMigration021IfNeeded } from '@storage/migrations/021-clear-all';
@@ -189,6 +190,8 @@ app.whenReady().then(async () => {
   // 业务 store 尚未接入;本步仅启动 SurrealDB + 跑 schema migration。
   /** ⭐ 平台自带的能力(查执行记录)—— 只是登记,不碰库;各模块的能力由模块自己登记 */
   registerFlowCapabilities();
+  /** Module5-04 第 6 步:AI 网页一问一答(ai.web.ask / ai.web.pages) */
+  registerAICapabilities();
   const storageStartedAt = Date.now();
   try {
     await initStorage();

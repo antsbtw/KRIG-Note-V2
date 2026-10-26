@@ -14,6 +14,12 @@ import { askAI, getSSEStatus, pasteAndSend, getLatestCapturedResponse, extractFu
 import { resolveAIWebContents } from './webview-registry';
 import { registerAISyncHandlers } from './ai-sync-orchestrator';
 
+/** 本 ws 的 AI Host guest wc id(renderer 透传);没给 = undefined,下面 fail loud / 返回空 */
+const wcIdOf = (payload: unknown): number | undefined => {
+  const id = (payload as { targetWcId?: unknown } | null)?.targetWcId;
+  return typeof id === 'number' ? id : undefined;
+};
+
 function isServiceId(v: unknown): v is AIServiceId {
   return v === 'chatgpt' || v === 'claude' || v === 'gemini';
 }
@@ -66,8 +72,8 @@ export function registerAIHandlers(): void {
     return AI_SERVICE_PROFILES.map((p) => ({ id: p.id, name: p.name, icon: p.icon }));
   });
 
-  // #4 ai.sse-status — debug
-  ipcMain.handle(IPC_CHANNELS.AI_SSE_STATUS, async () => getSSEStatus());
+  // #4 ai.sse-status — debug(第 6 步修:原来不传 wcId,下面没有 wcId 恒返回空状态)
+  ipcMain.handle(IPC_CHANNELS.AI_SSE_STATUS, async (_e, payload: unknown) => getSSEStatus(wcIdOf(payload)));
 
   // #5 ai.paste-and-send — 问 AI 路径:paste + send 不等回复(用户在 AI Web 实时看)
   ipcMain.handle(IPC_CHANNELS.AI_PASTE_AND_SEND, async (_e, payload: unknown) => {
@@ -87,10 +93,8 @@ export function registerAIHandlers(): void {
     return result;
   });
 
-  // #6 ai.get-latest-response — 提取按钮用:从 SSE 缓存取最新回复 markdown
-  ipcMain.handle(IPC_CHANNELS.AI_GET_LATEST_RESPONSE, async () => {
-    return getLatestCapturedResponse();
-  });
+  // #6 ai.get-latest-response — 提取按钮用:从 SSE 缓存取最新回复 markdown(第 6 步修:原来不传 wcId,恒 null)
+  ipcMain.handle(IPC_CHANNELS.AI_GET_LATEST_RESPONSE, async (_e, payload: unknown) => getLatestCapturedResponse(wcIdOf(payload)));
 
   // #7 ai.extract-full — Phase 10.B:整页对话提取(多 turn + artifact + 图片)
   ipcMain.handle(IPC_CHANNELS.AI_EXTRACT_FULL, async (_e, payload: unknown) => {

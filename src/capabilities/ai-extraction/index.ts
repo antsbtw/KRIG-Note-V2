@@ -82,12 +82,12 @@ async function getServiceList(): Promise<AIServiceListItem[]> {
   return window.electronAPI.aiServiceList();
 }
 
-async function getSSEStatus(): Promise<AISSEStatus> {
-  return window.electronAPI.aiSSEStatus();
+async function getSSEStatus(targetWcId?: number | null): Promise<AISSEStatus> {
+  return window.electronAPI.aiSSEStatus(targetWcId ?? undefined);
 }
 
-async function getLatestResponse(): Promise<string | null> {
-  return window.electronAPI.aiGetLatestResponse();
+async function getLatestResponse(targetWcId?: number | null): Promise<string | null> {
+  return window.electronAPI.aiGetLatestResponse(targetWcId ?? undefined);
 }
 
 async function extractFull(serviceId: AIServiceId, targetWcId?: number | null) {

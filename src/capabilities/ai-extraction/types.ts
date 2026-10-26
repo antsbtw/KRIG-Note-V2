@@ -122,9 +122,9 @@ export interface AIConversationApi {
   /** 取三服务清单 */
   getServiceList(): Promise<AIServiceListItem[]>;
   /** debug:SSE 拦截状态 */
-  getSSEStatus(): Promise<AISSEStatus>;
+  getSSEStatus(targetWcId?: number | null): Promise<AISSEStatus>;
   /** 取 SSE 缓存最新一次 AI 完整回复 markdown(供"提取整页对话"用) */
-  getLatestResponse(): Promise<string | null>;
+  getLatestResponse(targetWcId?: number | null): Promise<string | null>;
   /** Phase 10.B:整页对话提取(多 turn + artifact + 图片)— 提取按钮主路径 */
   extractFull(serviceId: AIServiceId, targetWcId?: number | null): Promise<AIExtractFullResult>;
   /** 右键单条提取:按 guest viewport 坐标定位 + 抽该条对话(本期仅 Claude)*/

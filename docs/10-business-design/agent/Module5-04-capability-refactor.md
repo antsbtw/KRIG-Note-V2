@@ -332,3 +332,15 @@ DDL 在临时内存库实测(加字段 + 真写一行读回)。
   - 日志无「账本没记上」、无 429。
 - 顺手修:X 面板在 Windows 浅色主题下白底淡灰字看不清(用户截图)—— X 模块用的 6 个颜色变量名 theme.css 里没定义,
   落到给深色配的兜底色;只在浅色段补上(Mac 深色不变),守卫 `x-theme-vars.test.ts` 从源码扫变量名。
+
+### 第 6 步 AI 网页一问一答 —— 2026-10-26(代码 + 单测完成,待 Windows 真机)
+
+- `platform/main/ai/ai-capabilities.ts`:
+  - `ai.web.ask`(control,我的判断:会在自己的 AI 对话里多一条,不发公开平台 → AI / 收件箱都能调)。
+    主进程自己按 ws 找 AI 网页:同 ws 共用分区 `persist:webview-<ws>`,按「分区 + 网址是这个服务」认;
+    没开 / 一个 ws 开着两个同服务的页 → refused 不猜(可给 wcId 指定);问的那一下占锁 `ai:<wcId>`;
+    超时默认 2 分钟(10 秒–10 分钟);没拿到回答 → failed 带原因。
+  - `ai.web.pages`(input):开着哪些 AI 网页(服务 / wcId / 网址)。
+- 顺手修:`ai.sse-status` / `ai.get-latest-response` 原来不传 wcId(下面一见没有就返回空 → 恒空)→ 透传 targetWcId(preload / 类型 / renderer API 一起改)。
+- 守卫注入违规变红:不按 ws 筛 / 接口不传 wcId。
+- 没动:界面「问 AI」(pasteAndSend)不占 `ai:<wcId>` 锁 —— 人在界面问的同时后台也问同一个页会撞;要不要收紧等真遇到再定(先全开放)。

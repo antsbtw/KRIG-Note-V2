@@ -878,8 +878,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiPasteAndSend(serviceId: string, prompt: string, targetWcId?: number, imageDataUrl?: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_PASTE_AND_SEND, { serviceId, prompt, targetWcId, imageDataUrl });
   },
-  aiGetLatestResponse(): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE);
+  aiGetLatestResponse(targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_GET_LATEST_RESPONSE, { targetWcId });
   },
   aiExtractFull(serviceId: string, targetWcId?: number): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_EXTRACT_FULL, { serviceId, targetWcId });
@@ -901,8 +901,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   aiServiceList(): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.AI_SERVICE_LIST);
   },
-  aiSSEStatus(): Promise<unknown> {
-    return ipcRenderer.invoke(IPC_CHANNELS.AI_SSE_STATUS);
+  aiSSEStatus(targetWcId?: number): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.AI_SSE_STATUS, { targetWcId });
   },
   onAIResponseStream(callback: (chunk: unknown) => void): () => void {
     const handler = (_event: unknown, chunk: unknown): void => callback(chunk);
