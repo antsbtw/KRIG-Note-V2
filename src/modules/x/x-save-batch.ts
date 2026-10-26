@@ -9,14 +9,20 @@ import { listAllRecipes } from '@platform/main/db/search-recipe-repo';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 import { recipeNameForQuery } from './x-recipe-query';
 import { saveTweets } from './x-tweet-repo';
-import { saveTweetAuthors, saveUsers } from './x-user-repo';
+import { refreshPerson, saveTweetAuthors, saveUsers } from './x-user-repo';
+import type { XUserRecord } from './x-user-audit';
+import type { AccountDecision } from './x-account';
 import { appendCollectLog, type CollectLogEntry } from './x-collect-log-repo';
 import { accountForWrite } from './x-account-repo';
 import { statsLine, summarizeBatch } from './x-batch-stats';
 
 export type TweetBatch = Parameters<typeof saveTweets>[0];
 /** wcId = 采集用的那个 X 网页 —— 作者的关系是它登录的号看到的(主进程据此认号);不给就不写关系 */
-export type TweetCtx = Parameters<typeof saveTweets>[1] & { readonly wcId?: number };
+export type TweetCtx = Parameters<typeof saveTweets>[1] & {
+  readonly wcId?: number;
+  /** 作者的配方来源;不给就按 searchRecipe 对配方表 */
+  readonly recipeName?: string;
+};
 export type UserBatch = Parameters<typeof saveUsers>[0];
 export type UserCtx = Parameters<typeof saveUsers>[1] & { readonly wcId?: number };
 
@@ -63,8 +69,7 @@ export async function saveTweetBatch(records: TweetBatch, ctx: TweetCtx): Promis
   });
   /** 顺手把推文作者写进人表(按采集网页认号);失败不让推文落库报失败,但响 + 留痕 */
   try {
-    const recipes = ctx?.searchRecipe ? await listAllRecipes() : [];
-    const recipeName = recipeNameForQuery(ctx?.searchRecipe, recipes);
+    const recipeName = ctx?.recipeName ?? recipeNameForQuery(ctx?.searchRecipe, ctx?.searchRecipe ? await listAllRecipes() : []);
     const account = await accountForWrite(ctx?.wcId);
     const a = await saveTweetAuthors(records, recipeName, account);
     traceRecorder.lifecycle({
@@ -91,9 +96,12 @@ export async function saveTweetBatch(records: TweetBatch, ctx: TweetCtx): Promis
   return { ...r, stats, statsLine: statsLine(stats) };
 }
 
-/** 采到的人落库(名单页)—— listSource 必填(调用方校验):它会进 list_memberships */
-export async function saveUserBatch(records: UserBatch, ctx: UserCtx): Promise<Awaited<ReturnType<typeof saveUsers>>> {
-  const r = await saveUsers(records, ctx, await accountForWrite(ctx.wcId));
+/**
+ * 采到的人落库(名单页)—— listSource 必填(调用方校验):它会进 list_memberships。
+ * account:调用方已经认过号(查回关 / 名单采集)就直接给,不给按 ctx.wcId 认
+ */
+export async function saveUserBatch(records: UserBatch, ctx: UserCtx, account?: AccountDecision): Promise<Awaited<ReturnType<typeof saveUsers>>> {
+  const r = await saveUsers(records, ctx, account ?? await accountForWrite(ctx.wcId));
   traceRecorder.lifecycle({
     layer: 'web.net',
     event: r.failed.length > 0 || r.inserted + r.updated === 0 ? 'x-save-users-incomplete' : 'x-save-users-ok',
@@ -111,4 +119,21 @@ export async function saveUserBatch(records: UserBatch, ctx: UserCtx): Promise<A
     inserted: r.inserted, updated: r.updated, failed: r.failed.length, wsId: ctx.wsId,
   });
   return r;
+}
+
+/**
+ * ⭐ 用刚从他主页读到的资料更新人表 + 「我和他」的关系 —— 一份(第 5 步,2026-10-26)
+ * 点人核对 / x.person.refresh / 关系采集都调这里;原来关系采集那份不留痕、新人不记账。
+ */
+export async function savePersonRefresh(rec: XUserRecord, account: AccountDecision): ReturnType<typeof refreshPerson> {
+  const d = await refreshPerson(rec, account);
+  traceRecorder.lifecycle({
+    layer: 'web.net', event: 'x-person-refresh', pageId: 'x-data',
+    detail: {
+      restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes,
+      relationAccount: d.relation.account ?? '(无)', relationSkipped: d.relation.skippedReason ?? '(none)',
+    },
+  });
+  if (d.isNew) await logCollect({ kind: 'users', source: 'profile-refresh', given: 1, inserted: 1, updated: 0, failed: 0 });
+  return d;
 }

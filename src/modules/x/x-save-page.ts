@@ -4,12 +4,11 @@
  * 用户:「A页是多少条,落库多少条,对不上问题在哪里,直接就可以敲定了」
  * 存推文 → 作者进人表(按采集网页认号写关系)→ 记账本(状态页对账靠它)→ 按 id 回读库里查得到哪些。
  * ⚠️ 回读不信存库返回的计数(`project-x-readback-lies` 那一族)。
+ * ⭐ 第 5 步(2026-10-26):存 / 作者 / 记账走 x-save-batch 那一份 —— 原来这里直接写账本,账本记不上整页报失败(推文其实已进库)。
  */
 import type { TweetRecord } from './x-timeline-audit';
-import { saveTweets, existingTweetIds } from './x-tweet-repo';
-import { saveTweetAuthors } from './x-user-repo';
-import { accountForWrite } from './x-account-repo';
-import { appendCollectLog } from './x-collect-log-repo';
+import { existingTweetIds } from './x-tweet-repo';
+import { saveTweetBatch } from './x-save-batch';
 
 export async function saveTweetPage(p: {
   readonly tweets: readonly TweetRecord[];
@@ -23,11 +22,6 @@ export async function saveTweetPage(p: {
   readonly wcId?: number;
 }): Promise<{ readonly inDb: readonly string[]; readonly inserted: number; readonly updated: number }> {
   const recs = p.tweets.filter((t) => t.id !== '');
-  const sv = await saveTweets(recs, { source: p.source, searchRecipe: p.searchRecipe, wsId: p.wsId });
-  const au = await saveTweetAuthors(recs, p.recipeName, await accountForWrite(p.wcId));
-  await appendCollectLog({ kind: 'tweets', source: p.source, given: recs.length,
-    inserted: sv.inserted, updated: sv.updated, failed: sv.failed.length, wsId: p.wsId });
-  await appendCollectLog({ kind: 'users', source: 'tweet-authors', given: au.inserted + au.updated + au.failed.length,
-    inserted: au.inserted, updated: au.updated, failed: au.failed.length, wsId: p.wsId });
+  const sv = await saveTweetBatch(recs, { source: p.source, searchRecipe: p.searchRecipe, recipeName: p.recipeName, wsId: p.wsId, wcId: p.wcId });
   return { inDb: await existingTweetIds(recs.map((t) => t.id)), inserted: sv.inserted, updated: sv.updated };
 }

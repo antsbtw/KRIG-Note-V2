@@ -14,9 +14,7 @@ import { webviewPorts } from './x-collect-ports';
 import { X_SCRIPTS } from './x-dom-scripts';
 import { getXHostState, listXHostStates } from './x-host-registry';
 import { acquirePage, releasePage } from './x-page-lock';
-import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
-import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
-import { auditUserPayload } from './x-user-audit';
+import { readProfileOn } from './x-person-profile';
 
 type Row = { ws_id: string; handle: string; rest_id?: string; detected_at?: string };
 
@@ -101,15 +99,11 @@ export async function identifyAccount(wsId: string): Promise<IdentifyResult> {
   const lock = acquirePage(wcId, IDENTIFY_BUSY, 'ui');
   if (!lock.ok) return { status: 'pending', handle: seen.handle, reason: `${lock.why},等它空了再认(要开一次 @${seen.handle} 的主页)` };
   try {
-    const h = await webviewPorts(wcId).harvest({
-      gotoPage: { name: X_PAGE_NAME.profile, params: { handle: seen.handle } },
-      pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
-      noisyUrlSubstrings: X_NOISY_URLS,
-    });
-    if (!h) return { status: 'failed', reason: `开 @${seen.handle} 的主页没采到东西` };
-    const users = h.items.filter((it) => it.url.includes(PROFILE_ENDPOINT)).flatMap((it) => auditUserPayload(it.text).items);
-    const me = pickProfileUser(users, seen.handle);
-    if (!me?.restId) return { status: 'failed', reason: `@${seen.handle} 的主页资料里找不到数字 id(主页资料请求${users.length === 0 ? '没来' : '来了但对不上'})` };
+    /** 读主页资料一份(x-person-profile);认号只要数字 id,不落库 */
+    const read = await readProfileOn(wcId, { handle: seen.handle });
+    if (!read.ok) return { status: 'failed', reason: `开 @${seen.handle} 的主页没认出数字 id(${read.why})` };
+    const me = read.rec;
+    if (!me.restId) return { status: 'failed', reason: `@${seen.handle} 的主页资料里没有数字 id` };
     await writeWsAccount(wsId, seen.handle, me.restId);
     return { status: 'ok', account: { wsId, handle: seen.handle, restId: me.restId } };
   } finally {

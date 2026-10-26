@@ -19,7 +19,8 @@ import { pageProblem } from './x-page-ledger';
 import { X_PAGE_NAME } from './x-pages';
 import { accountForWrite } from './x-account-repo';
 import { readSettings } from './x-ops-actions-repo';
-import { existingUserIds, saveUsers } from './x-user-repo';
+import { existingUserIds } from './x-user-repo';
+import { saveUserBatch } from './x-save-batch';
 import { scanFollowersUntilCaughtUp } from './x-follow-scan';
 import { insertFollowCheck, readAskStatuses, readKnownFollowers } from './x-follow-check-repo';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
@@ -72,7 +73,8 @@ export async function checkFollowBackOn(wsId: string, wcId: number, trigger: 'au
       harvest: ports.harvest,
       runScript: ports.runScript,
       save: async (users) => {
-        const r = await saveUsers(users, { listSource: 'followers', wsId }, account);
+        /** 存人一份(x-save-batch:留痕 + 记账;原来这里不记账) */
+        const r = await saveUserBatch(users, { listSource: 'followers', wsId }, account);
         if (r.failed.length > 0 && saveError === undefined) saveError = `存人失败 ${r.failed.length} 个:${r.failed[0].why}`;
         return { inDb: await existingUserIds(users.map((u) => u.restId)) };
       },

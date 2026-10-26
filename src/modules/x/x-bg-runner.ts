@@ -28,7 +28,7 @@ import { isRateLimited, type PaceKey } from './x-pace';
 import { collectPersonListSegment } from './x-person-list-collect';
 import { runSegment, type SegmentDeps, type RunOneResult } from './x-bg-segment';
 import { collectPersonTab, personCollectProgress } from './x-person-collect';
-import { saveTweets } from './x-tweet-repo';
+import { saveTweetBatch } from './x-save-batch';
 import { rangeStart, worthReloadRetry } from './x-person-timeline';
 import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 
@@ -161,7 +161,8 @@ export function makeSegmentDeps(wcId: number, job: BgJob, now: Date): SegmentDep
              * ⚠️ 每页已经先存过(逐页账,2026-10-16),这里整批再存一次(幂等,补齐长文正文等)——
              * 「新增」要算每页累计的,否则这里恒为 0。
              */
-            const sv = await saveTweets([...r.records], { source: input.page });
+            /** 存推一份(x-save-batch:作者 / 留痕 / 记账;原来整批补存不记账,补出来的新增对不上账) */
+            const sv = await saveTweetBatch([...r.records], { source: input.page });
             saved += r.pageInserted + sv.inserted;
           } catch (e) {
             // 采到了却存不进 = 这一段失败,断点不动(下次重采这一段,推文幂等)

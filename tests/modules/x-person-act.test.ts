@@ -54,7 +54,11 @@ vi.mock('@modules/x/x-ops-actions-repo', async () => ({
   readUnfollowGate: async () => h.gate,
   appendAction: async (e: unknown) => { h.calls.push(['appendAction', [e]]); },
 }));
-vi.mock('@modules/x/x-save-batch', () => ({ logCollect: async () => undefined, saveTweetBatch: async () => ({}), saveUserBatch: async () => ({}) }));
+/** 第 5 步起刷新落库一份(savePersonRefresh)—— 转给上面的假 refreshPerson,照样看得到「写库那一刻锁上写着什么」 */
+vi.mock('@modules/x/x-save-batch', () => ({
+  logCollect: async () => undefined, saveTweetBatch: async () => ({}), saveUserBatch: async () => ({}),
+  savePersonRefresh: async (rec: unknown, acc: unknown) => (await import('@modules/x/x-user-repo')).refreshPerson(rec as never, acc as never),
+}));
 
 const { execute } = await import('@platform/main/capability/capability');
 const { registerXCapabilities } = await import('@modules/x/x-capabilities');

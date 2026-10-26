@@ -9,16 +9,13 @@
  * ⚠️ 读主页要占一下 X 网页:忙 / 后台在采 / 正在查回关 → 让路,说清楚。
  */
 import { getXDB } from '@storage/surreal/client';
-import { webviewPorts } from './x-collect-ports';
-import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
 
 import { kickBgRunner } from './x-bg-runner';
 import { followCheckRunning } from './x-follow-check';
 import { accountForWrite } from './x-account-repo';
 import { PEOPLE_WITH_RELATION } from './x-account';
-import { auditUserPayload } from './x-user-audit';
-import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
-import { refreshPerson } from './x-user-repo';
+import { readProfileOn } from './x-person-profile';
+import { savePersonRefresh } from './x-save-batch';
 import { createJob, listJobs, readJob } from './x-bg-job-repo';
 import { kindOf, type BgJob, type BgListTab } from './x-bg-job';
 import { planRelation, type RelPlan } from './x-relation-plan';
@@ -71,18 +68,14 @@ export async function startRelationTaskOn(wsId: string, wcId: number, target?: {
   let followers: number | undefined;
   let following: number | undefined;
   /** ⚠️ 网页由执行器占着(能力 x.relation.start),这里不放锁 */
-  const rep = await webviewPorts(wcId).harvest({
-    gotoPage: { name: X_PAGE_NAME.profile, params: { handle: who.handle } },
-    pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
-    noisyUrlSubstrings: X_NOISY_URLS,
-  });
-  const items = (rep?.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
-  const rec = pickProfileUser(items.flatMap((it) => auditUserPayload(it.text).items), who.handle, who.restId);
-  if (!rec) return { ok: false, why: `没读到 @${who.handle} 的主页资料(${items.length === 0 ? '主页资料那条请求没来' : '载荷里找不到这个人'})` };
+  /** 读主页资料一份(x-person-profile) */
+  const read = await readProfileOn(wcId, who);
+  if (!read.ok) return { ok: false, why: `没读到 @${who.handle} 的主页资料(${read.why})` };
+  const rec = read.rec;
   followers = rec.followersCount;
   following = rec.followingCount;
-  /** 顺手把他的资料和「他和我」的关系更新进库 */
-  await refreshPerson(rec, account);
+  /** 顺手把他的资料和「他和我」的关系更新进库(刷新落库一份:留痕 + 新人记账) */
+  await savePersonRefresh(rec, account);
 
   const plan = planRelation({
     target: who, self, trigger, xCounts: { followers, following },

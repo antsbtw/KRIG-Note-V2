@@ -16,7 +16,8 @@ import { runCollect } from './x-collect-run';
 import { pageProblem } from './x-page-ledger';
 import { accountForWrite } from './x-account-repo';
 import { PEOPLE_WITH_RELATION, type AccountDecision } from './x-account';
-import { existingUserIds, saveUsers, writeRelations } from './x-user-repo';
+import { existingUserIds, writeRelations } from './x-user-repo';
+import { saveUserBatch } from './x-save-batch';
 import { writeListMembers } from './x-list-member-repo';
 import { scanMutualIntent } from './x-people-repo';
 import { makeKnownRunTracker } from './x-follow-back';
@@ -112,7 +113,8 @@ export async function collectPersonListSegment(input: {
       /** ⚠️ 续采时前面那趟滚动(抄请求模板)会把第一页再拿一次 —— 照存,但不算进这一段的人数 / 追上判据 */
       const seedRepeat = input.resumeCursor !== undefined && page === 0;
       try {
-        await saveUsers(users, { listSource: self ? SELF_LIST_SOURCE[input.list] : 'person-list' }, account);
+        /** 存人一份(x-save-batch:留痕 + 记账;原来这里不记账) */
+        await saveUserBatch(users, { listSource: self ? SELF_LIST_SOURCE[input.list] : 'person-list' }, account);
         if (!self) await writeListMembers(input.ownerRestId, input.list, ids, account.restId);
         if (!seedRepeat) {
           saved += ids.length;

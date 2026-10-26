@@ -24,7 +24,7 @@ import { acquirePage, releasePage } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
 import { appendAction, readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
-import { writeRelations } from './x-user-repo';
+import { followOn } from './x-person-act';
 import { followQueueStatus } from './x-follow-queue';
 
 export type AskRunInput = {
@@ -146,18 +146,10 @@ export async function runAsk(p: AskRunInput): Promise<AskRunResult> {
     if (engage) { r.ok = true; return r; }
 
     // ── ③ 关注 ──
-    const goP = await ports.goto(X_PAGE_NAME.profile, { handle: p.handle });
-    if (!goP.ok) { r.followed = 'failed'; stop('follow', `去不到他的主页:${goP.reason}`); return r; }
-    const fo = (await ports.runScript(X_SCRIPTS.follow, { restId: p.restId })) as { state?: string; why?: string } | null;
-    r.followed = fo?.state === 'followed' ? 'ok' : fo?.state === 'already-following' ? 'already' : 'failed';
-    if (r.followed !== 'failed') {
-      await writeRelations(account, [{ person: p.restId, iFollow: true, observedAt: new Date().toISOString() }], 'follow-action');
-    }
-    if (r.followed !== 'already') {
-      await appendAction({ action: 'follow', targetRestId: p.restId, targetHandle: p.handle, decidedBy: 'human',
-        result: r.followed === 'ok' ? 'ok' : 'failed', reason: `求关 · 推文 ${p.tweetId}`, detail: r.followed === 'failed' ? fo?.state : undefined, wsId: p.wsId });
-    }
-    if (r.followed === 'failed') { stop('follow', `关注没成:${fo?.state ?? '无返回'}${fo?.why ? `(${fo.why})` : ''}`); return r; }
+    /** ⭐ 关注一份(x-person-act followOn,和关注队列同一份) */
+    const fo = await followOn(p.wsId, wcId, account, p, `求关 · 推文 ${p.tweetId}`);
+    r.followed = fo.state === 'followed' ? 'ok' : fo.state === 'already-following' ? 'already' : 'failed';
+    if (r.followed === 'failed') { stop('follow', fo.detail ?? '关注没成'); return r; }
     r.ok = true;
     return r;
   } catch (e) {

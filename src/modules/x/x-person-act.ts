@@ -9,17 +9,17 @@
  *  ② 「异常即停」人卡和任务页各管各的(React 状态)→ 按 workspace 记在这里,两边看同一份
  */
 import { webviewPorts } from './x-collect-ports';
-import { X_NOISY_URLS, X_PAGE_NAME } from './x-pages';
+import { X_PAGE_NAME } from './x-pages';
 import { X_SCRIPTS } from './x-dom-scripts';
-import { auditUserPayload, type XUserRecord } from './x-user-audit';
-import { PROFILE_ENDPOINT, pickProfileUser } from './x-person-refresh';
-import { refreshPerson } from './x-user-repo';
+import type { XUserRecord } from './x-user-audit';
+import { readProfileOn } from './x-person-profile';
+import { writeRelations } from './x-user-repo';
 import { accountForWrite } from './x-account-repo';
-import { logCollect } from './x-save-batch';
+import type { AccountDecision } from './x-account';
+import { savePersonRefresh } from './x-save-batch';
 import { appendAction, readUnfollowGate } from './x-ops-actions-repo';
 import { localDayStart, type UnfollowGate } from './x-ops-settings';
 import { UNFOLLOW_STATE_TEXT } from './x-unfollow-text';
-import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
 
 export type Who = { readonly restId: string; readonly handle: string };
 
@@ -29,33 +29,53 @@ export type VerifyOutcome =
 
 /** ⭐ 去他主页读资料,把关系写回库(按这个 X 网页登录的号)。⚠️ 调之前必须已占住 wcId */
 export async function verifyPersonOn(wcId: number, who: Who): Promise<VerifyOutcome> {
+  const read = await readProfileOn(wcId, who);
+  if (!read.ok) return { kind: 'miss', text: `没读到(${read.why})` };
+  const rec = read.rec;
   try {
-    const rep = await webviewPorts(wcId).harvest({
-      gotoPage: { name: X_PAGE_NAME.profile, params: { handle: who.handle } },
-      /** 只等主页资料那一条;来了就停,最多 3 轮、10 秒 */
-      pageUrlIncludes: [PROFILE_ENDPOINT], wantPages: 1, maxRounds: 3, maxMs: 10_000,
-      noisyUrlSubstrings: X_NOISY_URLS,
-    }) as { items?: Array<{ url: string; text: string }>; problems?: string[] } | null;
-    if (!rep) return { kind: 'miss', text: '没读到(去不到他的主页 / 页面没了)' };
-    const items = (rep.items ?? []).filter((it) => it.url.includes(PROFILE_ENDPOINT));
-    const rec = pickProfileUser(items.flatMap((it) => auditUserPayload(it.text).items), who.handle, who.restId);
-    if (!rec) {
-      const why = rep.problems?.[0];
-      return { kind: 'miss', text: items.length === 0 ? `没读到(主页资料那条请求没来${why ? `:${why}` : ''})` : '没读到(载荷里找不到这个人)' };
-    }
     /** ⭐ 主页资料里的关系是这个 X 网页登录的号看到的(1.2.27) */
-    const d = await refreshPerson(rec, await accountForWrite(wcId));
-    traceRecorder.lifecycle({
-      layer: 'web.net', event: 'x-person-refresh', pageId: 'x-data',
-      detail: { restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes, relationAccount: d.relation.account ?? '(无)' },
-    });
-    if (d.isNew) await logCollect({ kind: 'users', source: 'profile-refresh', given: 1, inserted: 1, updated: 0, failed: 0 });
+    const d = await savePersonRefresh(rec, await accountForWrite(wcId));
     return d.isNew ? { kind: 'new', text: '库里没有,已补进来', rec, changes: d.changes }
       : d.changes.length > 0 ? { kind: 'changed', text: `有变化:${d.changes.join(';')}(已更新)`, rec, changes: d.changes }
         : { kind: 'same', text: '刚核对,与库里一致', rec, changes: [] };
   } catch (e) {
-    return { kind: 'miss', text: `没读到:${e instanceof Error ? e.message : String(e)}` };
+    return { kind: 'miss', text: `读到了但没写进库:${e instanceof Error ? e.message : String(e)}` };
   }
+}
+
+export type FollowDone = { readonly state: 'followed' | 'already-following' | 'failed'; readonly detail?: string };
+
+/**
+ * ⭐⭐ 关注一个人 —— 一份(第 5 步,2026-10-26;原来关注队列和求关卡各抄一遍):
+ * 去他主页 → 点关注 → 按钮变 Following = 关上了(执行后核对)→ 写进这个号的关系 → 记动作(本来就关注的不记)。
+ * 闸门 / 节奏 / 异常即停归调用方(队列等歇完、求关卡只提醒)。⚠️ 调之前必须已占住 wcId。
+ */
+export async function followOn(wsId: string, wcId: number, account: AccountDecision, who: Who, reason?: string): Promise<FollowDone> {
+  let state: FollowDone['state'] = 'failed';
+  let detail: string | undefined;
+  try {
+    const ports = webviewPorts(wcId);
+    const go = await ports.goto(X_PAGE_NAME.profile, { handle: who.handle });
+    if (!go.ok) detail = `去不到他的主页:${go.reason}`;
+    else {
+      const r = (await ports.runScript(X_SCRIPTS.follow, { restId: who.restId })) as { state?: string; why?: string } | null;
+      if (r?.state === 'followed' || r?.state === 'already-following') state = r.state;
+      else detail = `关注没成:${r?.state ?? '无返回'}${r?.why ? `(${r.why})` : ''}`;
+    }
+  } catch (e) {
+    detail = `关注出错:${e instanceof Error ? e.message : String(e)}`;
+  }
+  if (state !== 'failed') {
+    await writeRelations(account, [{ person: who.restId, iFollow: true, observedAt: new Date().toISOString() }], 'follow-action');
+  }
+  if (state !== 'already-following') {
+    await appendAction({
+      action: 'follow', targetRestId: who.restId, targetHandle: who.handle, decidedBy: 'human',
+      result: state === 'followed' ? 'ok' : 'failed', reason, detail, wsId,
+    });
+  }
+  console.log(`[x.follow] ${wsId} @${who.handle} → ${state}${detail ? `:${detail}` : ''}`);
+  return detail === undefined ? { state } : { state, detail };
 }
 
 /** ⭐⭐ 异常即停 —— 按 workspace 一份(一次取关没成就停,人看过原因点「恢复」才继续) */

@@ -116,9 +116,10 @@ describe('⭐⭐ 接线:写要认号,读要按号', () => {
   it('写:saveUsers / saveTweets(作者)/ refreshPerson 都按采集网页认号', () => {
     /** 2026-10-24 三个都迁走:存人 / 存推文在 x-save-batch.ts,刷新资料在能力 x.person.refresh */
     void caseBody;
-    expect(saveFnBody('saveUserBatch')).toMatch(/saveUsers\(records, ctx, await accountForWrite\(ctx\.wcId\)\)/);
+    /** 第 5 步(10-26):调用方已认过号可直接给 account(查回关 / 名单采集),不给照旧按 ctx.wcId 认 */
+    expect(saveFnBody('saveUserBatch')).toMatch(/saveUsers\(records, ctx, account \?\? await accountForWrite\(ctx\.wcId\)\)/);
     expect(saveFnBody('saveTweetBatch')).toMatch(/accountForWrite\(ctx\?\.wcId\)/);
-    expect(capBlock('x.person.refresh')).toMatch(/refreshPerson\(rec, await accountForWrite\(i\.wcId\)\)/);
+    expect(capBlock('x.person.refresh')).toMatch(/savePersonRefresh\(i\.record, await accountForWrite\(i\.wcId\)\)/);
   });
 
   it('读:概览 / 列表 / 人卡 / 朋友圈 / 状态页都先拿这个 ws 的号,没有就明说', () => {
@@ -141,7 +142,8 @@ describe('⭐⭐ 接线:写要认号,读要按号', () => {
     expect(CON).toMatch(/op: 'saveUsers', records: users, ctx: \{ listSource, wcId: wcId \?\? undefined \}/);
     expect(CON).toMatch(/searchRecipe: origin\?\.params\.q,[\s\S]{0,200}wcId: wcId \?\? undefined/);
     /** 2026-10-26 核对搬到主进程 x-person-act.ts:按读到它的那个网页认号 */
-    expect(read('src/modules/x/x-person-act.ts')).toMatch(/await refreshPerson\(rec, await accountForWrite\(wcId\)\)/);
+    /** 第 5 步(10-26):刷新落库一份 = x-save-batch savePersonRefresh */
+    expect(read('src/modules/x/x-person-act.ts')).toMatch(/await savePersonRefresh\(rec, await accountForWrite\(wcId\)\)/);
   });
 
   it('认号:脚本已注册、迁移已登记、运营顶栏真的挂了', () => {

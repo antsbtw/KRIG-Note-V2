@@ -19,7 +19,7 @@ vi.mock('@modules/x/x-person-collect', () => ({
 }));
 vi.mock('@modules/x/x-account-repo', () => ({ accountForWrite: vi.fn(async () => ({ kind: 'ok', restId: 'ME', handle: 'me' })) }));
 vi.mock('@modules/x/x-user-repo', () => ({
-  saveUsers: vi.fn(async (_u: unknown, ctx: { listSource: string }) => { saveUsersCalls.push({ ctx }); return { inserted: 0, updated: 0, failed: [] }; }),
+  saveUsers: vi.fn(async (_u: unknown, ctx: { listSource: string }) => { saveUsersCalls.push({ ctx }); return { inserted: 0, updated: 0, failed: [], relation: { written: 0, changed: 0, failed: 0 } }; }),
   existingUserIds: vi.fn(async (ids: string[]) => ids),
   writeRelations: vi.fn(async () => ({ report: { written: 0, changed: 0, failed: 0 }, before: new Map() })),
 }));
@@ -29,6 +29,8 @@ vi.mock('@storage/surreal/client', () => ({ getXDB: () => ({ query: async () => 
 vi.mock('@modules/x/x-list-member-repo', () => ({
   writeListMembers: vi.fn(async (owner: string, list: string, ids: string[]) => { memberCalls.push({ owner, list, ids }); return ids.length; }),
 }));
+/** 第 5 步起存人走 x-save-batch(记账)—— 账本不碰真库 */
+vi.mock('@modules/x/x-collect-log-repo', () => ({ appendCollectLog: vi.fn(async () => undefined) }));
 vi.mock('@modules/x/x-people-repo', () => ({ scanMutualIntent: vi.fn(async () => ({})) }));
 
 const FOLLOWERS = 'https://x.com/i/api/graphql/zz/Followers?variables=%7B%7D';

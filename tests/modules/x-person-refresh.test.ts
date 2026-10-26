@@ -103,7 +103,12 @@ describe('接线', () => {
     expect(fn).toMatch(/await verifyPerson\(workspaceId, p\)/);
     /** 2026-10-26 去主页读资料搬到主进程 x-person-act.ts verifyPersonOn(运营核对 + 取关后核对共用) */
     const RUN = read('src/modules/x/x-person-act.ts');
-    const rd = RUN.slice(RUN.indexOf('export async function verifyPersonOn'));
+    const vf = RUN.slice(RUN.indexOf('export async function verifyPersonOn'), RUN.indexOf('export type FollowDone'));
+    expect(vf.length).toBeGreaterThan(200);
+    /** 第 5 步(10-26):读主页资料一份 = x-person-profile.ts readProfileOn(核对 / 关系采集 / 认号共用) */
+    expect(vf).toMatch(/await readProfileOn\(wcId, who\)/);
+    const PF = read('src/modules/x/x-person-profile.ts');
+    const rd = PF.slice(PF.indexOf('export async function readProfileOn'));
     expect(rd.length).toBeGreaterThan(300);
     expect(rd).toMatch(/gotoPage: \{ name: X_PAGE_NAME\.profile/);
     expect(rd).toMatch(/pageUrlIncludes: \[PROFILE_ENDPOINT\], wantPages: 1, maxRounds: 3, maxMs: 10_000/);
@@ -133,8 +138,13 @@ describe('接线', () => {
     /** 2026-10-24 迁到能力 x.person.refresh */
     void IPC;
     const body = capBlock('x.person.refresh');
-    expect(body.length).toBeGreaterThan(200);
-    expect(body).toMatch(/source: 'profile-refresh'/);
-    expect(body).toMatch(/if \(d\.isNew\)/);
+    expect(body.length).toBeGreaterThan(100);
+    /** 第 5 步(10-26):刷新落库一份 = x-save-batch savePersonRefresh(新人记账在它里面) */
+    expect(body).toMatch(/savePersonRefresh\(i\.record, await accountForWrite\(i\.wcId\)\)/);
+    const SB = read('src/modules/x/x-save-batch.ts');
+    const sp = SB.slice(SB.indexOf('export async function savePersonRefresh'));
+    expect(sp.length).toBeGreaterThan(200);
+    expect(sp).toMatch(/source: 'profile-refresh'/);
+    expect(sp).toMatch(/if \(d\.isNew\)/);
   });
 });

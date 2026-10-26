@@ -10,15 +10,12 @@
  * ⚠️ X 网页忙(操作台采集 / 认号 / 后台采集)就让路,不抢页面。
  * ⚠️ 队列在内存(重启即空,人重新勾)—— 已关注的都在动作记录里,不会丢账。
  */
-import { webviewPorts } from './x-collect-ports';
-import { X_SCRIPTS } from './x-dom-scripts';
-import { X_PAGE_NAME } from './x-pages';
 import { getXHostState } from './x-host-registry';
 import { acquirePage, pageBusy, releasePage } from './x-page-lock';
 import { accountForWrite } from './x-account-repo';
-import { appendAction, readFollowGate } from './x-ops-actions-repo';
+import { readFollowGate } from './x-ops-actions-repo';
 import { localDayStart } from './x-ops-settings';
-import { writeRelations } from './x-user-repo';
+import { followOn } from './x-person-act';
 
 export type FollowItem = { readonly restId: string; readonly handle: string; readonly reason?: string };
 export type FollowDone = {
@@ -90,37 +87,16 @@ async function step(ws: string, x: Queue): Promise<void> {
   if (!lock.ok) { x.note = `让路:${lock.why}`; return; }
   const item = x.items.shift()!;
   x.current = item; x.note = heads;
-  const ports = webviewPorts(wcId);
-  let state: FollowDone['state'] = 'failed';
-  let detail: string | undefined;
+  /** ⭐ 关注一份(x-person-act followOn):去主页 → 点 → 核对 → 写关系 → 记动作 */
+  let done: { state: FollowDone['state']; detail?: string };
   try {
-    const go = await ports.goto(X_PAGE_NAME.profile, { handle: item.handle });
-    if (!go.ok) detail = `去不到他的主页:${go.reason}`;
-    else {
-      const r = (await ports.runScript(X_SCRIPTS.follow, { restId: item.restId })) as { state?: string; why?: string } | null;
-      if (r?.state === 'followed') state = 'followed';
-      else if (r?.state === 'already-following') state = 'already-following';
-      else detail = `关注没成:${r?.state ?? '无返回'}${r?.why ? `(${r.why})` : ''}`;
-    }
-  } catch (e) {
-    detail = `关注出错:${e instanceof Error ? e.message : String(e)}`;
+    done = await followOn(ws, wcId, account, item, item.reason);
   } finally {
     releasePage(lock.token);
     x.current = undefined;
   }
-  const at = new Date().toISOString();
-  if (state === 'followed' || state === 'already-following') {
-    /** ⭐ 执行后核对:按钮已变 Following = 我关注他 —— 写进这个号的关系(变化表会记一条) */
-    await writeRelations(account, [{ person: item.restId, iFollow: true, observedAt: at }], 'follow-action');
-  }
-  if (state !== 'already-following') {
-    await appendAction({
-      action: 'follow', targetRestId: item.restId, targetHandle: item.handle, decidedBy: 'human',
-      result: state === 'followed' ? 'ok' : 'failed', reason: item.reason, detail, wsId: ws,
-    });
-  }
-  x.done.push({ restId: item.restId, handle: item.handle, at, state, detail });
-  console.log(`[x.follow] ${ws} @${item.handle} → ${state}${detail ? `:${detail}` : ''}`);
+  const { state, detail } = done;
+  x.done.push({ restId: item.restId, handle: item.handle, at: new Date().toISOString(), state, detail });
   if (state === 'failed') {
     /** ② 异常即停 —— 不往下关,等人看 */
     x.paused = `@${item.handle} ${detail ?? '没关成'} —— 已暂停(异常即停),看过再点继续`;

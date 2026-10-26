@@ -13,9 +13,8 @@ import { Bad, digits, int, str, xCap, type O } from './x-capabilities-common';
 import { collectSearchByScroll, SEARCH_SCROLL_BUSY } from './x-search-scroll';
 import { recipeNameForQuery } from './x-recipe-query';
 import { cancelPersonCollect, collectPersonTab } from './x-person-collect';
-import { refreshPerson } from './x-user-repo';
 import { accountForWrite, readWsAccount } from './x-account-repo';
-import { logCollect, saveTweetBatch, saveUserBatch, type TweetBatch, type TweetCtx, type UserBatch, type UserCtx } from './x-save-batch';
+import { savePersonRefresh, saveTweetBatch, saveUserBatch, type TweetBatch, type TweetCtx, type UserBatch, type UserCtx } from './x-save-batch';
 import { existingTweetIds } from './x-tweet-repo';
 import { existingUserIds } from './x-user-repo';
 import { lookupSpot, pollSpot } from './x-spot-check';
@@ -107,19 +106,8 @@ export function registerXCollectCapabilities(): void {
       return { record: rec, wcId: o.wcId === undefined ? undefined : int(o, 'wcId', 0, Number.MAX_SAFE_INTEGER) };
     },
     subject: (i) => `x_author:${i.record.restId}`,
-    run: async (i) => {
-      const rec = i.record;
-      const d = await refreshPerson(rec, await accountForWrite(i.wcId));
-      traceRecorder.lifecycle({
-        layer: 'web.net', event: 'x-person-refresh', pageId: 'x-data',
-        detail: {
-          restId: rec.restId, handle: rec.handle, isNew: d.isNew, changes: d.changes,
-          relationAccount: d.relation.account ?? '(无)', relationSkipped: d.relation.skippedReason ?? '(none)',
-        },
-      });
-      if (d.isNew) await logCollect({ kind: 'users', source: 'profile-refresh', given: 1, inserted: 1, updated: 0, failed: 0 });
-      return d;
-    },
+    /** 刷新落库一份(x-save-batch savePersonRefresh:写库 + 留痕 + 新人记账) */
+    run: async (i) => savePersonRefresh(i.record, await accountForWrite(i.wcId)),
   });
 
   control({

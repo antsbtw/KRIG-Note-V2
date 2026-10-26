@@ -45,6 +45,8 @@ vi.mock('@modules/x/x-save-batch', () => ({
   saveTweetBatch: work('saveTweetBatch', { inserted: 3, updated: 1, failed: [] }),
   saveUserBatch: work('saveUserBatch', { inserted: 2, updated: 5, failed: [] }),
   logCollect: async (e: unknown) => { h.calls.push(['logCollect', [e]]); },
+  /** 第 5 步:刷新落库一份(写库 + 留痕 + 新人记账在它里面,x-step5-one-impl 钉行为) */
+  savePersonRefresh: work('savePersonRefresh', { isNew: true, stale: false, changes: [], relation: {} }),
 }));
 vi.mock('@modules/x/x-spot-check', () => ({ pollSpot: (ws: string, after: number) => { h.calls.push(['pollSpot', [ws, after]]); return null; }, lookupSpot: work('lookupSpot', { found: true }) }));
 vi.mock('@modules/x/x-people-repo', async () => ({ ...(await vi.importActual<object>('@modules/x/x-people-repo')), scanMutualIntent: work('scanMutualIntent', { scanned: 10 }) }));
@@ -137,8 +139,7 @@ describe('存库 / 其余', () => {
 
   it('刷新资料:按读到它的网页认号;新人记账', async () => {
     expect(await execute('x.person.refresh', { record: { restId: '42', handle: 'he' }, wcId: 7 }, { caller: 'ui' })).toMatchObject({ ok: true, value: { isNew: true } });
-    expect(h.calls.find(([n]) => n === 'refreshPerson')?.[1][1]).toMatchObject({ kind: 'ok', wc: 7 });
-    expect(h.calls.find(([n]) => n === 'logCollect')?.[1][0]).toMatchObject({ source: 'profile-refresh' });
+    expect(h.calls.find(([n]) => n === 'savePersonRefresh')?.[1][1]).toMatchObject({ kind: 'ok', wc: 7 });
     expect(h.rows[0].subjectRef).toBe('x_author:42');
   });
 

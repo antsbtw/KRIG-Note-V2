@@ -104,7 +104,8 @@ describe('接线', () => {
 
   it('⭐⭐⭐ 存推文后顺带写作者,对回配方名,并记账(否则对账差出这批新人)', () => {
     expect(body.length).toBeGreaterThan(500);
-    expect(body).toMatch(/recipeNameForQuery\(ctx\?\.searchRecipe, recipes\)/);
+    /** 第 5 步(10-26):逐页存推也走这里,调用方已知配方名就直接给(ctx.recipeName),不给才按 searchRecipe 对配方表 */
+    expect(body).toMatch(/ctx\?\.recipeName \?\? recipeNameForQuery\(ctx\?\.searchRecipe, /);
     /** ⭐ 1.2.27:作者的关系是采集网页登录的号看到的 —— 先认号,再按号写 */
     expect(body).toMatch(/const account = await accountForWrite\(ctx\?\.wcId\);\s*const a = await saveTweetAuthors\(records, recipeName, account\)/);
     expect(body).toMatch(/kind: 'users', source: 'tweet-authors'/);
