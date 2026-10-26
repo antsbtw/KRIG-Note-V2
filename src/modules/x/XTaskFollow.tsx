@@ -8,7 +8,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { getXHostState, subscribeXHost } from './x-host-registry';
-import { AskRun, type AskWho } from './XTaskAsk';
+import { AskRun } from './XTaskAsk';
+import { readCards, startCards, type CardQueue, type CardWho } from './x-flow-ui';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XTabs } from './XTabs';
 import { resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson } from './x-unfollow-run';
@@ -47,7 +48,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   /** ⭐ 点了谁(高亮)—— 与「勾选」分开:点 = 左边 X 网页跳到他主页;勾 = 选进这一批 */
   const [viewing, setViewing] = useState<string | null>(null);
   /** ⭐ 正在求关的这一批(用户 10-17:点赞、留言求关、关注 —— 取代「勾了就直接关注」) */
-  const [asking, setAsking] = useState<AskWho[] | null>(null);
+  const [asking, setAsking] = useState<CardQueue | null>(null);
   const wcId = useSyncExternalStore(subscribeXHost, () => getXHostState(wsId)?.wcId ?? null);
   /** ⭐ 第 4 阶段(2026-10-19):回关状态 / 上次查 / 正在查 */
   const [fs, setFs] = useState<FollowStatus | null>(null);
@@ -62,6 +63,16 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
    */
   const [unfPaused, setUnfPaused] = useState<string | null>(null);
   useEffect(() => { void unfollowHaltOf(wsId).then(setUnfPaused); }, [wsId]);
+  /** ⭐ 4c:一打开先问主进程有没有没做完的那批(关窗口 / 重启后接着那一张);问不到说出来 */
+  useEffect(() => {
+    let alive = true;
+    void readCards(wsId, 'ask').then((r) => {
+      if (!alive) return;
+      if (!r.ok) { setMsg(`读不到没做完的那批卡:${r.why}`); return; }
+      if (r.value) setAsking(r.value);
+    });
+    return () => { alive = false; };
+  }, [wsId]);
   const [unfDoing, setUnfDoing] = useState<string | null>(null);
   const loadFs = useCallback(() => {
     void xDataCall({ op: 'askFollowStatus', wsId }).then((r) => { if (r.status === 'ok') setFs(r.value as FollowStatus); });
@@ -176,11 +187,18 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
    * ⚠️ 10-17 撤掉「关注选中的 N 人」:只关注不求关 = 对方不回关(用户原话「莫名其妙关注,不求互关」)。
    * 改成逐个人求关:看推文 → 选一条 → 点赞 / 留言 / 关注。
    */
+  /** ⭐ 4c:起一批走主进程(x.cards.start) */
+  const beginAsk = async (list: readonly CardWho[]): Promise<void> => {
+    const r = await startCards(wsId, 'ask', list);
+    if (!r.ok) { setMsg(`没起成这一批:${r.why}`); return; }
+    setAsking(r.value);
+    if (r.value.replaced) setMsg(`⚠️ 盖掉了没做完的那一批(还剩 ${r.value.replaced} 张)`);
+  };
   const startAsk = (): void => {
     const list = (cands ?? []).filter((c) => picked.has(c.rest_id)).map((c) => ({ restId: c.rest_id, handle: c.handle, name: c.display_name }));
     if (list.length === 0) return;
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完`); return; }
-    setAsking(list);
+    void beginAsk(list);
     setPicked(new Set());
   };
   const control = async (action: 'pause' | 'resume' | 'clear'): Promise<void> => {
@@ -222,9 +240,9 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
 
       <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {asking && (
-            <AskRun wsId={wsId} queue={asking} onActed={loadProg} onPersonDone={loadCands} onEnd={(d) => {
+            <AskRun key={asking.startedAt} wsId={wsId} initial={asking} onActed={loadProg} onPersonDone={loadCands} onEnd={(d) => {
               setAsking(null);
-              setMsg(`这一批看完 ${d.length}/${asking.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+              setMsg(`这一批看完 ${d.length}/${asking.items.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
               loadCands();
             }} />
           )}
@@ -290,7 +308,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
                           {k === 'overdue' && (
                             <>
                               <button type="button" style={{ fontSize: 11 }} disabled={asking !== null}
-                                onClick={() => { setAsking([{ restId: x.person, handle: x.handle }]); }}
+                                onClick={() => { void beginAsk([{ restId: x.person, handle: x.handle }]); }}
                                 title="再求关一次:选他一条帖子,点赞 + 留言(关注已在,会记「本来就关注着」)">再互动</button>
                               <button type="button" style={{ fontSize: 11 }} disabled={unfDoing !== null || unfPaused !== null}
                                 onClick={() => void unfollowAsked(x)} title="去他主页取关(走取关的每日上限 / 间隔;记动作;取关后读回核对)">

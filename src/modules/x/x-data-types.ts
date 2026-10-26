@@ -262,6 +262,10 @@ export type XDataInvoke =
   | { readonly op: 'personCollectRange'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly range: string }
   | { readonly op: 'flowRuns'; readonly scope?: string }
   | { readonly op: 'flowStop'; readonly flow: string; readonly scope: string }
+  | { readonly op: 'cardsStart'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly people: ReadonlyArray<{ restId: string; handle: string; name?: string; hisTweetId?: string }> }
+  | { readonly op: 'cardsState'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn' }
+  | { readonly op: 'cardsAdvance'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn'; readonly index: number; readonly outcome: string }
+  | { readonly op: 'cardsEnd'; readonly wsId: string; readonly mode: 'ask' | 'engage' | 'vpn' }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
   /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
   | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }

@@ -143,6 +143,11 @@ const CAP_OF_OP: Readonly<Record<string, string | ((p: XDataInvoke) => string)>>
   blueMutualFind: 'x.blueMutual.find',
   personCollectRange: 'x.person.collectRange',
   flowRuns: 'flow.runs',
+  // 第 4 步 4c:卡片队列
+  cardsStart: 'x.cards.start',
+  cardsState: 'x.cards.state',
+  cardsAdvance: 'x.cards.advance',
+  cardsEnd: 'x.cards.end',
   flowStop: 'flow.stop',
   followQueueControl: (p) => ((p as { action?: string }).action === 'resume' ? 'x.followQueue.resume' : 'x.followQueue.control'),
 };

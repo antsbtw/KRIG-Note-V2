@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { openInLeft, verifyPerson } from './x-unfollow-run';
-import { runFlow, stopFlow } from './x-flow-ui';
+import { readCards, runFlow, startCards, stopFlow, type CardQueue } from './x-flow-ui';
 import { getXHostState } from './x-host-registry';
 import type { EngageOverview } from './x-engage-repo';
 import type { RecentPerson } from './x-engage';
@@ -31,7 +31,7 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const [quietLimit, setQuietLimit] = useState(PAGE);
   const [picked, setPicked] = useState<ReadonlyMap<string, AskWho>>(new Map());
   /** ⭐ 正在过互动卡的这一批(你勾的人) */
-  const [engaging, setEngaging] = useState<AskWho[] | null>(null);
+  const [engaging, setEngaging] = useState<CardQueue | null>(null);
   /** ⭐ 互动前先过一轮(用户 10-23):逐个采主页看 2 小时内有没有动静 */
   const [screening, setScreening] = useState<{ i: number; total: number; who?: string } | null>(null);
   /** ⭐ 用户 10-22「tab 中再包含 tab」:刚互关·没互动 / 刚互关·互动过 / 一周没互动 */
@@ -40,6 +40,16 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
     void xDataCall({ op: 'engageOverview', wsId, limit: quietLimit }).then((r) => { if (r.status === 'ok') setOv(r.value as EngageOverview); else setMsg(r.reason); });
   }, [wsId, quietLimit]);
   useEffect(() => { load(); }, [load]);
+  /** ⭐ 4c:一打开先问主进程有没有没做完的那批(关窗口 / 重启后接着那一张);问不到说出来 */
+  useEffect(() => {
+    let alive = true;
+    void readCards(wsId, 'engage').then((r) => {
+      if (!alive) return;
+      if (!r.ok) { setMsg(`读不到没做完的那批卡:${r.why}`); return; }
+      if (r.value) setEngaging(r.value);
+    });
+    return () => { alive = false; };
+  }, [wsId]);
 
   const collect = async (): Promise<void> => {
     setCollecting(true);
@@ -108,7 +118,11 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
     setMsg(`过了一轮 ${list.length} 人:2 小时内有动静 ${active.length} 人${unknown.length > 0 ? ` · 没看成 ${unknown.length} 人(照样进卡)` : ''}`
       + `${quiet.length > 0 ? ` · 没动静 ${quiet.length} 人已放一放(${ov?.deferDays ?? 3} 天内不列):@${quiet.join(' @')}` : ''}${run.length === 0 ? ' —— 这一批没有要互动的' : ''}`);
     load();
-    if (run.length > 0) setEngaging(run);
+    if (run.length === 0) return;
+    const c = await startCards(wsId, 'engage', run);
+    if (!c.ok) { setMsg(`没起成这一批:${c.why}`); return; }
+    setEngaging(c.value);
+    if (c.value.replaced) setMsg(`⚠️ 盖掉了没做完的那一批(还剩 ${c.value.replaced} 张)`);
   };
 
   /** ⭐ 批量勾:当前打开的那张名单,从上往下再勾 BATCH 个还没勾的 */
@@ -212,10 +226,10 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
       </div>
       {engaging && (
         <div style={{ marginTop: 8 }}>
-          <AskRun mode="engage" wsId={wsId} queue={engaging} onPersonDone={load} onEnd={(d) => {
+          <AskRun key={engaging.startedAt} mode="engage" wsId={wsId} initial={engaging} onPersonDone={load} onEnd={(d) => {
             setEngaging(null);
             setPicked(new Map());
-            setMsg(`这一批看完 ${d.length}/${engaging.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+            setMsg(`这一批看完 ${d.length}/${engaging.items.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
             load();
           }} />
         </div>

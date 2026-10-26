@@ -112,8 +112,9 @@ describe('任务 view', () => {
     /** 用户 10-17:「莫名其妙关注,不求互关…最终只是你关注对方,对方不回关你!」 */
     expect(F).not.toMatch(/op: 'followQueueAdd'/);
     const start = F.slice(F.indexOf('const startAsk'), F.indexOf('const control'));
-    expect(start).toMatch(/setAsking\(list\)/);
-    expect(F).toMatch(/<AskRun wsId=\{wsId\} queue=\{asking\}/);
+    /** 4c(10-26)起:起一批走主进程(x.cards.start),卡片拿主进程那份 */
+    expect(start).toMatch(/void beginAsk\(list\)/);
+    expect(F).toMatch(/<AskRun key=\{asking\.startedAt\} wsId=\{wsId\} initial=\{asking\}/);
     expect(F).toMatch(/op: 'followQueueControl', wsId, action/);
     expect(F).toMatch(/op: 'blueMutualCandidates'/);
     expect(F).toMatch(/op: 'blueMutualFollowProgress'/);

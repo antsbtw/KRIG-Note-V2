@@ -1814,6 +1814,30 @@ DEFINE FIELD OVERWRITE mode ON x_draft_note TYPE string ASSERT $value INSIDE ['a
 DEFINE FIELD OVERWRITE mode ON x_defer TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
 `;
 
+/**
+ * ⭐ 1.2.41 —— 卡片队列 x_card_queue(2026-10-26,Module5-04 第 4 步 4c)
+ * 用户 10-26 选「现在就把卡片队列搬到主进程」:这一批人 / 第几张 / 前面每张的结果存在这里,关窗口、重启 app 后还停在那一张。
+ * 一个号一种卡一行(id = <wsId>:<mode>);state 存 JSON 文本(数组里的对象 FLEXIBLE 不下传,记忆 project-surreal-flexible-parse-error)。
+ */
+const X_SCHEMA_1_2_41 = `
+DEFINE TABLE IF NOT EXISTS x_card_queue SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS ws_id      ON x_card_queue TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS mode       ON x_card_queue TYPE string ASSERT $value INSIDE ['ask', 'engage', 'vpn'];
+DEFINE FIELD IF NOT EXISTS state      ON x_card_queue TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS updated_at ON x_card_queue TYPE datetime;
+`;
+
+export async function x_migration_1_2_41(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_41);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_card_queue');
+  if (!('state' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.41] x_card_queue 没建起来 —— 卡片队列存不住,重启就丢');
+  console.log('[x-schema 1.2.41] 卡片队列 x_card_queue');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.41', appliedAt = $now, description = '卡片队列 x_card_queue'`,
+    { rid: new RecordId('schema_version', '1.2.41'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_40(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_40);
   const [a, b, c] = await db.query<[{ fields?: Record<string, string> }, { fields?: Record<string, string> }, { fields?: Record<string, string> }]>(

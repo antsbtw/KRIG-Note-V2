@@ -10,7 +10,8 @@
  */
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { AskRun, type AskWho } from './XTaskAsk';
+import { AskRun } from './XTaskAsk';
+import { startCards, type CardQueue, type CardWho } from './x-flow-ui';
 import type { PersonLists } from './x-list-member-repo';
 
 const LIST_LABEL: Record<string, string> = { followers: '关注者', following: '他关注的', verifiedFollowers: '蓝V关注者' };
@@ -22,7 +23,17 @@ export function XPersonLists({ wsId, restId, handle, wcOpen, onOpenInX }: {
 }): ReactElement {
   const [data, setData] = useState<PersonLists | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [asking, setAsking] = useState<AskWho[] | null>(null);
+  const [asking, setAsking] = useState<CardQueue | null>(null);
+  /**
+   * ⭐ 4c:起一批走主进程(和「任务 → 求关」共用这个号的求关那一份;没做完的那批在那边一打开就接着)。
+   * ⚠️ 这里起会盖掉没做完的那批 —— 照做,说出来
+   */
+  const beginAsk = async (list: readonly CardWho[]): Promise<void> => {
+    const r = await startCards(wsId, 'ask', list);
+    if (!r.ok) { setMsg(`没起成这一批:${r.why}`); return; }
+    setAsking(r.value);
+    if (r.value.replaced) setMsg(`⚠️ 盖掉了没做完的那一批求关(还剩 ${r.value.replaced} 张)`);
+  };
   const load = useCallback(() => {
     void xDataCall({ op: 'personLists', wsId, restId, limit: 50 }).then((r) => {
       if (r.status === 'ok') setData(r.value as PersonLists); else setMsg(r.reason);
@@ -68,16 +79,16 @@ export function XPersonLists({ wsId, restId, handle, wcOpen, onOpenInX }: {
             <span>其中 蓝V · 我没关注 · 有互关倾向:<strong>{data.candidateTotal}</strong> 人{data.candidateTotal > data.candidates.length ? `(显示粉丝最多的 ${data.candidates.length} 个)` : ''}</span>
             {data.candidates.length > 0 && (
               <button type="button" style={{ fontSize: 11 }} disabled={asking !== null}
-                onClick={() => setAsking(data.candidates.map((c) => ({ restId: c.rest_id, handle: c.handle, name: c.display_name })))}>
+                onClick={() => void beginAsk(data.candidates.map((c) => ({ restId: c.rest_id, handle: c.handle, name: c.display_name })))}>
                 这 {data.candidates.length} 个都去求关
               </button>
             )}
           </div>
           {asking && (
             <div style={{ marginTop: 6 }}>
-              <AskRun wsId={wsId} queue={asking} onPersonDone={load} onEnd={(d) => {
+              <AskRun key={asking.startedAt} wsId={wsId} initial={asking} onPersonDone={load} onEnd={(d) => {
                 setAsking(null);
-                setMsg(`求关看完 ${d.length}/${asking.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+                setMsg(`求关看完 ${d.length}/${asking.items.length} 人:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
                 load();
               }} />
             </div>
@@ -93,7 +104,7 @@ export function XPersonLists({ wsId, restId, handle, wcOpen, onOpenInX }: {
                   <div style={{ opacity: 0.7 }}>依据 · {c.mutual_intent_evidence ?? '—'}</div>
                 </span>
                 <button type="button" style={{ fontSize: 11, alignSelf: 'center' }} disabled={asking !== null}
-                  onClick={() => setAsking([{ restId: c.rest_id, handle: c.handle, name: c.display_name }])}>求关</button>
+                  onClick={() => void beginAsk([{ restId: c.rest_id, handle: c.handle, name: c.display_name }])}>求关</button>
               </div>
             ))}
           </div>

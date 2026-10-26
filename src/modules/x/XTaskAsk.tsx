@@ -16,6 +16,7 @@ import { xDataCall } from './x-data-types';
 import { getXHostState, subscribeXHost } from './x-host-registry';
 import { tweetIdOfUrl } from './x-tweet-url';
 import { openInLeft } from './x-unfollow-run';
+import { advanceCards, endCards, readCards, type CardQueue } from './x-flow-ui';
 import { threadForPrompt, type EngageThread } from './x-engage-thread-model';
 import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
@@ -33,8 +34,9 @@ const stepLine = (r: AskRunResult, engage = false): string =>
 
 type Done = { readonly who: AskWho; readonly outcome: string };
 
-export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask' }: {
-  wsId: string; queue: readonly AskWho[]; onEnd: (done: readonly Done[]) => void;
+export function AskRun({ wsId, initial, onEnd, onActed, onPersonDone, mode = 'ask' }: {
+  /** ⭐ 这一批(主进程那份,x.cards.*;4c 起第几张 / 前面的结果都在主进程,重启后接着) */
+  wsId: string; initial: CardQueue; onEnd: (done: readonly Done[]) => void;
   /**
    * ⭐ engage = 已互关蓝V的日常互动卡(2026-10-22,用户选「和求关卡一样」):点赞 + 回复,不关注;
    * Gemma 用日常互动的口吻;记进 x_engage。不给 = 求关卡
@@ -48,7 +50,11 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
    */
   onPersonDone?: () => void;
 }): ReactElement {
-  const [i, setI] = useState(0);
+  /** ⭐ 主进程那份的影子:只在主进程答复后更新(第几张以主进程为准) */
+  const [q, setQ] = useState<CardQueue>(initial);
+  /** 往下走 / 结束没成的原因(没成就停在这张,说出来) */
+  const [moveNote, setMoveNote] = useState<string | null>(null);
+  const [moving, setMoving] = useState(false);
   const [prep, setPrep] = useState<AskPrepared | null>(null);
   const [loading, setLoading] = useState(false);
   const [sel, setSel] = useState<AskTweet | null>(null);
@@ -58,7 +64,6 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const [draft, setDraft] = useState('');
   const [acting, setActing] = useState(false);
   const [result, setResult] = useState<AskRunResult | null>(null);
-  const [done, setDone] = useState<Done[]>([]);
   /** ⭐ Gemma 原稿 / 正在草拟 / 草拟没成的原因 */
   const [aiText, setAiText] = useState<string | undefined>(undefined);
   const [drafting, setDrafting] = useState(false);
@@ -91,7 +96,8 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     loadRules();
   };
   const draftSeq = useRef(0);
-  const who = queue[i];
+  const who = q.items[q.index];
+  const done = q.done;
   /** E = 不关注的两种(互动 / 回复求助);V = 回复求助(2026-10-23) */
   const E = mode !== 'ask';
   const V = mode === 'vpn';
@@ -204,11 +210,29 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
     if (r.status === 'failed') { setViewNote(`没记上「放一放」:${r.reason}`); return; }
     next(`先放一放(${(r.value as { days: number }).days} 天内不再列出)`);
   };
+  /** ⭐ 这张做完 → 报给主进程(带上第几张,防连点 / 两个窗口重复往下走);主进程说到哪张就到哪张 */
   const next = (outcome: string): void => {
-    const d = [...done, { who: who!, outcome }];
-    setDone(d);
-    onPersonDone?.();
-    if (i + 1 >= queue.length) onEnd(d); else setI(i + 1);
+    void (async () => {
+      setMoving(true); setMoveNote(null);
+      const r = await advanceCards(wsId, mode, q.index, outcome);
+      setMoving(false);
+      onPersonDone?.();
+      if (r.ok) {
+        if (r.value.finished) onEnd(r.value.done); else if (r.value.queue) setQ(r.value.queue);
+        return;
+      }
+      /** 没往下走(比如另一个窗口已经走过这张了)→ 重读主进程那份,停在它说的那张 */
+      const s = await readCards(wsId, mode);
+      if (s.ok && s.value === null) { onEnd(done); return; }
+      if (s.ok && s.value) setQ(s.value);
+      setMoveNote(`没往下走:${r.why}${s.ok ? '' : ` · 也读不到现在第几张:${s.why}`}`);
+    })();
+  };
+  /** 结束这一批(剩下的不做了);主进程没删掉就留在这儿说清楚 */
+  const endBatch = async (): Promise<void> => {
+    const r = await endCards(wsId, mode);
+    if (!r.ok) { setMoveNote(`没结束:${r.why}`); return; }
+    onEnd(r.value.done);
   };
 
   if (!who) return <div />;
@@ -292,9 +316,10 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   return (
     <div style={{ border: '1px solid var(--border-color, #2a2a2a)', borderRadius: 6, padding: 10, fontSize: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-        <strong>{LABEL} {i + 1}/{queue.length}:{who.name ?? who.handle} @{who.handle}</strong>
-        <button type="button" style={{ fontSize: 11 }} onClick={() => onEnd(done)}>结束这一批</button>
+        <strong>{LABEL} {q.index + 1}/{q.items.length}:{who.name ?? who.handle} @{who.handle}</strong>
+        <button type="button" style={{ fontSize: 11 }} disabled={moving} onClick={() => void endBatch()}>结束这一批</button>
       </div>
+      {moveNote && <div style={{ marginTop: 4, color: '#d97706' }}>⚠️ {moveNote}</div>}
       {done.length > 0 && (
         <div style={{ marginTop: 4, opacity: 0.7 }}>上一个:@{done[done.length - 1].who.handle} {done[done.length - 1].outcome}</div>
       )}

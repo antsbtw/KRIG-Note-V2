@@ -10,7 +10,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { getXHostState } from './x-host-registry';
 import { openInLeft } from './x-unfollow-run';
-import { runFlow, stopFlow } from './x-flow-ui';
+import { readCards, runFlow, startCards, stopFlow, type CardQueue } from './x-flow-ui';
 import { XTabs } from './XTabs';
 import { AskRun, type AskWho } from './XTaskAsk';
 import type { VpnOverview, VpnPostRow } from './x-vpn-run';
@@ -31,12 +31,30 @@ export function VpnHelpTask({ wsId }: { wsId: string }): ReactElement {
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [picked, setPicked] = useState<ReadonlyMap<string, AskWho>>(new Map());
-  const [replying, setReplying] = useState<AskWho[] | null>(null);
+  const [replying, setReplying] = useState<CardQueue | null>(null);
 
   const load = useCallback(() => {
     void xDataCall({ op: 'vpnOverview', wsId }).then((r) => { if (r.status === 'ok') { setOv(r.value as VpnOverview); setErr(null); } else setErr(r.reason); });
   }, [wsId]);
   useEffect(() => { load(); }, [load]);
+  /** ⭐ 4c:一打开先问主进程有没有没做完的那批(关窗口 / 重启后接着那一张);问不到说出来 */
+  useEffect(() => {
+    let alive = true;
+    void readCards(wsId, 'vpn').then((r) => {
+      if (!alive) return;
+      if (!r.ok) { setMsg(`读不到没做完的那批卡:${r.why}`); return; }
+      if (r.value) setReplying(r.value);
+    });
+    return () => { alive = false; };
+  }, [wsId]);
+  /** ⭐ 4c:起一批走主进程(x.cards.start) */
+  const beginReply = async (): Promise<void> => {
+    const r = await startCards(wsId, 'vpn', [...picked.values()]);
+    if (!r.ok) { setMsg(`没起成这一批:${r.why}`); return; }
+    setReplying(r.value);
+    if (r.value.replaced) setMsg(`⚠️ 盖掉了没做完的那一批(还剩 ${r.value.replaced} 张)`);
+    setPicked(new Map());
+  };
 
   /**
    * 判断还没判的:一次 5 条地问,直到判完或你停 —— 进度看得见。
@@ -147,16 +165,16 @@ export function VpnHelpTask({ wsId }: { wsId: string }): ReactElement {
               只列 {ov?.freshHours ?? 24} 小时内、还没回过的{ov && ov.expired > 0 ? ` · 另有 ${ov.expired} 条超过 ${ov.freshHours} 小时不列` : ''}{ov && ov.deferred > 0 ? ` · ${ov.deferred} 条最近放一放过` : ''}
             </div>
             <div style={{ marginTop: 6, fontSize: 12 }}>
-              <button type="button" disabled={picked.size === 0 || replying !== null} onClick={() => { setReplying([...picked.values()]); setPicked(new Map()); }}
+              <button type="button" disabled={picked.size === 0 || replying !== null} onClick={() => void beginReply()}
                 title="逐条过回复卡:来龙去脉 → Gemma 草拟(先帮忙再带试用链接)→ 你改 / 点评 → 点赞 + 回复">回复选中的({picked.size} 条)</button>
               {replying === null && ov && <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={pickBatch}>勾 {BATCH} 条</button>}
               {picked.size > 0 && replying === null && <button type="button" style={{ marginLeft: 6, fontSize: 11 }} onClick={() => setPicked(new Map())}>清空勾选</button>}
             </div>
             {replying && (
               <div style={{ marginTop: 8 }}>
-                <AskRun mode="vpn" wsId={wsId} queue={replying} onPersonDone={load} onEnd={(d) => {
+                <AskRun key={replying.startedAt} mode="vpn" wsId={wsId} initial={replying} onPersonDone={load} onEnd={(d) => {
                   setReplying(null);
-                  setMsg(`这一批看完 ${d.length}/${replying.length} 条:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
+                  setMsg(`这一批看完 ${d.length}/${replying.items.length} 条:${d.map((x) => `@${x.who.handle} ${x.outcome}`).join(';')}`.slice(0, 400));
                   load();
                 }} />
               </div>
