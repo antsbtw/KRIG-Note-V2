@@ -281,3 +281,17 @@ DDL 在临时内存库实测(加字段 + 真写一行读回)。
   操作台是测试后台、将来隐藏(记忆 feedback-x-console-is-dev-backend),不在第 4 步范围(我的判断,用户可推翻)。
 - 真机:左边打开推文 / 主页、核对 ok;有人占着 → 核对 refused;核对中别人被拒(锁上「核对 @…」);收件箱调取关 refused(对外动作);
   暂停 / 恢复能查能调;界面认号碰上网页没开 → refused(32596977 的修复真机确认)。⚠️ 界面取关 / 核对真机没点到,待日常使用。
+
+### 第 4 步 4b 界面循环搬成流程 —— 2026-10-26 ✅ Windows 测试机真机过
+
+- 平台层 `capability/flow.ts`:`defineFlow`(流程 = 能力,`f.call` 调别的能力,记录 run_id = 流程那次的 callId);
+  进度 / 叫停(`flow.runs` probe / `flow.stop`);同一流程同一范围一次一份(资源锁 `flow:<id>:<scope>`,锁对账里看得见);
+  步骤调用方 = 流程调用方(AI 起的流程里对外动作照样被拒)。
+- `x-flows.ts`:`x.engage.screenBatch` / `x.vpn.judgeAll` / `x.blueMutual.find` / `x.person.collectRange`;界面四处改成 `runFlow`(x-flow-ui.ts)。
+- IPC:`logAction / logPersonProgress / logPersonCollect` 退役(主进程当场记);**switch 只剩底座 4 个**(syncHost / pageAcquire / pageRelease / pageBusy),256 行。
+- 真机(收件箱起流程):判到判完(新库 0 条)ok;找蓝V 没配方 → 如实「找不到配方」;先过一轮(自己的号:15 小时前 → 放一放)ok;
+  人卡采一个月:帖子 10 页 258 / 回复 31 页 1231(到上限交后台)/ 转发 3 页 125,184 秒;中途 flow.runs 看到「第 1/3 · 帖子第 1 页 · 他自己 35 条…」;
+  叫停 → 4 秒后停在「回复:人点了停止」;同号再起一份 → refused「已经在跑」;锁对账 ✓。
+- 回归时撞了一次 X 限流(三遍连着采一个月,回复页第 16 页 429)→ 原有的「等 15 分钟再试」,流程把这句抄进进度,界面看得见(不是卡死);
+  等的时候网页一直占着,别的任务让路(与原来人卡一样)。
+- 剩 4c:求关 / 互动 / 求助回复卡的流程(准备 → 草拟 → 人确认 → 发送 → 下一个)。
