@@ -15,8 +15,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type Re
 import { xDataCall } from './x-data-types';
 import { getXHostState, subscribeXHost } from './x-host-registry';
 import { tweetIdOfUrl } from './x-tweet-url';
-import { X_PAGE_NAME } from './x-pages';
-import { xPageBusy } from './x-unfollow-run';
+import { openInLeft } from './x-unfollow-run';
 import { threadForPrompt, type EngageThread } from './x-engage-thread-model';
 import type { AskPrepared } from './x-ask-prepare';
 import type { AskTweet } from './x-ask-plan';
@@ -178,10 +177,9 @@ export function AskRun({ wsId, queue, onEnd, onActed, onPersonDone, mode = 'ask'
   const showInX = async (tweetId: string): Promise<void> => {
     const wcId = getXHostState(wsId)?.wcId;
     if (wcId === undefined) { setViewNote('X 网页没开'); return; }
-    const busy = await xPageBusy(wcId);
-    if (busy !== null) { setViewNote(`${busy},没跳转(跳走会打断)`); return; }
-    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.status, params: { tweetId } });
-    setViewNote(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
+    /** ⭐ 打开那一下占着网页(主进程能力 x.page.open);被占着 / 没打开都说出来 */
+    const why = await openInLeft(wsId, { tweetId });
+    setViewNote(why === null ? null : `${why},没跳转(跳走会打断)`);
   };
 
   /** 跳过此人 = 你排除的(原因「求关时跳过」),以后不再进候选;写不上就留在这儿说清楚,不假装跳过了 */

@@ -46,12 +46,13 @@ describe('任务 view', () => {
     };
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     order(F.slice(F.indexOf('const openAsked'), F.indexOf('const toggle')),
-      ['if (!opening) return;', 'await acquireXPage(wcId, CHECK_BUSY)', 'await readProfileAndRefresh({ rest_id: x.person, handle: x.handle }, wcId)', 'loadFs();', 'setLineRev(']);
+      /** 2026-10-26 核对搬到主进程(x.person.verify):占锁在执行器,被占着 → refused 不跳 */
+      ['if (!opening) return;', 'await verifyPerson(wsId, { rest_id: x.person, handle: x.handle })', "if ('refused' in v)", 'loadFs();', 'setLineRev(']);
     expect(F).toMatch(/onClick=\{\(\) => void openAsked\(x\)\}/);
     expect(F).toMatch(/<XPersonTimeline wsId=\{wsId\} restId=\{x.person\} rev=\{lineRev\} \/>/);
     const E = strip(read('src/modules/x/XTaskEngage.tsx'));
     order(E.slice(E.indexOf('const openPerson'), E.indexOf('const toggle')),
-      ['await acquireXPage(wcId, ', 'await readProfileAndRefresh({ rest_id: p.restId, handle: p.handle }, wcId)', 'load();']);
+      ['await verifyPerson(wsId, { rest_id: p.restId, handle: p.handle })', "if ('refused' in v)", 'load();']);
     expect(E).toMatch(/onClick=\{\(\) => void openPerson\(p\)\}/);
   });
 
@@ -159,16 +160,16 @@ describe('候选名单:点 = 跳主页,勾 = 选定(10-16 用户:「注意时点
     const F = strip(read('src/modules/x/XTaskFollow.tsx'));
     const fn = F.slice(F.indexOf('const openInX'), F.indexOf('const toggle'));
     const guard = fn.indexOf('if (qs?.current)');
-    /** 2026-10-23 起「网页忙不忙」= 申请主进程的锁(x-page-lock),拿不到就不跳 */
-    const busy = fn.indexOf('await acquireXPage(wcId, CHECK_BUSY)');
-    /** 2026-10-21 起跳转改为「去主页并读关系」(readProfileAndRefresh),读到已关注就从候选里拿掉 */
-    const go = fn.indexOf('await readProfileAndRefresh(');
+    /** 2026-10-26 起「去主页并读关系」在主进程(x.person.verify):占锁在执行器;被占着 → refused 不跳 */
+    const go = fn.indexOf('await verifyPerson(');
+    const busy = fn.indexOf("if ('refused' in v)");
     expect(guard).toBeGreaterThan(-1);
     /** ⚠️ 不钉 > -1 的话找不到也是 -1 < go,照样绿(2026-10-23 换接口时就这样假绿过) */
     expect(busy).toBeGreaterThan(-1);
     expect(go).toBeGreaterThan(-1);
     expect(guard).toBeLessThan(go);
-    expect(busy).toBeLessThan(go);
+    /** 被拒的处理在调用之后、看结果之前 */
+    expect(go).toBeLessThan(busy);
     expect(fn).toMatch(/if \(v\.rec\.following === true\) \{\s*setCands\(/);
   });
   it('认号:X 网页后登记好会再认一次', () => {

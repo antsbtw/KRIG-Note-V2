@@ -115,21 +115,20 @@ describe('接线守卫', () => {
 
   it('⭐ 人卡三个手动动作都先占住网页(主进程的锁 —— 后台在采也在这把锁上),被占着就不动', () => {
     const page = strip(read('src/modules/x/XOpsPeople.tsx'));
-    for (const [a, b] of [
-      ['const runVerify = useCallback', 'await readProfileAndRefresh('],
-      ['const collectTweets = useCallback', 'for (const tab of PERSON_TABS)'],
-    ]) {
-      const fn = page.slice(page.indexOf(a), page.indexOf(b));
-      expect(fn.length, a).toBeGreaterThan(50);
-      expect(fn, a).toMatch(/const lock = await acquireXPage\(wcId, \w+\);\s*if \(!lock\.ok\) \{[^\n]*return; \}/);
-    }
-    /** ⭐ 取关 2026-10-19 抽到 x-unfollow-run.ts:unfollowOnce 占住网页再动手 */
+    /** 采推文:界面先占住网页,再把锁带进主进程(x.person.collectTab 认带来的锁) */
+    const ct = page.slice(page.indexOf('const collectTweets = useCallback'), page.indexOf('for (const tab of PERSON_TABS)'));
+    expect(ct.length).toBeGreaterThan(50);
+    expect(ct).toMatch(/const lock = await acquireXPage\(wcId, \w+\);\s*if \(!lock\.ok\) \{[^\n]*return; \}/);
+    /**
+     * ⭐ 2026-10-26 核对 / 取关搬到主进程(能力 x.person.verify / x.person.unfollow):占网页在执行器,被占着 → 界面拿到 refused / blocked 不动
+     * (行为见 x-person-act.test.ts:网页被占着 refused、干活时锁上写着「核对 @x」「取关 @x」)
+     */
+    const rv = page.slice(page.indexOf('const runVerify = useCallback'), page.indexOf('/** ⭐ 一次只核对一个'));
+    expect(rv).toMatch(/const r = await verifyPerson\(workspaceId, p\);\s*if \('refused' in r\) \{/);
     const un = page.slice(page.indexOf('const unfollow = useCallback'), page.indexOf('/** 单击:选中'));
-    expect(un).toMatch(/await unfollowOnce\(/);
+    expect(un).toMatch(/r = await unfollowPerson\(workspaceId, p\);/);
+    expect(un).toMatch(/if \('blocked' in r\) \{/);
     const run = strip(read('src/modules/x/x-unfollow-run.ts'));
-    const core = run.slice(run.indexOf('export async function unfollowOnce'), run.indexOf("op: 'goto'"));
-    expect(core.length).toBeGreaterThan(50);
-    expect(core).toMatch(/const lock = await acquireXPage\(wcId, busyLabel\);\s*if \(!lock\.ok\) return/);
     const acq = run.slice(run.indexOf('export async function acquireXPage'), run.indexOf('export async function releaseXPage'));
     expect(acq).toMatch(/op: 'pageAcquire'/);
     const busyFn = run.slice(run.indexOf('export async function xPageBusy'), run.indexOf('export async function acquireXPage'));

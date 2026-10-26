@@ -11,9 +11,8 @@ import { getXHostState, subscribeXHost } from './x-host-registry';
 import { AskRun, type AskWho } from './XTaskAsk';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XTabs } from './XTabs';
-import { acquireXPage, readProfileAndRefresh, releaseXPage, unfollowOnce } from './x-unfollow-run';
+import { resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson } from './x-unfollow-run';
 
-const CHECK_BUSY = '任务:正在核对这个人';
 import type { AskStatus } from './x-follow-back';
 
 type Cand = { rest_id: string; handle: string; display_name?: string; followers_count?: number; follows_me?: boolean; mutual_intent_evidence?: string };
@@ -57,8 +56,12 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
   const [lineOf, setLineOf] = useState<string | null>(null);
   /** 点开核对后让往来重读一遍 */
   const [lineRev, setLineRev] = useState(0);
-  /** ⭐ 异常即停:任务页取关失败一次就停,人看过原因点「恢复」才继续(与运营取关同规矩) */
+  /**
+   * ⭐ 异常即停:取关失败一次就停,人看过原因点「恢复」才继续 —— 2026-10-26 起在主进程按 workspace 一份,
+   * 和运营人卡是同一个「取关已暂停」(原来两边各管各的)
+   */
   const [unfPaused, setUnfPaused] = useState<string | null>(null);
+  useEffect(() => { void unfollowHaltOf(wsId).then(setUnfPaused); }, [wsId]);
   const [unfDoing, setUnfDoing] = useState<string | null>(null);
   const loadFs = useCallback(() => {
     void xDataCall({ op: 'askFollowStatus', wsId }).then((r) => { if (r.status === 'ok') setFs(r.value as FollowStatus); });
@@ -80,20 +83,18 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     loadFs();
   };
   const unfollowAsked = async (s: AskStatus): Promise<void> => {
-    if (unfPaused) { setMsg(`取关已暂停:${unfPaused} —— 看过原因后点「恢复」`); return; }
     if (wcId === null) { setMsg('X 网页没开,没法取关'); return; }
     setUnfDoing(s.person);
     try {
       const who = { rest_id: s.person, handle: s.handle };
-      const r = await unfollowOnce(who, wcId, '任务:正在取关', `求关 ${s.askDays} 天没回关`, wsId);
-      if ('blocked' in r) { setMsg(r.blocked); return; }
-      if (r.done || r.state === 'not-following') {
-        /** 执行后核对:读回他主页把关系写进库 */
-        const v = await readProfileAndRefresh(who, wcId);
-        setMsg(`@${s.handle} ${r.done ? '已取关' : '本来就没关注'} · 核对:${v.text}${r.warning ? ` · ⚠️ ${r.warning}` : ''}`);
-      } else {
-        setUnfPaused(`@${s.handle} ${r.detail}`);
+      /** ⭐ 闸门 / 去主页 / 点 / 记动作 / 同一把锁里核对 / 异常即停 —— 都在主进程(能力 x.person.unfollow) */
+      const r = await unfollowPerson(wsId, who, `求关 ${s.askDays} 天没回关`);
+      if ('blocked' in r) { setMsg(r.blocked); void unfollowHaltOf(wsId).then(setUnfPaused); return; }
+      if (r.halted) {
+        setUnfPaused(r.halted);
         setMsg(`@${s.handle} 没取关成:${r.detail} —— 已暂停取关`);
+      } else {
+        setMsg(`@${s.handle} ${r.done ? '已取关' : '本来就没关注'} · 核对:${r.verify?.text ?? '?'}${r.warning ? ` · ⚠️ ${r.warning}` : ''}`);
       }
     } finally {
       setUnfDoing(null);
@@ -135,18 +136,12 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     setViewing(c.rest_id);
     if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
-    const lock = await acquireXPage(wcId, CHECK_BUSY);
-    if (!lock.ok) { setMsg(`${lock.why},没跳转(跳走会打断)`); return; }
     /**
-     * ⭐ 去他主页的同时读资料、把「我和他」的关系写回库(与运营人卡的「点人顺手核对」同一个函数)。
+     * ⭐ 去他主页的同时读资料、把「我和他」的关系写回库(与运营人卡的「点人顺手核对」同一个能力 x.person.verify)。
      * 用户 10-21:「点击观察到已经互关过的推友,就应该移除这个列表吧?」—— 读到我已经关注他 → 从候选里拿掉,说清楚。
      */
-    let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
-    try {
-      v = await readProfileAndRefresh({ rest_id: c.rest_id, handle: c.handle }, wcId);
-    } finally {
-      await releaseXPage(lock.token);
-    }
+    const v = await verifyPerson(wsId, { rest_id: c.rest_id, handle: c.handle });
+    if ('refused' in v) { setMsg(`${v.refused},没跳转(跳走会打断)`); return; }
     if (v.kind === 'miss') { setMsg(`跳过去了,但没读到他的关系:${v.text}`); return; }
     if (v.rec.following === true) {
       setCands((list) => (list ?? []).filter((x) => x.rest_id !== c.rest_id));
@@ -168,14 +163,8 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
     if (!opening) return;
     if (wcId === null) { setMsg('X 网页没开,没跳转'); return; }
     if (qs?.current) { setMsg(`正在关注 @${qs.current.handle},等它关完再点(跳走会打断关注)`); return; }
-    const lock = await acquireXPage(wcId, CHECK_BUSY);
-    if (!lock.ok) { setMsg(`${lock.why},没跳转(跳走会打断)`); return; }
-    let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
-    try {
-      v = await readProfileAndRefresh({ rest_id: x.person, handle: x.handle }, wcId);
-    } finally {
-      await releaseXPage(lock.token);
-    }
+    const v = await verifyPerson(wsId, { rest_id: x.person, handle: x.handle });
+    if ('refused' in v) { setMsg(`${v.refused},没跳转(跳走会打断)`); return; }
     if (v.kind === 'miss') { setMsg(`@${x.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
     setMsg(v.kind === 'same' ? null : `@${x.handle}:${v.text}${v.rec.followedBy === true && x.status !== 'back' ? ' —— 他已经回关了' : ''}`);
     /** 关系写回库了 → 名单重算、往来重读 */
@@ -276,7 +265,7 @@ export function FollowStep({ wsId, candidates }: { wsId: string; candidates: num
           <div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <span style={{ fontSize: 12, opacity: 0.7 }}>点名字看你们的往来</span>
-              {unfPaused && <button type="button" style={{ fontSize: 11 }} onClick={() => { setUnfPaused(null); setMsg(null); }} title={unfPaused}>恢复取关</button>}
+              {unfPaused && <button type="button" style={{ fontSize: 11 }} onClick={() => { void resumeUnfollowOf(wsId).then(() => unfollowHaltOf(wsId)).then(setUnfPaused); setMsg(null); }} title={unfPaused}>恢复取关</button>}
             </div>
             <div style={{ fontSize: 12, marginTop: 4 }}>
               {fs && fs.statuses.length === 0 && <span style={{ opacity: 0.6 }}>还没求关过谁</span>}

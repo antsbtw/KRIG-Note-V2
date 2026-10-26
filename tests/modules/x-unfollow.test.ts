@@ -100,36 +100,35 @@ describe('⭐⭐⭐ 取关闸门', () => {
 describe('⭐⭐⭐ 取关流程(页面)', () => {
   const PAGE = read('src/modules/x/XOpsPeople.tsx');
   const fn = PAGE.slice(PAGE.indexOf('const unfollow = useCallback'), PAGE.indexOf('/** 单击:选中'));
-  /** ⭐ 2026-10-19 取关核心抽到 x-unfollow-run.ts(运营人卡 + 任务页「满 N 天没回关」共用一份) */
-  const RUN = read('src/modules/x/x-unfollow-run.ts');
-  const core = RUN.slice(RUN.indexOf('export async function unfollowOnce'), RUN.indexOf('export type VerifyOutcome'));
+  /**
+   * ⭐ 2026-10-26 取关核心搬到主进程 x-person-act.ts unfollowOn(能力 x.person.unfollow;运营人卡 + 任务页共用一份)。
+   * 占网页 / 暂停检查在执行器(page / preflight),行为见 x-person-act.test.ts;这里钉函数里的顺序和留痕。
+   */
+  const RUN = read('src/modules/x/x-person-act.ts');
+  const core = RUN.slice(RUN.indexOf('export async function unfollowOn'));
 
-  it('顺序:暂停检查 → 调共用取关 → 核对;共用取关里:闸门 → 占住网页 → 去主页 → 点 → 记录', () => {
-    expect(fn.length).toBeGreaterThan(600);
+  it('顺序:页面调主进程取关 → 显示核对;主进程里:闸门 → 去主页 → 点 → 记录 → 同一把锁里核对', () => {
+    expect(fn.length).toBeGreaterThan(400);
     expect(core.length).toBeGreaterThan(1200);
     const at = (src: string, s: string): number => { const i = src.indexOf(s); expect(i, `找不到 ${s}`).toBeGreaterThan(-1); return i; };
-    const page = ['if (unfollowPaused !== null)', 'await unfollowOnce(', 'await runVerify(p);'].map((x) => at(fn, x));
+    const page = ['await unfollowPerson(workspaceId, p)', "if ('blocked' in r)", 'if (r.halted)', 'showVerify(p, r.verify)'].map((x) => at(fn, x));
     expect(page).toEqual([...page].sort((a, b) => a - b));
     const order = [
-      "op: 'unfollowGate'",
+      'await readUnfollowGate(',
       'gate.allowed ? undefined : gate.reason',
-      'await acquireXPage(wcId, busyLabel)',
-      "op: 'goto'",
-      'scriptId: X_SCRIPTS.unfollow',
-      "op: 'logAction'",
+      'ports.goto(X_PAGE_NAME.profile',
+      'ports.runScript(X_SCRIPTS.unfollow',
+      'await appendAction({',
+      'await verifyPersonOn(wcId, who)',
     ].map((x) => at(core, x));
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it('⭐⭐ 成功失败都留记录;不成功(且不是「本来就没关注」)就暂停,要人点恢复', () => {
+  it('⭐⭐ 成功失败都留记录;不成功(且不是「本来就没关注」)就暂停(主进程一份),要人点恢复', () => {
     expect(core).toMatch(/result: result\.done \? 'ok' : 'failed'/);
-    expect(fn).toMatch(/\} else \{\s*\/\*\*[^*]*\*\/\s*setUnfollowPaused\(/);
-    expect(PAGE).toMatch(/onClick=\{\(\) => \{ setUnfollowPaused\(null\);/);
-  });
-
-  it('⭐⭐ 取关期间占住网页(主进程的锁),拿不到就不动;结束(含出错)一定放掉', () => {
-    expect(core).toMatch(/const lock = await acquireXPage\(wcId, busyLabel\);\s*if \(!lock\.ok\) return \{ blocked:/);
-    expect(core).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);/);
+    expect(core).toMatch(/haltByWs\.set\(wsId, halted\)/);
+    expect(fn).toMatch(/if \(r\.halted\) \{ setUnfollowPaused\(r\.halted\); return; \}/);
+    expect(PAGE).toMatch(/onClick=\{\(\) => \{ void resumeUnfollowOf\(workspaceId\)/);
   });
 
   it('⭐ 只有「我关注他」的人才出现取关入口', () => {

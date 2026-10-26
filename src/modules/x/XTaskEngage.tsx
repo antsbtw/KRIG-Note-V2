@@ -10,8 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
-import { X_PAGE_NAME } from './x-pages';
-import { acquireXPage, readProfileAndRefresh, releaseXPage, xPageBusy } from './x-unfollow-run';
+import { openInLeft, verifyPerson } from './x-unfollow-run';
 import { getXHostState } from './x-host-registry';
 import type { EngageOverview } from './x-engage-repo';
 import type { RecentPerson } from './x-engage';
@@ -57,10 +56,9 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const show = async (page: 'profile' | 'status', params: Record<string, string>): Promise<void> => {
     const wcId = getXHostState(wsId)?.wcId;
     if (wcId === undefined) { setViewNote('X 网页没开'); return; }
-    const busy = await xPageBusy(wcId);
-    if (busy !== null) { setViewNote(`${busy},没跳转(跳走会打断)`); return; }
-    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME[page], params });
-    setViewNote(go.status === 'failed' ? `没跳过去:${(go as { reason?: string }).reason ?? '?'}` : null);
+    /** ⭐ 打开那一下占着网页(主进程能力 x.page.open);被占着 / 没打开都说出来 */
+    const why = await openInLeft(wsId, page === 'profile' ? { handle: params.handle } : { tweetId: params.tweetId });
+    setViewNote(why === null ? null : `${why},没跳转(跳走会打断)`);
   };
 
   /**
@@ -70,14 +68,9 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const openPerson = async (p: RecentPerson): Promise<void> => {
     const wcId = getXHostState(wsId)?.wcId;
     if (wcId === undefined) { setViewNote('X 网页没开'); return; }
-    const lock = await acquireXPage(wcId, '任务:正在核对这个人');
-    if (!lock.ok) { setViewNote(`${lock.why},没跳转(跳走会打断)`); return; }
-    let v: Awaited<ReturnType<typeof readProfileAndRefresh>>;
-    try {
-      v = await readProfileAndRefresh({ rest_id: p.restId, handle: p.handle }, wcId);
-    } finally {
-      await releaseXPage(lock.token);
-    }
+    /** ⭐ 核对在主进程(能力 x.person.verify),期间占着网页 */
+    const v = await verifyPerson(wsId, { rest_id: p.restId, handle: p.handle });
+    if ('refused' in v) { setViewNote(`${v.refused},没跳转(跳走会打断)`); return; }
     if (v.kind === 'miss') { setViewNote(`@${p.handle} 跳过去了,但关系没核对上:${v.text}`); return; }
     const still = v.rec.following === true && v.rec.followedBy === true;
     setViewNote(still ? (v.kind === 'same' ? null : `@${p.handle}:${v.text}`)

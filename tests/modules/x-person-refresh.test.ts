@@ -99,11 +99,12 @@ describe('接线', () => {
 
   it('⭐⭐ 核对:去主页 + 只等主页资料那一条 + 不多滚 + 有时限', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
-    expect(fn.length).toBeGreaterThan(500);
-    expect(fn).toMatch(/await readProfileAndRefresh\(p, wcId\)/);
-    /** 2026-10-19 去主页读资料抽到 x-unfollow-run.ts(运营核对 + 任务页取关后核对共用) */
-    const RUN = read('src/modules/x/x-unfollow-run.ts');
-    const rd = RUN.slice(RUN.indexOf('export async function readProfileAndRefresh'));
+    expect(fn.length).toBeGreaterThan(200);
+    expect(fn).toMatch(/await verifyPerson\(workspaceId, p\)/);
+    /** 2026-10-26 去主页读资料搬到主进程 x-person-act.ts verifyPersonOn(运营核对 + 取关后核对共用) */
+    const RUN = read('src/modules/x/x-person-act.ts');
+    const rd = RUN.slice(RUN.indexOf('export async function verifyPersonOn'));
+    expect(rd.length).toBeGreaterThan(300);
     expect(rd).toMatch(/gotoPage: \{ name: X_PAGE_NAME\.profile/);
     expect(rd).toMatch(/pageUrlIncludes: \[PROFILE_ENDPOINT\], wantPages: 1, maxRounds: 3, maxMs: 10_000/);
     expect(PROFILE_ENDPOINT).toBe('UserByScreenName');
@@ -111,13 +112,14 @@ describe('接线', () => {
 
   it('⭐⭐⭐ 操作台采集中不跳;自己核对期间占住网页,结束(含出错)一定放掉', () => {
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
-    /** 2026-10-23 起占网页走主进程的锁(x-page-lock):拿不到就不跳;核对是串行的(openInX 排队),不需要「自己的忙不算」的豁免 */
-    expect(fn).toMatch(/const lock = await acquireXPage\(wcId, VERIFY_BUSY\);\s*if \(!lock\.ok\)/);
     /**
-     * ⚠️ 第一版只看「finally 后 80 字内出现清忙」—— 注入「把它挪到 finally 块外面」仍全绿
-     * (还在 80 字内),而那样一出错就永远挂着「忙」。改成钉 **finally 块本身**的内容。
+     * 2026-10-26 起占网页在执行器(能力 x.person.verify 声明 page,结束含出错一定放 —— 执行器测试 + x-person-act.test 钉着);
+     * 界面这边:被占着 → 说「没跳转」,不留「核对中」的残影
      */
-    expect(fn).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);\s*\}/);
+    expect(fn).toMatch(/if \('refused' in r\) \{\s*setVerify\(\(v\) => \{ const n = \{ \.\.\.v \}; delete n\[p\.rest_id\]; return n; \}\);/);
+    const CAPS = read('src/modules/x/x-capabilities-act.ts');
+    const vb = CAPS.slice(CAPS.indexOf("id: 'x.person.verify'"), CAPS.indexOf("id: 'x.person.unfollow'"));
+    expect(vb).toMatch(/page: \(i\) => `核对 @\$\{i\.handle\}`/);
   });
 
   it('⭐⭐ 一次只核对一个;核对中再点只记住最后一个', () => {

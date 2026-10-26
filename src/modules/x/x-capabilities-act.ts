@@ -18,6 +18,9 @@ import { draftAskReply } from './x-ask-draft';
 import { replyLangOf, vpnLink } from './x-vpn-help';
 import { runAsk } from './x-ask-run';
 import { addToFollowQueue, controlFollowQueue, followQueueStatus, type FollowItem } from './x-follow-queue';
+import { resumeUnfollow, unfollowHalted, unfollowOn, verifyPersonOn } from './x-person-act';
+import { webviewPorts } from './x-collect-ports';
+import { X_PAGE_NAME } from './x-pages';
 
 const input = <I extends O>(def: Parameters<typeof xCap<I>>[1]): void => xCap('input', def);
 const output = <I extends O>(def: Parameters<typeof xCap<I>>[1]): void => xCap('output', def);
@@ -134,6 +137,66 @@ export function registerXActCapabilities(): void {
       console.log(`[x.follow] ${i.wsId} resume`);
       return followQueueStatus(i.wsId);
     },
+  });
+
+  // ── 第 4 步 4a:业务界面不再直接驱动网页 ──
+
+  control({
+    id: 'x.page.open', describe: '左边 X 网页打开某人主页 / 某条推文(打开那一下占着网页,别人在用就不跳)',
+    inputDoc: { ...WS, page: 'profile / status', handle: 'page = profile 时:他的 handle', tweetId: 'page = status 时:推文 id' },
+    parse: (o) => {
+      if (o.page !== 'profile' && o.page !== 'status') throw new Bad('page 只认 profile / status');
+      return o.page === 'profile'
+        ? { wsId: str(o, 'wsId'), page: 'profile' as const, handle: str(o, 'handle'), tweetId: undefined }
+        : { wsId: str(o, 'wsId'), page: 'status' as const, handle: undefined, tweetId: digits(o, 'tweetId') };
+    },
+    page: (i) => (i.page === 'profile' ? `打开 @${i.handle} 的主页` : `打开推文 ${i.tweetId}`),
+    subject: (i) => (i.tweetId ? `x_tweet:${i.tweetId}` : undefined),
+    run: async (i, _a, page) => {
+      const go = i.page === 'profile'
+        ? await webviewPorts(page.wcId).goto(X_PAGE_NAME.profile, { handle: i.handle as string })
+        : await webviewPorts(page.wcId).goto(X_PAGE_NAME.status, { tweetId: i.tweetId as string });
+      if (!go.ok) throw capFailed(`没打开:${go.reason ?? '?'}`);
+      return { opened: true };
+    },
+  });
+
+  input({
+    id: 'x.person.verify', describe: '点人核对:开他主页读资料,把资料和「我和他」的关系写回库(读到什么返回什么,没读到是 miss)',
+    inputDoc: { ...WS, restId: '他的数字 id', handle: '他的 handle' },
+    parse: (o) => ({ wsId: str(o, 'wsId'), restId: digits(o, 'restId'), handle: str(o, 'handle') }),
+    page: (i) => `核对 @${i.handle}`,
+    subject: (i) => `x_author:${i.restId}`,
+    run: (i, _a, page) => verifyPersonOn(page.wcId, { restId: i.restId, handle: i.handle }),
+  });
+
+  output({
+    id: 'x.person.unfollow', describe: '取关一个人:闸门 → 去他主页点取关 → 记动作 → 同一把锁里核对;没成 → 这个号的取关暂停,要人恢复',
+    inputDoc: { ...WS, restId: '他的数字 id', handle: '他的 handle', reason: '可选:为什么取关(进动作记录)' },
+    parse: (o) => ({ wsId: str(o, 'wsId'), restId: digits(o, 'restId'), handle: str(o, 'handle'), reason: optStr(o, 'reason') }),
+    preflight: (i) => {
+      const h = unfollowHalted(i.wsId);
+      return h ? `取关已暂停:${h} —— 看过原因后点「恢复」` : null;
+    },
+    page: (i) => `取关 @${i.handle}`,
+    subject: (i) => `x_author:${i.restId}`,
+    run: async (i, _a, page) => {
+      const r = await unfollowOn(i.wsId, page.wcId, { restId: i.restId, handle: i.handle }, i.reason);
+      if (r.halted) throw capFailed(`没取关成:${r.detail} —— 已暂停取关`, r);
+      return r;
+    },
+  });
+
+  input({
+    id: 'x.unfollow.halt', describe: '这个号的取关是不是暂停着(一次没成就停),停着的话为什么', inputDoc: WS,
+    parse: (o) => ({ wsId: str(o, 'wsId') }),
+    run: (i) => ({ halted: unfollowHalted(i.wsId) }),
+  });
+
+  control({
+    id: 'x.unfollow.resume', describe: '恢复取关(人看过暂停原因之后)', inputDoc: WS,
+    parse: (o) => ({ wsId: str(o, 'wsId') }),
+    run: (i) => ({ resumed: resumeUnfollow(i.wsId) }),
   });
 
   control({

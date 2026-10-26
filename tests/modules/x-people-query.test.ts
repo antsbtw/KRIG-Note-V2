@@ -110,8 +110,8 @@ describe('人卡与接线', () => {
   it('⭐ 「人」类真的渲染人页;页面不写死页名', () => {
     expect(read('src/modules/x/XOpsView.tsx')).toMatch(/category === 'people' && <XOpsPeople key=\{accountKey\} workspaceId=\{workspaceId\} \/>/);
     const PAGE = read('src/modules/x/XOpsPeople.tsx');
-    /** 2026-10-19 去主页的动作(核对 / 取关)抽到 x-unfollow-run.ts —— 两处都不许写死页名 */
-    const RUN = read('src/modules/x/x-unfollow-run.ts');
+    /** 2026-10-26 去主页的动作(核对 / 取关)搬到主进程 x-person-act.ts —— 两处都不许写死页名 */
+    const RUN = read('src/modules/x/x-person-act.ts');
     expect(RUN).toContain('X_PAGE_NAME.profile');
     expect(PAGE).not.toContain("'x.profile'");
     expect(RUN).not.toContain("'x.profile'");
@@ -202,14 +202,13 @@ describe('⭐⭐ 关联:点人 → X 网页跳到他主页(2026-10-08)', () => {
     /** 2026-10-09 起导航改为「去主页并核对」(harvest + gotoPage),在 runVerify 里 */
     const fn = PAGE.slice(PAGE.indexOf('const runVerify'), PAGE.indexOf('const openInX'));
     expect(fn.length).toBeGreaterThan(200);
-    /** 2026-10-23 起「问忙不忙」= 申请主进程的锁(x-page-lock),拿不到就不跳 */
-    const busy = fn.indexOf('await acquireXPage(wcId');
-    /** 2026-10-19 去主页 + 读资料抽到 readProfileAndRefresh(x-unfollow-run.ts) */
-    const go = fn.indexOf('readProfileAndRefresh(');
-    expect(busy, '没问忙不忙').toBeGreaterThan(-1);
-    expect(go).toBeGreaterThan(-1);
-    expect(busy, '先 goto 后问忙 —— 采集已经被打断了').toBeLessThan(go);
-    expect(fn).toMatch(/if \(!lock\.ok\) \{ setFollowNote\(`\$\{lock\.why\},没跳转/);
+    /**
+     * 2026-10-26 起核对在主进程(能力 x.person.verify):占锁 → 去主页 → 读,一步里做完;占不到 → refused,界面说「没跳转」
+     * (先占锁后跳转的顺序在执行器里,行为见 x-person-act.test.ts)
+     */
+    const call = fn.indexOf('await verifyPerson(workspaceId, p)');
+    expect(call, '没走主进程核对').toBeGreaterThan(-1);
+    expect(fn).toMatch(/if \('refused' in r\) \{[\s\S]{0,160}setFollowNote\(`\$\{r\.refused\},没跳转/);
   });
 
   it('⭐⭐ 操作台开采前先占住网页(被占着就不开采并说出来),结束时放自己的锁', () => {

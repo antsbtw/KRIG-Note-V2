@@ -136,6 +136,12 @@ const CAP_OF_OP: Readonly<Record<string, string | ((p: XDataInvoke) => string)>>
   askRun: 'x.ask.run',
   followQueueAdd: 'x.followQueue.add',
   /** 暂停 / 清空 = 普通控制;继续 = 对外动作(接着去关注)—— 按 action 分到两个能力 */
+  // 第 4 步 4a:业务界面不再直接驱动网页
+  personVerify: 'x.person.verify',
+  personUnfollow: 'x.person.unfollow',
+  unfollowHalt: 'x.unfollow.halt',
+  unfollowResume: 'x.unfollow.resume',
+  pageOpen: 'x.page.open',
   followQueueControl: (p) => ((p as { action?: string }).action === 'resume' ? 'x.followQueue.resume' : 'x.followQueue.control'),
 };
 

@@ -9,8 +9,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { getXHostState } from './x-host-registry';
-import { X_PAGE_NAME } from './x-pages';
-import { xPageBusy } from './x-unfollow-run';
+import { openInLeft } from './x-unfollow-run';
 import { XTabs } from './XTabs';
 import { AskRun, type AskWho } from './XTaskAsk';
 import type { VpnOverview, VpnPostRow } from './x-vpn-run';
@@ -81,10 +80,9 @@ export function VpnHelpTask({ wsId }: { wsId: string }): ReactElement {
   const show = async (tweetId: string): Promise<void> => {
     const wcId = getXHostState(wsId)?.wcId;
     if (wcId === undefined) { setMsg('X 网页没开'); return; }
-    const b = await xPageBusy(wcId);
-    if (b !== null) { setMsg(`${b},没跳转(跳走会打断)`); return; }
-    const go = await window.electronAPI!.webDomInvoke({ op: 'goto', pageRef: { wcId }, name: X_PAGE_NAME.status, params: { tweetId } });
-    if (go.status === 'failed') setMsg(`没跳过去:${(go as { reason?: string }).reason ?? '?'}`);
+    /** ⭐ 打开那一下占着网页(主进程能力 x.page.open);被占着 / 没打开都说出来 */
+    const why = await openInLeft(wsId, { tweetId });
+    if (why !== null) setMsg(`${why},没跳转(跳走会打断)`);
   };
 
   const whoOf = (p: VpnPostRow): AskWho | null => (p.authorRestId && p.handle ? { restId: p.authorRestId, handle: p.handle, name: p.name, hisTweetId: p.tweetId } : null);

@@ -254,6 +254,15 @@ export type XDataInvoke =
   | { readonly op: 'pageAcquire'; readonly wcId: number; readonly purpose: string }
   | { readonly op: 'pageRelease'; readonly token: string }
   | { readonly op: 'pageBusy'; readonly wcId: number }
+  /**
+   * ⭐⭐ 第 4 步 4a(2026-10-26):取关 / 核对 / 左边打开某页都在主进程(能力 x.person.unfollow / verify / x.page.open)
+   * renderer 不再自己 webDomInvoke 驱动网页
+   */
+  | { readonly op: 'personVerify'; readonly wsId: string; readonly restId: string; readonly handle: string }
+  | { readonly op: 'personUnfollow'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly reason?: string }
+  | { readonly op: 'unfollowHalt'; readonly wsId: string }
+  | { readonly op: 'unfollowResume'; readonly wsId: string }
+  | { readonly op: 'pageOpen'; readonly wsId: string; readonly page: 'profile' | 'status'; readonly handle?: string; readonly tweetId?: string }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
   /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
   | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }

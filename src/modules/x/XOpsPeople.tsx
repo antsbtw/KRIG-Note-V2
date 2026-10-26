@@ -35,7 +35,7 @@ import type { XUserRecord } from './x-user-audit';
 import type { CollectOnWebviewResult } from './x-collect-on-webview';
 import type { CirclePerson } from './x-friend-circle';
 import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
-import { acquireXPage, readProfileAndRefresh, releaseXPage, unfollowOnce, type UnfollowOutcome } from './x-unfollow-run';
+import { acquireXPage, releaseXPage, resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson, type UnfollowOutcome, type VerifyOutcome } from './x-unfollow-run';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XPersonLists } from './XPersonLists';
 import { describeProgress, type BgJob } from './x-bg-job';
@@ -138,19 +138,13 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
   /**
    * ⭐⭐ 让 X 网页打开这个人的主页,并**顺手核对**。
    * ⚠️ 不跳的情况都说出来:X 网页没开 / 操作台正在采集(跳走会打断采集)。
-   * ⚠️ 核对期间占住 X 网页(主进程的锁,x-page-lock),免得操作台 / 后台同时在这个页面上采;被占着就不跳,说出是谁。
+   * ⚠️ 核对在主进程(能力 x.person.verify,2026-10-26 第 4 步):期间占住 X 网页,免得操作台 / 后台同时在这个页面上采;
+   *    被占着就不跳,说出是谁。
    */
-  const VERIFY_BUSY = '运营正在核对这个人';
-  const runVerify = useCallback(async (p: PersonRow): Promise<void> => {
-    if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
-    const lock = await acquireXPage(wcId, VERIFY_BUSY);
-    if (!lock.ok) { setFollowNote(`${lock.why},没跳转(跳走会打断采集)`); return; }
-    setFollowNote(null);
-    setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
-    let result: { kind: 'same' | 'changed' | 'new' | 'miss'; text: string };
-    try {
-      const r = await readProfileAndRefresh(p, wcId);
-      result = { kind: r.kind, text: r.text };
+  /** 核对结果显示到人卡 / 列表(取关后的核对结果也走这里) */
+  const showVerify = useCallback((p: PersonRow, r: VerifyOutcome): void => {
+    const result = { kind: r.kind, text: r.text };
+    {
       if (r.kind !== 'miss') {
         const rec = r.rec;
         patchRow(rec);
@@ -169,11 +163,21 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
         }
         if (r.changes.length > 0 || r.kind === 'new') loadOverview();
       }
-    } finally {
-      await releaseXPage(lock.token);
     }
     setVerify((v) => ({ ...v, [p.rest_id]: { ...result, at: Date.now() } }));
-  }, [wcId, loadOverview]);
+  }, [loadOverview]);
+  const runVerify = useCallback(async (p: PersonRow): Promise<void> => {
+    if (wcId == null) { setFollowNote('X 网页没开,没跳转'); return; }
+    setVerify((v) => ({ ...v, [p.rest_id]: { kind: 'running', text: '核对中…', at: Date.now() } }));
+    const r = await verifyPerson(workspaceId, p);
+    if ('refused' in r) {
+      setVerify((v) => { const n = { ...v }; delete n[p.rest_id]; return n; });
+      setFollowNote(`${r.refused},没跳转(跳走会打断采集)`);
+      return;
+    }
+    setFollowNote(null);
+    showVerify(p, r);
+  }, [wcId, workspaceId, showVerify]);
 
   /** ⭐ 一次只核对一个;核对中又点了别人,只记住**最后点的那个** */
   const openInX = useCallback((p: PersonRow): void => {
@@ -345,38 +349,35 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
    * ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续。
    * (红线取消后挡封号风险的就剩这些;X 弹验证 / 改版时连着硬点只会更糟)
    */
+  /** ⚠️ 暂停在主进程一份(按 workspace,2026-10-26):任务页取关没成,这里也看得见;这里只是显示 */
   const [unfollowPaused, setUnfollowPaused] = useState<string | null>(null);
   const [unfollowing, setUnfollowing] = useState<string | null>(null);
-  const UNFOLLOW_BUSY = '运营正在取关';
+  useEffect(() => { void unfollowHaltOf(workspaceId).then(setUnfollowPaused); }, [workspaceId]);
 
   const unfollow = useCallback(async (p: PersonRow): Promise<void> => {
-    if (unfollowPaused !== null) { setFollowNote(`取关已暂停:${unfollowPaused} —— 看过原因后点「恢复」`); return; }
     if (wcId == null) { setFollowNote('X 网页没开,没法取关'); return; }
-    /** ⭐ 闸门 / 让路 / 去主页 / 点 / 记动作 —— 与任务页同一份(x-unfollow-run.ts) */
+    /** ⭐ 闸门 / 让路 / 去主页 / 点 / 记动作 / 同一把锁里核对 / 异常即停 —— 都在主进程(能力 x.person.unfollow) */
     setUnfollowing(p.rest_id);
     let r: UnfollowOutcome;
     try {
-      r = await unfollowOnce(p, wcId, UNFOLLOW_BUSY, undefined, workspaceId);
+      r = await unfollowPerson(workspaceId, p);
     } finally {
       setUnfollowing(null);
     }
-    if (r.gate) setGate(r.gate);
-    if ('blocked' in r) { setFollowNote(r.blocked); return; }
-    loadGate();
-
-    if (r.done) {
-      setFollowNote(r.warning ? `⚠️ 已取关 @${p.handle},提醒:${r.warning}` : null);
-      /** ⑤ 取关后立刻核对 —— 读回他的主页,确认关系真变了再更新库(并按分组移出列表) */
-      await runVerify(p);
-    } else if (r.state === 'not-following') {
-      /** 本来就没关注:不算异常,核对一下把库里的「我关注」纠正过来 */
-      setFollowNote(`@${p.handle} 本来就没关注,已重新核对`);
-      await runVerify(p);
-    } else {
-      /** ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续 */
-      setUnfollowPaused(`@${p.handle} ${r.detail}`);
+    if ('blocked' in r) {
+      setFollowNote(r.blocked);
+      /** 被拒可能就是因为暂停着 —— 以主进程为准刷一下 */
+      void unfollowHaltOf(workspaceId).then(setUnfollowPaused);
+      return;
     }
-  }, [unfollowPaused, wcId, loadGate, runVerify]);
+    setGate(r.gate);
+    loadGate();
+    if (r.halted) { setUnfollowPaused(r.halted); return; }
+    if (r.done) setFollowNote(r.warning ? `⚠️ 已取关 @${p.handle},提醒:${r.warning}` : null);
+    else setFollowNote(`@${p.handle} 本来就没关注,已重新核对`);
+    /** ⑤ 取关后的核对在主进程同一把锁里做完了 —— 这里只显示(并按分组移出列表) */
+    if (r.verify) showVerify(p, r.verify);
+  }, [wcId, workspaceId, loadGate, showVerify]);
 
   /** 单击:选中 + X 网页跟着跳 —— **不开人卡** */
   const selectPerson = (p: PersonRow): void => {
@@ -630,7 +631,7 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             {unfollowPaused !== null && (
               <div style={S.error}>
                 ⏸ 取关已暂停:{unfollowPaused}(X 改版、弹验证或限流时连着硬点只会更糟)
-                <button type="button" style={S.linkBtn} onClick={() => { setUnfollowPaused(null); setFollowNote(null); }}>恢复</button>
+                <button type="button" style={S.linkBtn} onClick={() => { void resumeUnfollowOf(workspaceId).then(() => unfollowHaltOf(workspaceId)).then(setUnfollowPaused); setFollowNote(null); }}>恢复</button>
               </div>
             )}
             {followNote !== null && <div style={S.muted}>⚠️ {followNote}</div>}
