@@ -10,9 +10,6 @@
 
 import { ipcMain, webContents, type WebContents } from 'electron';
 
-import { traceRecorder } from '@platform/main/web-capability/wiring/runtime';
-
-import { appendAction } from './x-ops-actions-repo';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import type { XDataInvoke, XDataResult } from './x-data-types';
 import { clearXHostState, getXHostState, setXHostState } from './x-host-registry';
@@ -20,8 +17,6 @@ import { clearXHostState, getXHostState, setXHostState } from './x-host-registry
 import { acquirePage, pageBusy, releasePage, revokePage } from './x-page-lock';
 import { revokeLocks } from '@platform/main/flow/resource-lock';
 import { execute, type CapResult } from '@platform/main/capability/capability';
-
-import { tracePersonProgress } from './x-person-collect';
 
 const failed = (reason: string): XDataResult => ({ status: 'failed', reason });
 
@@ -142,6 +137,13 @@ const CAP_OF_OP: Readonly<Record<string, string | ((p: XDataInvoke) => string)>>
   unfollowHalt: 'x.unfollow.halt',
   unfollowResume: 'x.unfollow.resume',
   pageOpen: 'x.page.open',
+  // 第 4 步 4b:流程
+  engageScreenBatch: 'x.engage.screenBatch',
+  vpnJudgeAll: 'x.vpn.judgeAll',
+  blueMutualFind: 'x.blueMutual.find',
+  personCollectRange: 'x.person.collectRange',
+  flowRuns: 'flow.runs',
+  flowStop: 'flow.stop',
   followQueueControl: (p) => ((p as { action?: string }).action === 'resume' ? 'x.followQueue.resume' : 'x.followQueue.control'),
 };
 
@@ -237,34 +239,6 @@ async function handle(p: XDataInvoke, sender?: WebContents): Promise<XDataResult
         /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 只做校验 + 调 repo */
         /** ⭐⭐ 此刻状态(运营顶栏 / 人卡「在不在跑」)+ 这个号各状态任务数 */
         /** ⭐ 运营设置 / 取关闸门 / 动作记录(2026-10-10) */
-        case 'logAction': {
-          const e = p.entry;
-          if (!e || e.action !== 'unfollow' || !e.targetRestId || !e.targetHandle
-            || (e.decidedBy !== 'human' && e.decidedBy !== 'ai') || (e.result !== 'ok' && e.result !== 'failed')) {
-            return failed('[x.data] logAction 的记录不完整');
-          }
-          await appendAction(e);
-          /** ⭐ 动作也打到主进程日志 —— 人看的那块屏(feedback-log-where-the-human-looks) */
-          console.log(`[x.ops] ${e.decidedBy === 'human' ? '人' : 'AI'} ${e.action} @${e.targetHandle} → ${e.result}${e.detail ? `(${e.detail})` : ''}`);
-          traceRecorder.lifecycle({
-            layer: 'web.net', event: `x-action-${e.result}`, pageId: 'x-data',
-            detail: { action: e.action, target: e.targetHandle, restId: e.targetRestId, by: e.decidedBy, detail: e.detail ?? '' },
-          });
-          return { status: 'ok', value: { logged: true } };
-        }
-
-        case 'logPersonProgress':
-          /** ⭐ 与主进程采集时写的是同一份(`x-person-collect.ts`):event: 'x-person-progress' */
-          tracePersonProgress(p.entry);
-          return { status: 'ok', value: { logged: true } };
-
-        case 'logPersonCollect': {
-          const e = p.entry;
-          console.log(`[x.people] 采 @${e.handle} ${e.tab}(${e.range}):${e.pages} 页 ${e.records} 条(新 ${e.inserted})—— ${e.stopReason || '(无停因)'}`);
-          traceRecorder.lifecycle({ layer: 'web.net', event: 'x-person-collect', pageId: 'x-data', detail: { ...e } });
-          return { status: 'ok', value: { logged: true } };
-        }
-
         /**
          * ⭐⭐⭐ 一页一存、存完回读(2026-10-16,逐页账)。
          * ⚠️ 存库**走同一条路**(递归调 saveTweets / saveUsers 分支):记账、留痕、按号写关系、本批统计都照旧,

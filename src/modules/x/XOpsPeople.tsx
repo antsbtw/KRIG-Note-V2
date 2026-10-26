@@ -25,27 +25,21 @@
  * ⚠️ 操作台采集中不跳(跳走会打断采集),并说出来;已经在他主页就不重载。
  */
 
-import {
-  useCallback, useEffect, useRef, useState, useSyncExternalStore,
-  type CSSProperties, type ReactElement,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { subscribeXHost, getXHostState } from './x-host-registry';
 import type { XUserRecord } from './x-user-audit';
-import type { CollectOnWebviewResult } from './x-collect-on-webview';
+
 import type { CirclePerson } from './x-friend-circle';
-import { LIVE_PAGE_CAP, PERSON_TABS, TIMELINE_RANGES, rangeStart, worthReloadRetry, type TimelineRange } from './x-person-timeline';
-import { acquireXPage, releaseXPage, resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson, type UnfollowOutcome, type VerifyOutcome } from './x-unfollow-run';
+import { LIVE_PAGE_CAP, TIMELINE_RANGES, type TimelineRange } from './x-person-timeline';
+import { resumeUnfollowOf, unfollowHaltOf, unfollowPerson, verifyPerson, type UnfollowOutcome, type VerifyOutcome } from './x-unfollow-run';
+import { runFlow, stopFlow } from './x-flow-ui';
 import { XPersonTimeline } from './XPersonTimeline';
 import { XPersonLists } from './XPersonLists';
 import { describeProgress, type BgJob } from './x-bg-job';
 import { useBgStatus } from './XBgStatus';
 import { localDayStart, type OpsSettings, type UnfollowGate } from './x-ops-settings';
-import {
-  DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup,
-  type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort,
-  type PersonDetail, type PersonRow, type PersonTweet,
-} from './x-people-query';
+import { DEFAULT_PEOPLE_FILTER, PEOPLE_GROUPS, PEOPLE_SORTS, relationLabel, normalizeTags, splitTagInput, inGroup, type PeopleFilter, type PeopleGroup, type PeopleOverview, type PeopleScope, type PeopleSort, type PersonDetail, type PersonRow, type PersonTweet } from './x-people-query';
 
 const PAGE = 200;
 /** 宽于此就并排显示列表与人卡 */
@@ -55,7 +49,6 @@ const fmt = (n: number | undefined): string => (n === undefined ? '—' : n.toLo
 
 /** 互关倾向是谁定的 —— 人 > AI > 算法 */
 const INTENT_SOURCE: Readonly<Record<string, string>> = { human: '你标的', ai: 'AI', rule: '算法' };
-
 
 export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactElement {
   const [overview, setOverview] = useState<PeopleOverview | null>(null);
@@ -207,100 +200,24 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
    * ⚠️ 2026-10-10 第一版只滚动 8 轮,每页都只拿到首屏 —— 滚动触发翻页不可靠,所以改游标翻页。
    */
   const [collect, setCollect] = useState<Record<string, { running: boolean; text: string }>>({});
-  const COLLECT_BUSY = '运营正在采他的推文';
-  const cancelCollect = useRef(false);
+  /**
+   * ⭐⭐ 整串在主进程跑(流程 x.person.collectRange,2026-10-26 第 4 步):整段占着网页、按标签页采、第一次翻页被拒就重载再试、
+   * 存库、每个标签页留痕;这里只看进度。停止 = 叫停流程(它会通知正在翻页的那次停下)。
+   */
   const collectTweets = useCallback(async (p: PersonRow, range: TimelineRange): Promise<void> => {
     if (wcId == null) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: 'X 网页没开,没法采' } })); return; }
-    const lock = await acquireXPage(wcId, COLLECT_BUSY);
-    if (!lock.ok) { setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `${lock.why},先等它结束` } })); return; }
-    const start = rangeStart(range, new Date());
     const label = TIMELINE_RANGES.find((r) => r.id === range)?.label ?? range;
-    cancelCollect.current = false;
-    const parts: string[] = [];
-    const say = (msg: string): void =>
-      setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `[${label}] ${parts.join(';')}${parts.length ? ';' : ''}${msg}` } }));
-    try {
-      for (const tab of PERSON_TABS) {
-        if (cancelCollect.current) { parts.push(`${tab.label}:人点了停止`); break; }
-        /**
-         * ⭐ 最多两次:第一次翻页就 403(翻页模板没带鉴权头)时,重载这一页再试一次。
-         * ⚠️ 2026-10-12 真机:帖子页那条响应只被页面钩子收到、CDP 没收到 → 模板没有鉴权头 → 403,
-         * 只翻了 1 页就停。重载后两条通道重新收一遍,大概率拿到带头的那份。第一次采到的照样存。
-         */
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
-          say(`正在采${tab.label}…${attempt > 1 ? '(重载后第 2 次)' : ''}`);
-          /**
-           * ⭐⭐ 去那一页 + runCollect 在**主进程**跑(2026-10-13 后台策略 3a:`collectOnWebview`,
-           * 与后台 runner 共用一份)。进度每句都由主进程当场写 x-person-progress 留痕;
-           * 这里每秒问一次最新那句,只为界面上滚动显示。
-           */
-          let seenSeq = 0;
-          /** ⚠️ 采完后才回来的那次问询不许再改界面(会盖掉结果那句) */
-          let done = false;
-          const poll = setInterval(() => {
-            void xDataCall({ op: 'personCollectProgress', wcId }).then((r) => {
-              if (done) return;
-              const v = r.status === 'ok' ? r.value as { seq: number; msg?: string } | null : null;
-              if (v && v.seq !== seenSeq && v.msg) { seenSeq = v.seq; say(`${tab.label}:${v.msg}`); }
-            });
-          }, 1000);
-          let res;
-          try {
-            res = await xDataCall({
-              op: 'collectPersonTab', wcId, page: tab.name, handle: p.handle, restId: p.rest_id,
-              start: start?.toISOString(),
-              pageCap: settingsRef.current?.['collect.live_page_cap'] ?? LIVE_PAGE_CAP,
-              attempt,
-              /** ⭐ 带着上面占住的锁进去(主进程能力只核对、不再申请) */
-              ownToken: lock.token,
-            });
-          } finally {
-            done = true;
-            clearInterval(poll);
-          }
-          if (res.status === 'failed') throw new Error(res.reason);
-          const run = res.value as CollectOnWebviewResult;
-          if (!run.reached) { parts.push(`${tab.label}:没去到这一页(${run.reason})`); break; }
-          const records = [...run.records];
-          const pages = (run.paging?.rounds ?? 0) + 1;
-          const why = run.paging?.stopReason ?? '';
-          /**
-           * 第一轮翻页就被拒 = 翻页模板没带鉴权头 → 值得重载再试。
-           * ⚠️ 两种措辞都要认(2026-10-13):旧的「HTTP 403」+ 403 根治后的
-           * 「没带鉴权头」(种子一条带头的都没有时的失败语)——
-           * 只认 HTTP 403 的话,新措辞不触发重试,回复页种子没带头就只采 1 页就停
-           * (project-x-paging-403-root-cause 记过这笔连带账)。
-           */
-          const authFail = worthReloadRetry(why, run.paging?.rounds ?? 0);
-          /** ⚠️ 每页已在主进程先存过(逐页账,2026-10-16)—— 新增要加上每页累计的,否则下面整批再存恒为 0 */
-          let inserted = run.pageInserted ?? 0;
-          if (records.length > 0) {
-            const sv = await xDataCall({ op: 'saveTweets', records, ctx: { source: tab.name, wcId: wcId ?? undefined } });
-            if (sv.status === 'failed') { parts.push(`${tab.label}没存进库:${sv.reason}`); break; }
-            inserted += (sv.value as { inserted: number }).inserted;
-          }
-          /**
-           * ⭐⭐ 每个标签页(每次尝试)的结果**落留痕**(2026-10-10:停因只显示在人卡上,关了就没,
-           * 事后分不清「第一页就按时间停」还是「根本没翻页」)。成功路径也要留痕。
-           */
-          void xDataCall({
-            op: 'logPersonCollect',
-            entry: { restId: p.rest_id, handle: p.handle, range, tab: tab.name, pages, records: records.length, inserted, stopReason: `${attempt > 1 ? '[第 2 次] ' : ''}${why}` },
-          });
-          if (authFail && attempt === 1 && !cancelCollect.current) continue;
-          parts.push(`${tab.label} ${pages} 页 ${records.length} 条(新 ${inserted})${attempt > 1 ? '[重载后]' : ''}${why ? ` —— ${why}` : ''}`);
-          break;
-        }
-      }
-    } catch (e) {
-      parts.push(`出错:${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      await releaseXPage(lock.token);
-    }
-    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text: `[${label}] 采完:${parts.join(';')}` } }));
+    setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: `[${label}] 开始…` } }));
+    const r = await runFlow(
+      { op: 'personCollectRange', wsId: workspaceId, restId: p.rest_id, handle: p.handle, range },
+      'x.person.collectRange', workspaceId,
+      (run) => { if (run.msg) setCollect((c) => ({ ...c, [p.rest_id]: { running: true, text: run.msg! } })); },
+    );
+    const text = r.status === 'ok' ? (r.value as { text: string }).text : `[${label}] 没采:${r.reason}`;
+    setCollect((c) => ({ ...c, [p.rest_id]: { running: false, text } }));
     setCardRev((v) => v + 1);
     loadOverview();
-  }, [wcId, loadOverview]);
+  }, [wcId, workspaceId, loadOverview]);
 
   /** ⭐ 选时间范围的小框 —— 第一步只开放「一个月」 */
   /**
@@ -343,7 +260,6 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
     });
     loadGate();
   }, [loadGate]);
-
 
   /**
    * ⭐⭐ 异常即停 —— 一次取关没成功就暂停,要人看过原因、点「恢复」才继续。
@@ -719,9 +635,8 @@ export function XOpsPeople({ workspaceId }: { workspaceId: string }): ReactEleme
             onOpenInX={(person) => openInX(person)}
             onCollect={(person) => void collectTweets(person, 'month')}
             onCancelCollect={() => {
-              cancelCollect.current = true;
-              /** ⭐ 翻页在主进程跑 —— 光立 renderer 的标记停不住它 */
-              if (wcId != null) void xDataCall({ op: 'cancelPersonCollect', wcId });
+              /** ⭐ 叫停流程:它在标签页之间停下,并通知正在翻页的那次停(x-flows.ts onStop → cancelPersonCollect) */
+              void stopFlow('x.person.collectRange', workspaceId);
             }}
             onUnfollow={(person) => void unfollow(person)}
             unfollowing={unfollowing === cardId}

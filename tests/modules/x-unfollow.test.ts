@@ -136,13 +136,15 @@ describe('⭐⭐⭐ 取关流程(页面)', () => {
     expect(PAGE).toMatch(/\{p\.i_follow === true && \(\s*<button type="button" style=\{S\.btn\} disabled=\{unfollowing\} onClick=\{\(\) => onUnfollow\(p\)\}/);
   });
 
-  it('⭐ 接线:设置 / 闸门 / 记录三个 op 契约有、handler 有;迁移登记了', () => {
+  it('⭐ 接线:设置 / 闸门两个 op 契约有、handler 有;记动作在主进程当场记(logAction op 2026-10-26 退役);迁移登记了', () => {
     const TYPES = read('src/modules/x/x-data-types.ts');
     const IPC = read('src/modules/x/x-data-ipc.ts');
-    for (const op of ['opsSettings', 'setOpsSetting', 'unfollowGate', 'logAction']) {
+    for (const op of ['opsSettings', 'setOpsSetting', 'unfollowGate']) {
       expect(TYPES).toMatch(new RegExp(`op: '${op}'`));
       expect(ipcHandles(IPC, op), op).toBe(true);
     }
+    expect(TYPES).not.toMatch(/op: 'logAction'/);
+    expect(read('src/modules/x/x-person-act.ts')).toMatch(/await appendAction\(\{\s*action: 'unfollow'/);
     expect(read('src/storage/migrations/x-runner.ts')).toMatch(/version: '1\.2\.24'[\s\S]{0,200}up: x_migration_1_2_24/);
   });
 

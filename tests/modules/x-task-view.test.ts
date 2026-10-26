@@ -3,6 +3,7 @@
  * 用户:「是否增加一个和运营同级的task(任务),这个任务就是蓝V互关」「围绕需要做的事情来展现或构建就好了」
  */
 import { describe, it, expect } from 'vitest';
+import { flowBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -96,9 +97,12 @@ describe('任务 view', () => {
     const E = strip(read('src/modules/x/XTaskEngage.tsx'));
     const fn = E.slice(E.indexOf('const startEngage'), E.indexOf('const pickBatch'));
     expect(fn.length).toBeGreaterThan(300);
-    const at = (x: string): number => { const i = fn.indexOf(x); expect(i, x).toBeGreaterThan(-1); return i; };
-    expect(at("op: 'engageScreen'") < at("op: 'deferPerson', wsId, restId: w.restId, mode: 'engage'")).toBe(true);
-    expect(fn).toMatch(/if \(r\.status === 'failed'\) \{ unknown\.push\(w\); continue; \}/);
+    /** 2026-10-26 逐个筛 + 放一放搬到主进程流程 x.engage.screenBatch(行为见 x-flows.test.ts);界面只 runFlow + 分进卡 */
+    expect(fn).toMatch(/await runFlow\(/);
+    const flow = flowBlock('x.engage.screenBatch');
+    const at = (x: string): number => { const i = flow.indexOf(x); expect(i, x).toBeGreaterThan(-1); return i; };
+    expect(at("f.call('x.engage.screen'") < at("f.call('x.person.defer', { wsId: i.wsId, restId: w.restId, mode: 'engage' })")).toBe(true);
+    expect(flow).toMatch(/if \(!v\) \{ unknown\.push\(w\); continue; \}/);
     expect(fn).toMatch(/const run = \[\.\.\.active, \.\.\.unknown\];/);
     expect(E).toMatch(/onClick=\{\(\) => void startEngage\(\)\}/);
   });
@@ -141,9 +145,12 @@ describe('任务 view', () => {
   it('⭐ 1 找人:走已验证的滚动截获,跑完扫一遍互关倾向再刷新(否则候选恒 0)', () => {
     const B = strip(read('src/modules/x/XTaskBlueMutual.tsx'));
     const f = B.slice(B.indexOf('const findOnce'), B.indexOf('const t = last?.totals'));
-    expect(f).toMatch(/op: 'searchScroll'/);
-    expect(f.indexOf("op: 'scanMutualIntent'")).toBeGreaterThan(f.indexOf("op: 'searchScroll'"));
-    expect(f.indexOf('load();')).toBeGreaterThan(f.indexOf("op: 'scanMutualIntent'"));
+    /** 2026-10-26 搬到主进程流程 x.blueMutual.find:搜索 → 扫倾向;界面跑完再刷新 */
+    const flow = flowBlock('x.blueMutual.find');
+    expect(flow.indexOf("f.call('x.search.scroll'")).toBeGreaterThan(-1);
+    expect(flow.indexOf("f.call('x.intent.scan'")).toBeGreaterThan(flow.indexOf("f.call('x.search.scroll'"));
+    expect(f.indexOf('load();')).toBeGreaterThan(f.indexOf('await runFlow('));
+    expect(f.indexOf('await runFlow(')).toBeGreaterThan(-1);
   });
 });
 

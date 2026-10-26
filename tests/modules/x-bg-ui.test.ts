@@ -7,7 +7,7 @@
  * ③ 主进程收到后真写进自己的登记表 ④ bg* op 调的是 repo、暂停/恢复先读后写。
  */
 import { readFileSync } from 'node:fs';
-import { capBlock, capOfOp, ipcHandles, readCapBlock, WRITE_CAPS_SRC } from './_x-ipc-wiring';
+import { WRITE_CAPS_SRC, capBlock, capOfOp, flowBlock, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -115,10 +115,12 @@ describe('接线守卫', () => {
 
   it('⭐ 人卡三个手动动作都先占住网页(主进程的锁 —— 后台在采也在这把锁上),被占着就不动', () => {
     const page = strip(read('src/modules/x/XOpsPeople.tsx'));
-    /** 采推文:界面先占住网页,再把锁带进主进程(x.person.collectTab 认带来的锁) */
-    const ct = page.slice(page.indexOf('const collectTweets = useCallback'), page.indexOf('for (const tab of PERSON_TABS)'));
-    expect(ct.length).toBeGreaterThan(50);
-    expect(ct).toMatch(/const lock = await acquireXPage\(wcId, \w+\);\s*if \(!lock\.ok\) \{[^\n]*return; \}/);
+    /** 采推文:2026-10-26 起整串在主进程流程 x.person.collectRange —— 流程整段占着网页(被占着整个流程 refused),每个标签页带着流程那把锁 */
+    const ct = page.slice(page.indexOf('const collectTweets = useCallback'), page.indexOf('/** ⭐ 选时间范围的小框'));
+    expect(ct).toMatch(/await runFlow\(/);
+    const flow = flowBlock('x.person.collectRange');
+    expect(flow).toMatch(/const p = pageNeed\(i\.wsId, '运营正在采他的推文'\);/);
+    expect(flow).toMatch(/ownToken: token,/);
     /**
      * ⭐ 2026-10-26 核对 / 取关搬到主进程(能力 x.person.verify / x.person.unfollow):占网页在执行器,被占着 → 界面拿到 refused / blocked 不动
      * (行为见 x-person-act.test.ts:网页被占着 refused、干活时锁上写着「核对 @x」「取关 @x」)

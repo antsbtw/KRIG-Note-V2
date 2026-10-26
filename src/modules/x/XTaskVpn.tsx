@@ -6,10 +6,11 @@
  * 上面一排 tab(找求助帖 / 筛选 / 回复记录),筛选里再一排(值得回 / 不值得 / 待判断)—— 同蓝V互关(用户 10-22 定的布局)。
  * 回复卡和互动卡同一个组件(AskRun mode = vpn):来龙去脉 + Gemma 草拟(事实清单 + 试用链接)+ 点评 + 点赞·回复。
  */
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { getXHostState } from './x-host-registry';
 import { openInLeft } from './x-unfollow-run';
+import { runFlow, stopFlow } from './x-flow-ui';
 import { XTabs } from './XTabs';
 import { AskRun, type AskWho } from './XTaskAsk';
 import type { VpnOverview, VpnPostRow } from './x-vpn-run';
@@ -29,7 +30,6 @@ export function VpnHelpTask({ wsId }: { wsId: string }): ReactElement {
   const [sub, setSub] = useState<'worth' | 'notWorth' | 'pending'>('worth');
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const stop = useRef(false);
   const [picked, setPicked] = useState<ReadonlyMap<string, AskWho>>(new Map());
   const [replying, setReplying] = useState<AskWho[] | null>(null);
 
@@ -38,23 +38,21 @@ export function VpnHelpTask({ wsId }: { wsId: string }): ReactElement {
   }, [wsId]);
   useEffect(() => { load(); }, [load]);
 
-  /** 判断还没判的:一次 5 条地问,直到判完或你停 —— 进度看得见 */
+  /**
+   * 判断还没判的:一次 5 条地问,直到判完或你停 —— 进度看得见。
+   * ⭐ 循环在主进程(流程 x.vpn.judgeAll,2026-10-26 第 4 步);这里只看进度,进度一变就刷一下名单(判完的那几条马上挪过去)
+   */
   const judgeAll = async (): Promise<void> => {
-    stop.current = false;
-    let total = 0; let failed = 0;
-    for (;;) {
-      if (stop.current) break;
-      setBusy(`Gemma 判断中…已判 ${total} 条${failed ? `(${failed} 条没判成,下次重判)` : ''}`);
-      const r = await xDataCall({ op: 'vpnJudge', wsId, limit: 5 });
-      if (r.status === 'failed') { setMsg(`判断出错:${r.reason}`); break; }
-      const v = r.value as { judged: number; failed: number; left: number };
-      if (v.left === -1) { setMsg('已经有一轮判断在跑'); break; }
-      total += v.judged; failed += v.failed;
-      load();
-      if (v.left === 0 || v.judged + v.failed === 0) break;
-    }
+    setBusy('Gemma 判断中…');
+    let lastMsg = '';
+    const r = await runFlow({ op: 'vpnJudgeAll', wsId }, 'x.vpn.judgeAll', wsId, (run) => {
+      if (run.msg && run.msg !== lastMsg) { lastMsg = run.msg; setBusy(run.msg); load(); }
+    });
     setBusy(null);
-    setMsg((m) => `${m ? `${m} · ` : ''}判完 ${total} 条${failed ? `,${failed} 条没判成(下次重判)` : ''}`);
+    load();
+    if (r.status !== 'ok') { setMsg(`判断出错:${r.reason}`); return; }
+    const v = r.value as { judged: number; failed: number; note?: string };
+    setMsg((m) => `${m ? `${m} · ` : ''}${v.note ? `${v.note} · ` : ''}判完 ${v.judged} 条${v.failed ? `,${v.failed} 条没判成(下次重判)` : ''}`);
   };
 
   /** 找一轮 → 自动接着判断新找到的 */
@@ -128,7 +126,7 @@ export function VpnHelpTask({ wsId }: { wsId: string }): ReactElement {
       {err && <div style={{ color: '#f87171', fontSize: 12 }}>⚠️ {err}</div>}
       {busy && (
         <div style={{ fontSize: 12 }}>
-          {busy} {busy.startsWith('Gemma') && <button type="button" style={{ fontSize: 11 }} onClick={() => { stop.current = true; }}>停</button>}
+          {busy} {busy.startsWith('Gemma') && <button type="button" style={{ fontSize: 11 }} onClick={() => { void stopFlow('x.vpn.judgeAll', wsId); }}>停</button>}
         </div>
       )}
       {msg && <div style={{ fontSize: 12, opacity: 0.85 }}>{msg}</div>}

@@ -5,12 +5,15 @@
  */
 import { defineCapability } from './capability';
 import { listCalls } from '../flow/flow-run-repo';
+import { registerFlowControlCapabilities } from './flow';
 
 let registered = false;
 
 export function registerFlowCapabilities(): void {
   if (registered) return;
   registered = true;
+  /** 流程:看进度 / 叫停(flow.runs / flow.stop) */
+  registerFlowControlCapabilities();
   defineCapability<{ limit: number; capability?: string; caller?: string; status?: string }, unknown>({
     id: 'flow.calls.recent',
     kind: 'input',

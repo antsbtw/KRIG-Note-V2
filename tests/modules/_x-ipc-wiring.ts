@@ -41,6 +41,15 @@ export function capBlock(id: string): string {
 export const WRITE_CAPS_SRC = (): string => read('src/modules/x/x-capabilities-write.ts');
 export const readCapBlock = capBlock;
 
+/** 流程(x-flows.ts,2026-10-26 第 4 步 4b)里某个流程的定义块;找不到 = '' */
+export function flowBlock(id: string): string {
+  const src = read('src/modules/x/x-flows.ts');
+  const i = src.indexOf(`id: '${id}'`);
+  if (i < 0) return '';
+  const j = src.indexOf('\n  defineFlow<', i);
+  return src.slice(i, j < 0 ? undefined : j);
+}
+
 /** 存库那一份(x-save-batch.ts,2026-10-24 从 IPC 搬出)里某个导出函数的函数体;找不到 = '' */
 export function saveFnBody(name: string): string {
   const src = read('src/modules/x/x-save-batch.ts');

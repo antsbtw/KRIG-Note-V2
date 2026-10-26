@@ -11,11 +11,10 @@
  * 2 / 3 还没做:不放假按钮,如实写「下一步做」。
  */
 import { useCallback, useEffect, useState, useSyncExternalStore, type ReactElement } from 'react';
+import { runFlow } from './x-flow-ui';
 import { xDataCall } from './x-data-types';
 import { getXHostState, subscribeXHost } from './x-host-registry';
-import { recipeToQuery } from './x-recipe-query';
 import { ledgerLine, type PageLedgerRow } from './x-page-ledger';
-import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import { FollowStep } from './XTaskFollow';
 import { EngageStep } from './XTaskEngage';
 import { XTabs } from './XTabs';
@@ -49,23 +48,18 @@ export function BlueMutualTask({ wsId }: { wsId: string }): ReactElement {
   }, [wsId]);
   useEffect(() => { load(); }, [load]);
 
-  /** ⭐ 1 找人:配方「蓝V互关」→ 滚动截获(每页对账、存库回读)→ 扫一遍互关倾向 → 刷新数字 */
+  /**
+   * ⭐ 1 找人:配方「蓝V互关」→ 滚动截获(每页对账、存库回读)→ 扫一遍互关倾向 → 刷新数字。
+   * 整串在主进程跑(流程 x.blueMutual.find,2026-10-26 第 4 步);这里只看进度
+   */
   const findOnce = async (): Promise<void> => {
     if (wcId === null) { setFinding('X 网页没开 —— 先在左栏打开 X'); return; }
     setFinding('读配方…'); setLast(null);
-    const lr = await xDataCall({ op: 'list' });
-    const recipe = lr.status === 'ok' ? (lr.value as SearchRecipe[]).find((x) => x.name === '蓝V互关') : undefined;
-    if (!recipe) { setFinding('找不到配方「蓝V互关」—— 先建配方'); return; }
-    const q = recipeToQuery(recipe);
-    if (q.problems.length > 0) { setFinding(`配方有问题:${q.problems.join(';')}`); return; }
-    setFinding(`找人中:让页面自己翻页,最多 ${pages} 页,每页对账…(左边 X 网页别动)`);
-    const sr = await xDataCall({ op: 'searchScroll', wcId, q: q.q, f: q.resultType, wantPages: pages, maxMs: 10 * 60_000 });
-    if (sr.status === 'failed') { setFinding(`找人失败:${sr.reason}`); return; }
-    const v = sr.value as ScrollResult;
-    setLast(v);
-    if (!v.ok) { setFinding(`找人没跑:${v.why ?? '?'}`); return; }
-    setFinding('判断互关倾向中…');
-    await xDataCall({ op: 'scanMutualIntent' });
+    const r = await runFlow({ op: 'blueMutualFind', wsId, pages }, 'x.blueMutual.find', wsId, (run) => { if (run.msg) setFinding(run.msg); });
+    if (r.status === 'failed') { setFinding(`找人失败:${r.reason}`); return; }
+    const v = r.value as { ok: true; scroll: ScrollResult } | { ok: false; why: string };
+    if (!v.ok) { setFinding(v.why.startsWith('找人没成') ? v.why.replace('找人没成', '找人失败') : v.why); return; }
+    setLast(v.scroll);
     setFinding(null);
     load();
   };

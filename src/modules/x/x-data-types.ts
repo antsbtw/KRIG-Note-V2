@@ -213,8 +213,6 @@ export type XDataInvoke =
   | { readonly op: 'personTweets'; readonly restId: string; readonly limit: number }
   /** ⭐ 他的朋友圈(从推文现算)—— 返回 `{ tweets, people, rows }` */
   | { readonly op: 'friendCircle'; readonly wsId: string; readonly restId: string; readonly limit: number }
-  /** ⭐ 采一个人时的**进度**落留痕(翻到第几页 / 歇 / 限流等待)—— 运行中也看得见 */
-  | { readonly op: 'logPersonProgress'; readonly entry: { readonly handle: string; readonly tab: string; readonly attempt: number; readonly msg: string } }
   /**
    * ⭐⭐ 人卡采一个标签页 —— 采集在**主进程**跑(`x-person-collect.ts` → collectOnWebview,2026-10-13 3a)。
    * 回 `CollectOnWebviewResult`(去没去到页 / 推文 / 翻页账);存库、采集记录、重试仍由 renderer 做。
@@ -232,14 +230,6 @@ export type XDataInvoke =
   | { readonly op: 'personCollectProgress'; readonly wcId: number }
   /** 人点了停止 —— 立标记,翻页每轮开头 / 歇着时每秒都会看 */
   | { readonly op: 'cancelPersonCollect'; readonly wcId: number }
-  /** ⭐ 采一个人某个标签页的结果落留痕(页数 / 条数 / 停因)*/
-  | {
-      readonly op: 'logPersonCollect';
-      readonly entry: {
-        readonly restId: string; readonly handle: string; readonly range: string; readonly tab: string;
-        readonly pages: number; readonly records: number; readonly inserted: number; readonly stopReason: string;
-      };
-    }
   /**
    * ⭐⭐ renderer → 主进程:把 X 网页登记(ws→wcId)同步过去(`x-host-sync.ts`)。
    * ⚠️ 登记表每进程一份,后台 runner 在主进程 —— 不同步它永远看不到 X 网页。
@@ -263,6 +253,15 @@ export type XDataInvoke =
   | { readonly op: 'unfollowHalt'; readonly wsId: string }
   | { readonly op: 'unfollowResume'; readonly wsId: string }
   | { readonly op: 'pageOpen'; readonly wsId: string; readonly page: 'profile' | 'status'; readonly handle?: string; readonly tweetId?: string }
+  /**
+   * ⭐⭐ 第 4 步 4b(2026-10-26):原来写在界面里的循环搬到主进程当流程(x-flows.ts);界面只开始 / 看进度 / 叫停
+   */
+  | { readonly op: 'engageScreenBatch'; readonly wsId: string; readonly people: ReadonlyArray<{ restId: string; handle: string; hisAt?: string }> }
+  | { readonly op: 'vpnJudgeAll'; readonly wsId: string }
+  | { readonly op: 'blueMutualFind'; readonly wsId: string; readonly pages: number }
+  | { readonly op: 'personCollectRange'; readonly wsId: string; readonly restId: string; readonly handle: string; readonly range: string }
+  | { readonly op: 'flowRuns'; readonly scope?: string }
+  | { readonly op: 'flowStop'; readonly flow: string; readonly scope: string }
   /** ⭐⭐ 后台采集任务(2026-10-14 第 4 步)—— 直接调 `x-bg-job-repo` */
   /** kind = 'lists' 是采他的三个名单(2026-10-19,range 固定 all);不给 = 帖子/回复/转发 */
   | { readonly op: 'bgCreateJob'; readonly restId: string; readonly handle: string; readonly wsId: string; readonly range: string; readonly kind?: 'lists' }
@@ -288,17 +287,11 @@ export type XDataInvoke =
   | { readonly op: 'setOpsSetting'; readonly key: string; readonly value: number }
   /** ⭐ 现在能不能取关(每日上限 + 最小间隔)—— dayStartIso 由 renderer 按本地时区给 */
   | { readonly op: 'unfollowGate'; readonly dayStartIso: string }
-  /** ⭐ 记一条动作(只追加)*/
-  | {
-      readonly op: 'logAction';
-      readonly entry: {
-        readonly action: 'unfollow'; readonly targetRestId: string; readonly targetHandle: string;
-        readonly decidedBy: 'human' | 'ai'; readonly result: 'ok' | 'failed';
-        readonly reason?: string; readonly detail?: string;
-        /** 哪个 ws 发起的 —— 时间线按号找动作要它(2026-10-19;之前的取关记录没有) */
-        readonly wsId?: string;
-      };
-    };
+  /**
+   * ⚠️ 2026-10-26 logAction / logPersonProgress / logPersonCollect 退役(Module5-04 第 4 步):
+   * 取关和采主页搬进主进程,动作 / 进度 / 每个标签页的结果由主进程当场记,不再由界面上报。
+   */
+  ;
 
 /**
  * ⚠️ 三态 —— 与 `WebDomResult` 同一形状:

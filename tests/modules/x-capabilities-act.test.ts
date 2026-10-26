@@ -141,9 +141,9 @@ describe('接线守卫:第 3 步收口', () => {
   const read = (p: string): string => readFileSync(resolve(__dirname, '../..', p), 'utf8');
   const strip = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   const IPC = strip(read('src/modules/x/x-data-ipc.ts'));
-  it('⭐ IPC switch 只剩底座 4 个 + 界面流程上报 3 个(业务全走能力对照表)', () => {
+  it('⭐ IPC switch 只剩底座 4 个(业务全走能力对照表;界面流程上报 3 个 2026-10-26 第 4 步退役)', () => {
     const cases = [...IPC.matchAll(/case '([a-zA-Z]+)':/g)].map((m) => m[1]).sort();
-    expect(cases).toEqual(['logAction', 'logPersonCollect', 'logPersonProgress', 'pageAcquire', 'pageBusy', 'pageRelease', 'syncHost']);
+    expect(cases).toEqual(['pageAcquire', 'pageBusy', 'pageRelease', 'syncHost']);
   });
   it('⭐ 关注队列控制按 action 分:继续 → 对外动作的能力;做了一半的结果原样给卡片', () => {
     const table = IPC.slice(IPC.indexOf('const CAP_OF_OP'), IPC.indexOf('};', IPC.indexOf('const CAP_OF_OP')));

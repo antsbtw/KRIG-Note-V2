@@ -17,6 +17,7 @@ import { registerXWriteCapabilities } from './x-capabilities-write';
 import { registerXPageCapabilities } from './x-capabilities-page';
 import { registerXCollectCapabilities } from './x-capabilities-collect';
 import { registerXActCapabilities } from './x-capabilities-act';
+import { registerXFlows } from './x-flows';
 import { pageNeed, wsAccount } from './x-capabilities-common';
 import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
@@ -53,6 +54,8 @@ export function registerXCapabilities(): void {
   registerXCollectCapabilities();
   /** 第 3 步第 4 批:AI 类 + 对外动作(x-capabilities-act.ts) */
   registerXActCapabilities();
+  /** 第 4 步 4b:流程(原来写在界面里的循环,x-flows.ts) */
+  registerXFlows();
 
   defineCapability<{ wsId: string; restId: string; handle: string; hisTweetId?: string }, unknown, { wcId: number; acc: Acc }>({
     id: X_CAP.engagePrepare,

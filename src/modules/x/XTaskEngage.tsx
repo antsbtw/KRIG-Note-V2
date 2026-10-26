@@ -8,9 +8,10 @@
  *  · 一周没互动 —— 先把自己最近 7 天的互动采全,再对互关蓝V做补集(用户:「至少采自己的一周互动结果,然后做补集」)
  *  点名字 → 左边看他主页;点帖子 → 左边看这条;勾选 → 「和选中的互动」逐个过互动卡。
  */
-import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { xDataCall } from './x-data-types';
 import { openInLeft, verifyPerson } from './x-unfollow-run';
+import { runFlow, stopFlow } from './x-flow-ui';
 import { getXHostState } from './x-host-registry';
 import type { EngageOverview } from './x-engage-repo';
 import type { RecentPerson } from './x-engage';
@@ -33,7 +34,6 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const [engaging, setEngaging] = useState<AskWho[] | null>(null);
   /** ⭐ 互动前先过一轮(用户 10-23):逐个采主页看 2 小时内有没有动静 */
   const [screening, setScreening] = useState<{ i: number; total: number; who?: string } | null>(null);
-  const stopScreen = useRef(false);
   /** ⭐ 用户 10-22「tab 中再包含 tab」:刚互关·没互动 / 刚互关·互动过 / 一周没互动 */
   const [sub, setSub] = useState<'newUntouched' | 'newTouched' | 'quiet'>('newUntouched');
   const load = useCallback(() => {
@@ -88,21 +88,22 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
   const startEngage = async (): Promise<void> => {
     const list = [...picked.values()];
     if (list.length === 0) return;
-    stopScreen.current = false;
-    const active: AskWho[] = []; const quiet: string[] = []; const unknown: AskWho[] = [];
     const hisAtOf = new Map([...(ov?.newUntouched ?? []), ...(ov?.newTouched ?? []), ...(ov?.quiet ?? [])].map((p) => [p.restId, p.unanswered?.at]));
-    for (const [i, w] of list.entries()) {
-      if (stopScreen.current) { unknown.push(...list.slice(i)); break; }
-      setScreening({ i: i + 1, total: list.length, who: w.handle });
-      const r = await xDataCall({ op: 'engageScreen', wsId, restId: w.restId, handle: w.handle, hisAt: hisAtOf.get(w.restId) });
-      if (r.status === 'failed') { unknown.push(w); continue; }
-      const v = r.value as { active: boolean; why?: string };
-      if (v.active) { active.push(w); continue; }
-      const d = await xDataCall({ op: 'deferPerson', wsId, restId: w.restId, mode: 'engage' });
-      if (d.status === 'failed') unknown.push(w); else quiet.push(w.handle);
-    }
+    setScreening({ i: 0, total: list.length });
+    /** ⭐ 逐个筛 + 放一放在主进程跑(流程 x.engage.screenBatch,2026-10-26 第 4 步);这里只看进度 */
+    const r = await runFlow(
+      { op: 'engageScreenBatch', wsId, people: list.map((w) => ({ restId: w.restId, handle: w.handle, hisAt: hisAtOf.get(w.restId) })) },
+      'x.engage.screenBatch', wsId,
+      (run) => setScreening({ i: run.i ?? 0, total: run.total ?? list.length, who: run.msg?.split('@').at(-1) }),
+    );
     setScreening(null);
     setPicked(new Map());
+    if (r.status !== 'ok') { setMsg(`没过成一轮:${r.reason}`); return; }
+    const v = r.value as { active: Array<{ restId: string }>; quiet: Array<{ handle: string }>; unknown: Array<{ restId: string }> };
+    const byId = new Map(list.map((w) => [w.restId, w]));
+    const active = v.active.map((x) => byId.get(x.restId)).filter((x): x is AskWho => x !== undefined);
+    const unknown = v.unknown.map((x) => byId.get(x.restId)).filter((x): x is AskWho => x !== undefined);
+    const quiet = v.quiet.map((x) => x.handle);
     const run = [...active, ...unknown];
     setMsg(`过了一轮 ${list.length} 人:2 小时内有动静 ${active.length} 人${unknown.length > 0 ? ` · 没看成 ${unknown.length} 人(照样进卡)` : ''}`
       + `${quiet.length > 0 ? ` · 没动静 ${quiet.length} 人已放一放(${ov?.deferDays ?? 3} 天内不列):@${quiet.join(' @')}` : ''}${run.length === 0 ? ' —— 这一批没有要互动的' : ''}`);
@@ -200,7 +201,7 @@ export function EngageStep({ wsId }: { wsId: string }): ReactElement {
         {screening && (
           <span style={{ marginLeft: 6 }}>
             先过一轮:{screening.i}/{screening.total} @{screening.who}(看他 2 小时内有没有发推,左边会跳)
-            {' '}<button type="button" style={{ fontSize: 11 }} onClick={() => { stopScreen.current = true; }}>停,剩下的直接进卡</button>
+            {' '}<button type="button" style={{ fontSize: 11 }} onClick={() => { void stopFlow('x.engage.screenBatch', wsId); }}>停,剩下的直接进卡</button>
           </span>
         )}
         {ov && engaging === null && screening === null && (

@@ -5,7 +5,7 @@
  * 这里钉:分组口径、事实只从三标记来、身份按 rest_id、用户输入走参数、接线不断。
  */
 import { describe, it, expect } from 'vitest';
-import { capBlock, capOfOp, ipcHandles, readCapBlock } from './_x-ipc-wiring';
+import { capBlock, capOfOp, flowBlock, ipcHandles, readCapBlock } from './_x-ipc-wiring';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -387,7 +387,8 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
    * ⚠️ 取代 10-09 的「各 2 页滚动」探查版:真机滚 8 轮每页都只拿到首屏,改游标翻页 + 按时间收手。
    */
   const PAGE = read('src/modules/x/XOpsPeople.tsx');
-  const fn = PAGE.slice(PAGE.indexOf('const collectTweets'), PAGE.indexOf('/** ⭐ 选时间范围的小框'));
+  /** ⭐⭐ 2026-10-26 人卡采主页整串搬到主进程流程 x.person.collectRange(x-flows.ts);人卡只 runFlow 看进度 */
+  const fn = flowBlock('x.person.collectRange');
   /**
    * ⭐ 2026-10-13(后台策略 3a):「去那一页 → runCollect」搬到主进程 `x-collect-on-webview.ts`
    * (与后台 runner 共用),人卡经 `collectPersonTab` 调它。判据不变,改钉**真在跑**的那份。
@@ -397,10 +398,10 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
 
   it('⭐⭐ 三个标签页来自 PERSON_TABS;每页去那一页再 runCollect;收手用时间窗', () => {
     expect(fn.length).toBeGreaterThan(1000);
-    expect(fn).toMatch(/for \(const tab of PERSON_TABS\)/);
-    expect(fn).toMatch(/op: 'collectPersonTab', wcId, page: tab\.name, handle: p\.handle, restId: p\.rest_id/);
+    expect(fn).toMatch(/for \(const \[k, tab\] of PERSON_TABS\.entries\(\)\)/);
+    expect(fn).toMatch(/f\.call\('x\.person\.collectTab', \{\s*wcId, page: tab\.name, handle: i\.handle, restId: i\.restId/);
     /** 页数上限 2026-10-10 起读设置(用户可调),没设就用默认 LIVE_PAGE_CAP */
-    expect(fn).toMatch(/pageCap: settingsRef\.current\?\.\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP/);
+    expect(fn).toMatch(/const pageCap = \(await readSettings\(\)\)\.settings\['collect\.live_page_cap'\] \?\? LIVE_PAGE_CAP;/);
     expect(fn, '没把范围起点交给主进程 —— 按时间收手会失效').toMatch(/start: start\?\.toISOString\(\)/);
     /** 主进程那份:先去那一页(没到就不采),再 runCollect,收手用时间窗 */
     const goAt = CORE.indexOf('ports.goto(input.page, { handle: input.handle })');
@@ -420,12 +421,13 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
   });
 
   it('⭐⭐ 忙就不采;采期间登记忙,结束(含出错)一定清掉;能停', () => {
-    expect(fn).toMatch(/const lock = await acquireXPage\(wcId, COLLECT_BUSY\);\s*if \(!lock\.ok\)/);
-    expect(fn).toMatch(/\} finally \{\s*await releaseXPage\(lock\.token\);\s*\}/);
-    /** ⭐ 停:renderer 外层循环看 cancelCollect;翻页在主进程,停止按钮还要通知主进程 */
-    expect(fn).toMatch(/if \(cancelCollect\.current\) \{ parts\.push/);
+    /** 2026-10-26 占网页在流程的前提里(整段占着,结束含出错由执行器放 —— 执行器 / 流程测试钉着) */
+    expect(fn).toMatch(/prepare: async \(i\) => \{\s*const p = pageNeed\(i\.wsId, '运营正在采他的推文'\);/);
+    /** ⭐ 停:流程在标签页之间看 f.stopped();叫停时通知正在翻页的那次(onStop → cancelPersonCollect) */
+    expect(fn).toMatch(/if \(f\.stopped\(\)\) \{ parts\.push/);
+    expect(fn).toMatch(/f\.onStop\(\(\) => \{ cancelPersonCollect\(wcId\); \}\);/);
     const btn = PAGE.slice(PAGE.indexOf('onCancelCollect={'), PAGE.indexOf('onCancelCollect={') + 300);
-    expect(btn, '停止按钮没通知主进程 —— 翻页停不住').toMatch(/op: 'cancelPersonCollect', wcId/);
+    expect(btn, '停止按钮没叫停流程 —— 翻页停不住').toMatch(/stopFlow\('x\.person\.collectRange', workspaceId\)/);
     expect(MAIN, '主进程没把停止标记接给 runCollect').toMatch(/cancelled: \(\) => ctl\.cancelled/);
     /** 2026-10-24 迁到能力 x.person.cancelCollect */
     expect(capBlock('x.person.cancelCollect')).toMatch(/cancelPersonCollect\(i\.wcId\)/);
@@ -434,7 +436,7 @@ describe('⭐⭐ 采他的帖子 / 回复 / 转发 —— 按时间范围(2026-1
   it('⭐ 推文走 saveTweets(作者顺带进人表),来源记成哪一页', () => {
     expect(CORE).toMatch(/run\.summary\?\.items/);
     expect(fn).toMatch(/const records = \[\.\.\.run\.records\]/);
-    expect(fn).toMatch(/op: 'saveTweets', records, ctx: \{ source: tab\.name, wcId: wcId \?\? undefined \}/);
+    expect(fn).toMatch(/f\.call\('x\.tweet\.save', \{ records, ctx: \{ source: tab\.name, wcId \} \}\)/);
   });
 
   it('⭐⭐⭐ 人卡的「他的推文」按作者数字 id 查,不按 handle', async () => {

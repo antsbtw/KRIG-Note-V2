@@ -173,9 +173,11 @@ describe('接线守卫', () => {
     }
   });
   it('人卡采主页把占住的锁带进去;搜索函数不再自己占锁(只核对带来的)', () => {
-    const P = strip(read('src/modules/x/XOpsPeople.tsx'));
-    const call = P.slice(P.indexOf("op: 'collectPersonTab'"), P.indexOf("op: 'collectPersonTab'") + 400);
-    expect(call).toMatch(/ownToken: lock\.token/);
+    /** 2026-10-26 人卡采主页搬到流程 x.person.collectRange:带着流程占住的那把锁去采每个标签页 */
+    const F = strip(read('src/modules/x/x-flows.ts'));
+    const blk = F.slice(F.indexOf("id: 'x.person.collectRange'"));
+    expect(blk).toMatch(/const token = f\.held\.get\(pageResource\(wcId\)\) as string;/);
+    expect(blk).toMatch(/f\.call\('x\.person\.collectTab', \{[\s\S]{0,200}ownToken: token,/);
     const S = strip(read('src/modules/x/x-search-scroll.ts'));
     expect(S).not.toMatch(/acquirePage\(/);
     expect(S).toMatch(/readonly ownToken: string;/);
