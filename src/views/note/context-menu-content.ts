@@ -63,26 +63,7 @@ export function registerContextMenu(): void {
       group: 'thought',
       order: 191,
     },
-    {
-      // X 集成 阶段 2(写方向):选区/整篇 → 注入 X compose 框(或 pending 回复目标的 reply 框);
-      // always 可见(命令内部三态:无选区取整篇 / 有 pending 走回复 / 否则发普通推)。
-      id: 'note-view.send-to-x',
-      label: '𝕏 发到 X',
-      command: 'x-view.send-to-x',
-      view: VIEW,
-      group: 'thought',
-      order: 192,
-    },
-    {
-      // X Articles 终态发布(2026-06-13):整篇 note → 驱动 X 原生 Insert 发长文
-      // (LaTeX/Table/Code/Posts/Media 走原生)。⚠️ 只插内容,用户在 X 手动点 Publish。
-      id: 'note-view.publish-x-article',
-      label: '𝕏 发布为 X 文章',
-      command: 'x-view.publish-article',
-      view: VIEW,
-      group: 'thought',
-      order: 193,
-    },
+    // 𝕏 发到 X / 发布为 X 文章:X 模块自己挂进来(src/modules/x/x-note-context-menu.ts),删 X 菜单项跟着走
     {
       id: 'note-view.delete-thought-at-cursor',
       label: '💭 删除 Thought',

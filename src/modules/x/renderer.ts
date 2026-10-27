@@ -37,6 +37,7 @@ import { XOpsView } from './XOpsView';
 import { XTaskView } from './XTaskView';
 import { registerXCommands } from './x-commands';
 import { startXHostSync } from './x-host-sync';
+import { registerXNoteContextMenu } from './x-note-context-menu';
 
 /** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
 export const X_WEB_VIEW_ID = 'x-web-view';
@@ -137,3 +138,6 @@ registerView({
  * ⚠️ 登记表每进程一份;去掉这行 runner 恒「没开 X 网页」静默空转(2026-10-14 发现)。
  */
 startXHostSync();
+
+/** note 右键菜单里 X 的两项 —— X 自己挂,删 X 跟着走 */
+registerXNoteContextMenu();
