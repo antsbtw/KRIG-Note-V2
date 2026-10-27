@@ -129,6 +129,8 @@ const CAP_OF_OP: Readonly<Record<string, string | ((p: XDataInvoke) => string)>>
   cardsAdvance: 'x.cards.advance',
   cardsEnd: 'x.cards.end',
   flowStop: 'flow.stop',
+  // 发推(10-27 起)
+  postPrepare: 'x.post.prepare',
   followQueueControl: (p) => ((p as { action?: string }).action === 'resume' ? 'x.followQueue.resume' : 'x.followQueue.control'),
 };
 

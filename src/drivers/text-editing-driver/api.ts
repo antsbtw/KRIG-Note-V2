@@ -25,7 +25,7 @@ import {
   type ArticlePlan,
 } from './serializers/note-to-article-plan';
 import { blockMediaKey, type ArticleMediaMap } from './serializers/doc-to-article-doc';
-import { instanceRegistry } from './instance-registry';
+import { instanceRegistry, contentOf } from './instance-registry';
 import {
   applyNodeStyleCommand,
   type NodeStyleCommand,
@@ -1998,6 +1998,29 @@ export const textEditingDriverApi = {
     if (state.selection.empty) return { markdown: '', images: [], videos: [] };
     const slice = state.selection.content();
     return sliceToMarkdown(slice);
+  },
+
+  /**
+   * 取当前选区(空 = 整篇)的内容 JSON,并盯着它:文档一变就把同一段(位置随编辑映射)的新内容推给 onChange。
+   * onChange(null) = 实例没了。用途:发推预览窗边改边看(通用,不认识业务)。实例不存在返回 null。
+   */
+  watchSelectionContent(
+    instanceId: string,
+    onChange: (content: unknown[] | null) => void,
+  ): { content: unknown[]; wholeDoc: boolean; stop: () => void } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const w = { from: state.selection.from, to: state.selection.to, whole: state.selection.empty, onChange };
+    return { content: contentOf(state.doc, w), wholeDoc: w.whole, stop: instanceRegistry.watch(instanceId, w) };
+  },
+
+  /** 让这个编辑器拿到焦点(预览窗「回 note 改」) */
+  focusInstance(instanceId: string): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return false;
+    inst.view.focus();
+    return true;
   },
 
   /**

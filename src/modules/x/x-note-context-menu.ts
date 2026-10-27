@@ -5,15 +5,34 @@
  *   点了静默无反应。现在由 X 自己挂(菜单项 + 命令同在 X 目录),删 X 菜单项跟着走。
  *   守卫:tests/modules/menu-command-registered.test.ts(菜单命令必须有人注册)。
  *
- * ⚠️ 发推正在重建(交接 docs/10-business-design/x/HANDOFF-posting-control.prompt.md):
- *   发推本身将登记成 X 的能力(界面 / AI 走同一个 execute),这里的命令只负责把 note 的内容交过去。
- *   重建完成前点了明说「正在重建」,不静默。
+ * ⭐ 发推是 X 的能力(x-capabilities-post.ts,界面 / AI 走同一个 execute);这里的命令只负责打开预览窗、把 note 那段内容交过去。
+ *   第①期只显示(发法建议 + X 上的样子),发布 / 定时第②③⑦期接。
  */
 import { contextMenuRegistry } from '@slot/interaction-registries/context-menu-registry/context-menu-registry';
 import { registerWsCommand } from '@slot/command-registry/register-ws-command';
+import { contextMenuController } from '@slot/triggers/context-menu-controller';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { TextEditingApi } from '@capabilities/text-editing/types';
+import { openPostPreview } from './x-post-preview';
 
 const NOTE_VIEW = 'note-view';
-const REBUILDING = '发推正在重建,暂时还不能用(9-29 删 X 代码时删掉了,还没重建)。';
+
+/** 右键那一刻的 note 编辑器(快照优先,没有就取有焦点的) */
+function noteInstanceId(): string | null {
+  const fromMenu = contextMenuController.getState().context.custom.pmInstanceId;
+  if (typeof fromMenu === 'string') return fromMenu;
+  return requireCapabilityApi<TextEditingApi>('text-editing').instanceRegistry.getFocusedInstanceId();
+}
+
+function openFromNote(wsId: string, form?: 'article'): void {
+  const id = noteInstanceId();
+  if (!id) {
+    console.warn('[x-post] 发到 X:找不到 note 编辑器');
+    window.alert('找不到要发的 note —— 先点一下 note 里的内容,再右键「𝕏 发到 X」');
+    return;
+  }
+  openPostPreview(wsId, id, form);
+}
 
 export function registerXNoteContextMenu(): void {
   contextMenuRegistry.register([
@@ -23,12 +42,7 @@ export function registerXNoteContextMenu(): void {
 }
 
 export function registerXNoteCommands(wsId: string): void {
-  registerWsCommand('x-view.send-to-x', () => wsId, () => {
-    console.warn('[x-post] 发到 X:发推正在重建,命令只提示');
-    window.alert(REBUILDING);
-  });
-  registerWsCommand('x-view.publish-article', () => wsId, () => {
-    console.warn('[x-post] 发布为 X 文章:发推正在重建,命令只提示');
-    window.alert(REBUILDING);
-  });
+  registerWsCommand('x-view.send-to-x', () => wsId, (ctx) => { openFromNote(ctx.wsId); });
+  /** X 文章:同一个预览窗,先显示文章那种 */
+  registerWsCommand('x-view.publish-article', () => wsId, (ctx) => { openFromNote(ctx.wsId, 'article'); });
 }

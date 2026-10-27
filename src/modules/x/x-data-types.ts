@@ -24,6 +24,7 @@ import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { TweetRecord } from './x-timeline-audit';
 import type { XUserRecord } from './x-user-audit';
 import type { PeopleFilter } from './x-people-query';
+import type { PmNode } from './x-post-compose';
 
 /**
  * ⚠️ 通道名**不在这里** —— 在 `@shared/ipc/channel-names` 的 `X_DATA_INVOKE`。
@@ -289,6 +290,8 @@ export type XDataInvoke =
   | { readonly op: 'setOpsSetting'; readonly key: string; readonly value: number }
   /** ⭐ 现在能不能取关(每日上限 + 最小间隔)—— dayStartIso 由 renderer 按本地时区给 */
   | { readonly op: 'unfollowGate'; readonly dayStartIso: string }
+  /** ⭐ 发推:note 内容 → 发文方案(能力 x.post.prepare,只排版不发)—— 回 `PostPlan` */
+  | { readonly op: 'postPrepare'; readonly content?: readonly PmNode[]; readonly noteId?: string }
   /**
    * ⚠️ 2026-10-26 logAction / logPersonProgress / logPersonCollect 退役(Module5-04 第 4 步):
    * 取关和采主页搬进主进程,动作 / 进度 / 每个标签页的结果由主进程当场记,不再由界面上报。

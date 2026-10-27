@@ -11,6 +11,28 @@
  */
 
 import type { EditorView } from 'prosemirror-view';
+import type { Transaction } from 'prosemirror-state';
+import type { Node as PMNode } from 'prosemirror-model';
+
+/**
+ * 盯着一段内容(选区或整篇):文档变了就把**同一段**(位置随编辑映射)的新内容推给 onChange。
+ * 用途:发推预览窗(用户 10-27「回 note 改,预览跟着刷新」)—— 通用,不认识任何业务。
+ * onChange(null) = 实例没了(note 关了)。
+ */
+export interface ContentWatcher {
+  from: number;
+  to: number;
+  /** true = 整篇(不映射位置,每次取整个 doc) */
+  whole: boolean;
+  onChange: (content: unknown[] | null) => void;
+}
+
+/** 一段内容的 JSON:整篇 = doc 的子块;选区 = slice(两端可能是半个块) */
+export function contentOf(doc: PMNode, w: Pick<ContentWatcher, 'from' | 'to' | 'whole'>): unknown[] {
+  if (w.whole) return (doc.toJSON() as { content?: unknown[] }).content ?? [];
+  if (w.to <= w.from) return [];
+  return (doc.slice(w.from, w.to).content.toJSON() as unknown[] | null) ?? [];
+}
 
 interface InstanceEntry {
   view: EditorView;
@@ -29,6 +51,29 @@ interface InstanceEntry {
 
 class InstanceRegistry {
   private instances = new Map<string, InstanceEntry>();
+  private watchers = new Map<string, Set<ContentWatcher>>();
+
+  /** 盯一段内容;返回取消函数 */
+  watch(instanceId: string, w: ContentWatcher): () => void {
+    let set = this.watchers.get(instanceId);
+    if (!set) { set = new Set(); this.watchers.set(instanceId, set); }
+    set.add(w);
+    return () => { set!.delete(w); };
+  }
+
+  /** Host onTransaction 在 doc 变了时调:映射每个盯着的范围,推新内容 */
+  notifyDocChanged(instanceId: string, tr: Transaction, doc: PMNode): void {
+    const set = this.watchers.get(instanceId);
+    if (!set || set.size === 0) return;
+    for (const w of set) {
+      if (!w.whole) {
+        /** 起点往前粘、终点往后粘:在选区两头打字也算在里面 */
+        w.from = tr.mapping.map(w.from, -1);
+        w.to = tr.mapping.map(w.to, 1);
+      }
+      w.onChange(contentOf(doc, w));
+    }
+  }
 
   /**
    * 注册实例。
@@ -72,6 +117,11 @@ class InstanceRegistry {
       }
     }
     this.instances.delete(instanceId);
+    const set = this.watchers.get(instanceId);
+    if (set) {
+      this.watchers.delete(instanceId);
+      for (const w of set) w.onChange(null);
+    }
   }
 
   /** 记录用户最后一次主动放置的光标位置(Host onTransaction 调)*/
