@@ -234,10 +234,11 @@ AI                     ─┘                          ▼
 - 补口子:「𝕏 发到 X」「𝕏 发布为 X 文章」从 note 菜单里搬到 X 模块自己挂(`src/modules/x/x-note-context-menu.ts`),命令点了明说「发推正在重建」。
 - 新守卫 `tests/modules/menu-command-registered.test.ts`:右键菜单里的命令必须有人注册(注入违规已看过变红)。
 
-## 8. 第①期(10-27,代码完成,待真机)
+## 8. 第①期(10-27,✅ 真机看过)
 
 - 排版纯函数 `src/modules/x/x-post-compose.ts` + 加权字数 `x-post-length.ts`(单测 43 条:每种块 / 建议发法 / 推串断点)。
 - 能力 `x.post.prepare`(input,`x-capabilities-post.ts`):界面给块数组;AI 只给 noteId 到库里读。单测 5 条(AI 调用不被拒、记录 caller=ai)。
 - 编辑器加通用的「盯一段内容」(`instanceRegistry.watch` / `watchSelectionContent`):选区随编辑映射,note 改了推新内容;单测 6 条,注入违规看过变红。
 - 预览窗 `XPostPreview.tsx` + `x-post-preview.ts`:浮在右边不点外面就关;建议 + 五种发法切换 + X 样子(头像 / 推串连线 / 1–4 图版式 / 字数标红);「发布」「定时」灰着。
+- 真机修了两处:段内选区丢块类型(误报「认不出的块 text」,`doc.slice(…, true)`);深色下字发暗(颜色名只在浅色段,守卫 x-theme-vars 补深色半边)。
 - 已知局限:裸域名(example.com)不按 23 算;号是不是 Premium 还认不出(长推只写「要 Premium」);转图只是占位(第④期)。
