@@ -31,6 +31,11 @@ const SELECTORS: Readonly<Record<string, string>> = {
   [X_ANCHORS.tweetArticle]: 'article[data-testid="tweet"]',
   /** ⚠️ 登录态才有 testid(求关只在登录态跑);单篇页只有一个回复框,命中多个 = 页面不是预期的样子,由调用方先查 */
   [X_ANCHORS.replyBox]: '[data-testid="tweetTextarea_0"]',
+  /**
+   * ⚠️ /compose/post 是盖在首页上的弹窗,首页时间线顶上还有一个同样 testid 的内嵌框 —— 只认 role=dialog 里的。
+   * 待真机:弹窗是不是 role="dialog"(发推第②期 10-27 按 X 现行结构写的,没在真机上量过)。
+   */
+  [X_ANCHORS.composeBox]: '[role="dialog"] [data-testid="tweetTextarea_0"]',
 };
 
 /** ⭐ 本模块的锚点表 —— 启动时 **push** 给底座 */

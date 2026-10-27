@@ -55,6 +55,7 @@ import { startFollowQueue, stopFollowQueue } from './x-follow-queue';
 import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
 import { listLocks } from '@platform/main/flow/resource-lock';
 import { registerXCapabilities } from './x-capabilities';
+import { stopPostDraftTimers } from './x-post-draft';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -120,6 +121,8 @@ export function registerXModule(): void {
   /** ⭐ 关注队列(2026-10-16,蓝V互关 M4)—— 自启、before-quit 自停,timer unref */
   startFollowQueue();
   app.on('before-quit', stopFollowQueue);
+  /** ⭐ 发推待发草稿的「10 分钟没确认自动撤回」定时器(发推第②期,2026-10-27)—— before-quit 停 */
+  app.on('before-quit', stopPostDraftTimers);
   /** ⭐ 后台采集状态进运行体检(黑匣子)—— X 自己登记,宿主不认识 X 内部 */
   registerHealthProbe('x.bg', bgRunnerHealth);
   /** ⭐⭐ X 的能力登记进平台能力目录(Module5-04 第 2 步)—— 删 X 目录这一行就没了 */

@@ -36,6 +36,7 @@ import type { HostHandle, HostProps } from '@capabilities/web-rendering';
 import { setXHostState, clearXHostState } from './x-host-registry';
 import { setSpot, type SpotReq } from './x-spot-store';
 import { xDataCall } from './x-data-types';
+import { XPostBar } from './XPostBar';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -228,6 +229,9 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
           ⊞
         </button>
       </div>
+
+      {/* ⭐ 发推第②期:note 填进 X 发推框后,在这里确认 / 取消(没有待发草稿时不占地方) */}
+      <XPostBar wsId={workspaceId} />
 
       {/* ⭐ 真 webview —— 与同 ws 的内置浏览器同 partition(登录态共享) */}
       <Host

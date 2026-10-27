@@ -242,3 +242,17 @@ AI                     ─┘                          ▼
 - 预览窗 `XPostPreview.tsx` + `x-post-preview.ts`:浮在右边不点外面就关;建议 + 五种发法切换 + X 样子(头像 / 推串连线 / 1–4 图版式 / 字数标红);「发布」「定时」灰着。
 - 真机修了两处:段内选区丢块类型(误报「认不出的块 text」,`doc.slice(…, true)`);深色下字发暗(颜色名只在浅色段,守卫 x-theme-vars 补深色半边)。
 - 已知局限:裸域名(example.com)不按 23 算;号是不是 Premium 还认不出(长推只写「要 Premium」);转图只是占位(第④期)。
+
+## 9. 第②期(10-27,代码完成,待真机)
+
+- 平台执行器加 `Need.keep` / `ttlMs`:成功后锁不放,交给下一次调用带 `reuse` 进来接着用、由它放;没成照样放。X 能力构造器对应 `keepPage`。单测 3 条(改坏看过变红)。
+- 能力(`x-capabilities-post.ts` + `x-post-draft.ts`):
+  - `x.post.fill`(output):本期只认 `single`、不带图;打开 `x.compose` → 弹窗里正文框只有一个且是空的 → **只贴一次**(check none)→ 自己读回核对(表情图片按 alt 拼回)→ 对不上就清掉报 failed。成了网页一直占着,记一份待发草稿(一个 ws 一份)。
+  - `x.post.cancel`(control):清框 → 回首页关弹窗 → 放锁;清不掉不导航、照样放锁、报 failed「请手动删」。why = user / back-to-note / timeout。
+  - `x.post.pending`(input,probe):现在的草稿 + 上一份怎么结束的。
+  - 10 分钟没确认:定时器调执行器的 `x.post.cancel`(caller timer),留痕和人点一样;before-quit 停定时器。
+  - 草稿真假以锁为准:网页销毁锁被收回 → 草稿当没有(不另接线)。
+- 锚点 `x.composeBox` = `[role="dialog"] [data-testid="tweetTextarea_0"]`(首页顶上还有一个同 testid 的内嵌框)。⚠️ 弹窗是不是 role=dialog、X 编辑器认不认合成的 Backspace,**待真机**。
+- 界面:预览窗「发布 ▸」(X 没开就在 note 的另一栏打开,从编辑器实例 id `::slot:<left|right>` 读 note 在哪栏);X 网页顶上 KRIG 确认条 `XPostBar`(确认发布 / 回 note 改 / 取消 + 倒计时)。两边共用 `x-post-pending-store`(每秒问一次 pending)。
+- 「确认发布」本期只提示「第③期才真发,这次没发」—— 不接能力。
+- 单测:能力 12 条(`x-post-fill.test.ts`,两处改坏看过变红)+ 页面脚本 6 条(jsdom 真跑)。

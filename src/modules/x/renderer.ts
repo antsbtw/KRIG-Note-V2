@@ -38,11 +38,10 @@ import { XTaskView } from './XTaskView';
 import { registerXCommands } from './x-commands';
 import { startXHostSync } from './x-host-sync';
 import { registerXNoteContextMenu } from './x-note-context-menu';
+import { X_WEB_VIEW_ID, X_OPS_VIEW_ID, X_TASK_VIEW_ID } from './x-view-id';
 
-/** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
-export const X_WEB_VIEW_ID = 'x-web-view';
-export const X_OPS_VIEW_ID = 'x-ops-view';
-export const X_TASK_VIEW_ID = 'x-task-view';
+/** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份(定义在 x-view-id.ts) */
+export { X_WEB_VIEW_ID, X_OPS_VIEW_ID, X_TASK_VIEW_ID };
 
 /** ① 左栏:X 的网页 */
 registerView({

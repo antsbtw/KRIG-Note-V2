@@ -85,6 +85,13 @@ export const X_SCRIPTS = {
    * 用户:「在左边x的原图增加关联方法,增加一个右键菜单,由用户抽查」
    */
   spotTarget: 'x.spotTarget' as ScriptId,
+  /**
+   * ⭐ 发推第②期(2026-10-27):发推弹窗里的正文框在不在、几个、里面是什么(只读)。
+   * 字按「图片表情读 alt」拼回去 —— X 可能把表情画成图片,textContent 里没有。
+   */
+  composeBoxState: 'x.composeBoxState' as ScriptId,
+  /** ⭐ 发推第②期:清空发推弹窗里的正文框(取消 / 超时撤回 / 填错了),回读清没清掉 */
+  composeClear: 'x.composeClear' as ScriptId,
 } as const;
 
 /**
@@ -431,6 +438,62 @@ const REPLY_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
+ * ⭐ 发推弹窗里的正文框(发推第②期,2026-10-27)。⚠️ 只认 role=dialog 里的 —— 首页时间线顶上还有一个同 testid 的内嵌框。
+ * 最多等 8 秒(弹窗是导航后才画出来的)。返回 { found, count, text }。
+ */
+const COMPOSE_BOX_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    var textOf = function (el) {
+      var out = '';
+      el.childNodes.forEach(function (n) {
+        if (n.nodeType === 3) out += n.nodeValue;
+        else if (n.nodeType === 1) out += n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : textOf(n);
+      });
+      return out;
+    };
+    var t0 = Date.now();
+    var tick = function () {
+      var boxes = document.querySelectorAll('[role="dialog"] [data-testid="tweetTextarea_0"]');
+      if (boxes.length > 0) { resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim() }); return; }
+      if (Date.now() - t0 > 8000) { resolve({ found: false }); return; }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+})();`;
+
+/**
+ * 清空发推弹窗的正文框:全选 → 按 Backspace(X 的编辑器认按键)→ 没清掉再 execCommand('delete')。
+ * state:empty(本来就空)/ cleared(带 via)/ not-cleared(带 left:剩下的开头)/ no-box(弹窗已经不在了)
+ */
+const COMPOSE_CLEAR_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    var box = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
+    if (!box) { resolve({ state: 'no-box' }); return; }
+    var left = function () { return (box.textContent || '').trim(); };
+    if (left() === '' && !box.querySelector('img')) { resolve({ state: 'empty' }); return; }
+    box.focus();
+    var range = document.createRange();
+    range.selectNodeContents(box);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.dispatchEvent(new Event('selectionchange'));
+    var gone = function () { return left() === '' && !box.querySelector('img'); };
+    setTimeout(function () {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, cancelable: true }));
+      setTimeout(function () {
+        if (gone()) { resolve({ state: 'cleared', via: 'backspace' }); return; }
+        try { document.execCommand('delete'); } catch (e) {}
+        setTimeout(function () {
+          resolve(gone() ? { state: 'cleared', via: 'exec-delete' } : { state: 'not-cleared', left: left().slice(0, 40) });
+        }, 300);
+      }, 300);
+    }, 100);
+  });
+})();`;
+
+/**
  * ⭐ 发送回复脚本正文。__NEEDLE__ = 回复正文里的字和表情(只留字母 / 汉字 / 数字 / 表情,前 16 个);__ME__ = 我的 handle(小写)。
  * ⚠️ X 把表情渲染成 <img alt="👍">,textContent 里没有 —— 页面这边用 textOf 把图片的 alt 按原位拼回去再比
  * (用户 10-21:只回一个 👍 也是允许的,不能因为核对不了就禁掉)。
@@ -678,5 +741,16 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
      * 走 `JSON.stringify` 绑定 —— 绝不拼进脚本文本。
      */
     build: FETCH_NEXT_PAGE_SCRIPT,
+  },
+  {
+    id: X_SCRIPTS.composeBoxState,
+    purpose: 'X:发推弹窗里的正文框在不在、里面是什么(只读;表情图片按 alt 拼回)',
+    /** ⚠️ 无参数 */
+    build: () => COMPOSE_BOX_SRC,
+  },
+  {
+    id: X_SCRIPTS.composeClear,
+    purpose: 'X:清空发推弹窗里的正文框(取消 / 撤回),回读清没清掉 —— 不点发布',
+    build: () => COMPOSE_CLEAR_SRC,
   },
 ];

@@ -3,12 +3,14 @@
  *
  * note 右键「𝕏 发到 X」→ 浮在右边(不点外面就关,人要回 note 改字):建议的发法 + 显示成 X 上的样子;
  * 可以换发法;note 一改这里跟着变(x-post-preview.ts 盯着那段内容)。
- * ⚠️ 只显示:「发布」「定时」第②③期才接(那时调 x.post.fill / publish 能力,界面不驱动网页)。
+ * 「发布 ▸」(第②期):调能力 x.post.fill 把这条填进左边 X 的发推框(不发),到 X 顶上的确认条里确认 / 取消。
+ *   界面不驱动网页 —— 填、清、占网页全在主进程能力里。「定时」第⑦期。
  * ⚠️ 字不能在这里改(用户 10-27 定 B:字只在 note 里改,note 是唯一原文)。
  */
 import { useEffect, useState } from 'react';
 import type { PostDraft, PostForm, PostMedia, PostPlan } from './x-post-compose';
 import { X_POST_LIMIT } from './x-post-length';
+import type { PendingSnap } from './x-post-pending-store';
 
 export type PreviewState =
   | { readonly kind: 'loading' }
@@ -17,15 +19,40 @@ export type PreviewState =
   /** note 关了 */
   | { readonly kind: 'gone' };
 
+/** 「发布 ▸」那一下的进度(草稿本身的状态看 pending) */
+export type FillState =
+  | { readonly phase: 'idle' }
+  | { readonly phase: 'filling'; readonly step: string }
+  | { readonly phase: 'failed'; readonly why: string };
+
 export type PreviewProps = {
   readonly state: PreviewState;
   readonly handle: string | null;
   readonly wholeDoc: boolean;
   /** 打开时想先看的发法(「发布为 X 文章」进来是 article) */
   readonly initialForm?: PostForm;
+  readonly fill: FillState;
+  readonly pending: PendingSnap;
+  /** 预览窗打开的时刻 —— 只说这之后结束的草稿 */
+  readonly openedAt: number;
   readonly onBackToNote: () => void;
   readonly onClose: () => void;
+  readonly onPublish: (form: PostForm) => void;
 };
+
+const ENDED_TEXT: Record<string, string> = { user: '你点了取消', 'back-to-note': '你回 note 改了', timeout: '10 分钟没确认,自动撤回' };
+const mmss = (ms: number): string => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+
+/** 草稿在 X 上等确认时,每秒刷新剩余时间 */
+function useNow(on: boolean): number {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!on) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
 
 const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML' };
 const box = { border: '1px solid var(--border-popup)', borderRadius: 8 } as const;
@@ -80,7 +107,7 @@ function PostCard({ post, handle, limit, last }: { post: PostDraft; handle: stri
   );
 }
 
-export function XPostPreview({ state, handle, wholeDoc, initialForm, onBackToNote, onClose }: PreviewProps) {
+export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pending, openedAt, onBackToNote, onClose, onPublish }: PreviewProps) {
   const [form, setForm] = useState<PostForm | null>(initialForm ?? null);
   const plan = state.kind === 'ok' ? state.plan : null;
   /** 人没选过 → 跟着建议走(note 改了建议可能变);人选的那种变得不可用 → 回到建议 */
@@ -90,6 +117,17 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, onBackToNot
   }, [plan, form]);
   const current = plan ? plan.options.find((o) => o.form === (form ?? plan.suggested)) : undefined;
   const limit = current?.form === 'single' || current?.form === 'thread' ? X_POST_LIMIT : current?.form === 'longPost' ? 25000 : null;
+  const draft = pending.pending;
+  const now = useNow(draft !== null);
+  const ended = pending.ended && pending.ended.at >= openedAt ? pending.ended : null;
+  /** 发布按钮能不能点 —— 不能的话为什么(写在按钮的提示里) */
+  const blockWhy = !plan || plan.empty || !current ? '没有可发的内容'
+    : draft ? '左边 X 上已经有一份在等你确认'
+      : fill.phase === 'filling' ? '正在填'
+        : current.form !== 'single' ? `「${current.label}」还不能填进 X(第②期只做单条推)`
+          : current.posts[0]?.media.length ? '带图第④期才能填进 X'
+            : limit !== null && (current.posts[0]?.weight ?? 0) > limit ? '超过字数了'
+              : null;
 
   return (
     <div style={{
@@ -142,10 +180,32 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, onBackToNot
         )}
       </div>
 
+      {(draft || fill.phase !== 'idle' || ended) && (
+        <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border-popup)', fontSize: 12, lineHeight: 1.5 }}>
+          {fill.phase === 'filling' && <div>⏳ {fill.step}</div>}
+          {fill.phase === 'failed' && <div style={{ color: '#e5484d' }}>❌ 没填进 X:{fill.why}</div>}
+          {draft && (
+            <div>
+              ✅ 已填进 X 的发推框(@{draft.handle})—— 到 X 上看一眼,在顶上的 KRIG 条里点「确认发布」或「取消」。
+              <span style={{ color: 'var(--text-muted)' }}> {mmss(draft.expiresAt - now)} 后自动撤回</span>
+            </div>
+          )}
+          {!draft && ended && (
+            <div style={{ color: 'var(--text-muted)' }}>
+              上一份草稿已撤回({ENDED_TEXT[ended.why] ?? ended.why}){ended.cleared ? '' : ' ⚠️ 框里的字没清掉,请在 X 上手动删'}
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '10px 12px', borderTop: '1px solid var(--border-popup)' }}>
         <button type="button" style={btn} onClick={onBackToNote} title="字只在 note 里改;改了这里跟着变">回 note 改</button>
         <button type="button" style={btnOff} disabled title="定时发:第⑦期">⏰ 定时</button>
-        <button type="button" style={{ ...btnMain, opacity: 0.4, cursor: 'default' }} disabled title="发布:第②③期接(先填进 X,你在 X 上再确认一次)">发布 ▸</button>
+        <button type="button" style={blockWhy ? { ...btnMain, opacity: 0.4, cursor: 'default' } : btnMain} disabled={blockWhy !== null}
+          title={blockWhy ?? '先填进左边 X 的发推框(不发),你在 X 上看过再确认'}
+          onClick={() => { if (current && !blockWhy) onPublish(current.form); }}>
+          {fill.phase === 'filling' ? '填进 X…' : '发布 ▸'}
+        </button>
       </div>
     </div>
   );

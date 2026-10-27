@@ -4,15 +4,58 @@
  * 用户 10-26:「发推是 x 模块的一个独立功能模块,note 调用接口就可以发推,要保持 AI 也同样能够调用这些功能。」
  * → note 右键、拖块、定时器、AI 都调这里的能力,入口自己不带发推代码。
  *
- * 本期只有 x.post.prepare(只排版,类别 input:不碰 X 网页、不对外)。fill / publish / cancel 在第②③期。
+ * 第①期 x.post.prepare(只排版,input:不碰 X 网页、不对外)。
+ * 第②期 x.post.fill(填进 X 发推弹窗不发,占着网页等人确认)/ x.post.cancel(清框、放网页)/ x.post.pending(查待发草稿)。
+ * x.post.publish 第③期。
  */
-import { capFailed } from '@platform/main/capability/capability';
-import { Bad, xCap, type O } from './x-capabilities-common';
-import { composePost, type PmNode, type PostPlan } from './x-post-compose';
+import { capFailed, capRefused, execute } from '@platform/main/capability/capability';
+import { Bad, str, xCap, type O } from './x-capabilities-common';
+import { composePost, type PmNode, type PostForm, type PostPlan } from './x-post-compose';
+import { releasePage } from './x-page-lock';
+import {
+  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, clearCompose, endPending, fillCompose, lastEnded, newDraftId, pendingPost, viewOf,
+  type CancelWhy, type PendingPost,
+} from './x-post-draft';
 
 const isPmNode = (v: unknown): v is PmNode => !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';
 
 type PrepareIn = { readonly content?: readonly PmNode[]; readonly noteId?: string };
+type FillIn = PrepareIn & { readonly wsId: string; readonly form: PostForm };
+type CancelIn = { readonly wsId: string; readonly draftId: string; readonly why: CancelWhy };
+
+const FORMS: readonly PostForm[] = ['single', 'thread', 'longPost', 'article', 'image'];
+/** 第②期能填进 X 的发法;别的先如实拒 */
+const FILLABLE: readonly PostForm[] = ['single'];
+const LATER: Partial<Record<PostForm, string>> = { thread: '第⑤期', longPost: '第⑤期', article: '第⑥期', image: '第④期' };
+
+/** content / noteId 两种给法(prepare、fill 共用) */
+function parseSource(o: O): PrepareIn {
+  const noteId = typeof o.noteId === 'string' && o.noteId !== '' ? o.noteId : undefined;
+  if (o.content !== undefined) {
+    if (!Array.isArray(o.content) || !o.content.every(isPmNode)) throw new Bad('content 要块数组(每个有 type)');
+    return { content: o.content as PmNode[], noteId };
+  }
+  if (noteId === undefined) throw new Bad('要 content(块数组)或 noteId');
+  return { noteId };
+}
+
+async function planOf(i: PrepareIn): Promise<PostPlan> {
+  if (i.content) return composePost(i.content);
+  /** 动态 import:X 的单测不必把 note 存储整套拖进来 */
+  const { getNote } = await import('@platform/main/note/capability-impl');
+  const { unwrapPmDoc } = await import('@platform/main/note/envelope');
+  const note = await getNote(i.noteId as string);
+  if (!note) throw capFailed(`note ${i.noteId} 不存在(或已删除)`);
+  const doc = unwrapPmDoc(note.doc) as { content?: PmNode[] };
+  return composePost(doc.content ?? []);
+}
+
+/** 超时没确认:走执行器的 cancel(caller timer)—— 和人点取消同一条路、同样留痕 */
+function cancelOnTimeout(p: PendingPost): void {
+  void execute('x.post.cancel', { wsId: p.wsId, draftId: p.draftId, why: 'timeout' }, { caller: 'timer' }).then((r) => {
+    if (!r.ok) console.warn(`[x.post] 待发草稿 ${p.draftId} 超时撤回没成:${r.why}`);
+  });
+}
 
 export function registerXPostCapabilities(): void {
   xCap<PrepareIn>('input', {
@@ -22,15 +65,7 @@ export function registerXPostCapabilities(): void {
       content: '可选:块数组(PM JSON,界面给选区 / 整篇;给了就不读库)',
       noteId: '可选:note id —— 不给 content 时到库里读整篇',
     },
-    parse: (o: O) => {
-      const noteId = typeof o.noteId === 'string' && o.noteId !== '' ? o.noteId : undefined;
-      if (o.content !== undefined) {
-        if (!Array.isArray(o.content) || !o.content.every(isPmNode)) throw new Bad('content 要块数组(每个有 type)');
-        return { content: o.content as PmNode[], noteId };
-      }
-      if (noteId === undefined) throw new Bad('要 content(块数组)或 noteId');
-      return { noteId };
-    },
+    parse: parseSource,
     subject: (i) => (i.noteId ? `note:${i.noteId}` : undefined),
     summarize: (out) => {
       const p = out as PostPlan;
@@ -39,15 +74,90 @@ export function registerXPostCapabilities(): void {
         options: p.options.map((o) => `${o.form}:${o.available ? o.posts.length : 'x'}`).join(' '),
       };
     },
-    run: async (i) => {
-      if (i.content) return composePost(i.content);
-      /** 动态 import:X 的单测不必把 note 存储整套拖进来 */
-      const { getNote } = await import('@platform/main/note/capability-impl');
-      const { unwrapPmDoc } = await import('@platform/main/note/envelope');
-      const note = await getNote(i.noteId as string);
-      if (!note) throw capFailed(`note ${i.noteId} 不存在(或已删除)`);
-      const doc = unwrapPmDoc(note.doc) as { content?: PmNode[] };
-      return composePost(doc.content ?? []);
+    run: planOf,
+  });
+
+  xCap<FillIn>('output', {
+    id: 'x.post.fill',
+    describe: '把 note 的内容按某种发法排好,填进 X 的发推弹窗 —— 不发;网页一直占着,等人在 X 上看过再确认(publish)或取消(cancel),10 分钟没确认自动撤回',
+    inputDoc: {
+      wsId: '哪个 workspace 的号',
+      form: `发法:${FORMS.join(' / ')}(本期只能 single)`,
+      content: '可选:块数组(PM JSON,界面给选区 / 整篇;给了就不读库)',
+      noteId: '可选:note id —— 不给 content 时到库里读整篇;给了也会记在草稿上',
+    },
+    parse: (o) => {
+      if (!FORMS.includes(o.form as PostForm)) throw new Bad(`form 只认 ${FORMS.join(' / ')}`);
+      return { ...parseSource(o), wsId: str(o, 'wsId'), form: o.form as PostForm };
+    },
+    account: true,
+    preflight: (i) => {
+      if (!FILLABLE.includes(i.form)) return `这种发法还不能填进 X(${LATER[i.form] ?? '以后'}做)—— 现在只能发单条推`;
+      const p = pendingPost(i.wsId);
+      return p ? `X 上已经有一份待发草稿在等你确认(「${p.text.slice(0, 20)}」)—— 先确认或取消那份` : null;
+    },
+    page: () => '发推:待发草稿,等你在 X 上确认',
+    keepPage: { ttlMs: DRAFT_LOCK_TTL_MS },
+    subject: (i) => (i.noteId ? `note:${i.noteId}` : undefined),
+    run: async (i, acc, page) => {
+      const plan = await planOf(i);
+      if (plan.empty) throw capRefused('内容是空的,没有可发的');
+      const opt = plan.options.find((o) => o.form === i.form);
+      if (!opt?.available) throw capRefused(`这段内容不能这么发:${opt?.why ?? '没有这种发法'}`);
+      const post = opt.posts[0];
+      if (opt.posts.length !== 1) throw capRefused(`排出来是 ${opt.posts.length} 条,单条推只能 1 条`);
+      if (post.media.length > 0) throw capRefused(`带了 ${post.media.length} 个图 / 视频 / 要转图的块 —— 带图第④期才能填进 X;先去掉再发`);
+      if (post.text.trim() === '') throw capRefused('正文是空的');
+      const r = await fillCompose(page.wcId, post.text);
+      if (!r.ok) throw capFailed(r.why);
+      const now = Date.now();
+      const p: PendingPost = {
+        draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId,
+        form: i.form, text: post.text, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
+      };
+      addPending(p, cancelOnTimeout);
+      console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${post.weight} 字)草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
+      return viewOf(p);
+    },
+  });
+
+  xCap<CancelIn>('control', {
+    id: 'x.post.cancel',
+    describe: '撤回 X 上的待发草稿:清掉发推框里的字、关掉弹窗、放开网页(不发)',
+    inputDoc: { wsId: '哪个 workspace 的号', draftId: '草稿 id(fill 返回的)', why: '可选:user / back-to-note / timeout' },
+    parse: (o) => {
+      const why = o.why ?? 'user';
+      if (why !== 'user' && why !== 'back-to-note' && why !== 'timeout') throw new Bad('why 只认 user / back-to-note / timeout');
+      return { wsId: str(o, 'wsId'), draftId: str(o, 'draftId'), why };
+    },
+    preflight: (i) => {
+      const p = pendingPost(i.wsId);
+      if (!p || p.draftId !== i.draftId) return `没有这份待发草稿(${i.draftId}):已经撤回 / 过期 / 网页关了`;
+      return null;
+    },
+    page: () => '发推:撤回草稿',
+    /** 带 fill 留下的锁进来;执行器不替它放,这里放 */
+    reuse: (i) => pendingPost(i.wsId)?.token,
+    run: async (i, _a, page) => {
+      const p = pendingPost(i.wsId) as PendingPost;
+      const c = await clearCompose(page.wcId);
+      endPending(p, i.why, c.cleared);
+      releasePage(page.token);
+      console.log(`[x.post] 撤回草稿 ${p.draftId}(${i.why}):${c.detail}`);
+      if (!c.cleared) throw capFailed(`框里的字没清掉:${c.detail} —— 请在左边 X 上手动删掉;网页已放开`);
+      return { draftId: p.draftId, detail: c.detail };
+    },
+  });
+
+  xCap<{ wsId: string }>('input', {
+    id: 'x.post.pending',
+    describe: '这个号在 X 上有没有待发草稿(填进去了、等人确认的);没有的话,上一份是怎么结束的',
+    inputDoc: { wsId: '哪个 workspace 的号' },
+    parse: (o) => ({ wsId: str(o, 'wsId') }),
+    probe: true,
+    run: (i) => {
+      const p = pendingPost(i.wsId);
+      return { pending: p ? viewOf(p) : null, ended: lastEnded(i.wsId) };
     },
   });
 }

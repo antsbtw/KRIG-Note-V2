@@ -253,6 +253,10 @@ export const X_PAGE_NAME = {
   reposts: 'x.reposts',
   /** ⭐ 单篇推文 —— 求关:去这条推文点赞 / 留言(2026-10-17) */
   status: 'x.status',
+  /** ⭐ 发推弹窗 —— 发推第②期:note 排好的内容填进这里,人在 X 上看过再确认(2026-10-27) */
+  compose: 'x.compose',
+  /** 首页 —— 发推取消后回这里(弹窗关掉) */
+  home: 'x.home',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,
@@ -412,6 +416,8 @@ export const X_ANCHORS = {
   tweetArticle: 'x.tweetArticle' as AnchorName,
   /** 单篇推文页上的回复框(求关留言往这里贴,2026-10-17) */
   replyBox: 'x.replyBox' as AnchorName,
+  /** 发推弹窗里的正文框(发推第②期,2026-10-27)—— 首页底下还有一个内嵌发推框,只认弹窗里的 */
+  composeBox: 'x.composeBox' as AnchorName,
 } as const;
 
 /**
