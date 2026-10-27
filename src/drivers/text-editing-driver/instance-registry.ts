@@ -31,7 +31,8 @@ export interface ContentWatcher {
 export function contentOf(doc: PMNode, w: Pick<ContentWatcher, 'from' | 'to' | 'whole'>): unknown[] {
   if (w.whole) return (doc.toJSON() as { content?: unknown[] }).content ?? [];
   if (w.to <= w.from) return [];
-  return (doc.slice(w.from, w.to).content.toJSON() as unknown[] | null) ?? [];
+  // includeParents:选区在一段里时不带它会只剩散的 text 节点(块类型、列表外壳全丢)
+  return (doc.slice(w.from, w.to, true).content.toJSON() as unknown[] | null) ?? [];
 }
 
 interface InstanceEntry {

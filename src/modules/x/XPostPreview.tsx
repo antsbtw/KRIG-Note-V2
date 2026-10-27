@@ -29,6 +29,12 @@ export type PreviewProps = {
 
 const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML' };
 const box = { border: '1px solid var(--border-color, #2a2a2a)', borderRadius: 8 } as const;
+const btn = {
+  background: 'transparent', border: '1px solid var(--border-color, #444)', borderRadius: 4,
+  color: 'var(--text-secondary, #aaa)', cursor: 'pointer', fontSize: 12, padding: '4px 12px', fontFamily: 'inherit',
+} as const;
+const btnOff = { ...btn, cursor: 'default', opacity: 0.4 } as const;
+const btnMain = { ...btn, background: 'var(--accent-color, #1d9bf0)', borderColor: 'transparent', color: '#fff' } as const;
 
 function MediaCell({ m }: { m: PostMedia }) {
   const cell = { background: 'var(--bg-secondary, #1a1a1a)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } as const;
@@ -90,11 +96,12 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, onBackToNot
       position: 'fixed', top: 56, right: 16, width: 400, maxHeight: 'calc(100vh - 80px)', zIndex: 9000,
       display: 'flex', flexDirection: 'column', background: 'var(--bg-popup, #111)', color: 'var(--text-primary)',
       ...box, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', fontSize: 13,
+      fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--border-color, #2a2a2a)' }}>
         <b style={{ flex: 1 }}>𝕏 发到 X{handle ? ` · @${handle}` : ''}</b>
         <span style={{ fontSize: 11, color: 'var(--text-muted)', marginRight: 8 }}>{wholeDoc ? '整篇' : '选中的部分'}</span>
-        <button type="button" onClick={onClose} title="关闭">✕</button>
+        <button type="button" onClick={onClose} title="关闭" style={{ ...btn, border: 'none', padding: '2px 6px' }}>✕</button>
       </div>
 
       <div style={{ padding: 12, overflowY: 'auto', flex: 1 }}>
@@ -112,7 +119,8 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, onBackToNot
               {plan.options.map((o) => (
                 <button key={o.form} type="button" disabled={!o.available} title={o.why ?? o.note ?? ''} onClick={() => setForm(o.form)}
                   style={{
-                    fontSize: 12, padding: '3px 8px', borderRadius: 12, opacity: o.available ? 1 : 0.45,
+                    fontSize: 12, padding: '3px 10px', borderRadius: 12, opacity: o.available ? 1 : 0.45, fontFamily: 'inherit',
+                    cursor: o.available ? 'pointer' : 'default',
                     border: '1px solid var(--border-color, #2a2a2a)',
                     background: o.form === current.form ? 'var(--accent-bg, #333)' : 'transparent', color: 'inherit',
                   }}>
@@ -135,9 +143,9 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, onBackToNot
       </div>
 
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '10px 12px', borderTop: '1px solid var(--border-color, #2a2a2a)' }}>
-        <button type="button" onClick={onBackToNote} title="字只在 note 里改;改了这里跟着变">回 note 改</button>
-        <button type="button" disabled title="定时发:第⑦期">⏰ 定时</button>
-        <button type="button" disabled title="发布:第②③期接(先填进 X,你在 X 上再确认一次)">发布 ▸</button>
+        <button type="button" style={btn} onClick={onBackToNote} title="字只在 note 里改;改了这里跟着变">回 note 改</button>
+        <button type="button" style={btnOff} disabled title="定时发:第⑦期">⏰ 定时</button>
+        <button type="button" style={{ ...btnMain, opacity: 0.4, cursor: 'default' }} disabled title="发布:第②③期接(先填进 X,你在 X 上再确认一次)">发布 ▸</button>
       </div>
     </div>
   );

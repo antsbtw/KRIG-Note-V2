@@ -40,6 +40,11 @@ describe('盯一段内容', () => {
     w.insert(5, '尾');
     expect(texts(w.got[1])).toBe('头乙丙尾');
   });
+  it('选区在一段里:取出来顶层还是段落,不是散的 text(真机 10-27 抓到)', () => {
+    const w = setup({ from: 2, to: 4, whole: false });
+    w.insert(3, '新');
+    expect((w.got[0] as Array<{ type: string }>).map((n) => n.type)).toEqual(['paragraph']);
+  });
   it('选区前面插字:范围跟着挪,内容不变', () => {
     const w = setup({ from: 2, to: 4, whole: false });
     w.insert(1, '前前');
