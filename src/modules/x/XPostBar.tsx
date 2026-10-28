@@ -25,12 +25,27 @@ export function XPostBar({ wsId }: { wsId: string }) {
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<string | null>(null);
   useEffect(() => {
     if (!draft) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [draft]);
   useEffect(() => { setNote(null); }, [draft?.draftId]);
+  /** 撤回了但框没清掉:草稿已结束,条不能跟着消失 —— 否则「请手动删」没人看见(10-27 真机) */
+  const stale = snap.ended && !snap.ended.cleared ? snap.ended : null;
+  if (!draft && stale && dismissed !== stale.draftId) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', flex: '0 0 auto',
+        background: 'var(--accent-bg)', borderBottom: '1px solid var(--border-popup)', color: 'var(--text-bright)', fontSize: 13,
+      }}>
+        <b style={{ flex: 'none' }}>KRIG</b>
+        <span style={{ flex: 1, color: '#d97706' }}>⚠️ 撤回了,但发推框里的字没清掉 —— 请在下面 X 的发推框里手动删掉(没发出去)。</span>
+        <button type="button" style={btn} onClick={() => setDismissed(stale.draftId)}>知道了</button>
+      </div>
+    );
+  }
   if (!draft) return null;
 
   const cancel = async (why: 'user' | 'back-to-note'): Promise<void> => {
