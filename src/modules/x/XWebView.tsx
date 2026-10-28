@@ -37,6 +37,8 @@ import { setXHostState, clearXHostState } from './x-host-registry';
 import { setSpot, type SpotReq } from './x-spot-store';
 import { xDataCall } from './x-data-types';
 import { XPostBar } from './XPostBar';
+import { X_WEB_VIEW_ID } from './x-view-id';
+import { useSlotVisible } from '@workspace/workspace-state/slot-visibility';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -90,10 +92,27 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
    */
   const lastUrlRef = useRef(X_HOME);
 
+  /**
+   * ⚠️⚠️ 只有**在台上**的 X 才登记(2026-10-27 真机)。
+   * 点 ✕ 关掉 X 后,框架把它 display:none 保活(SlotArea),webview 还活着;
+   * 它若还登记着,发推就以为 X 开着、往一个看不见的零尺寸页面里填 ——
+   * X 在那种页面上不弹发推弹窗,报「找不到正文框」;采集也滚不动。
+   * 在不在台上由框架告知(slot-visibility),不自己猜。
+   */
+  const visible = useSlotVisible(workspaceId, X_WEB_VIEW_ID);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+
   const registerHost = useCallback(() => {
+    if (!visibleRef.current) return;
     const id = hostRef.current?.getWebContentsId() ?? null;
     if (id != null) setXHostState(workspaceId, id, lastUrlRef.current);
   }, [workspaceId]);
+
+  useEffect(() => {
+    if (visible) registerHost();
+    else clearXHostState(workspaceId);
+  }, [visible, registerHost, workspaceId]);
 
   useEffect(() => () => clearXHostState(workspaceId), [workspaceId]);
 
