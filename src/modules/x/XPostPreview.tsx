@@ -8,7 +8,7 @@
  * ⚠️ 字不能在这里改(用户 10-27 定 B:字只在 note 里改,note 是唯一原文)。
  */
 import { useEffect, useState } from 'react';
-import { fillBlock, type PostDraft, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
+import { fillBlock, formNotFillable, type PostDraft, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
 import type { PostedBefore } from './x-post-repo';
@@ -118,7 +118,14 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
     if (!plan || form === null) return;
     if (!plan.options.find((o) => o.form === form)?.available) setForm(null);
   }, [plan, form]);
-  const current = plan ? plan.options.find((o) => o.form === (form ?? plan.suggested)) : undefined;
+  /**
+   * 人没选过时先选哪种:建议的那种现在能填就选它;还不能填(长推 / X 文章没做)就先选现在能发的
+   * —— 否则一打开发布键就是灰的(10-28 用户:「发不出去?」)。建议照样标 ✓,只是不默认选中。
+   */
+  const fallback = plan?.options.find((o) => o.available && formNotFillable(o.form) === null && fillBlock(o) === null)?.form
+    ?? plan?.options.find((o) => o.available && formNotFillable(o.form) === null)?.form;
+  const preferred = plan ? (formNotFillable(plan.suggested) === null ? plan.suggested : fallback ?? plan.suggested) : undefined;
+  const current = plan ? plan.options.find((o) => o.form === (form ?? preferred)) : undefined;
   const limit = current?.form === 'single' || current?.form === 'thread' ? X_POST_LIMIT : current?.form === 'longPost' ? 25000 : null;
   const draft = pending.pending;
   const now = useNow(draft !== null);
@@ -152,6 +159,9 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
             <div style={{ marginBottom: 8 }}>
               建议:<b>{plan.options.find((o) => o.form === plan.suggested)?.label}</b>
               <span style={{ color: 'var(--text)' }}> —— {plan.reason}</span>
+              {form === null && preferred !== plan.suggested && (
+                <span style={{ color: '#d97706' }}>(还不能填进 X,先给你选了「{current.label}」)</span>
+              )}
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
               {plan.options.map((o) => (

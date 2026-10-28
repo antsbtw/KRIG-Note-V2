@@ -361,14 +361,32 @@ function buildThread(units: readonly Unit[], warn: Set<string>): PostDraft[] {
     cur.texts.push({ ...u, cont: false });
   };
 
-  for (const u of units) {
+  /** 从第 i 个单元起这一节的字(到下一个小标题 / 分隔线为止) */
+  const section = (i: number): TextUnit[] => {
+    const out: TextUnit[] = [];
+    for (let j = i; j < units.length; j++) {
+      const v = units[j];
+      if (v.k === 'break') break;
+      if (v.k !== 'text') continue;
+      if (j > i && (v.role === 'heading' || v.role === 'title')) break;
+      out.push(v);
+    }
+    return out;
+  };
+
+  for (const [i, u] of units.entries()) {
     if (u.k === 'break') { flush(); continue; }
     if (u.k === 'media') {
       if (mediaProblem([...cur.media, u.m]) !== null) flush();
       cur.media.push(u.m);
       continue;
     }
-    if ((u.role === 'heading' || u.role === 'title') && nonEmpty()) flush();
+    /**
+     * 小标题:整节塞得进这条就接着写,塞不下才开新的一条(不让小标题孤零零落在上一条末尾)。
+     * 原来见小标题就开新条 —— 299 字带 5 个小标题排成 6 条;用户 10-28:「应该两个对话就够了」。
+     */
+    if ((u.role === 'heading' || u.role === 'title') && nonEmpty()
+      && xWeightedLength(joinTexts([...cur.texts, ...section(i)])) > THREAD_BUDGET) flush();
     if (fits(u)) { cur.texts.push(u); continue; }
     if (nonEmpty()) flush();
     if (fits(u)) { cur.texts.push(u); continue; }

@@ -158,9 +158,26 @@ describe('推串在哪断', () => {
     const posts = thread([p('a'), hr, p('b')]);
     expect(posts.map((x) => x.text)).toEqual(['a 1/2', 'b 2/2']);
   });
-  it('小标题开新的一条', () => {
-    const posts = thread([p('前言'), h('第一节'), p('正文')]);
+  it('小标题那节塞得进这条就接着写,不硬开新条', () => {
+    expect(thread([p('前言'), h('第一节'), p('正文')])).toHaveLength(1);
+  });
+  it('小标题那节塞不下 → 小标题带着正文开新的一条(不落在上一条末尾)', () => {
+    const posts = thread([p('甲'.repeat(100)), h('第一节'), p('乙'.repeat(60))]);
+    expect(posts).toHaveLength(2);
     expect(posts[1].text.startsWith('第一节')).toBe(true);
+  });
+  it('⭐ 10-28 真机:299 字带 5 个小标题,排 2 条不是 6 条', () => {
+    const doc = [
+      h('格式测试:VPS 入门', 1),
+      h('什么是 VPS'), p('VPS 是一台租来的服务器,按月付费,便宜但要自己维护。详见 https://x.com/antsBTW'),
+      h('优点'), p('• 价格低'), p('• 可以装任何软件'), p('• 有独立 IP'),
+      h('上手步骤'), p('1. 选服务商'), p('2. 装系统'), p('3. 配防火墙'),
+      h('今天的进度'), p('☑ 买好服务器'), p('☐ 装好代理'),
+      p('「先能用,再求快。」'), p('有问题欢迎留言 @antsBTW #VPS 🚀'),
+    ];
+    const r = composePost(doc);
+    expect(r.weight).toBeGreaterThan(280);
+    expect(thread(doc)).toHaveLength(2);
   });
   it('一段太长按句号断,不在句子中间断', () => {
     const sentence = '这'.repeat(60) + '。';
