@@ -12,6 +12,12 @@ import type { PmPayload } from '@semantic/types';
 export type AssemblyHints = {
   /** listItem 用 — 区分 bulletList vs orderedList (taskItem 字面是另一 NodeSpec, 无此歧义) */
   listType?: 'bullet' | 'ordered';
+  /**
+   * 这块是它那个结构容器(columnList / bulletList / orderedList / taskList)的第一个 —— 拼装时从这里另起一组。
+   * 容器壳不存,只存里面的块;没有这个记号,挨着的两个分栏 / 两个列表拼回来会并成一个
+   * (2026-10-28 用户实测:三行两栏存完再打开挤成一行六栏)。老数据没有记号 = 照旧并成一组。
+   */
+  groupStart?: true;
 };
 
 /** payload 顶层非 PM schema 字段的辅助提示 */
