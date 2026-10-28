@@ -102,10 +102,14 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
     fill = { phase: 'filling', step: '填进 X 发推框…' };
     draw();
     const r = await xDataCall({ op: 'postFill', wsId, form, content: latest as PmNode[] });
+    /** 预览窗中途被关了也要记:X 上那条的「回 note 改」靠它找回 note */
+    if (r.status === 'ok') rememberDraftNote((r.value as { draftId: string }).draftId, instanceId);
     if (open !== me) return;
     if (r.status === 'ok') {
-      rememberDraftNote((r.value as { draftId: string }).draftId, instanceId);
-      fill = { phase: 'idle' };
+      /** 填好就关:接下来在 X 顶上的确认条里定;预览窗留着会压住那条的按钮(10-27 真机截图) */
+      await refreshPending(wsId);
+      closePostPreview();
+      return;
     } else {
       fill = { phase: 'failed', why: r.reason };
       console.warn(`[x-post] 没填进 X:${r.reason}`);
