@@ -65,6 +65,8 @@ const h = vi.hoisted(() => ({
   busy: 0,
   /** 前几次贴字被 X 冲掉(10-28 真机:弹窗刚开就贴,X 重画后框是空的) */
   wipes: 0,
+  /** 没点中那条就贴进去的(只到了看得见的那份):一点「+」就被 X 重画冲掉、也加不出新条(10-28 真机) */
+  ghost: new Set<number>(),
 }));
 
 vi.mock('@storage/surreal/client', () => ({
@@ -112,6 +114,7 @@ vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
       const k = Number(/^x\.composeBox(?:\.(\d+))?$/.exec(input.anchor)?.[1] ?? 0);
       h.order.push(`type@${k}`);
       h.typed.push(input.text);
+      if (h.active !== k) h.ghost.add(k);
       if (h.wipes > 0) { h.wipes -= 1; return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } }; }
       if (k === 0) h.box = (h.box ?? '') + (h.landsAs ?? input.text);
       else h.extra[k - 1] += h.landsAs ?? input.text;
@@ -145,6 +148,7 @@ vi.mock('@modules/x/x-collect-ports', () => ({
       if (id === 'x.composeAddPost') {
         if (h.addFails) return { state: 'no-button', testids: ['tweetButton', 'tweetTextarea_0'] };
         if (Number(params.index) !== 1 + h.extra.length) return { state: 'wrong-count', have: 1 + h.extra.length };
+        if (h.ghost.size > 0) { h.box = ''; h.extra = h.extra.map(() => ''); return { state: 'timeout', have: 1 + h.extra.length }; }
         h.extra.push(''); h.active = h.extra.length;
         h.order.push(`add@${h.active}`);
         return { state: 'added', have: 1 + h.extra.length };
@@ -204,7 +208,7 @@ beforeEach(() => {
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0; h.toast = true; h.staleLooks = 0;
   h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
-  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0; h.wipes = 0;
+  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0; h.wipes = 0; h.ghost = new Set();
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -458,6 +462,14 @@ describe('推串(10-28,用户「先把推文的各种形式搞完善」)', () =>
     expect(h.typed).toHaveLength(3);
     expect(h.typed[0]).toBe(h.typed[1]);
     expect(h.extra).toHaveLength(1);
+    await execute('x.post.cancel', { wsId: 'ws-1', draftId: (await pending()).pending!.draftId }, { caller: 'ui' });
+  });
+
+  it('⭐ 10-28 真机:没图的推串 —— 每条先点中再贴,「+」才加得出来', async () => {
+    h.active = -1;
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'thread', noteId: 'N7', content: [para('甲'.repeat(130)), { type: 'horizontalRule' }, para('乙')] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.order).toEqual(['focus@0', 'type@0', 'add@1', 'focus@1', 'type@1']);
     await execute('x.post.cancel', { wsId: 'ws-1', draftId: (await pending()).pending!.draftId }, { caller: 'ui' });
   });
 

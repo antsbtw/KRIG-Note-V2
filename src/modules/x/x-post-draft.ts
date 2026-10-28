@@ -215,11 +215,17 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
         return { ok: false, why: await undo(wcId, `推串${which}没加出来:${what}`) };
       }
     }
+    /**
+     * 推串每条先点中那条再放图 / 贴字。
+     * 10-28 真机:没图的第 1 条没点就直接贴 —— 框里看得见字,一点「+」X 重画,字没了、也没加出第 2 条
+     * (X 的编辑器状态和看得见的字是两份,没点中时贴进去的只到了看得见那份 —— 这是推断);
+     * 带图那次每条都先点了,一切正常。
+     */
+    if (thread) {
+      const f = (await ports.runScript(X_SCRIPTS.composeFocus, { index: k })) as StepState;
+      if (f?.state !== 'ok') return { ok: false, why: await undo(wcId, `${which}点不中(${f?.state ?? '脚本没回话'})`) };
+    }
     if (post.files.length > 0) {
-      if (thread) {
-        const f = (await ports.runScript(X_SCRIPTS.composeFocus, { index: k })) as StepState;
-        if (f?.state !== 'ok') return { ok: false, why: await undo(wcId, `${which}点不中(${f?.state ?? '脚本没回话'})—— 图不知道挂到哪条`) };
-      }
       const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.composeFileInput, files: post.files, check: { kind: 'none' } });
       touched = true;
       if (fed.status === 'failed') return { ok: false, why: await undo(wcId, `${which}图没放进去:${fed.reason}`) };
