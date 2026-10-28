@@ -32,6 +32,12 @@ const g = globalThis as unknown as Record<string, unknown>;
 g.IntersectionObserver ??= NoopObserver;
 g.ResizeObserver ??= NoopObserver;
 (window as unknown as Record<string, unknown>).electronAPI ??= { learningVocabList: () => Promise.resolve([]) };
+/** jsdom 不排版:slash 弹菜单要 coordsAtPos,给个零矩形 */
+const zeroRect = () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) });
+const zeroRects = () => Object.assign([zeroRect()], { item: () => zeroRect() });
+(Range.prototype as any).getClientRects = zeroRects;
+(Range.prototype as any).getBoundingClientRect = zeroRect;
+(Element.prototype as any).getClientRects = zeroRects;
 /** jsdom 无 url 时 localStorage 不可用;Mermaid 块读主题偏好要用 */
 const mem = new Map<string, string>();
 Object.defineProperty(window, 'localStorage', {
@@ -151,3 +157,42 @@ for (const cols of [2, 3] as const) {
     });
   }
 }
+
+/** 用户 2026-10-28 选 A:栏里打 / 不出「2 Columns」(分栏不能嵌套,点了也是空操作) */
+describe('栏里的 slash 菜单不出「2 Columns」', () => {
+  async function menuLabels(): Promise<string[]> {
+    const { slashRegistry } = await import('@slot/interaction-registries/slash-registry/slash-registry');
+    const { slashMenuController } = await import('@slot/triggers/slash-menu-controller');
+    const { visibleInside } = await import('@slot/frame-bindings/SlashMenuBinding');
+    const st = slashMenuController.getState();
+    expect(st.visible).toBe(true);
+    return visibleInside(slashRegistry.getItemsForView('note-view', ''), st.inside).map((i) => i.label);
+  }
+
+  beforeAll(async () => {
+    const { registerSlashMenu } = await import('@views/note/slash-menu-content');
+    registerSlashMenu();
+  });
+
+  it('栏里:没有 2 Columns,其它项照常', async () => {
+    const { view } = mount(2, 1);
+    const labels = await menuLabels();
+    expect(labels).not.toContain('2 Columns');
+    expect(labels).toContain('Image');
+    view.destroy();
+  });
+
+  it('栏外:2 Columns 照常出现', async () => {
+    const p = schema.nodes.paragraph.create();
+    const doc = schema.nodes.doc.create(null, [schema.nodes.heading.create({ level: 1, isTitle: true }, schema.text('标题')), p]);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    const id = `t::slot:left#${++seq}`;
+    const view = buildEditorView(el, schema, blocks, doc, () => undefined, 'note-view', id);
+    view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+    view.dispatch(view.state.tr.insertText('/'));
+    const labels = await menuLabels();
+    expect(labels).toContain('2 Columns');
+    view.destroy();
+  });
+});

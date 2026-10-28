@@ -6,18 +6,20 @@ interface SlashMenuState {
   y: number;
   viewId: string;
   query: string;
+  /** 光标外层的块类型(由内到外,如 ['column','columnList']);菜单按 SlashItem.hiddenInside 过滤 */
+  inside: readonly string[];
 }
 
 const initialState: SlashMenuState = {
-  visible: false, x: 0, y: 0, viewId: '', query: '',
+  visible: false, x: 0, y: 0, viewId: '', query: '', inside: [],
 };
 
 class SlashMenuController {
   private state: SlashMenuState = initialState;
   private listeners: Set<() => void> = new Set();
 
-  show(x: number, y: number, viewId: string, query: string = ''): void {
-    this.state = { visible: true, x, y, viewId, query };
+  show(x: number, y: number, viewId: string, query: string = '', inside: readonly string[] = []): void {
+    this.state = { visible: true, x, y, viewId, query, inside };
     this.notify();
   }
 

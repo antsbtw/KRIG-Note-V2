@@ -82,7 +82,10 @@ export function buildSlashPlugin(viewId: string): Plugin {
           // 计算屏幕坐标(/ 字符上方,弹层在 / 下方一行)
           try {
             const coords = view.coordsAtPos(state.triggerPos);
-            slashMenuController.show(coords.left, coords.bottom + 4, viewId, state.query);
+            const $p = view.state.doc.resolve(state.triggerPos);
+            const inside: string[] = [];
+            for (let d = $p.depth - 1; d > 0; d--) inside.push($p.node(d).type.name);
+            slashMenuController.show(coords.left, coords.bottom + 4, viewId, state.query, inside);
           } catch {
             slashMenuController.hide();
           }
