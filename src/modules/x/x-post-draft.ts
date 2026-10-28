@@ -158,7 +158,11 @@ type MediaState = {
 /** 填进 X 的一条:字 + 磁盘上的图(调用方从 media:// 解出来) */
 export type FillPost = { readonly text: string; readonly files: readonly string[] };
 
-type StepState = { state?: string; have?: number; testids?: string[] } | null;
+type StepState = {
+  state?: string; have?: number; testids?: string[];
+  /** 「+」没加出来时的现场 */
+  label?: string; disabledAfter?: boolean; inDom?: boolean; firstLen?: number; counter?: string; dialogs?: number;
+} | null;
 
 /**
  * 打开发推弹窗 → 框得是空的(没字也没图)、只有一个 → 一条一条填:第 2 条起先点「+」加一条(推串,2026-10-28),
@@ -203,7 +207,10 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
       if (add?.state !== 'added') {
         const what = add?.state === 'no-button' ? `弹窗里找不到「+」按钮(弹窗里的 testid:${(add.testids ?? []).join(',')})`
           : add?.state === 'wrong-count' ? `加之前框数是 ${add.have} 个,应该是 ${k} 个`
-            : `${add?.state ?? '脚本没回话'}${add?.have !== undefined ? `(现在 ${add.have} 个框)` : ''}`;
+            : add?.state === 'timeout'
+              ? `点了「+」5 秒没多出框(现在 ${add.have} 个框;按钮「${add.label}」点完${add.disabledAfter ? '变灰' : '没灰'}${add.inDom ? '' : '、已不在页面上'};`
+                + `第 1 条 X 里 ${add.firstLen} 字、X 的计数 ${add.counter || '?'};页面上 ${add.dialogs} 个弹层;弹窗里的 testid:${(add.testids ?? []).join(',')})`
+              : `${add?.state ?? '脚本没回话'}${add?.have !== undefined ? `(现在 ${add.have} 个框)` : ''}`;
         console.warn(`[x.post] 推串${which}没加出来:${what}`);
         return { ok: false, why: await undo(wcId, `推串${which}没加出来:${what}`) };
       }

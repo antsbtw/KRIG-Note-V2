@@ -669,7 +669,24 @@ const COMPOSE_ADD_POST_SRC = String.raw`(function () {
     var tick = function () {
       var n = boxesIn(dlg).length;
       if (n > idx) { resolve({ state: 'added', have: n }); return; }
-      if (Date.now() - t0 > 5000) { resolve({ state: 'timeout', have: n }); return; }
+      if (Date.now() - t0 > 5000) {
+        /** 没加出来:带回现场(按钮名 / 点完灰没灰 / 第一条 X 看到几个字 / 弹窗里有什么 / 有没有别的弹层)—— 10-28 真机长文第 2 条加不出来,只有 timeout 看不出为什么 */
+        var ids2 = {};
+        dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids2[el.getAttribute('data-testid')] = 1; });
+        var first = boxesIn(dlg)[0];
+        var bar = dlg.querySelector('[role="progressbar"]');
+        resolve({
+          state: 'timeout', have: n,
+          label: btn.getAttribute('aria-label') || '',
+          disabledAfter: btn.getAttribute('aria-disabled') === 'true' || !!btn.disabled,
+          inDom: document.contains(btn),
+          firstLen: first ? (first.textContent || '').length : -1,
+          counter: bar ? (bar.getAttribute('aria-valuenow') || '') + '/' + (bar.getAttribute('aria-valuemax') || '') : '',
+          dialogs: document.querySelectorAll('[role="dialog"], [role="alertdialog"]').length,
+          testids: Object.keys(ids2).slice(0, 40),
+        });
+        return;
+      }
       setTimeout(tick, 200);
     };
     tick();

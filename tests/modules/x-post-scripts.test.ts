@@ -282,6 +282,17 @@ describe('推串(10-28):几条框 / 加一条 / 点中 / 一起清 / 核对不�
     expect(r.testids).toContain('tweetTextarea_0');
   });
 
+  it('点了「+」5 秒没多出框 → timeout 带现场(按钮名、点完灰没灰、第 1 条字数、testid)', async () => {
+    const d = threadDialog([{ text: '长长的第一条' }], false);
+    const add = document.createElement('button');
+    add.setAttribute('data-testid', 'addButton');
+    add.setAttribute('aria-label', 'Add post');
+    d.append(add);
+    const r = await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }));
+    expect(r).toMatchObject({ state: 'timeout', have: 1, label: 'Add post', disabledAfter: false, inDom: true, firstLen: 6 });
+    expect(r.testids).toContain('addButton');
+  }, 10_000);
+
   it('点中第 2 条 → 焦点在它上;没有这条 → no-box', async () => {
     threadDialog([{ text: 'a' }, { text: 'b' }]);
     expect(await run(buildP(X_SCRIPTS.composeFocus, { index: 1 }))).toEqual({ state: 'ok' });
