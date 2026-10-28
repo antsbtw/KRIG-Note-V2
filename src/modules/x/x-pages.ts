@@ -420,6 +420,8 @@ export const X_ANCHORS = {
   composeBox: 'x.composeBox' as AnchorName,
   /** 发推弹窗里的选图控件(发推第④期,2026-10-28)—— 喂磁盘文件给它,X 自己上传 */
   composeFileInput: 'x.composeFileInput' as AnchorName,
+  /** 推串的「+」(加一条) */
+  composeAddButton: 'x.composeAddButton' as AnchorName,
 } as const;
 
 /** 推串第 k 条的正文框(2026-10-28);第 0 条就是 composeBox */

@@ -346,3 +346,31 @@ describe('⭐ frame 作用域本轮不实现 —— 明确 Failed,不静默当 m
     expect(box.textContent).toBe('');
   });
 });
+
+describe('⭐ tap.trusted —— 真点击(X 推串的「+」不认脚本 .click(),2026-10-28 真机)', () => {
+  const host = (center: unknown, withClick = true) => {
+    const clicks: Array<[number, number]> = [];
+    const scripts: string[] = [];
+    return {
+      clicks, scripts,
+      evaluate: async (_p: string, s: string) => { scripts.push(s); return center; },
+      ...(withClick ? { trustedClick: async (_p: string, x: number, y: number) => { clicks.push([x, y]); } } : {}),
+    };
+  };
+  it('量出元素中心 → 用宿主真点击点那个坐标,不跑脚本 .click()', async () => {
+    const h = host({ x: 612, y: 350 });
+    const r = await new InputEngine(h, new MapAnchorResolver(ANCHORS)).tap(PAGE, { anchor: 'updateButton', trusted: true });
+    expect(isOk(r)).toBe(true);
+    expect(h.clicks).toEqual([[612, 350]]);
+    expect(h.scripts.some((s) => s.includes('.click()'))).toBe(false);
+  });
+  it('找不到元素 → Failed;宿主没接真点击 → Failed(不偷偷退回脚本点击)', async () => {
+    const miss = host(null);
+    expect(isFailed(await new InputEngine(miss, new MapAnchorResolver(ANCHORS)).tap(PAGE, { anchor: 'updateButton', trusted: true }))).toBe(true);
+    expect(miss.clicks).toEqual([]);
+    const noCdp = host({ x: 1, y: 1 }, false);
+    const r = await new InputEngine(noCdp, new MapAnchorResolver(ANCHORS)).tap(PAGE, { anchor: 'updateButton', trusted: true });
+    expect(isFailed(r)).toBe(true);
+    expect(noCdp.scripts).toEqual([]);
+  });
+});

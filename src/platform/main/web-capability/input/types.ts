@@ -176,6 +176,8 @@ export type FeedInput = InputTargetBase & {
 
 export type TapInput = InputTargetBase & {
   readonly settle?: TapSettle;
+  /** 用「真」鼠标点(CDP,isTrusted)而不是脚本 .click() —— 站点不认脚本点击时用 */
+  readonly trusted?: boolean;
 };
 
 export type PressInput = {

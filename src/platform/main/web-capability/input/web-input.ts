@@ -38,6 +38,7 @@ import {
   SCOPE_AMBIGUOUS,
   SCOPE_NOT_FOUND,
   buildAnchorExistsScript,
+  buildCenterScript,
   buildContainsScript,
   buildDirectWriteScript,
   buildExactScript,
@@ -75,6 +76,11 @@ export interface InputHost {
   osPaste?(pageId: PageId, text: string): Promise<void>;
   /** 把磁盘文件喂进 `<input type=file>`(CDP `DOM.setFileInputFiles`) */
   setFileInputFiles?(pageId: PageId, selector: string, files: readonly string[]): Promise<void>;
+  /**
+   * 「真」鼠标点一下页面坐标(CDP `Input.dispatchMouseEvent`,isTrusted = true)。
+   * 有的站点只认真点击:X 推串的「+」被脚本 .click() 点了会把当前这条清空、也不加新条(2026-10-28 真机实测)。
+   */
+  trustedClick?(pageId: PageId, x: number, y: number): Promise<void>;
   /** 可注入的时钟,便于单测跑轮询而不真等 */
   sleep?(ms: number): Promise<void>;
 }
@@ -362,13 +368,26 @@ export class InputEngine implements WebInput {
     if (anchor.status !== 'ok') return anchor;
     const scopeDesc = describeScope(input.scope);
 
-    const clicked = await this.evalScoped(
-      pageId,
-      buildTapScript(anchor.value, scope.value),
-      scopeDesc,
-    );
-    if (clicked.status !== 'ok') return clicked;
-    if (clicked.value !== true) return failed(`未找到可点的 ${input.anchor}`, true);
+    if (input.trusted) {
+      if (!this.host.trustedClick) return failed('当前宿主不支持真点击(未接 CDP Input.dispatchMouseEvent)', false);
+      const at = await this.evalScoped(pageId, buildCenterScript(anchor.value, scope.value), scopeDesc);
+      if (at.status !== 'ok') return at;
+      const c = at.value as { x?: number; y?: number } | null;
+      if (!c || typeof c.x !== 'number' || typeof c.y !== 'number') return failed(`未找到可点的 ${input.anchor}`, true);
+      try {
+        await this.host.trustedClick(pageId, c.x, c.y);
+      } catch (err) {
+        return failed(`真点击失败: ${err instanceof Error ? err.message : String(err)}`, true);
+      }
+    } else {
+      const clicked = await this.evalScoped(
+        pageId,
+        buildTapScript(anchor.value, scope.value),
+        scopeDesc,
+      );
+      if (clicked.status !== 'ok') return clicked;
+      if (clicked.value !== true) return failed(`未找到可点的 ${input.anchor}`, true);
+    }
 
     if (!input.settle) {
       // 没给 settle → 如实说「没等」,不谎称 settled

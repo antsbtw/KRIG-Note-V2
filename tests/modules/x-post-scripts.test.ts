@@ -268,28 +268,27 @@ describe('推串(10-28):几条框 / 加一条 / 点中 / 一起清 / 核对不�
     expect(r).toMatchObject({ found: true, count: 1, text: '第一条', media: 6, boxes: [{ text: '第一条', media: 4 }, { text: '2/2', media: 2 }] });
   });
 
-  it('⭐ 点「+」→ 等到第 2 个框出来 → added;框数不对 → wrong-count(不乱点)', async () => {
+  it('⭐ 「+」分两半:check 看能不能点(不点)/ wait 等新框;框数不对 → wrong-count', async () => {
     threadDialog([{ text: '第一条' }]);
-    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }))).toEqual({ state: 'added', have: 2 });
-    expect(document.querySelector('[role="dialog"] [data-testid="tweetTextarea_1"]')).not.toBeNull();
-    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }))).toEqual({ state: 'wrong-count', have: 2 });
+    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1, mode: 'check' }))).toEqual({ state: 'ready' });
+    /** check 绝不自己点(X 不认脚本点击,点了会清掉当前这条) */
+    expect(document.querySelector('[role="dialog"] [data-testid="tweetTextarea_1"]')).toBeNull();
+    (document.querySelector('[data-testid="addButton"]') as HTMLElement).click();
+    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1, mode: 'wait' }))).toEqual({ state: 'added', have: 2 });
+    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1, mode: 'check' }))).toEqual({ state: 'wrong-count', have: 2 });
   });
 
   it('找不到「+」→ no-button,带弹窗里的 testid(真机据此对准)', async () => {
     threadDialog([{ text: '第一条' }], false);
-    const r = await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }));
+    const r = await run(buildP(X_SCRIPTS.composeAddPost, { index: 1, mode: 'check' }));
     expect(r.state).toBe('no-button');
     expect(r.testids).toContain('tweetTextarea_0');
   });
 
-  it('点了「+」5 秒没多出框 → timeout 带现场(按钮名、点完灰没灰、第 1 条字数、testid)', async () => {
-    const d = threadDialog([{ text: '长长的第一条' }], false);
-    const add = document.createElement('button');
-    add.setAttribute('data-testid', 'addButton');
-    add.setAttribute('aria-label', 'Add post');
-    d.append(add);
-    const r = await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }));
-    expect(r).toMatchObject({ state: 'timeout', have: 1, label: 'Add post', disabledAfter: false, inDom: true, firstLen: 6 });
+  it('点了「+」5 秒没多出框 → timeout 带现场(第 1 条字数、弹层数、testid)', async () => {
+    threadDialog([{ text: '长长的第一条' }]);
+    const r = await run(buildP(X_SCRIPTS.composeAddPost, { index: 1, mode: 'wait' }));
+    expect(r).toMatchObject({ state: 'timeout', have: 1, firstLen: 6 });
     expect(r.testids).toContain('addButton');
   }, 10_000);
 

@@ -641,48 +641,46 @@ const COMPOSE_CLEAR_SRC = String.raw`(function () {
 })();`;
 
 /**
- * 推串:点「+」加一条,等第 __INDEX__ 个框出来(X 加完会把光标放进新框)。
- * state:added / wrong-count(加之前框数不是 __INDEX__ 个)/ no-button(带 testids)/ disabled / timeout / no-dialog
+ * 推串加一条,分两半(中间由输入引擎用「真」鼠标点「+」):
+ * - __MODE__ = 'check':点之前看能不能点 —— ready / wrong-count(框数不是 __INDEX__ 个)/ no-button(带 testids)/ disabled / no-dialog
+ * - __MODE__ = 'wait':点之后等第 __INDEX__+1 个框出来 —— added / timeout(带现场)
+ * ⚠️ 不在脚本里 .click():X 不认脚本点击,点了会把当前这条清空、也不加新条(2026-10-28 真机实测;CDP 真点击才行)。
  */
 const COMPOSE_ADD_POST_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
     ${BOXES_JS}
     var idx = __INDEX__;
+    var mode = __MODE__;
     var dlg = dialogOf();
     if (!dlg) { resolve({ state: 'no-dialog' }); return; }
-    var have = boxesIn(dlg).length;
-    if (have !== idx) { resolve({ state: 'wrong-count', have: have }); return; }
-    var btn = dlg.querySelector('[data-testid="addButton"]');
-    if (!btn) {
-      var bs = dlg.querySelectorAll('button[aria-label], [role="button"][aria-label]');
-      for (var i = 0; i < bs.length; i++) if (/add post|add another|添加|新增/i.test(bs[i].getAttribute('aria-label') || '')) { btn = bs[i]; break; }
-    }
-    if (!btn) {
-      var ids = {};
-      dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
-      resolve({ state: 'no-button', testids: Object.keys(ids).slice(0, 40) });
+    if (mode === 'check') {
+      var have = boxesIn(dlg).length;
+      if (have !== idx) { resolve({ state: 'wrong-count', have: have }); return; }
+      var btn = dlg.querySelector('[data-testid="addButton"]');
+      if (!btn) {
+        var ids = {};
+        dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
+        resolve({ state: 'no-button', testids: Object.keys(ids).slice(0, 40) });
+        return;
+      }
+      if (btn.getAttribute('aria-disabled') === 'true' || btn.disabled) { resolve({ state: 'disabled' }); return; }
+      resolve({ state: 'ready' });
       return;
     }
-    if (btn.getAttribute('aria-disabled') === 'true' || btn.disabled) { resolve({ state: 'disabled' }); return; }
-    btn.click();
     var t0 = Date.now();
     var tick = function () {
       /** 每次重新找弹窗:X 可能重画弹窗,手里那个旧节点就不长了 */
-      var n = boxesIn(dialogOf() || dlg).length;
+      var d = dialogOf() || dlg;
+      var n = boxesIn(d).length;
       if (n > idx) { resolve({ state: 'added', have: n }); return; }
       if (Date.now() - t0 > 5000) {
-        /** 没加出来:带回现场(按钮名 / 点完灰没灰 / 第一条 X 看到几个字 / 弹窗里有什么 / 有没有别的弹层)—— 10-28 真机长文第 2 条加不出来,只有 timeout 看不出为什么 */
+        /** 没加出来:带回现场(第一条 X 里几个字 / 弹窗里有什么 / 有几个弹层) */
         var ids2 = {};
-        dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids2[el.getAttribute('data-testid')] = 1; });
-        var first = boxesIn(dlg)[0];
-        var bar = dlg.querySelector('[role="progressbar"]');
+        d.querySelectorAll('[data-testid]').forEach(function (el) { ids2[el.getAttribute('data-testid')] = 1; });
+        var first = boxesIn(d)[0];
         resolve({
           state: 'timeout', have: n,
-          label: btn.getAttribute('aria-label') || '',
-          disabledAfter: btn.getAttribute('aria-disabled') === 'true' || !!btn.disabled,
-          inDom: document.contains(btn),
           firstLen: first ? (first.textContent || '').length : -1,
-          counter: bar ? (bar.getAttribute('aria-valuenow') || '') + '/' + (bar.getAttribute('aria-valuemax') || '') : '',
           dialogs: document.querySelectorAll('[role="dialog"], [role="alertdialog"]').length,
           testids: Object.keys(ids2).slice(0, 40),
         });
@@ -1126,8 +1124,10 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
   },
   {
     id: X_SCRIPTS.composeAddPost,
-    purpose: 'X:推串 —— 点发推弹窗里的「+」加一条,等新框出来(不发)',
-    build: (params) => COMPOSE_ADD_POST_SRC.replace('__INDEX__', () => String(Math.max(1, Math.floor(Number(params.index) || 0)))),
+    purpose: 'X:推串加一条 —— 点「+」前看能不能点 / 点后等新框出来(点由输入引擎真点击;不发)',
+    build: (params) => COMPOSE_ADD_POST_SRC
+      .replace('__INDEX__', () => String(Math.max(1, Math.floor(Number(params.index) || 0))))
+      .replace('__MODE__', () => JSON.stringify(params.mode === 'wait' ? 'wait' : 'check')),
   },
   {
     id: X_SCRIPTS.composeFocus,

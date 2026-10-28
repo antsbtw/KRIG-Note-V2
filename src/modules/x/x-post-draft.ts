@@ -161,7 +161,7 @@ export type FillPost = { readonly text: string; readonly files: readonly string[
 type StepState = {
   state?: string; have?: number; testids?: string[];
   /** 「+」没加出来时的现场 */
-  label?: string; disabledAfter?: boolean; inDom?: boolean; firstLen?: number; counter?: string; dialogs?: number;
+  firstLen?: number; dialogs?: number;
 } | null;
 
 /**
@@ -203,23 +203,26 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
   for (const [k, post] of posts.entries()) {
     const which = thread ? `第 ${k + 1} 条` : '';
     if (k > 0) {
-      const add = (await ports.runScript(X_SCRIPTS.composeAddPost, { index: k })) as StepState;
+      /** 先看能不能点 → 真点击「+」(X 不认脚本点击)→ 等新框出来 */
+      let add = (await ports.runScript(X_SCRIPTS.composeAddPost, { index: k, mode: 'check' })) as StepState;
+      if (add?.state === 'ready') {
+        const tap = await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.composeAddButton, trusted: true });
+        add = tap.status === 'failed' ? { state: `点不了「+」:${tap.reason}` }
+          : (await ports.runScript(X_SCRIPTS.composeAddPost, { index: k, mode: 'wait' })) as StepState;
+      }
       if (add?.state !== 'added') {
         const what = add?.state === 'no-button' ? `弹窗里找不到「+」按钮(弹窗里的 testid:${(add.testids ?? []).join(',')})`
           : add?.state === 'wrong-count' ? `加之前框数是 ${add.have} 个,应该是 ${k} 个`
             : add?.state === 'timeout'
-              ? `点了「+」5 秒没多出框(现在 ${add.have} 个框;按钮「${add.label}」点完${add.disabledAfter ? '变灰' : '没灰'}${add.inDom ? '' : '、已不在页面上'};`
-                + `第 1 条 X 里 ${add.firstLen} 字、X 的计数 ${add.counter || '?'};页面上 ${add.dialogs} 个弹层;弹窗里的 testid:${(add.testids ?? []).join(',')})`
+              ? `点了「+」5 秒没多出框(现在 ${add.have} 个框;第 1 条 X 里 ${add.firstLen} 字;页面上 ${add.dialogs} 个弹层;弹窗里的 testid:${(add.testids ?? []).join(',')})`
               : `${add?.state ?? '脚本没回话'}${add?.have !== undefined ? `(现在 ${add.have} 个框)` : ''}`;
         console.warn(`[x.post] 推串${which}没加出来:${what}`);
         return { ok: false, why: await undo(wcId, `推串${which}没加出来:${what}`) };
       }
     }
     /**
-     * 推串每条先点中那条再放图 / 贴字。
-     * 10-28 真机:没图的第 1 条没点就直接贴 —— 框里看得见字,一点「+」X 重画,字没了、也没加出第 2 条
-     * (X 的编辑器状态和看得见的字是两份,没点中时贴进去的只到了看得见那份 —— 这是推断);
-     * 带图那次每条都先点了,一切正常。
+     * 推串每条先点中那条再放图 / 贴字(X 的工具栏、放图都跟着「当前这条」走)。
+     * ⚠️ 10-28 曾以为「没点中就贴 → 点「+」字被清」,真机诊断证否:清字的是脚本点「+」,见上面真点击。
      */
     if (thread) {
       const f = (await ports.runScript(X_SCRIPTS.composeFocus, { index: k })) as StepState;
@@ -250,7 +253,7 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
     touched = true;
     /**
      * 贴完先确认 X 里真有这条字,再往下(点「+」/ 下一条)。
-     * 10-28 真机:弹窗刚开就贴,X 随后把弹窗重画了一遍 —— 字没了、「+」也换了一个,点「+」5 秒没反应。
+     * (10-28 起因是推测「弹窗刚开就贴被重画冲掉」,后来真机证否 —— 真因是脚本点「+」;这道读回仍留着,贴空了能当场看出来。)
      * 框还是空的(被冲掉)→ 留痕后重贴一次;不是空的却对不上 → 不重贴(免得贴两遍),走到最后的读回核对报出来。
      */
     let landed = await waitBoxText(wcId, k, post.text);

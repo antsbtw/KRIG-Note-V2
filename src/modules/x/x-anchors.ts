@@ -42,6 +42,8 @@ const SELECTORS: Readonly<Record<string, string>> = {
    * ⚠️ 首页内嵌框也有一个 —— 只认弹窗里的;弹窗里有没有,第④期真机第一次跑时确认。
    */
   [X_ANCHORS.composeFileInput]: '[role="dialog"] input[data-testid="fileInput"]',
+  /** 推串的「+」—— 2026-10-28 真机:testid addButton,只在当前这条有字 / 有图时出现;⚠️ 只认真点击 */
+  [X_ANCHORS.composeAddButton]: '[role="dialog"] [data-testid="addButton"]',
   /** 推串第 2…25 条的正文框(X 按 tweetTextarea_1、_2… 编号;2026-10-28 按 X 现行结构写,待真机) */
   ...Object.fromEntries(Array.from({ length: X_THREAD_MAX - 1 }, (_, i) =>
     [composeBoxAnchor(i + 1), `[role="dialog"] [data-testid="tweetTextarea_${i + 1}"]`])),
