@@ -104,8 +104,15 @@ export function stopPostDraftTimers(): void {
 /** 核对用:去掉空白(X 编辑器分段后 textContent 没有换行) */
 export const sameText = (a: string, b: string): boolean => a.replace(/\s/g, '') === b.replace(/\s/g, '');
 
-type BoxState = { found?: boolean; count?: number; text?: string } | null;
+type BoxState = {
+  found?: boolean; count?: number; text?: string;
+  dialogs?: number; boxesAnywhere?: number; loggedOut?: boolean; ready?: string;
+} | null;
 type ClearState = { state?: 'empty' | 'cleared' | 'not-cleared' | 'no-box'; via?: string; left?: string } | null;
+
+/** 找不到框时页面上有什么(给人和日志看) */
+const seen = (b: BoxState): string =>
+  `页面上弹窗 ${b?.dialogs ?? '?'} 个、发推框 ${b?.boxesAnywhere ?? '?'} 个(含首页内嵌那个)、加载 ${b?.ready ?? '?'}`;
 
 export type FillOutcome = { readonly ok: true } | { readonly ok: false; readonly why: string };
 
@@ -117,8 +124,18 @@ export async function fillCompose(wcId: number, text: string): Promise<FillOutco
   const ports = webviewPorts(wcId);
   const go = await ports.goto(X_PAGE_NAME.compose, {});
   if (!go.ok) return { ok: false, why: `发推弹窗没打开:${go.reason ?? '?'}` };
-  const box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
-  if (!box?.found) return { ok: false, why: '发推弹窗里找不到正文框(没登录?X 改版了?)' };
+  /**
+   * X 刚打开(冷启动)时整页加载慢,一次 8 秒等不到弹窗(10-27 真机:新开 X 立刻点发布,9 秒报找不到)。
+   * 最多再等一轮;还没有就带着页面实况报错。
+   */
+  let box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
+  if (!box?.found && !box?.loggedOut) {
+    console.log(`[x.post] 8 秒没等到发推弹窗(${seen(box)}),再等一轮`);
+    box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
+  }
+  if (!box?.found) {
+    return { ok: false, why: box?.loggedOut ? 'X 没登录 —— 先在 X 网页里登录' : `发推弹窗里找不到正文框(${seen(box)})` };
+  }
   if (box.count !== 1) return { ok: false, why: `发推弹窗里有 ${box.count} 个正文框,不知道该填哪个` };
   if ((box.text ?? '') !== '') {
     return { ok: false, why: `发推框里已经有字(「${box.text!.slice(0, 30)}」,可能是 X 留着的上一次)—— 没往里填,免得两段拼在一起` };

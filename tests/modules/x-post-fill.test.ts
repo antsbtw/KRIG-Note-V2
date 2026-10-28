@@ -20,6 +20,8 @@ const h = vi.hoisted(() => ({
   /** 贴进去时 X 实际显示成什么(模拟对不上);null = 照原样 */
   landsAs: null as string | null,
   clearFails: false,
+  /** 发推弹窗还要几轮探测才出来(模拟 X 冷启动) */
+  missesLeft: 0,
   goto: [] as string[],
   typed: [] as string[],
 }));
@@ -45,6 +47,7 @@ vi.mock('@modules/x/x-collect-ports', () => ({
   webviewPorts: () => ({
     goto: async (name: string) => { h.goto.push(name); return { ok: true }; },
     runScript: async (id: string) => {
+      if (id === 'x.composeBoxState' && h.missesLeft > 0) { h.missesLeft -= 1; return { found: false, dialogs: 0, boxesAnywhere: 0, ready: 'loading' }; }
       if (id === 'x.composeBoxState') return h.box === null ? { found: false } : { found: true, count: 1, text: h.box.trim() };
       if (id === 'x.composeClear') {
         if (h.box === null) return { state: 'no-box' };
@@ -70,7 +73,7 @@ const pending = async () => ((await execute('x.post.pending', { wsId: 'ws-1' }, 
 
 beforeEach(() => {
   h.rows.length = 0; h.goto.length = 0; h.typed.length = 0;
-  h.box = ''; h.landsAs = null; h.clearFails = false;
+  h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -95,6 +98,16 @@ describe('x.post.fill 填进 X(不发)', () => {
     expect(again).toMatchObject({ ok: false, kind: 'refused' });
     expect(!again.ok && again.why).toContain('已经有一份待发草稿');
     expect(h.typed).toEqual(['今天读了一篇论文']);
+  });
+
+  it('⭐ X 冷启动:第一轮没等到弹窗 → 再等一轮就填;两轮都没有 → failed 带页面实况', async () => {
+    h.missesLeft = 1;
+    expect(await execute('x.post.fill', fillIn(), { caller: 'ui' })).toMatchObject({ ok: true });
+    lock._resetLocks(); stopPostDraftTimers();
+    h.box = ''; h.missesLeft = 2;
+    const r = await execute('x.post.fill', fillIn('再来'), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('加载 loading');
   });
 
   it('框里已经有字 → 不往里贴,不留锁', async () => {

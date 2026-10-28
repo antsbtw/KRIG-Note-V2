@@ -455,7 +455,17 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
     var tick = function () {
       var boxes = document.querySelectorAll('[role="dialog"] [data-testid="tweetTextarea_0"]');
       if (boxes.length > 0) { resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim() }); return; }
-      if (Date.now() - t0 > 8000) { resolve({ found: false }); return; }
+      if (Date.now() - t0 > 8000) {
+        /** 找不到时带回页面实况,好分清:弹窗没出来 / 框换了名字 / 没登录 / 页面还在加载 */
+        resolve({
+          found: false,
+          dialogs: document.querySelectorAll('[role="dialog"]').length,
+          boxesAnywhere: document.querySelectorAll('[data-testid="tweetTextarea_0"]').length,
+          loggedOut: !!document.querySelector('[data-testid="loginButton"], [data-testid="login"]'),
+          ready: document.readyState,
+        });
+        return;
+      }
       setTimeout(tick, 200);
     };
     tick();

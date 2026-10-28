@@ -30,7 +30,7 @@ describe('发推框状态', () => {
   });
   it('弹窗不在 → 等满 8 秒报 found:false(不拿首页内嵌框充数)', async () => {
     page(null);
-    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: false });
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: false, dialogs: 0, boxesAnywhere: 1, loggedOut: false, ready: 'complete' });
   }, 12_000);
 });
 
