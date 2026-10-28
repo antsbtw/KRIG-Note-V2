@@ -190,19 +190,33 @@ describe('带图(第④期):数图 / 等传完 / 清图', () => {
     expect(r).toMatchObject({ state: 'timeout', attached: 1, blobs: 1, buttonEnabled: false });
     expect(r.testids).toContain('tweetButton');
   }, 70_000);
-  it('⭐ 清框:先点掉图再删字 → cleared;点不掉图 → not-cleared 说还挂着几张', async () => {
-    attach(2);
-    const box = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') as HTMLElement;
-    box.addEventListener('keydown', () => { box.textContent = (box.textContent ?? '').slice(0, -1); });
-    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared' });
-    expect(document.querySelectorAll('[role="dialog"] img').length).toBe(0);
-    attach(1, false);
-    expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'not-cleared', left: '还挂着 1 张图(没找到移除按钮)' });
+  it('⭐ 挂着图 → 关弹窗、X 问存不存草稿时点「放弃」(按文字认,不点保存)→ cleared via discard', async () => {
+    const d = attach(2);
+    const saved: string[] = [];
+    d.insertAdjacentHTML('afterbegin', '<button data-testid="app-bar-close" aria-label="Close"></button>');
+    d.querySelector('[data-testid="app-bar-close"]')!.addEventListener('click', () => {
+      document.body.insertAdjacentHTML('beforeend', '<div data-testid="confirmationSheetDialog">'
+        + '<button data-testid="confirmationSheetConfirm">Save</button><button data-testid="confirmationSheetCancel">Discard</button></div>');
+      const sheet = document.querySelector('[data-testid="confirmationSheetDialog"]')!;
+      sheet.querySelector('[data-testid="confirmationSheetConfirm"]')!.addEventListener('click', () => saved.push('save'));
+      sheet.querySelector('[data-testid="confirmationSheetCancel"]')!.addEventListener('click', () => { d.remove(); sheet.remove(); });
+    });
+    expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'cleared', via: 'discard' });
+    expect(saved).toEqual([]);
   });
-  it('只有图没有字 → 点掉图就算清了', async () => {
+  it('挂着图、点了关闭但认不出「放弃」→ not-cleared 带看到的按钮文字(不乱点)', async () => {
+    const d = attach(1);
+    d.insertAdjacentHTML('afterbegin', '<button data-testid="app-bar-close" aria-label="Close"></button>');
+    d.querySelector('[data-testid="app-bar-close"]')!.addEventListener('click', () => {
+      document.body.insertAdjacentHTML('beforeend', '<div data-testid="confirmationSheetDialog"><button data-testid="confirmationSheetConfirm">Save</button></div>');
+    });
+    const r = await run(build(X_SCRIPTS.composeClear));
+    expect(r.state).toBe('not-cleared');
+    expect(String(r.left)).toContain('Save');
+  }, 10_000);
+  it('挂着图、没有关闭按钮 → not-cleared 说清楚', async () => {
     attach(1);
-    (document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') as HTMLElement).textContent = '';
-    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared', via: 'media' });
+    expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'not-cleared', left: '找不到弹窗的关闭按钮' });
   });
 });
 
@@ -260,14 +274,15 @@ describe('推串(10-28):几条框 / 加一条 / 点中 / 一起清 / 核对不�
     expect(await run(buildP(X_SCRIPTS.composeFocus, { index: 5 }))).toEqual({ state: 'no-box', have: 2 });
   });
 
-  it('⭐ 清框:每条的字都删光(从最后一条往前);首页内嵌框不动', async () => {
-    const d = threadDialog([{ text: '第一条' }, { text: '第二条' }]);
-    d.querySelectorAll('[contenteditable]').forEach((b) => b.addEventListener('keydown', (e) => {
-      const t = b.textContent ?? '';
-      if ((e as KeyboardEvent).key === 'Backspace') b.textContent = t.slice(0, -1);
-    }));
-    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared', via: 'keys' });
-    expect([...d.querySelectorAll('[contenteditable]')].map((b) => b.textContent)).toEqual(['', '']);
+  it('⭐ 推串清框:关弹窗 → 「放弃」(中文界面也认)→ 整串连图一起没了;首页内嵌框不动', async () => {
+    const d = threadDialog([{ text: '第一条', imgs: 4 }, { text: '2/2', imgs: 2 }]);
+    d.insertAdjacentHTML('afterbegin', '<div role="button" aria-label="关闭" data-testid="x"></div>');
+    d.querySelector('[aria-label="关闭"]')!.addEventListener('click', () => {
+      document.body.insertAdjacentHTML('beforeend', '<div role="alertdialog"><button>保存</button><button>放弃</button></div>');
+      const sheet = document.querySelector('[role="alertdialog"]')!;
+      sheet.querySelectorAll('button')[1].addEventListener('click', () => { d.remove(); sheet.remove(); });
+    });
+    expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'cleared', via: 'discard' });
     expect(document.body.textContent).toContain('首页内嵌框');
   });
 

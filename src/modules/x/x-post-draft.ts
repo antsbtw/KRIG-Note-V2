@@ -275,7 +275,8 @@ export async function clearCompose(wcId: number): Promise<ClearOutcome> {
   if (c?.state === 'not-cleared') return { cleared: false, detail: `框里还剩「${c.left ?? ''}」` };
   if (c?.state !== 'cleared' && c?.state !== 'empty' && c?.state !== 'no-box') return { cleared: false, detail: `清框脚本没回话(${JSON.stringify(c)})` };
   const go = await ports.goto(X_PAGE_NAME.home, {});
-  const detail = c.state === 'no-box' ? '弹窗已经不在了' : c.state === 'empty' ? '框本来就是空的' : `已清空(${c.via === 'media' ? '只有图' : c.via})`;
+  const via: Record<string, string> = { discard: '关弹窗时点了 X 的「放弃」', close: '关弹窗(X 没问存不存草稿)', keys: '逐字删掉' };
+  const detail = c.state === 'no-box' ? '弹窗已经不在了' : c.state === 'empty' ? '框本来就是空的' : `已清空(${via[c.via ?? ''] ?? c.via})`;
   return { cleared: true, detail: go.ok ? detail : `${detail};回首页没成:${go.reason ?? '?'}` };
 }
 

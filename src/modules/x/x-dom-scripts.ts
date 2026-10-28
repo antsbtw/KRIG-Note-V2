@@ -546,8 +546,13 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
- * 清空发推弹窗:先把挂着的图一张张点掉(第④a期),再把正文一个一个按 Backspace(删不动换 Delete)删到空 —— X 的编辑器不认页面设的全选。
- * state:empty(本来就空)/ cleared(带 via)/ not-cleared(带 left:剩下的开头 / 还剩几张图)/ no-box(弹窗已经不在了)
+ * 清空发推弹窗。两条路:
+ *  · 推串(不止一条)或挂着图 → 关弹窗、在 X 问「存不存草稿」时点「放弃」(Discard),X 自己把所有条和图一起扔掉。
+ *    ⚠️ 10-28 真机:X 只在「当前这条」上给移除图的按钮,脚本点别的条切不过去 → 第 1 条的 4 张图点不掉。
+ *    按钮按文字认(Discard / 放弃 / 舍弃 / 不保存);**绝不点 Save / 保存**(会在 X 上留一份草稿)。认不出就如实报,带按钮文字。
+ *  · 单条、只有字 → 一个一个按 Backspace 删(10-27 真机验过):X 的编辑器(Draft.js)不认页面设的全选,
+ *    一次只删一个字;Backspace 删不动(光标在中间)就换 Delete 往后删。上限 = 字数×2+10 次。
+ * state:empty / cleared(via:discard / close / keys)/ not-cleared(left:剩下什么 / 卡在哪)/ no-box(弹窗已经不在了)
  */
 const COMPOSE_CLEAR_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
@@ -558,82 +563,68 @@ const COMPOSE_CLEAR_SRC = String.raw`(function () {
     var boxes = function () { return boxesIn(dlg); };
     var textIn = function (b) { return (b.textContent || '').trim(); };
     var sizeOf = function (b) { return textIn(b).length + b.querySelectorAll('img').length; };
-    /** 推串:所有条的字连起来(报「还剩什么」用) */
-    var left = function () { return boxes().map(textIn).join(''); };
     var size = function () { return boxes().reduce(function (n, b) { return n + sizeOf(b); }, 0); };
-    if (size() === 0 && attachedIn(dlg).n === 0) { resolve({ state: 'empty' }); return; }
-    /** 图的移除按钮:removeMedia,或 aria-label 写着移除 / 删除的(没在真机上量过,两样都认) */
-    var removeBtn = function () {
-      var b = dlg.querySelector('[data-testid="removeMedia"]');
-      if (b) return b;
-      var bs = dlg.querySelectorAll('button[aria-label], [role="button"][aria-label]');
-      for (var i = 0; i < bs.length; i++) if (/remove media|移除|删除/i.test(bs[i].getAttribute('aria-label') || '')) return bs[i];
-      return null;
+    if (size() === 0 && attachedIn(dlg).n === 0 && boxes().length < 2) { resolve({ state: 'empty' }); return; }
+    var waitFor = function (get, ms, then) {
+      var t0 = Date.now();
+      var tick = function () { var v = get(); if (v) { then(v); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 150); };
+      tick();
     };
-    var unmedia = function (tries, done) {
-      if (attachedIn(dlg).n === 0) { done(true); return; }
-      var b = removeBtn();
-      if (!b || tries <= 0) { done(false); return; }
-      b.click();
-      setTimeout(function () { unmedia(tries - 1, done); }, 150);
-    };
-    /** 推串:移除按钮可能只在「当前这条」上 —— 整窗点不掉时逐条点一下再点 */
-    var unmediaEach = function (i, done) {
-      var bs = boxes();
-      if (attachedIn(dlg).n === 0 || i >= bs.length) { done(attachedIn(dlg).n === 0); return; }
-      bs[i].click();
-      setTimeout(function () { unmedia(10, function () { unmediaEach(i + 1, done); }); }, 200);
-    };
-    /**
-     * ⚠️ 10-27 真机:X 的编辑器(Draft.js)不认页面上设的全选 —— 光标停在末尾,一次 Backspace 只删一个字
-     * (17 字删了 2 个)。所以一个一个删:Backspace 删不动了(光标在中间、前面删光)就换 Delete 往后删。
-     * 每条上限 = 字数×2+10 次,删不动就如实报 not-cleared。推串从最后一条往前清。
-     */
-    var presses = 0;
-    var clearBox = function (idx, done) {
-      var box = boxes()[idx];
-      if (!box) { done(true); return; }
-      if (idx > 0) box.click();
-      box.focus();
-      var key = function (k, code) {
-        box.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: code, which: code, bubbles: true, cancelable: true }));
-      };
-      var budget = sizeOf(box) * 2 + 10;
-      var stuck = 0;
-      var forward = false;
-      var step = function () {
-        var before = sizeOf(box);
-        if (before === 0) { done(true); return; }
-        if (budget-- <= 0) { done(false); return; }
-        if (forward) key('Delete', 46); else key('Backspace', 8);
-        presses += 1;
-        setTimeout(function () {
-          if (sizeOf(box) < before) stuck = 0;
-          else if (++stuck >= 3) { if (forward) { done(false); return; } forward = true; stuck = 0; }
-          step();
-        }, 30);
-      };
-      step();
-    };
-    var clearFrom = function (idx) {
-      if (idx < 0) {
-        resolve(size() === 0 ? { state: 'cleared', via: 'keys', presses: presses } : { state: 'not-cleared', left: left().slice(0, 40) });
-        return;
+    var labelOf = function (b) { return ((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')).trim(); };
+
+    if (boxes().length > 1 || attachedIn(dlg).n > 0) {
+      var close = dlg.querySelector('[data-testid="app-bar-close"]');
+      if (!close) {
+        var cs = dlg.querySelectorAll('button[aria-label], [role="button"][aria-label]');
+        for (var i = 0; i < cs.length; i++) if (/^(close|关闭)$/i.test((cs[i].getAttribute('aria-label') || '').trim())) { close = cs[i]; break; }
       }
-      clearBox(idx, function (ok) {
-        if (!ok) { resolve({ state: 'not-cleared', left: left().slice(0, 40) }); return; }
-        clearFrom(idx - 1);
-      });
-    };
-    unmedia(10, function (noMedia) {
-      var afterMedia = function (ok) {
-        if (!ok) { resolve({ state: 'not-cleared', left: '还挂着 ' + attachedIn(dlg).n + ' 张图(没找到移除按钮)' }); return; }
-        if (size() === 0) { resolve({ state: 'cleared', via: 'media', presses: 0 }); return; }
-        clearFrom(boxes().length - 1);
+      if (!close) { resolve({ state: 'not-cleared', left: '找不到弹窗的关闭按钮' }); return; }
+      close.click();
+      var closed = function () { return document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') ? null : true; };
+      /** X 问「存不存草稿」的那一页:按文字认「放弃」,不认按钮位置 */
+      var discardBtn = function () {
+        var bs = document.querySelectorAll('[data-testid="confirmationSheetDialog"] button, [data-testid="confirmationSheetDialog"] [role="button"], [role="alertdialog"] button, [role="alertdialog"] [role="button"], [role="dialog"] [data-testid^="confirmationSheet"]');
+        for (var k = 0; k < bs.length; k++) if (/discard|放弃|舍弃|不保存/i.test(labelOf(bs[k]))) return bs[k];
+        return null;
       };
-      if (noMedia || boxes().length < 2) afterMedia(noMedia);
-      else unmediaEach(0, afterMedia);
-    });
+      waitFor(function () { return closed() || discardBtn(); }, 4000, function (v) {
+        if (v === true) { resolve({ state: 'cleared', via: 'close' }); return; }
+        if (!v) {
+          var seen = [];
+          document.querySelectorAll('[data-testid^="confirmationSheet"], [role="alertdialog"] button').forEach(function (b) { seen.push(labelOf(b).slice(0, 20)); });
+          resolve({ state: 'not-cleared', left: '点了关闭,没看到「放弃」按钮(看到:' + (seen.join(' / ') || '没有确认页') + ')' });
+          return;
+        }
+        v.click();
+        waitFor(closed, 5000, function (ok) {
+          resolve(ok ? { state: 'cleared', via: 'discard' } : { state: 'not-cleared', left: '点了放弃,弹窗还在' });
+        });
+      });
+      return;
+    }
+
+    var box = boxes()[0];
+    box.focus();
+    var key = function (k, code) {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: code, which: code, bubbles: true, cancelable: true }));
+    };
+    var budget = sizeOf(box) * 2 + 10;
+    var stuck = 0;
+    var forward = false;
+    var presses = 0;
+    var step = function () {
+      var before = sizeOf(box);
+      if (before === 0) { resolve({ state: 'cleared', via: 'keys', presses: presses }); return; }
+      if (budget-- <= 0) { resolve({ state: 'not-cleared', left: textIn(box).slice(0, 40) }); return; }
+      if (forward) key('Delete', 46); else key('Backspace', 8);
+      presses += 1;
+      setTimeout(function () {
+        if (sizeOf(box) < before) stuck = 0;
+        else if (++stuck >= 3) { if (forward) { resolve({ state: 'not-cleared', left: textIn(box).slice(0, 40) }); return; } forward = true; stuck = 0; }
+        step();
+      }, 30);
+    };
+    step();
   });
 })();`;
 
