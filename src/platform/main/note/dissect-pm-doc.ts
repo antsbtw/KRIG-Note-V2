@@ -21,6 +21,10 @@
 import type { PmPayload } from '@semantic/types';
 import { STRUCTURAL_CONTAINER_TYPES } from '@semantic/types/structural';
 import { initialRanks } from './lexrank';
+import type { AssemblyHints } from './assemble-pm-doc-helpers';
+
+/** 拼装时按「连续段」重新包壳的结构容器(structural-rebuild-rules)—— 它们的第一块要记 groupStart */
+const GROUPED_CONTAINERS = new Set(['columnList', 'bulletList', 'orderedList', 'taskList']);
 
 /**
  * dissect 输出 — 交给 capability 走 diff + storage transaction。
@@ -158,6 +162,11 @@ function processChildren(
         ctx,
         false,
       );
+      /** 分栏 / 列表的第一块记「另起一组」:容器壳不存,挨着的两个容器拼回来要分得开 */
+      if (GROUPED_CONTAINERS.has(child.type) && grandchildIds.length > 0) {
+        const first = ctx.payloadById.get(grandchildIds[0]) as (PmPayload & { _assemblyHints?: AssemblyHints }) | undefined;
+        if (first) first._assemblyHints = { ...first._assemblyHints, groupStart: true };
+      }
       siblingAtomIds.push(...grandchildIds);
       continue;
     }

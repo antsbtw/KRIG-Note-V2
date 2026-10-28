@@ -60,7 +60,13 @@ export function buildPmNode(
   const payload = atom.payload.payload as BlockAtomPayload;
   const childIds = childrenByParent.get(atomId);
 
-  // 叶子(无子)→ 原样返回(剥 hints)
+  /**
+   * ⚠️ 返回值**带着** _assemblyHints —— 上一层的 applyRebuildRules 要读(listType / groupStart),由它剥。
+   * 之前在这里就剥了,分组规则永远读不到:挨着的两个分栏 / 无序紧跟有序列表拼回来并成一个(2026-10-28 测出)。
+   * 调用方拿到后都要过 applyRebuildRules 或 assembleTable(两者都剥)。
+   */
+  const hints = payload._assemblyHints;
+  // 叶子(无子)→ 原样返回(带 hints)
   if (!childIds || childIds.length === 0) {
     // table 无 cell 子 atom → 空 table(content:[])违反 schema `tableRow+`,
     // 落 doc 后打开时 setNodeMarkup 重校验崩溃。丢弃这个孤立 table atom
@@ -72,7 +78,9 @@ export function buildPmNode(
       );
       return null;
     }
-    return stripAssemblyHints(payload);
+    const leaf = stripAssemblyHints(payload) as BlockAtomPayload;
+    if (hints) leaf._assemblyHints = hints;
+    return leaf;
   }
 
   // 字面拍板:容器型 block 的 storage content 应是 [] — 非空字面 warn 但不 fail
@@ -110,11 +118,12 @@ export function buildPmNode(
     content = applyRebuildRules(childNodes);
   }
 
-  // 字面输出:剥 hints + 替换 content
-  const out: PmPayload = { type: payload.type };
+  // 字面输出:替换 content(hints 留给上一层的分组规则)
+  const out: BlockAtomPayload = { type: payload.type };
   if (payload.attrs !== undefined) out.attrs = payload.attrs;
   out.content = content;
   if (payload.marks !== undefined) out.marks = payload.marks;
+  if (hints) out._assemblyHints = hints;
   return out;
 }
 

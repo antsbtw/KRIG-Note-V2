@@ -34,6 +34,10 @@ interface RebuildResult {
 
 type RebuildRule = (ctx: RebuildContext) => RebuildResult | null;
 
+/** 第 j 块是不是另起一组(dissect 记的 groupStart);组的第一块自己不算 */
+const startsNewGroup = (ctx: RebuildContext, j: number): boolean =>
+  j > ctx.i && (ctx.children[j] as BlockAtomPayload)._assemblyHints?.groupStart === true;
+
 /**
  * listItem 连续段 → bulletList / orderedList (按首项 _assemblyHints.listType 决定)
  */
@@ -42,7 +46,7 @@ function rebuildList(ctx: RebuildContext): RebuildResult | null {
   const group: PmPayload[] = [];
   let listType: 'bullet' | 'ordered' = 'bullet';
   let j = ctx.i;
-  while (j < ctx.children.length && ctx.children[j].type === 'listItem') {
+  while (j < ctx.children.length && ctx.children[j].type === 'listItem' && !startsNewGroup(ctx, j)) {
     const hint = (ctx.children[j] as BlockAtomPayload)._assemblyHints?.listType;
     if (hint === 'ordered') listType = 'ordered';
     group.push(stripAssemblyHints(ctx.children[j]));
@@ -56,13 +60,13 @@ function rebuildList(ctx: RebuildContext): RebuildResult | null {
 }
 
 /**
- * taskItem 连续段 → taskList (无歧义)
+ * taskItem 连续段 → taskList(遇到 groupStart 另起一个)
  */
 function rebuildTaskList(ctx: RebuildContext): RebuildResult | null {
   if (ctx.children[ctx.i].type !== 'taskItem') return null;
   const group: PmPayload[] = [];
   let j = ctx.i;
-  while (j < ctx.children.length && ctx.children[j].type === 'taskItem') {
+  while (j < ctx.children.length && ctx.children[j].type === 'taskItem' && !startsNewGroup(ctx, j)) {
     group.push(stripAssemblyHints(ctx.children[j]));
     j++;
   }
@@ -73,18 +77,19 @@ function rebuildTaskList(ctx: RebuildContext): RebuildResult | null {
 }
 
 /**
- * column 连续段 → columnList (无歧义)
+ * column 连续段 → columnList(遇到 groupStart 另起一个;老数据没记号就整段一个)
  */
 function rebuildColumnList(ctx: RebuildContext): RebuildResult | null {
   if (ctx.children[ctx.i].type !== 'column') return null;
   const group: PmPayload[] = [];
   let j = ctx.i;
-  while (j < ctx.children.length && ctx.children[j].type === 'column') {
+  while (j < ctx.children.length && ctx.children[j].type === 'column' && !startsNewGroup(ctx, j)) {
     group.push(stripAssemblyHints(ctx.children[j]));
     j++;
   }
   return {
-    wrapper: { type: 'columnList', content: group },
+    /** columns 跟着实际栏数(壳不存,不写就落回默认 2 —— 3 栏的会说成 2 栏) */
+    wrapper: { type: 'columnList', attrs: { columns: group.length }, content: group },
     consumed: j - ctx.i,
   };
 }
