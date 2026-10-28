@@ -35,14 +35,28 @@ describe('发推框状态', () => {
 });
 
 describe('清空发推框', () => {
-  it('⭐ 编辑器认 Backspace(全选后删)→ cleared via backspace;首页内嵌框不动', async () => {
-    const box = page('要撤回的字')!;
+  /** 像 Draft.js:不认页面设的全选,光标在 caret 处;Backspace 删光标前一个字,Delete 删光标后一个字 */
+  const draftLike = (box: HTMLElement, caret: number): void => {
+    let pos = caret;
     box.addEventListener('keydown', (e) => {
-      const sel = window.getSelection();
-      if ((e as KeyboardEvent).key === 'Backspace' && sel && sel.toString() === '要撤回的字') box.textContent = '';
+      const t = box.textContent ?? '';
+      const k = (e as KeyboardEvent).key;
+      if (k === 'Backspace' && pos > 0) { box.textContent = t.slice(0, pos - 1) + t.slice(pos); pos -= 1; }
+      if (k === 'Delete' && pos < t.length) box.textContent = t.slice(0, pos) + t.slice(pos + 1);
     });
-    expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'cleared', via: 'backspace' });
+  };
+  it('⭐ 编辑器一次 Backspace 只删一个字(10-27 真机)→ 一个个删到空;首页内嵌框不动', async () => {
+    const box = page('要撤回的字')!;
+    draftLike(box, 5);
+    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared', via: 'keys' });
+    expect(box.textContent).toBe('');
     expect(document.body.textContent).toContain('首页内嵌框里的字');
+  });
+  it('光标在中间 → 前面删光后换 Delete 往后删', async () => {
+    const box = page('前面后面')!;
+    draftLike(box, 2);
+    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared' });
+    expect(box.textContent).toBe('');
   });
   it('删不掉 → not-cleared,带上剩下的开头(不谎称清了)', async () => {
     page('删不掉的字');

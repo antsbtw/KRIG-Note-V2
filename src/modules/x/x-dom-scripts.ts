@@ -474,7 +474,7 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
- * 清空发推弹窗的正文框:全选 → 按 Backspace(X 的编辑器认按键)→ 没清掉再 execCommand('delete')。
+ * 清空发推弹窗的正文框:一个一个按 Backspace(删不动换 Delete),直到空 —— X 的编辑器不认页面设的全选。
  * state:empty(本来就空)/ cleared(带 via)/ not-cleared(带 left:剩下的开头)/ no-box(弹窗已经不在了)
  */
 const COMPOSE_CLEAR_SRC = String.raw`(function () {
@@ -482,25 +482,34 @@ const COMPOSE_CLEAR_SRC = String.raw`(function () {
     var box = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
     if (!box) { resolve({ state: 'no-box' }); return; }
     var left = function () { return (box.textContent || '').trim(); };
-    if (left() === '' && !box.querySelector('img')) { resolve({ state: 'empty' }); return; }
+    var size = function () { return left().length + box.querySelectorAll('img').length; };
+    if (size() === 0) { resolve({ state: 'empty' }); return; }
     box.focus();
-    var range = document.createRange();
-    range.selectNodeContents(box);
-    var sel = window.getSelection();
-    sel.removeAllRanges();
-    sel.addRange(range);
-    document.dispatchEvent(new Event('selectionchange'));
-    var gone = function () { return left() === '' && !box.querySelector('img'); };
-    setTimeout(function () {
-      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', keyCode: 8, which: 8, bubbles: true, cancelable: true }));
+    /**
+     * ⚠️ 10-27 真机:X 的编辑器(Draft.js)不认页面上设的全选 —— 光标停在末尾,一次 Backspace 只删一个字
+     * (17 字删了 2 个)。所以一个一个删:Backspace 删不动了(光标在中间、前面删光)就换 Delete 往后删。
+     * 上限 = 字数×2+10 次,删不动就如实报 not-cleared。
+     */
+    var key = function (k, code) {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: code, which: code, bubbles: true, cancelable: true }));
+    };
+    var budget = size() * 2 + 10;
+    var stuck = 0;
+    var forward = false;
+    var presses = 0;
+    var step = function () {
+      var before = size();
+      if (before === 0) { resolve({ state: 'cleared', via: 'keys', presses: presses }); return; }
+      if (budget-- <= 0) { resolve({ state: 'not-cleared', left: left().slice(0, 40) }); return; }
+      if (forward) key('Delete', 46); else key('Backspace', 8);
+      presses += 1;
       setTimeout(function () {
-        if (gone()) { resolve({ state: 'cleared', via: 'backspace' }); return; }
-        try { document.execCommand('delete'); } catch (e) {}
-        setTimeout(function () {
-          resolve(gone() ? { state: 'cleared', via: 'exec-delete' } : { state: 'not-cleared', left: left().slice(0, 40) });
-        }, 300);
-      }, 300);
-    }, 100);
+        if (size() < before) stuck = 0;
+        else if (++stuck >= 3) { if (forward) { resolve({ state: 'not-cleared', left: left().slice(0, 40) }); return; } forward = true; stuck = 0; }
+        step();
+      }, 30);
+    };
+    step();
   });
 })();`;
 
