@@ -1268,6 +1268,9 @@ export const textEditingDriverApi = {
       const paragraphType = schema.nodes.paragraph;
       if (!hr || !paragraphType) return;
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, [hr.create(), paragraphType.create()]);
+      // 光标进 hr 后的新段落(pos + hr 1 + p开1)—— 不设的话映射到被替换段落之后,
+      // 跳过新段落;在分栏/callout 里还会跳出容器(2026-10-28 分栏 slash 全量测试抓到)
+      tr.setSelection(TextSelection.create(tr.doc, pos + 2));
       view.dispatch(tr);
       view.focus();
       return;
@@ -2506,7 +2509,12 @@ function insertAtomBlock(
     } else {
       tr = tr.insert(blockEnd, node);
     }
-    tr = tr.scrollIntoView();
+    // 光标落在块后面、同一容器里:后面紧挨可打字的段落就进去,没有就补一个空段落。
+    // 不设的话光标映射到「最近能打字处」—— 在分栏/callout 里会跳出容器(2026-10-28 分栏 slash 全量测试抓到)
+    const after = (isEmptyParagraph ? blockStart : blockEnd) + node.nodeSize;
+    const next = tr.doc.resolve(after).nodeAfter;
+    if (!next?.isTextblock) tr = tr.insert(after, state.schema.nodes.paragraph.create());
+    tr = tr.setSelection(TextSelection.create(tr.doc, after + 1)).scrollIntoView();
     dispatch(tr);
   }
   view.focus();
