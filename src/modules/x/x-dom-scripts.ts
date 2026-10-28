@@ -92,6 +92,13 @@ export const X_SCRIPTS = {
   composeBoxState: 'x.composeBoxState' as ScriptId,
   /** ⭐ 发推第②期:清空发推弹窗里的正文框(取消 / 超时撤回 / 填错了),回读清没清掉 */
   composeClear: 'x.composeClear' as ScriptId,
+  /**
+   * ⭐⭐ 发推第③期(2026-10-27):点发推弹窗里的「发布」—— 真的对外发。
+   * 等弹窗关掉才算点成;顺手读 X 的「已发送」提示条里的链接(有就带回 tweetId,没有也不算失败 —— 由主页核对定)。
+   */
+  composeSend: 'x.composeSend' as ScriptId,
+  /** ⭐⭐ 发推第③期:在我的主页上找我刚发的那条(作者是我、正文对得上、时间不早于点发布)→ 推文 id */
+  findMyPost: 'x.findMyPost' as ScriptId,
 } as const;
 
 /**
@@ -569,6 +576,89 @@ const SEND_REPLY_SRC = String.raw`(function () {
   });
 })();`;
 
+/**
+ * 点发推弹窗的「发布」。state:closed(弹窗关了,带 toastId 如果读到)/ not-sent(15 秒弹窗还在、框里还有字)/
+ * no-dialog / no-button / disabled / error
+ * ⚠️ 只认弹窗里的按钮(tweetButton);首页内嵌框的是 tweetButtonInline,不碰。
+ */
+const COMPOSE_SEND_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var dlg = function () { return document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]'); };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var v = get(); if (v) { then(v); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 250); };
+        tick();
+      };
+      var toastId = function () {
+        var a = document.querySelector('[data-testid="toast"] a[href*="/status/"]');
+        var m = a ? /\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+        return m ? m[1] : null;
+      };
+      if (!dlg()) { resolve({ state: 'no-dialog' }); return; }
+      waitFor(function () {
+        var b = document.querySelector('[role="dialog"] [data-testid="tweetButton"]');
+        return b && b.getAttribute('aria-disabled') !== 'true' && !b.disabled ? b : null;
+      }, 5000, function (btn) {
+        if (!btn) { resolve({ state: document.querySelector('[role="dialog"] [data-testid="tweetButton"]') ? 'disabled' : 'no-button' }); return; }
+        btn.click();
+        waitFor(function () { return dlg() ? null : true; }, 15000, function (closed) {
+          if (!closed) { resolve({ state: 'not-sent' }); return; }
+          waitFor(toastId, 4000, function (id) { resolve(id ? { state: 'closed', toastId: id } : { state: 'closed' }); });
+        });
+      });
+    } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/**
+ * 在我的主页上找我刚发的那条。__NEEDLE__ 同 replyNeedle;__ME__ 我的 handle(小写);__SINCE__ 点发布的时刻(ms,留 2 分钟钟差)。
+ * 返回 { tweetId } / { why: 'not-found', seen: 页面上我的推文数 }
+ */
+const FIND_MY_POST_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var needle = __NEEDLE__, me = __ME__, since = __SINCE__ - 120000;
+      var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, ''); };
+      var textOf = function (el) {
+        var out = '';
+        el.childNodes.forEach(function (n) {
+          if (n.nodeType === 3) out += n.nodeValue;
+          else if (n.nodeType === 1) out += n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : textOf(n);
+        });
+        return out;
+      };
+      var seen = 0;
+      var look = function () {
+        seen = 0;
+        var arts = document.querySelectorAll('article[data-testid="tweet"]');
+        for (var i = 0; i < arts.length; i++) {
+          var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
+          for (var j = 0; j < ts.length; j++) {
+            var a = ts[j].closest('a');
+            var m = a ? /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+            if (!m || m[1].toLowerCase() !== me) continue;
+            seen += 1;
+            var at = Date.parse(ts[j].getAttribute('datetime') || '');
+            var tx = arts[i].querySelector('[data-testid="tweetText"]');
+            if (tx && norm(textOf(tx)).indexOf(needle) !== -1 && isFinite(at) && at >= since) return m[2];
+          }
+        }
+        return null;
+      };
+      if (!needle || !me) { resolve({ why: 'no-needle-or-me' }); return; }
+      var t0 = Date.now();
+      var tick = function () {
+        var id = look();
+        if (id) { resolve({ tweetId: id }); return; }
+        if (Date.now() - t0 > 10000) { resolve({ why: 'not-found', seen: seen }); return; }
+        setTimeout(tick, 300);
+      };
+      tick();
+    } catch (e) { resolve({ why: 'error: ' + String(e) }); }
+  });
+})();`;
+
 /** 回复正文里拿来认「这是我刚发的那条」的字和表情 —— 与脚本里 norm 同一规则(按字符截,不把表情截半) */
 export function replyNeedle(text: string): string {
   return [...text.replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, '')].slice(0, 16).join('');
@@ -772,5 +862,18 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
     id: X_SCRIPTS.composeClear,
     purpose: 'X:清空发推弹窗里的正文框(取消 / 撤回),回读清没清掉 —— 不点发布',
     build: () => COMPOSE_CLEAR_SRC,
+  },
+  {
+    id: X_SCRIPTS.composeSend,
+    purpose: 'X:点发推弹窗里的「发布」(真的对外发),等弹窗关掉;读「已发送」提示条里的链接',
+    build: () => COMPOSE_SEND_SRC,
+  },
+  {
+    id: X_SCRIPTS.findMyPost,
+    purpose: 'X:在我的主页上找我刚发的那条(作者是我、正文对得上、时间不早于点发布)',
+    build: (params) => FIND_MY_POST_SRC
+      .replace('__NEEDLE__', () => JSON.stringify(String(params.needle ?? '')))
+      .replace('__ME__', () => JSON.stringify(String(params.me ?? '').toLowerCase()))
+      .replace('__SINCE__', () => String(Number(params.since) || 0)),
   },
 ];

@@ -73,3 +73,63 @@ describe('清空发推框', () => {
     expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'no-box' });
   });
 });
+
+describe('点发布(第③期)', () => {
+  const withButton = (disabled: boolean): HTMLElement => {
+    page('要发的字');
+    const d = document.querySelector('[role="dialog"]')!;
+    const b = document.createElement('button');
+    b.setAttribute('data-testid', 'tweetButton');
+    if (disabled) b.setAttribute('aria-disabled', 'true');
+    d.append(b);
+    /** 首页内嵌框的按钮 —— 不该被点 */
+    const inline = document.createElement('button');
+    inline.setAttribute('data-testid', 'tweetButtonInline');
+    inline.addEventListener('click', () => { throw new Error('点了首页内嵌框的发布'); });
+    document.body.prepend(inline);
+    return b;
+  };
+  it('⭐ 点弹窗里的发布 → 弹窗关了 + 提示条里有链接 → closed 带 toastId', async () => {
+    const b = withButton(false);
+    b.addEventListener('click', () => {
+      document.querySelector('[role="dialog"]')!.remove();
+      document.body.insertAdjacentHTML('beforeend', '<div data-testid="toast"><a href="/me/status/1900000000000000009">View</a></div>');
+    });
+    expect(await run(build(X_SCRIPTS.composeSend))).toEqual({ state: 'closed', toastId: '1900000000000000009' });
+  });
+  it('按钮是灰的 → disabled,不点', async () => {
+    const b = withButton(true);
+    let clicked = false;
+    b.addEventListener('click', () => { clicked = true; });
+    expect(await run(build(X_SCRIPTS.composeSend))).toEqual({ state: 'disabled' });
+    expect(clicked).toBe(false);
+  }, 10_000);
+  it('弹窗不在 → no-dialog', async () => {
+    page(null);
+    expect(await run(build(X_SCRIPTS.composeSend))).toEqual({ state: 'no-dialog' });
+  });
+});
+
+describe('在我主页上找刚发的那条(第③期)', () => {
+  const art = (handle: string, id: string, text: string, at: number): string =>
+    `<article data-testid="tweet"><a href="/${handle}/status/${id}"><time datetime="${new Date(at).toISOString()}"></time></a><div data-testid="tweetText">${text}</div></article>`;
+  const find = (needle: string, since: number) =>
+    run(X_DOM_SCRIPTS.find((s) => s.id === X_SCRIPTS.findMyPost)!.build({ needle, me: 'Me', since }));
+  it('⭐ 作者是我 + 正文对得上 + 时间不早于点发布 → 那条的 id;别人同样的字 / 我以前同样的字都不算', async () => {
+    const now = Date.now();
+    document.body.innerHTML = art('other', '111', '今天读了一篇论文', now)
+      + art('me', '222', '今天读了一篇论文', now - 3_600_000)
+      + art('me', '333', '今天读了一篇<img alt="📚">论文', now);
+    expect(await find('今天读了一篇📚论文', now)).toEqual({ tweetId: '333' });
+  });
+  it('⭐ 我以前发过一模一样的字(排在前面)→ 不算,认时间不早于点发布的那条', async () => {
+    const now = Date.now();
+    document.body.innerHTML = art('me', '222', '今天读了一篇论文', now - 3_600_000) + art('me', '444', '今天读了一篇论文', now + 1000);
+    expect(await find('今天读了一篇论文', now)).toEqual({ tweetId: '444' });
+  });
+  it('没有 → 等满 10 秒报 not-found,带上页面上我的推文数', async () => {
+    const now = Date.now();
+    document.body.innerHTML = art('me', '222', '别的字', now);
+    expect(await find('今天读了一篇论文', now)).toEqual({ why: 'not-found', seen: 1 });
+  }, 15_000);
+});

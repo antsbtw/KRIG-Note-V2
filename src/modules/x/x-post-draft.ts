@@ -15,7 +15,7 @@
 import { inputEngine } from '@platform/main/web-capability/wiring/runtime';
 import { resolve as resolvePage } from '@platform/main/web-capability/wiring/web-collect-engine';
 import { webviewPorts } from './x-collect-ports';
-import { X_SCRIPTS } from './x-dom-scripts';
+import { X_SCRIPTS, replyNeedle } from './x-dom-scripts';
 import { X_ANCHORS, X_PAGE_NAME } from './x-pages';
 import { holdsPage } from './x-page-lock';
 import type { PostForm } from './x-post-compose';
@@ -41,7 +41,14 @@ export type PendingPost = {
 /** 给界面看的(不带锁 token) */
 export type PendingView = Omit<PendingPost, 'token' | 'wcId'>;
 /** 上一份是怎么结束的(界面据此说「已撤回(超时没确认)」) */
-export type DraftEnded = { readonly draftId: string; readonly why: CancelWhy; readonly at: number; readonly cleared: boolean };
+export type DraftEnded = {
+  readonly draftId: string; readonly why: CancelWhy | 'published'; readonly at: number; readonly cleared: boolean;
+  /** 发布的结局(why = published 才有):sent 核对上了 / unseen 点了发布没核对上 / failed 没发出去 */
+  readonly outcome?: 'sent' | 'unseen' | 'failed';
+  readonly tweetId?: string;
+  readonly handle?: string;
+  readonly detail?: string;
+};
 export type CancelWhy = 'user' | 'back-to-note' | 'timeout';
 
 const pending = new Map<string, PendingPost>();
@@ -86,6 +93,15 @@ export function addPending(p: PendingPost, onTimeout: (p: PendingPost) => void):
 export function endPending(p: PendingPost, why: CancelWhy, cleared: boolean): void {
   dropPending(p.wsId);
   ended.set(p.wsId, { draftId: p.draftId, why, at: Date.now(), cleared });
+}
+
+/** 发布结束(不论成没成,草稿都没了:发出去了 / 状态说不清,都不能再撤回) */
+export function endPublished(p: PendingPost, o: PublishOutcome): void {
+  dropPending(p.wsId);
+  ended.set(p.wsId, {
+    draftId: p.draftId, why: 'published', at: Date.now(), cleared: true,
+    outcome: o.outcome, tweetId: o.tweetId, handle: p.handle, detail: o.detail,
+  });
 }
 
 function dropPending(wsId: string): void {
@@ -173,3 +189,56 @@ export async function clearCompose(wcId: number): Promise<ClearOutcome> {
   const detail = c.state === 'no-box' ? '弹窗已经不在了' : c.state === 'empty' ? '框本来就是空的' : `已清空(${c.via})`;
   return { cleared: true, detail: go.ok ? detail : `${detail};回首页没成:${go.reason ?? '?'}` };
 }
+
+export type PublishOutcome = {
+  readonly outcome: 'sent' | 'unseen' | 'failed';
+  readonly detail: string;
+  readonly tweetId?: string;
+  /** 发出去的字(以点发布前框里的为准 —— 人可能在 X 上又改过) */
+  readonly sentText: string;
+  readonly editedOnX: boolean;
+};
+
+type SendState = { state?: string; toastId?: string; why?: string } | null;
+type FindState = { tweetId?: string; why?: string; seen?: number } | null;
+
+/**
+ * 点 X 的「发布」→ 去我的主页核对(作者是我、正文对得上、时间不早于点发布)。
+ * 设计 §2:核对以**框里的字**为准 —— 人在 X 上又改了几个字,发出去的是改后的,记 editedOnX。
+ * ⚠️ 只点一次;点了以后无论核对上没有都不重试(重试 = 可能发两条)。
+ * ⚠️ 调之前网页必须已被执行器占着(fill 留下的锁)。
+ */
+export async function publishCompose(wcId: number, p: PendingPost): Promise<PublishOutcome> {
+  const ports = webviewPorts(wcId);
+  const box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
+  if (!box?.found) return { outcome: 'failed', detail: `发推弹窗不在了(${seen(box)})—— 没点发布`, sentText: p.text, editedOnX: false };
+  const sentText = box.text ?? '';
+  if (sentText.trim() === '') return { outcome: 'failed', detail: '发推框是空的 —— 没点发布', sentText, editedOnX: false };
+  const editedOnX = !sameText(sentText, p.text);
+
+  const since = Date.now();
+  const sent = (await ports.runScript(X_SCRIPTS.composeSend, {})) as SendState;
+  if (sent?.state !== 'closed') {
+    const what = sent?.state === 'not-sent' ? '点了发布,15 秒弹窗还在 —— X 没接受(看一眼 X 上有没有报错)'
+      : sent?.state === 'disabled' ? 'X 的发布按钮是灰的(字数超了?)—— 没点'
+      : `没点成发布:${sent?.state ?? '脚本没回话'}${sent?.why ? `(${sent.why})` : ''}`;
+    return { outcome: sent?.state === 'not-sent' ? 'unseen' : 'failed', detail: what, sentText, editedOnX };
+  }
+
+  /** 到我的主页上找 —— 弹窗关了不等于发出去了(X 可能弹错误提示后关窗) */
+  const go = await ports.goto(X_PAGE_NAME.profile, { handle: p.handle });
+  if (!go.ok) {
+    return { outcome: 'unseen', detail: `点了发布、弹窗关了,但去主页核对没打开:${go.reason ?? '?'} —— 请在 X 上看一眼`, tweetId: sent.toastId, sentText, editedOnX };
+  }
+  const found = (await ports.runScript(X_SCRIPTS.findMyPost, { needle: replyNeedle(sentText), me: p.handle, since })) as FindState;
+  if (found?.tweetId) {
+    const also = sent.toastId && sent.toastId !== found.tweetId ? `(X 提示条里的是 ${sent.toastId},不一样)` : '';
+    return { outcome: 'sent', detail: `在你主页上核对到了${also}`, tweetId: found.tweetId, sentText, editedOnX };
+  }
+  return {
+    outcome: 'unseen',
+    detail: `点了发布、弹窗关了,但在你主页上没找到这条(主页上你的推文 ${found?.seen ?? '?'} 条${found?.why && found.why !== 'not-found' ? `,${found.why}` : ''})${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''} —— 请在 X 上看一眼`,
+    tweetId: sent.toastId, sentText, editedOnX,
+  };
+}
+

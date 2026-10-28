@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import type { PostDraft, PostForm, PostMedia, PostPlan } from './x-post-compose';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
+import type { PostedBefore } from './x-post-repo';
 
 export type PreviewState =
   | { readonly kind: 'loading' }
@@ -38,6 +39,8 @@ export type PreviewProps = {
   readonly onBackToNote: () => void;
   readonly onClose: () => void;
   readonly onPublish: (form: PostForm) => void;
+  /** 这段字以前发过的(x.post.history)—— 只提醒,不拦(用户 10-21「有问题提示就好了」) */
+  readonly posted: readonly PostedBefore[];
 };
 
 const ENDED_TEXT: Record<string, string> = { user: '你点了取消', 'back-to-note': '你回 note 改了', timeout: '10 分钟没确认,自动撤回' };
@@ -107,7 +110,7 @@ function PostCard({ post, handle, limit, last }: { post: PostDraft; handle: stri
   );
 }
 
-export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pending, openedAt, onBackToNote, onClose, onPublish }: PreviewProps) {
+export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pending, openedAt, onBackToNote, onClose, onPublish, posted }: PreviewProps) {
   const [form, setForm] = useState<PostForm | null>(initialForm ?? null);
   const plan = state.kind === 'ok' ? state.plan : null;
   /** 人没选过 → 跟着建议走(note 改了建议可能变);人选的那种变得不可用 → 回到建议 */
@@ -124,7 +127,7 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
   const blockWhy = !plan || plan.empty || !current ? '没有可发的内容'
     : draft ? '左边 X 上已经有一份在等你确认'
       : fill.phase === 'filling' ? '正在填'
-        : current.form !== 'single' ? `「${current.label}」还不能填进 X(第②期只做单条推)`
+        : current.form !== 'single' ? `「${current.label}」还不能填进 X(现在只做单条推)`
           : current.posts[0]?.media.length ? '带图第④期才能填进 X'
             : limit !== null && (current.posts[0]?.weight ?? 0) > limit ? '超过字数了'
               : null;
@@ -171,6 +174,16 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
             <div style={{ ...box, padding: 12 }}>
               {current.posts.map((p, i) => <PostCard key={i} post={p} handle={handle} limit={limit} last={i === current.posts.length - 1} />)}
             </div>
+            {posted.length > 0 && (
+              <div style={{ marginTop: 8, fontSize: 12, color: '#d97706' }}>
+                {posted.map((b) => (
+                  <div key={b.draftId}>
+                    ⚠ {b.endedAt.slice(5, 16).replace('T', ' ')} 已用 @{b.handle} 发过这段{b.status === 'unseen' ? '(当时没核对上,可能发出去了)' : ''}
+                    {b.tweetId ? ` · 推文 ${b.tweetId}` : ''} —— 再发会重复(只提醒,照样能发)
+                  </div>
+                ))}
+              </div>
+            )}
             {plan.warnings.length > 0 && (
               <div style={{ marginTop: 8, fontSize: 12, color: '#d97706' }}>
                 {plan.warnings.map((w) => <div key={w}>⚠ {w}</div>)}
@@ -192,7 +205,9 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
           )}
           {!draft && ended && (
             <div style={{ color: 'var(--text-muted)' }}>
-              上一份草稿已撤回({ENDED_TEXT[ended.why] ?? ended.why}){ended.cleared ? '' : ' ⚠️ 框里的字没清掉,请在 X 上手动删'}
+              {ended.why === 'published'
+                ? `上一份已发布:${ended.outcome === 'sent' ? '✅ 核对上了' : ended.outcome === 'unseen' ? '⚠️ 没核对上' : '❌ 没发出去'}`
+                : `上一份草稿已撤回(${ENDED_TEXT[ended.why] ?? ended.why})${ended.cleared ? '' : ' ⚠️ 框里的字没清掉,请在 X 上手动删'}`}
             </div>
           )}
         </div>

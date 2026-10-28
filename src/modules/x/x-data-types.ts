@@ -295,6 +295,8 @@ export type XDataInvoke =
   | { readonly op: 'postFill'; readonly wsId: string; readonly form: PostForm; readonly content?: readonly PmNode[]; readonly noteId?: string }
   | { readonly op: 'postCancel'; readonly wsId: string; readonly draftId: string; readonly why?: 'user' | 'back-to-note' | 'timeout' }
   | { readonly op: 'postPending'; readonly wsId: string }
+  | { readonly op: 'postPublish'; readonly wsId: string; readonly draftId: string }
+  | { readonly op: 'postHistory'; readonly wsId: string; readonly text: string }
   /**
    * ⚠️ 2026-10-26 logAction / logPersonProgress / logPersonCollect 退役(Module5-04 第 4 步):
    * 取关和采主页搬进主进程,动作 / 进度 / 每个标签页的结果由主进程当场记,不再由界面上报。

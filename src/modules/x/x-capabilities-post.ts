@@ -6,22 +6,36 @@
  *
  * 第①期 x.post.prepare(只排版,input:不碰 X 网页、不对外)。
  * 第②期 x.post.fill(填进 X 发推弹窗不发,占着网页等人确认)/ x.post.cancel(清框、放网页)/ x.post.pending(查待发草稿)。
- * x.post.publish 第③期。
+ * 第③期 x.post.publish(人在 X 上看过点确认 → 点 X 的发布 → 去主页核对)/ x.post.history(这段字发过没)。
+ * 每份草稿在 x_post 里一行(fill 建、cancel / publish 写结局)。
  */
 import { capFailed, capRefused, execute } from '@platform/main/capability/capability';
 import { Bad, str, xCap, type O } from './x-capabilities-common';
 import { composePost, type PmNode, type PostForm, type PostPlan } from './x-post-compose';
 import { releasePage } from './x-page-lock';
 import {
-  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, clearCompose, endPending, fillCompose, lastEnded, newDraftId, pendingPost, viewOf,
-  type CancelWhy, type PendingPost,
+  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
+  publishCompose, viewOf, type CancelWhy, type PendingPost,
 } from './x-post-draft';
+import { findPosted, recordEnded, recordFilled } from './x-post-repo';
 
 const isPmNode = (v: unknown): v is PmNode => !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';
 
 type PrepareIn = { readonly content?: readonly PmNode[]; readonly noteId?: string };
 type FillIn = PrepareIn & { readonly wsId: string; readonly form: PostForm };
 type CancelIn = { readonly wsId: string; readonly draftId: string; readonly why: CancelWhy };
+type DraftIn = { readonly wsId: string; readonly draftId: string };
+
+/** 草稿 id 对不上 / 没有 → 拒(cancel、publish 共用) */
+const noDraft = (i: DraftIn): string | null => {
+  const p = pendingPost(i.wsId);
+  return !p || p.draftId !== i.draftId ? `没有这份待发草稿(${i.draftId}):已经撤回 / 发过 / 过期 / 网页关了` : null;
+};
+
+/** 记录写不上不能吞(fail loud),但也不能因此把已经发生的事说成没发生 —— 打一行红字、结果照实返回 */
+const logRecordError = (draftId: string, e: unknown): void => {
+  console.error(`[x.post] ⚠️ 发推记录 ${draftId} 没写上(这次的结局只在执行记录里):${e instanceof Error ? e.message : String(e)}`);
+};
 
 const FORMS: readonly PostForm[] = ['single', 'thread', 'longPost', 'article', 'image'];
 /** 第②期能填进 X 的发法;别的先如实拒 */
@@ -99,7 +113,7 @@ export function registerXPostCapabilities(): void {
     page: () => '发推:待发草稿,等你在 X 上确认',
     keepPage: { ttlMs: DRAFT_LOCK_TTL_MS },
     subject: (i) => (i.noteId ? `note:${i.noteId}` : undefined),
-    run: async (i, acc, page) => {
+    run: async (i, acc, page, caller) => {
       const plan = await planOf(i);
       if (plan.empty) throw capRefused('内容是空的,没有可发的');
       const opt = plan.options.find((o) => o.form === i.form);
@@ -115,6 +129,13 @@ export function registerXPostCapabilities(): void {
         draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId,
         form: i.form, text: post.text, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
       };
+      try {
+        await recordFilled({ draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form, text: post.text, caller });
+      } catch (e) {
+        /** 记不下来就不留这份草稿:发出去了却查不到「发过」比填不进去更糟 */
+        const c = await clearCompose(page.wcId);
+        throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${c.cleared ? '框已清掉' : `框没清掉:${c.detail}`}`);
+      }
       addPending(p, cancelOnTimeout);
       console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${post.weight} 字)草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
       return viewOf(p);
@@ -130,11 +151,7 @@ export function registerXPostCapabilities(): void {
       if (why !== 'user' && why !== 'back-to-note' && why !== 'timeout') throw new Bad('why 只认 user / back-to-note / timeout');
       return { wsId: str(o, 'wsId'), draftId: str(o, 'draftId'), why };
     },
-    preflight: (i) => {
-      const p = pendingPost(i.wsId);
-      if (!p || p.draftId !== i.draftId) return `没有这份待发草稿(${i.draftId}):已经撤回 / 过期 / 网页关了`;
-      return null;
-    },
+    preflight: noDraft,
     page: () => '发推:撤回草稿',
     /** 带 fill 留下的锁进来;执行器不替它放,这里放 */
     reuse: (i) => pendingPost(i.wsId)?.token,
@@ -143,10 +160,44 @@ export function registerXPostCapabilities(): void {
       const c = await clearCompose(page.wcId);
       endPending(p, i.why, c.cleared);
       releasePage(page.token);
+      await recordEnded(p.draftId, { status: 'cancelled', detail: `${i.why}:${c.detail}` }).catch((e) => logRecordError(p.draftId, e));
       console.log(`[x.post] 撤回草稿 ${p.draftId}(${i.why}):${c.detail}`);
       if (!c.cleared) throw capFailed(`框里的字没清掉:${c.detail} —— 请在左边 X 上手动删掉;网页已放开`);
       return { draftId: p.draftId, detail: c.detail };
     },
+  });
+
+  xCap<DraftIn>('output', {
+    id: 'x.post.publish',
+    describe: '发出去:人在 X 上看过待发草稿、点了确认 → 点 X 的「发布」→ 去我的主页核对推文真的出现了(作者是我、正文对得上)。只点一次,核对不上不重发',
+    inputDoc: { wsId: '哪个 workspace 的号', draftId: '草稿 id(fill 返回的)' },
+    parse: (o) => ({ wsId: str(o, 'wsId'), draftId: str(o, 'draftId') }),
+    preflight: noDraft,
+    page: () => '发推:点发布并核对',
+    /** 带 fill 留下的锁进来;发完这里放 */
+    reuse: (i) => pendingPost(i.wsId)?.token,
+    subject: (i) => `draft:${i.draftId}`,
+    run: async (i, _a, page) => {
+      const p = pendingPost(i.wsId) as PendingPost;
+      const o = await publishCompose(page.wcId, p);
+      endPublished(p, o);
+      releasePage(page.token);
+      await recordEnded(p.draftId, { status: o.outcome, detail: o.detail, tweetId: o.tweetId, sentText: o.sentText, editedOnX: o.editedOnX })
+        .catch((e) => logRecordError(p.draftId, e));
+      const url = o.tweetId ? `https://x.com/${p.handle}/status/${o.tweetId}` : undefined;
+      console.log(`[x.post] 发布 ${p.draftId}(@${p.handle}):${o.outcome} —— ${o.detail}${url ? ` ${url}` : ''}${o.editedOnX ? '(在 X 上改过字)' : ''}`);
+      if (o.outcome !== 'sent') throw capFailed(o.detail);
+      return { draftId: p.draftId, tweetId: o.tweetId, url, handle: p.handle, editedOnX: o.editedOnX };
+    },
+  });
+
+  xCap<{ wsId: string; text: string }>('input', {
+    id: 'x.post.history',
+    describe: '这段字以前用这个号发过没(按内容比,不看空白);发过的给时间、哪个号、推文 id —— 只提醒用,不拦',
+    inputDoc: { wsId: '哪个 workspace 的号', text: '要发的正文' },
+    parse: (o) => ({ wsId: str(o, 'wsId'), text: str(o, 'text') }),
+    account: true,
+    run: async (i, acc) => ({ posted: await findPosted(acc.restId, i.text) }),
   });
 
   xCap<{ wsId: string }>('input', {

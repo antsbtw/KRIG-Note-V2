@@ -250,7 +250,7 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
       </div>
 
       {/* ⭐ 发推第②期:note 填进 X 发推框后,在这里确认 / 取消(没有待发草稿时不占地方) */}
-      <XPostBar wsId={workspaceId} />
+      <XPostBar wsId={workspaceId} onOpen={(u) => hostRef.current?.loadURL(u)} />
 
       {/* ⭐ 真 webview —— 与同 ws 的内置浏览器同 partition(登录态共享) */}
       <Host

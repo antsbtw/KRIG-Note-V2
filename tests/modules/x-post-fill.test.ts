@@ -24,11 +24,39 @@ const h = vi.hoisted(() => ({
   missesLeft: 0,
   goto: [] as string[],
   typed: [] as string[],
+  /** x_post 表(id → 行) */
+  posts: new Map<string, Record<string, unknown>>(),
+  dbDown: false,
+  /** 点发布:closed / not-sent / disabled;closed 时 profileHas 决定主页上找不找得到 */
+  sendAs: 'closed' as string,
+  profileHas: true,
+  sends: 0,
 }));
 
 vi.mock('@storage/surreal/client', () => ({
   getFlowDB: () => ({ query: async (sql: string, v: Record<string, unknown>) => { if (sql.includes('CREATE flow_step_run')) h.rows.push(v); return [[]]; } }),
-  getXDB: () => ({ query: async () => [[]] }),
+  getXDB: () => ({
+    query: async (sql: string, v: Record<string, unknown>) => {
+      if (h.dbDown) throw new Error('库连不上');
+      if (sql.includes("UPSERT type::record('x_post'")) {
+        const row = { account: v.account, handle: v.handle, note_id: v.note, text: v.text, content_hash: v.hash, status: 'filled', caller: v.caller };
+        h.posts.set(String(v.id), row);
+        return [[row]];
+      }
+      if (sql.includes("UPDATE type::record('x_post'")) {
+        const row = h.posts.get(String(v.id));
+        if (!row) return [[]];
+        Object.assign(row, { status: v.status, detail: v.detail, tweet_id: v.tweet, sent_text: v.sent, edited_on_x: v.edited, ended_at: new Date() });
+        return [[row]];
+      }
+      if (sql.includes('FROM x_post')) {
+        return [[...h.posts.entries()]
+          .filter(([, r]) => r.account === v.a && r.content_hash === v.h && (r.status === 'sent' || r.status === 'unseen'))
+          .map(([id, r]) => ({ id: `x_post:${id}`, ...r }))];
+      }
+      return [[]];
+    },
+  }),
 }));
 vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
   traceRecorder: { lifecycle: () => undefined },
@@ -49,6 +77,13 @@ vi.mock('@modules/x/x-collect-ports', () => ({
     runScript: async (id: string) => {
       if (id === 'x.composeBoxState' && h.missesLeft > 0) { h.missesLeft -= 1; return { found: false, dialogs: 0, boxesAnywhere: 0, ready: 'loading' }; }
       if (id === 'x.composeBoxState') return h.box === null ? { found: false } : { found: true, count: 1, text: h.box.trim() };
+      if (id === 'x.composeSend') {
+        h.sends += 1;
+        if (h.sendAs !== 'closed') return { state: h.sendAs };
+        h.box = null;
+        return { state: 'closed', toastId: '1900000000000000001' };
+      }
+      if (id === 'x.findMyPost') return h.profileHas ? { tweetId: '1900000000000000001' } : { why: 'not-found', seen: 3 };
       if (id === 'x.composeClear') {
         if (h.box === null) return { state: 'no-box' };
         if (h.box === '') return { state: 'empty' };
@@ -74,6 +109,7 @@ const pending = async () => ((await execute('x.post.pending', { wsId: 'ws-1' }, 
 beforeEach(() => {
   h.rows.length = 0; h.goto.length = 0; h.typed.length = 0;
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
+  h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -209,3 +245,86 @@ describe('超时 / 网页没了', () => {
     expect(await execute('x.post.fill', fillIn('再来'), { caller: 'ui' })).toMatchObject({ ok: false, kind: 'failed' });
   });
 });
+
+const draftOf = (r: unknown): string => (r as { value: { draftId: string } }).value.draftId;
+
+describe('x.post.publish 发出去(第③期)', () => {
+  it('⭐ 点发布 → 去我主页核对上 → ok 带链接;只点一次;锁放了;记录 sent;条上显示发出去了', async () => {
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { tweetId: '1900000000000000001', url: 'https://x.com/me/status/1900000000000000001', editedOnX: false } });
+    expect(h.sends).toBe(1);
+    expect(h.goto).toEqual(['x.compose', 'x.profile']);
+    expect(lock.lockHolder('page:7')).toBeNull();
+    expect(h.posts.get(d)).toMatchObject({ status: 'sent', tweet_id: '1900000000000000001', sent_text: '今天读了一篇论文' });
+    expect(await pending()).toMatchObject({ pending: null, ended: { why: 'published', outcome: 'sent' } });
+  });
+
+  it('⭐ 人在 X 上又改了字 → 以框里的为准,记「在 X 上改过」', async () => {
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    h.box = '今天读了一篇好论文';
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { editedOnX: true } });
+    expect(h.posts.get(d)).toMatchObject({ sent_text: '今天读了一篇好论文', edited_on_x: true });
+  });
+
+  it('⭐ 主页上没找到 → failed「没核对上」、记录 unseen、不再点第二次、锁照放', async () => {
+    h.profileHas = false;
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('没找到');
+    expect(h.sends).toBe(1);
+    expect(h.posts.get(d)).toMatchObject({ status: 'unseen' });
+    expect(lock.lockHolder('page:7')).toBeNull();
+    expect((await pending()).ended).toMatchObject({ outcome: 'unseen' });
+  });
+
+  it('X 的发布按钮是灰的 → failed、记录 failed、没去主页', async () => {
+    h.sendAs = 'disabled';
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(!r.ok && r.why).toContain('灰');
+    expect(h.goto).toEqual(['x.compose']);
+    expect(h.posts.get(d)).toMatchObject({ status: 'failed' });
+  });
+
+  it('⭐ AI 调 publish:refused 要人批复(P3 前),网页没碰', async () => {
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ai' });
+    expect(r).toMatchObject({ ok: false, kind: 'refused' });
+    expect(h.sends).toBe(0);
+    expect(lock.lockHolder('page:7')).not.toBeNull();
+  });
+
+  it('草稿 id 不对 / 已发过 → refused', async () => {
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    expect(await execute('x.post.publish', { wsId: 'ws-1', draftId: 'draft_假的' }, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused' });
+    await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused' });
+    expect(h.sends).toBe(1);
+  });
+});
+
+describe('发推记录 x_post / 发过没', () => {
+  it('⭐ 发出去的同一段字 → history 查得到(不看空白);撤回的不算', async () => {
+    const d1 = draftOf(await execute('x.post.fill', fillIn('撤回的那段'), { caller: 'ui' }));
+    await execute('x.post.cancel', { wsId: 'ws-1', draftId: d1 }, { caller: 'ui' });
+    expect(h.posts.get(d1)).toMatchObject({ status: 'cancelled' });
+    const d2 = draftOf(await execute('x.post.fill', fillIn('今天读了一篇论文'), { caller: 'ui' }));
+    await execute('x.post.publish', { wsId: 'ws-1', draftId: d2 }, { caller: 'ui' });
+    const hist = async (text: string) => ((await execute('x.post.history', { wsId: 'ws-1', text }, { caller: 'ai' })) as { value: { posted: Array<{ draftId: string }> } }).value.posted;
+    expect((await hist('今天 读了\n一篇论文')).map((p) => p.draftId)).toEqual([d2]);
+    expect(await hist('撤回的那段')).toEqual([]);
+  });
+
+  it('⭐ 记录写不上 → fill 失败、框清掉、不留锁(发出去了却查不到「发过」更糟)', async () => {
+    h.dbDown = true;
+    const r = await execute('x.post.fill', fillIn(), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('记录写不上');
+    expect(h.box).toBe('');
+    expect(lock.lockHolder('page:7')).toBeNull();
+  });
+});
+

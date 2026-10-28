@@ -14,6 +14,7 @@ import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { xDataCall } from './x-data-types';
 import type { PmNode, PostForm, PostPlan } from './x-post-compose';
 import { XPostPreview, type PreviewState, type FillState } from './XPostPreview';
+import type { PostedBefore } from './x-post-repo';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getXHostState, subscribeXHost } from './x-host-registry';
 import { X_WEB_VIEW_ID } from './x-view-id';
@@ -97,13 +98,14 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
   let wholeDoc = true;
   let seq = 0;
   let fill: FillState = { phase: 'idle' };
+  let posted: readonly PostedBefore[] = [];
   /** 最新的那段内容 —— 点发布时填的就是它(和预览上看到的同一份) */
   let latest: unknown[] = [];
   const openedAt = Date.now();
   const draw = (): void => {
     if (open !== me) return;
     root.render(createElement(XPostPreview, {
-      state, handle, wholeDoc, initialForm, fill, openedAt,
+      state, handle, wholeDoc, initialForm, fill, openedAt, posted,
       pending: pendingSnap(wsId),
       onBackToNote: () => { te.focusInstance(instanceId); },
       onClose: closePostPreview,
@@ -142,6 +144,13 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
     if (my !== seq || open !== me) return;
     state = r.status === 'ok' ? { kind: 'ok', plan: r.value as PostPlan } : { kind: 'failed', why: r.reason };
     if (r.status !== 'ok') console.warn(`[x-post] 排版没成:${r.reason}`);
+    draw();
+    /** 发过没:按单条推的正文查(本期只能发单条) */
+    const text = r.status === 'ok' ? (r.value as PostPlan).options.find((o) => o.form === 'single')?.posts[0]?.text ?? '' : '';
+    const h = text.trim() === '' ? null : await xDataCall({ op: 'postHistory', wsId, text });
+    if (my !== seq || open !== me) return;
+    if (h && h.status !== 'ok') console.warn(`[x-post] 查「发过没」没成:${h.reason}`);
+    posted = h && h.status === 'ok' ? (h.value as { posted: PostedBefore[] }).posted : [];
     draw();
   };
 
