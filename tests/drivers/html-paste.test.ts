@@ -6,6 +6,8 @@
  * 夹具是真剪贴板(tests/fixtures/paste/):同一段验收文字(acceptance.md 同内容)
  * - word.*   :pandoc 转 docx → Microsoft Word 打开 → 全选复制(2026-10-28 本机 Word 15)
  * - chrome.* :pandoc 转 html → Chrome 打开 → 全选复制
+ * - notion.* :同内容建 Notion 页(另加提示框 / 折叠块 / 代码块)→ Chrome 里 Notion 网页版选中全部块复制
+ *   (标题行没选进来;Notion 的 text/plain 本身就是 markdown,html 是它把 markdown 渲染出来的)
  * 每份是 NSPasteboard 的 public.html + public.utf8-plain-text 原样落盘。
  *
  * 真编辑器装配 + 往 view.dom 派发真 paste 事件,看粘贴后块的种类和顺序。
@@ -181,6 +183,41 @@ describe('网页粘贴(Chrome 真剪贴板)', () => {
   it('只有部分项带 checkbox 的列表不当任务列表', () => {
     const r = normalizePastedHtml('<ul><li><input type="checkbox"> a</li><li>b</li></ul>')!;
     expect(r.html).not.toContain('task-list');
+  });
+});
+
+describe('Notion 粘贴(真剪贴板)', () => {
+  it('方括号待办成任务列表、<aside> 成提示框、代码块不多换行', () => {
+    const view = mount();
+    paste(view, fixture('notion'));
+    expect(kinds(view)).toEqual([
+      'h2', 'paragraph',
+      'h2', 'bulletList(3)',
+      'h2', 'orderedList(3)',
+      'h2', 'taskList[x ]',
+      'blockquote', 'horizontalRule',
+      'callout',
+      'bulletList(1)', // 折叠块:Notion 的 html 里就是两段文字的列表项,与普通列表项分不出,原样保留内容
+      'codeBlock', 'paragraph',
+    ]);
+    const doc = view.state.doc;
+    expect(doc.textContent).not.toMatch(/\[[ x]\]|<\/?aside>/);
+    const callout = doc.child(11);
+    expect(callout.attrs.emoji).toBe('💡');
+    expect(callout.textContent).toBe('这是一个提示框');
+    expect(doc.child(13).textContent).toBe('echo hello');
+    expect(doc.child(13).attrs.language).toBe('bash');
+  });
+
+  it('只有部分项是方括号开头的列表不当任务列表', () => {
+    const r = normalizePastedHtml('<ul><li>[x] a</li><li>b</li></ul>')!;
+    expect(r.html).not.toContain('task-list');
+  });
+
+  it('没有闭合 </aside> 不当提示框,原文不动', () => {
+    const r = normalizePastedHtml('<p>&lt;aside&gt;</p><p>正文</p>')!;
+    expect(r.html).not.toContain('krig-callout');
+    expect(r.html).toContain('正文');
   });
 });
 

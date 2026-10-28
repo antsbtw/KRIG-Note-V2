@@ -11,6 +11,11 @@
  *   (KRIG 列表缩进走 indent attr,不嵌套)
  * - Word 引用:段落样式 MsoQuote / MsoIntenseQuote / MsoBlockText → <blockquote>
  * - 网页任务列表:<li> 里开头一个 checkbox(GitHub / pandoc 等)→ KRIG task-list 的 DOM
+ * - 方括号任务列表:<li>[x]  买好服务器</li>(Notion 的 html 就是这样,把 markdown 原样渲染)
+ *   → task-list
+ * - Notion 提示框:html 里是字面文字段落 `<aside>` + 图标 … `</aside>` → callout
+ * - 代码块:<pre><code> 末尾多一个换行(Notion / markdown 渲染器都带)→ 去掉
+ *   (Notion 的折叠块 html 里就是「两段文字的列表项」,与普通列表项分不出来,不改)
  * - 文字颜色:Chrome 复制会把页面正文颜色(如 rgb(26,26,26))内联到每个元素,
  *   textStyle mark 照单全收 → 暗色主题下字几乎看不见。灰阶颜色(黑/白/灰,即页面底色字)
  *   去掉;有色相的颜色(红字、蓝字)是作者有意标的,保留
@@ -26,10 +31,11 @@ const MAX_INDENT = 8;
 type ListKind = 'bullet' | 'ordered' | 'task';
 
 export interface NormalizeReport {
-  source: 'word' | 'html';
+  source: 'word' | 'notion' | 'html';
   lists: number;
   quotes: number;
   taskLists: number;
+  callouts: number;
   colorsRemoved: number;
 }
 
@@ -178,6 +184,74 @@ function normalizeTaskLists(doc: Document): number {
   return lists;
 }
 
+const BRACKET_TASK = /^\s*\[([ xX])\]\s+/;
+
+/** <li>[x] 文字</li> 整组 → task-list(只有全部项都是方括号开头才算) */
+function normalizeBracketTaskLists(doc: Document): number {
+  let lists = 0;
+  for (const ul of Array.from(doc.body.querySelectorAll('ul'))) {
+    if (ul.getAttribute('data-type') === 'task-list') continue;
+    const items = Array.from(ul.children).filter((c) => c.tagName === 'LI');
+    if (items.length === 0 || !items.every((li) => BRACKET_TASK.test(li.textContent ?? ''))) continue;
+    ul.setAttribute('data-type', 'task-list');
+    for (const li of items) {
+      li.setAttribute('data-type', 'task-item');
+      li.setAttribute('data-checked', String(/^\s*\[[xX]\]/.test(li.textContent ?? '')));
+      // 方括号在第一个文字节点里(可能包在 <p> 里)
+      const walker = doc.createTreeWalker(li, NodeFilter.SHOW_TEXT);
+      for (let t = walker.nextNode(); t; t = walker.nextNode()) {
+        if (!t.textContent?.trim()) continue;
+        t.textContent = t.textContent.replace(BRACKET_TASK, '');
+        break;
+      }
+    }
+    lists++;
+  }
+  return lists;
+}
+
+/**
+ * Notion 提示框:`<p>&lt;aside&gt;<br>💡</p> <p>正文…</p> <p>&lt;/aside&gt;</p>`
+ * → `<div class="krig-callout" data-emoji="💡"><p>正文…</p></div>`
+ */
+function normalizeAsideCallouts(doc: Document): number {
+  let callouts = 0;
+  for (const open of Array.from(doc.body.querySelectorAll('p'))) {
+    if (!open.isConnected) continue;
+    const head = /^\s*<aside>\s*([\s\S]*?)\s*$/.exec(open.textContent ?? '');
+    if (!head) continue;
+    const body: Element[] = [];
+    let close: Element | null = null;
+    for (let e = open.nextElementSibling; e; e = e.nextElementSibling) {
+      if (e.tagName === 'P' && e.textContent?.trim() === '</aside>') {
+        close = e;
+        break;
+      }
+      body.push(e);
+    }
+    if (!close) continue;
+    const div = doc.createElement('div');
+    div.className = 'krig-callout';
+    if (head[1]) div.setAttribute('data-emoji', head[1]);
+    if (body.length === 0) body.push(doc.createElement('p'));
+    open.replaceWith(div);
+    div.append(...body);
+    close.remove();
+    callouts++;
+  }
+  return callouts;
+}
+
+/** <pre><code>…\n</code></pre> 末尾的换行不是代码内容 */
+function trimCodeTrailingNewline(doc: Document): void {
+  for (const pre of Array.from(doc.body.querySelectorAll('pre'))) {
+    const last = pre.lastChild?.nodeType === 1 ? pre.lastChild.lastChild : pre.lastChild;
+    if (last?.nodeType === 3 && last.textContent?.endsWith('\n')) {
+      last.textContent = last.textContent.replace(/\r?\n$/, '');
+    }
+  }
+}
+
 /** 颜色是不是灰阶(黑 / 白 / 灰)—— 页面正文底色字,不是作者有意标的颜色 */
 export function isGrayscaleColor(value: string): boolean {
   const v = value.trim().toLowerCase();
@@ -219,11 +293,13 @@ export function normalizePastedHtml(html: string): { html: string; report: Norma
   if (html.includes('data-pm-slice')) return null;
   const doc = new DOMParser().parseFromString(html, 'text/html');
   const word = isWordHtml(html);
+  trimCodeTrailingNewline(doc);
   const report: NormalizeReport = {
-    source: word ? 'word' : 'html',
+    source: word ? 'word' : html.includes('notionvc:') ? 'notion' : 'html',
     lists: word ? normalizeWordLists(doc) : 0,
     quotes: word ? normalizeWordQuotes(doc) : 0,
-    taskLists: normalizeTaskLists(doc),
+    taskLists: normalizeTaskLists(doc) + normalizeBracketTaskLists(doc),
+    callouts: normalizeAsideCallouts(doc),
     colorsRemoved: stripGrayscaleColors(doc),
   };
   return { html: doc.body.innerHTML, report };

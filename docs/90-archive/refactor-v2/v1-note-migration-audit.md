@@ -164,7 +164,7 @@ V1 `paste/` ~1500 行:smart-paste-plugin / html-to-markdown / internal-clipboard
 |---|---|
 | 内部复制粘贴(PM 自带) | ✅(2026-10-28 修:任务列表曾被解析成无序列表) |
 | 粘贴外部 markdown | ✅ 2026-10-28 `build-markdown-paste-plugin.ts`(Cmd+Shift+V 不转) |
-| 粘贴外部 HTML | ✅ 2026-10-28 Word / 网页:PM parseDOM + `build-html-paste-normalize-plugin.ts` 先改写(Word 列表/引用、任务列表、页面底色字);真剪贴板夹具 `tests/fixtures/paste/`。Notion 未取样 |
+| 粘贴外部 HTML | ✅ 2026-10-28 Word / 网页 / Notion:PM parseDOM + `build-html-paste-normalize-plugin.ts` 先改写(Word 列表/引用、任务列表、页面底色字);真剪贴板夹具 `tests/fixtures/paste/`。Notion 折叠块 html 里分不出,粘成列表项 |
 | 粘贴 base64 图 | ❌ paste-media plugin 没迁 |
 | **smart-paste**(识别来源:GitHub / Notion / Google Docs 等智能转换)| ❌ V1 复杂 |
 
