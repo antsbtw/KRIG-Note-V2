@@ -8,7 +8,7 @@
  * ⚠️ 字不能在这里改(用户 10-27 定 B:字只在 note 里改,note 是唯一原文)。
  */
 import { useEffect, useState } from 'react';
-import { fillProblem, type PostDraft, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
+import { fillBlock, type PostDraft, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
 import type { PostedBefore } from './x-post-repo';
@@ -127,10 +127,7 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
   const blockWhy = !plan || plan.empty || !current ? '没有可发的内容'
     : draft ? '左边 X 上已经有一份在等你确认'
       : fill.phase === 'filling' ? '正在填'
-        : current.form !== 'single' ? `「${current.label}」还不能填进 X(现在只做单条推)`
-          : fillProblem(current.posts[0]?.media ?? [])
-            ?? (limit !== null && (current.posts[0]?.weight ?? 0) > limit ? '超过字数了'
-              : null);
+        : fillBlock(current);
 
   return (
     <div style={{

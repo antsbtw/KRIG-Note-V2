@@ -1863,6 +1863,26 @@ DEFINE FIELD IF NOT EXISTS media      ON x_post TYPE option<array<string>>;
 DEFINE FIELD IF NOT EXISTS sent_media ON x_post TYPE option<int>;
 `;
 
+/**
+ * ⭐ 1.2.44 —— 发推记录带推串(2026-10-28)
+ * post_count = 推串几条(单条推不写);tweet_ids = 每条的推文 id,按顺序,没核对上的是 ''(tweet_id 仍是第一条)。
+ */
+const X_SCHEMA_1_2_44 = `
+DEFINE FIELD IF NOT EXISTS post_count ON x_post TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS tweet_ids  ON x_post TYPE option<array<string>>;
+`;
+
+export async function x_migration_1_2_44(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_44);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');
+  if (!('post_count' in (t?.fields ?? {})) || !('tweet_ids' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.44] x_post 没加上 post_count / tweet_ids —— 推串记不住每条');
+  console.log('[x-schema 1.2.44] 发推记录带推串 x_post.post_count / tweet_ids');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.44', appliedAt = $now, description = '发推记录带推串'`,
+    { rid: new RecordId('schema_version', '1.2.44'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_43(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_43);
   const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');

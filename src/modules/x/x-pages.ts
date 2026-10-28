@@ -422,6 +422,10 @@ export const X_ANCHORS = {
   composeFileInput: 'x.composeFileInput' as AnchorName,
 } as const;
 
+/** 推串第 k 条的正文框(2026-10-28);第 0 条就是 composeBox */
+export const composeBoxAnchor = (k: number): AnchorName =>
+  (k === 0 ? X_ANCHORS.composeBox : (`x.composeBox.${k}` as AnchorName));
+
 /**
  * ⭐⭐ **每个语义页面要哪些参数** —— 面板问它要,**不许自己抄一份**。
  *

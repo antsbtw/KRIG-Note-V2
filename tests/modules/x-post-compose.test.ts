@@ -183,3 +183,18 @@ describe('推串在哪断', () => {
     expect(posts[2].media.map((m) => (m as { src: string }).src)).toEqual(['media://6.png']);
   });
 });
+
+describe('推串:能不能填进 X(10-28)', () => {
+  it('⭐ 一句话 + 6 张图 → 2 条(4 + 2);只有图的那条正文就是「2/2」,前面不留空行', () => {
+    const posts = thread([p('什么是VPS?'), ...[1, 2, 3, 4, 5, 6].map((n) => img(`media://images/${n}.png`))]);
+    expect(posts.map((x) => x.media.length)).toEqual([4, 2]);
+    expect(posts.map((x) => x.text)).toEqual(['什么是VPS?\n\n1/2', '2/2']);
+  });
+  it('⭐ fillBlock:推串现在能填;某条要转图 → 说是第几条;长推还不能填', async () => {
+    const { fillBlock } = await import('../../src/modules/x/x-post-compose');
+    const opt = (nodes: PmNode[], form: string) => composePost(nodes).options.find((o) => o.form === form)!;
+    expect(fillBlock(opt([p('甲'.repeat(200)), p('乙'.repeat(200))], 'thread'))).toBeNull();
+    expect(fillBlock(opt([p('甲'.repeat(100)), hr, p('乙'), { type: 'mathBlock', content: [t('E=mc^2')] }], 'thread'))).toContain('第 2 条');
+    expect(fillBlock(opt([p('短')], 'longPost'))).toContain('第⑤期');
+  });
+});

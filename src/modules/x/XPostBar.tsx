@@ -47,7 +47,7 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
     const url = end.tweetId && end.handle ? `https://x.com/${end.handle}/status/${end.tweetId}` : null;
     const [color, text] = end.why !== 'published'
       ? ['#d97706', '⚠️ 撤回了,但发推框里的字没清掉 —— 请在下面 X 的发推框里手动删掉(没发出去)。']
-      : end.outcome === 'sent' ? ['#16a34a', `✅ 已发到 X(@${end.handle ?? '?'}),在你主页上核对过了。`]
+      : end.outcome === 'sent' ? ['#16a34a', `✅ 已发到 X(@${end.handle ?? '?'}),${(end.count ?? 1) > 1 ? `推串 ${end.count} 条都` : ''}核对过了。`]
         : end.outcome === 'unseen' ? ['#d97706', `⚠️ 点了发布,但没核对上:${end.detail ?? ''}`]
           : ['#e5484d', `❌ 没发出去:${end.detail ?? ''}`];
     return (
@@ -63,7 +63,7 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
 
   const publish = async (): Promise<void> => {
     setBusy(true);
-    setNote('ⓘ 正在点 X 的发布,再去你主页核对…(别动左边网页)');
+    setNote(`ⓘ 正在点 X 的${draft.posts.length > 1 ? '「全部发布」,再逐条' : '发布,再去'}核对…(别动左边网页)`);
     const r = await xDataCall({ op: 'postPublish', wsId, draftId: draft.draftId });
     setBusy(false);
     if (r.status !== 'ok') console.warn(`[x-post] 发布没核对上:${r.reason}`);
@@ -87,7 +87,7 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
     <div style={{ ...bar, flexWrap: 'wrap' }}>
       <b style={{ flex: 'none' }}>KRIG</b>
       <span style={{ flex: 1, minWidth: 200 }}>
-        已填进下面的发推框{draft.media.length > 0 ? `(带 ${draft.media.length} 张图)` : ''} —— 这就是发出去的样子,核对一下。
+        已填进下面的发推框{[draft.posts.length > 1 ? `推串 ${draft.posts.length} 条` : '', draft.media.length > 0 ? `带 ${draft.media.length} 张图` : ''].filter(Boolean).map((x, i, a) => (i === 0 ? '(' : '') + x + (i === a.length - 1 ? ')' : '、')).join('')} —— 这就是发出去的样子,核对一下。
         <span style={{ color: 'var(--text-muted)' }}> {mmss(draft.expiresAt - now)} 后没确认自动撤回</span>
         {note && <div style={{ fontSize: 12, color: note.startsWith('❌') ? '#e5484d' : '#d97706', marginTop: 2 }}>{note}</div>}
       </span>

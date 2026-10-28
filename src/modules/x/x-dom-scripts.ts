@@ -104,6 +104,13 @@ export const X_SCRIPTS = {
   composeMediaReady: 'x.composeMediaReady' as ScriptId,
   /** ⭐⭐ 发推第③期:在我的主页上找我刚发的那条(作者是我、正文对得上、时间不早于点发布)→ 推文 id */
   findMyPost: 'x.findMyPost' as ScriptId,
+  /**
+   * ⭐ 推串(2026-10-28):点发推弹窗里的「+」加一条,等第 __INDEX__ 个正文框出来。
+   * 找不到按钮就带回弹窗里有哪些 testid —— X 的推串编辑没在真机上量过,第一次跑据此对准。
+   */
+  composeAddPost: 'x.composeAddPost' as ScriptId,
+  /** ⭐ 推串:点一下第 __INDEX__ 条让它成为「当前这条」—— X 的工具栏(放图)只对当前这条 */
+  composeFocus: 'x.composeFocus' as ScriptId,
 } as const;
 
 /**
@@ -471,6 +478,30 @@ const ATTACHED_JS = String.raw`
     };`;
 
 /**
+ * 弹窗里的正文框(推串有几条就几个:tweetTextarea_0、_1…,按序号排)和每条自己那块(只含它一个框的最大祖先)。
+ * ⚠️ X 还有 tweetTextarea_0_label 之类,只认「tweetTextarea_数字」。
+ */
+const BOXES_JS = String.raw`
+    var boxesIn = function (root) {
+      var out = [];
+      root.querySelectorAll('[data-testid^="tweetTextarea_"]').forEach(function (el) {
+        var m = /^tweetTextarea_(\d+)$/.exec(el.getAttribute('data-testid') || '');
+        if (m) out.push({ i: Number(m[1]), el: el });
+      });
+      out.sort(function (a, b) { return a.i - b.i; });
+      return out.map(function (x) { return x.el; });
+    };
+    var itemOf = function (box, dlg) {
+      var el = box;
+      while (el.parentElement && el.parentElement !== dlg && boxesIn(el.parentElement).length === 1) el = el.parentElement;
+      return el;
+    };
+    var dialogOf = function () {
+      var b = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
+      return b ? b.closest('[role="dialog"]') : null;
+    };`;
+
+/**
  * ⭐ 发推弹窗里的正文框(发推第②期,2026-10-27)。⚠️ 只认 role=dialog 里的 —— 首页时间线顶上还有一个同 testid 的内嵌框。
  * 最多等 8 秒(弹窗是导航后才画出来的)。返回 { found, count, text, media:挂了几张图 }。
  */
@@ -485,11 +516,15 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
       return out;
     };
     ${ATTACHED_JS}
+    ${BOXES_JS}
     var t0 = Date.now();
     var tick = function () {
       var boxes = document.querySelectorAll('[role="dialog"] [data-testid="tweetTextarea_0"]');
       if (boxes.length > 0) {
-        resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim(), media: attachedIn(boxes[0].closest('[role="dialog"]')).n });
+        var dlg = boxes[0].closest('[role="dialog"]');
+        /** 推串:每条的字和它自己那块里挂的图 */
+        var all = boxesIn(dlg).map(function (b) { return { text: textOf(b).trim(), media: attachedIn(itemOf(b, dlg)).n }; });
+        resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim(), media: attachedIn(dlg).n, boxes: all });
         return;
       }
       if (Date.now() - t0 > 8000) {
@@ -516,12 +551,16 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
  */
 const COMPOSE_CLEAR_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
-    var box = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
-    if (!box) { resolve({ state: 'no-box' }); return; }
+    if (!document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]')) { resolve({ state: 'no-box' }); return; }
     ${ATTACHED_JS}
-    var dlg = box.closest('[role="dialog"]');
-    var left = function () { return (box.textContent || '').trim(); };
-    var size = function () { return left().length + box.querySelectorAll('img').length; };
+    ${BOXES_JS}
+    var dlg = dialogOf();
+    var boxes = function () { return boxesIn(dlg); };
+    var textIn = function (b) { return (b.textContent || '').trim(); };
+    var sizeOf = function (b) { return textIn(b).length + b.querySelectorAll('img').length; };
+    /** 推串:所有条的字连起来(报「还剩什么」用) */
+    var left = function () { return boxes().map(textIn).join(''); };
+    var size = function () { return boxes().reduce(function (n, b) { return n + sizeOf(b); }, 0); };
     if (size() === 0 && attachedIn(dlg).n === 0) { resolve({ state: 'empty' }); return; }
     /** 图的移除按钮:removeMedia,或 aria-label 写着移除 / 删除的(没在真机上量过,两样都认) */
     var removeBtn = function () {
@@ -538,36 +577,112 @@ const COMPOSE_CLEAR_SRC = String.raw`(function () {
       b.click();
       setTimeout(function () { unmedia(tries - 1, done); }, 150);
     };
-    unmedia(10, function (noMedia) {
-    if (!noMedia) { resolve({ state: 'not-cleared', left: '还挂着 ' + attachedIn(dlg).n + ' 张图(没找到移除按钮)' }); return; }
-    if (size() === 0) { resolve({ state: 'cleared', via: 'media', presses: 0 }); return; }
-    box.focus();
+    /** 推串:移除按钮可能只在「当前这条」上 —— 整窗点不掉时逐条点一下再点 */
+    var unmediaEach = function (i, done) {
+      var bs = boxes();
+      if (attachedIn(dlg).n === 0 || i >= bs.length) { done(attachedIn(dlg).n === 0); return; }
+      bs[i].click();
+      setTimeout(function () { unmedia(10, function () { unmediaEach(i + 1, done); }); }, 200);
+    };
     /**
      * ⚠️ 10-27 真机:X 的编辑器(Draft.js)不认页面上设的全选 —— 光标停在末尾,一次 Backspace 只删一个字
      * (17 字删了 2 个)。所以一个一个删:Backspace 删不动了(光标在中间、前面删光)就换 Delete 往后删。
-     * 上限 = 字数×2+10 次,删不动就如实报 not-cleared。
+     * 每条上限 = 字数×2+10 次,删不动就如实报 not-cleared。推串从最后一条往前清。
      */
-    var key = function (k, code) {
-      box.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: code, which: code, bubbles: true, cancelable: true }));
-    };
-    var budget = size() * 2 + 10;
-    var stuck = 0;
-    var forward = false;
     var presses = 0;
-    var step = function () {
-      var before = size();
-      if (before === 0) { resolve({ state: 'cleared', via: 'keys', presses: presses }); return; }
-      if (budget-- <= 0) { resolve({ state: 'not-cleared', left: left().slice(0, 40) }); return; }
-      if (forward) key('Delete', 46); else key('Backspace', 8);
-      presses += 1;
-      setTimeout(function () {
-        if (size() < before) stuck = 0;
-        else if (++stuck >= 3) { if (forward) { resolve({ state: 'not-cleared', left: left().slice(0, 40) }); return; } forward = true; stuck = 0; }
-        step();
-      }, 30);
+    var clearBox = function (idx, done) {
+      var box = boxes()[idx];
+      if (!box) { done(true); return; }
+      if (idx > 0) box.click();
+      box.focus();
+      var key = function (k, code) {
+        box.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: code, which: code, bubbles: true, cancelable: true }));
+      };
+      var budget = sizeOf(box) * 2 + 10;
+      var stuck = 0;
+      var forward = false;
+      var step = function () {
+        var before = sizeOf(box);
+        if (before === 0) { done(true); return; }
+        if (budget-- <= 0) { done(false); return; }
+        if (forward) key('Delete', 46); else key('Backspace', 8);
+        presses += 1;
+        setTimeout(function () {
+          if (sizeOf(box) < before) stuck = 0;
+          else if (++stuck >= 3) { if (forward) { done(false); return; } forward = true; stuck = 0; }
+          step();
+        }, 30);
+      };
+      step();
     };
-    step();
+    var clearFrom = function (idx) {
+      if (idx < 0) {
+        resolve(size() === 0 ? { state: 'cleared', via: 'keys', presses: presses } : { state: 'not-cleared', left: left().slice(0, 40) });
+        return;
+      }
+      clearBox(idx, function (ok) {
+        if (!ok) { resolve({ state: 'not-cleared', left: left().slice(0, 40) }); return; }
+        clearFrom(idx - 1);
+      });
+    };
+    unmedia(10, function (noMedia) {
+      var afterMedia = function (ok) {
+        if (!ok) { resolve({ state: 'not-cleared', left: '还挂着 ' + attachedIn(dlg).n + ' 张图(没找到移除按钮)' }); return; }
+        if (size() === 0) { resolve({ state: 'cleared', via: 'media', presses: 0 }); return; }
+        clearFrom(boxes().length - 1);
+      };
+      if (noMedia || boxes().length < 2) afterMedia(noMedia);
+      else unmediaEach(0, afterMedia);
     });
+  });
+})();`;
+
+/**
+ * 推串:点「+」加一条,等第 __INDEX__ 个框出来(X 加完会把光标放进新框)。
+ * state:added / wrong-count(加之前框数不是 __INDEX__ 个)/ no-button(带 testids)/ disabled / timeout / no-dialog
+ */
+const COMPOSE_ADD_POST_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    ${BOXES_JS}
+    var idx = __INDEX__;
+    var dlg = dialogOf();
+    if (!dlg) { resolve({ state: 'no-dialog' }); return; }
+    var have = boxesIn(dlg).length;
+    if (have !== idx) { resolve({ state: 'wrong-count', have: have }); return; }
+    var btn = dlg.querySelector('[data-testid="addButton"]');
+    if (!btn) {
+      var bs = dlg.querySelectorAll('button[aria-label], [role="button"][aria-label]');
+      for (var i = 0; i < bs.length; i++) if (/add post|add another|添加|新增/i.test(bs[i].getAttribute('aria-label') || '')) { btn = bs[i]; break; }
+    }
+    if (!btn) {
+      var ids = {};
+      dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
+      resolve({ state: 'no-button', testids: Object.keys(ids).slice(0, 40) });
+      return;
+    }
+    if (btn.getAttribute('aria-disabled') === 'true' || btn.disabled) { resolve({ state: 'disabled' }); return; }
+    btn.click();
+    var t0 = Date.now();
+    var tick = function () {
+      var n = boxesIn(dlg).length;
+      if (n > idx) { resolve({ state: 'added', have: n }); return; }
+      if (Date.now() - t0 > 5000) { resolve({ state: 'timeout', have: n }); return; }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+})();`;
+
+/** 推串:点第 __INDEX__ 条,让它成为当前这条(放图前);state:ok / no-box */
+const COMPOSE_FOCUS_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    ${BOXES_JS}
+    var dlg = dialogOf();
+    var box = dlg ? boxesIn(dlg)[__INDEX__] : null;
+    if (!box) { resolve({ state: 'no-box', have: dlg ? boxesIn(dlg).length : 0 }); return; }
+    box.click();
+    box.focus();
+    setTimeout(function () { resolve({ state: 'ok' }); }, 300);
   });
 })();`;
 
@@ -707,7 +822,7 @@ const COMPOSE_SEND_SRC = String.raw`(function () {
 const FIND_MY_POST_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
     try {
-      var needle = __NEEDLE__, me = __ME__, since = __SINCE__ - 120000, photos = __PHOTOS__;
+      var needle = __NEEDLE__, me = __ME__, since = __SINCE__ - 120000, photos = __PHOTOS__, exclude = __EXCLUDE__;
       var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, ''); };
       var textOf = function (el) {
         var out = '';
@@ -730,6 +845,8 @@ const FIND_MY_POST_SRC = String.raw`(function () {
             var m = a ? /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
             if (!m || m[1].toLowerCase() !== me) continue;
             seen += 1;
+            /** 推串:前几条已经认领过的 id 不再认(两条字很像时别认成同一条) */
+            if (exclude.indexOf(m[2]) !== -1) continue;
             var at = Date.parse(ts[j].getAttribute('datetime') || '');
             var tx = arts[i].querySelector('[data-testid="tweetText"]');
             var textOk = needle === '' ? !tx || norm(textOf(tx)) === '' : !!tx && norm(textOf(tx)).indexOf(needle) !== -1;
@@ -973,7 +1090,18 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
       .replace('__NEEDLE__', () => JSON.stringify(String(params.needle ?? '')))
       .replace('__ME__', () => JSON.stringify(String(params.me ?? '').toLowerCase()))
       .replace('__SINCE__', () => String(Number(params.since) || 0))
-      .replace('__PHOTOS__', () => String(Math.max(0, Math.floor(Number(params.photos) || 0)))),
+      .replace('__PHOTOS__', () => String(Math.max(0, Math.floor(Number(params.photos) || 0))))
+      .replace('__EXCLUDE__', () => JSON.stringify(Array.isArray(params.exclude) ? params.exclude.map(String) : [])),
+  },
+  {
+    id: X_SCRIPTS.composeAddPost,
+    purpose: 'X:推串 —— 点发推弹窗里的「+」加一条,等新框出来(不发)',
+    build: (params) => COMPOSE_ADD_POST_SRC.replace('__INDEX__', () => String(Math.max(1, Math.floor(Number(params.index) || 0)))),
+  },
+  {
+    id: X_SCRIPTS.composeFocus,
+    purpose: 'X:推串 —— 点第几条让它成为当前这条(放图前,不发)',
+    build: (params) => COMPOSE_FOCUS_SRC.replace('__INDEX__', () => String(Math.max(0, Math.floor(Number(params.index) || 0)))),
   },
   {
     id: X_SCRIPTS.composeMediaReady,

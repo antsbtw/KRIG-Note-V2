@@ -9,14 +9,15 @@
  * 第③期 x.post.publish(人在 X 上看过点确认 → 点 X 的发布 → 去主页核对)/ x.post.history(这段字发过没)。
  * 第③b期(10-28)x.post.ofNote(这篇 note 发过哪些,note 顶上那行用)/ x.post.show(在 X 网页上打开某条推)。
  * 第④a期(10-28)fill 带图:note 里存在本机图片库的图先喂进 X 再贴字;转图 / 视频是第④期剩下的,还没做。
+ * 推串(10-28,用户「先把推文的各种形式搞完善」从第⑤期提前):fill 一条条加进 X 的发推弹窗,publish 点「全部发布」后逐条核对。
  * 每份草稿在 x_post 里一行(fill 建、cancel / publish 写结局)。
  */
 import { capFailed, capRefused, execute } from '@platform/main/capability/capability';
 import { Bad, str, xCap, type O } from './x-capabilities-common';
-import { composePost, fillProblem, type PmNode, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
+import { FILLABLE, composePost, fillBlock, formNotFillable, type PmNode, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
 import { releasePage } from './x-page-lock';
 import {
-  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
+  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, type DraftPost, type FillPost, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
   publishCompose, viewOf, type CancelWhy, type PendingPost,
 } from './x-post-draft';
 import { findNotePosts, findPosted, recordEnded, recordFilled } from './x-post-repo';
@@ -42,9 +43,6 @@ const logRecordError = (draftId: string, e: unknown): void => {
 };
 
 const FORMS: readonly PostForm[] = ['single', 'thread', 'longPost', 'article', 'image'];
-/** 第②期能填进 X 的发法;别的先如实拒 */
-const FILLABLE: readonly PostForm[] = ['single'];
-const LATER: Partial<Record<PostForm, string>> = { thread: '第⑤期', longPost: '第⑤期', article: '第⑥期', image: '第④期剩下的' };
 
 /** content / noteId 两种给法(prepare、fill 共用) */
 function parseSource(o: O): PrepareIn {
@@ -114,7 +112,7 @@ export function registerXPostCapabilities(): void {
     describe: '把 note 的内容按某种发法排好,填进 X 的发推弹窗(note 里存在本机的图一起放进去,最多 4 张)—— 不发;网页一直占着,等人在 X 上看过再确认(publish)或取消(cancel),10 分钟没确认自动撤回',
     inputDoc: {
       wsId: '哪个 workspace 的号',
-      form: `发法:${FORMS.join(' / ')}(本期只能 single)`,
+      form: `发法:${FORMS.join(' / ')}(现在能填的:${FILLABLE.join(' / ')})`,
       content: '可选:块数组(PM JSON,界面给选区 / 整篇;给了就不读库)',
       noteId: '可选:note id —— 不给 content 时到库里读整篇;给了也会记在草稿上',
     },
@@ -124,7 +122,8 @@ export function registerXPostCapabilities(): void {
     },
     account: true,
     preflight: (i) => {
-      if (!FILLABLE.includes(i.form)) return `这种发法还不能填进 X(${LATER[i.form] ?? '以后'}做)—— 现在只能发单条推`;
+      const notYet = formNotFillable(i.form);
+      if (notYet) return notYet;
       const p = pendingPost(i.wsId);
       return p ? `X 上已经有一份待发草稿在等你确认(「${p.text.slice(0, 20)}」)—— 先确认或取消那份` : null;
     },
@@ -135,29 +134,37 @@ export function registerXPostCapabilities(): void {
       const plan = await planOf(i);
       if (plan.empty) throw capRefused('内容是空的,没有可发的');
       const opt = plan.options.find((o) => o.form === i.form);
-      if (!opt?.available) throw capRefused(`这段内容不能这么发:${opt?.why ?? '没有这种发法'}`);
-      const post = opt.posts[0];
-      if (opt.posts.length !== 1) throw capRefused(`排出来是 ${opt.posts.length} 条,单条推只能 1 条`);
-      const mediaWhy = fillProblem(post.media);
-      if (mediaWhy) throw capRefused(mediaWhy);
-      if (post.text.trim() === '' && post.media.length === 0) throw capRefused('正文是空的');
-      const { srcs, files } = await mediaFiles(post.media);
-      const r = await fillCompose(page.wcId, post.text, files);
+      if (!opt) throw capRefused(`没有这种发法(${i.form})`);
+      const why = fillBlock(opt);
+      if (why) throw capRefused(why);
+      const resolved: Array<{ srcs: string[]; files: string[] }> = [];
+      for (const post of opt.posts) resolved.push(await mediaFiles(post.media));
+      const fills: FillPost[] = opt.posts.map((post, k) => ({ text: post.text, files: resolved[k].files }));
+      const posts: DraftPost[] = opt.posts.map((post, k) => ({ text: post.text, media: resolved[k].srcs }));
+      const r = await fillCompose(page.wcId, fills);
       if (!r.ok) throw capFailed(r.why);
       const now = Date.now();
+      const text = posts.map((x) => x.text).join('\n\n');
+      const srcs = posts.flatMap((x) => x.media);
       const p: PendingPost = {
         draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId,
-        form: i.form, text: post.text, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
+        form: i.form, posts, text, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
       };
+      /** 「发过没」按整段字认(预览窗拿单条推那份整段查):推串每条末尾的 1/N 不算进去 */
+      const whole = plan.options.find((o) => o.form === 'single')?.posts[0]?.text ?? text;
       try {
-        await recordFilled({ draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form, text: post.text, media: srcs, caller });
+        await recordFilled({
+          draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form,
+          text, hashText: whole, posts: posts.length, media: srcs, caller,
+        });
       } catch (e) {
         /** 记不下来就不留这份草稿:发出去了却查不到「发过」比填不进去更糟 */
         const c = await clearCompose(page.wcId);
         throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${c.cleared ? '框已清掉' : `框没清掉:${c.detail}`}`);
       }
       addPending(p, cancelOnTimeout);
-      console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${post.weight} 字${srcs.length > 0 ? `、${srcs.length} 张图` : ''})草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
+      const weight = opt.posts.reduce((n, x) => n + x.weight, 0);
+      console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${posts.length > 1 ? `推串 ${posts.length} 条、` : ''}${weight} 字${srcs.length > 0 ? `、${srcs.length} 张图` : ''})草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
       return viewOf(p);
     },
   });
@@ -189,7 +196,7 @@ export function registerXPostCapabilities(): void {
 
   xCap<DraftIn>('output', {
     id: 'x.post.publish',
-    describe: '发出去:人在 X 上看过待发草稿、点了确认 → 点 X 的「发布」→ 去我的主页核对推文真的出现了(作者是我、正文对得上)。只点一次,核对不上不重发',
+    describe: '发出去:人在 X 上看过待发草稿、点了确认 → 点 X 的「发布」(推串是「全部发布」)→ 逐条核对推文真的出现了(作者是我、正文对得上、图数够)。只点一次,核对不上不重发',
     inputDoc: { wsId: '哪个 workspace 的号', draftId: '草稿 id(fill 返回的)' },
     parse: (o) => ({ wsId: str(o, 'wsId'), draftId: str(o, 'draftId') }),
     preflight: noDraft,
@@ -202,12 +209,15 @@ export function registerXPostCapabilities(): void {
       const o = await publishCompose(page.wcId, p);
       endPublished(p, o);
       releasePage(page.token);
-      await recordEnded(p.draftId, { status: o.outcome, detail: o.detail, tweetId: o.tweetId, sentText: o.sentText, sentMedia: o.sentMedia, editedOnX: o.editedOnX })
+      await recordEnded(p.draftId, {
+        status: o.outcome, detail: o.detail, tweetId: o.tweetId, tweetIds: o.tweetIds.length > 1 ? o.tweetIds : undefined,
+        sentText: o.sentText, sentMedia: o.sentMedia, editedOnX: o.editedOnX,
+      })
         .catch((e) => logRecordError(p.draftId, e));
       const url = o.tweetId ? `https://x.com/${p.handle}/status/${o.tweetId}` : undefined;
-      console.log(`[x.post] 发布 ${p.draftId}(@${p.handle},${o.sentMedia} 张图):${o.outcome} —— ${o.detail}${url ? ` ${url}` : ''}${o.editedOnX ? '(在 X 上改过字)' : ''}`);
+      console.log(`[x.post] 发布 ${p.draftId}(@${p.handle},${o.tweetIds.length > 1 ? `推串 ${o.tweetIds.length} 条、` : ''}${o.sentMedia} 张图):${o.outcome} —— ${o.detail}${url ? ` ${url}` : ''}${o.editedOnX ? '(在 X 上改过字)' : ''}`);
       if (o.outcome !== 'sent') throw capFailed(o.detail);
-      return { draftId: p.draftId, tweetId: o.tweetId, url, handle: p.handle, editedOnX: o.editedOnX };
+      return { draftId: p.draftId, tweetId: o.tweetId, tweetIds: o.tweetIds, url, handle: p.handle, editedOnX: o.editedOnX };
     },
   });
 

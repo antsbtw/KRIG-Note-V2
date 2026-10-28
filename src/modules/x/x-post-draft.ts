@@ -16,7 +16,7 @@ import { inputEngine } from '@platform/main/web-capability/wiring/runtime';
 import { resolve as resolvePage } from '@platform/main/web-capability/wiring/web-collect-engine';
 import { webviewPorts } from './x-collect-ports';
 import { X_SCRIPTS, replyNeedle } from './x-dom-scripts';
-import { X_ANCHORS, X_PAGE_NAME } from './x-pages';
+import { X_ANCHORS, X_PAGE_NAME, composeBoxAnchor } from './x-pages';
 import { holdsPage } from './x-page-lock';
 import type { PostForm } from './x-post-compose';
 
@@ -24,6 +24,13 @@ import type { PostForm } from './x-post-compose';
 export const DRAFT_TTL_MS = 10 * 60_000;
 /** 锁的兜底超时:比草稿多 2 分钟 —— 正常由撤回放;撤回也没跑才轮到锁超时收回(要响) */
 export const DRAFT_LOCK_TTL_MS = DRAFT_TTL_MS + 2 * 60_000;
+
+/** 草稿里的一条(推串有几条就几个;单条推 1 个) */
+export type DraftPost = {
+  readonly text: string;
+  /** 这条带的图(note 里的 media:// 地址) */
+  readonly media: readonly string[];
+};
 
 export type PendingPost = {
   readonly draftId: string;
@@ -33,8 +40,10 @@ export type PendingPost = {
   readonly token: string;
   readonly noteId?: string;
   readonly form: PostForm;
+  /** 每一条(推串 2026-10-28);下面的 text / media 是它们合起来的(显示、记录用) */
+  readonly posts: readonly DraftPost[];
   readonly text: string;
-  /** 带的图(note 里的 media:// 地址,第④期) */
+  /** 带的图(note 里的 media:// 地址,第④期)—— 所有条合起来 */
   readonly media: readonly string[];
   readonly handle: string;
   readonly filledAt: number;
@@ -48,6 +57,8 @@ export type DraftEnded = {
   /** 发布的结局(why = published 才有):sent 核对上了 / unseen 点了发布没核对上 / failed 没发出去 */
   readonly outcome?: 'sent' | 'unseen' | 'failed';
   readonly tweetId?: string;
+  /** 推串:几条 */
+  readonly count?: number;
   readonly handle?: string;
   readonly detail?: string;
 };
@@ -74,7 +85,7 @@ export function pendingPost(wsId: string): PendingPost | null {
 
 export function viewOf(p: PendingPost): PendingView {
   return {
-    draftId: p.draftId, wsId: p.wsId, noteId: p.noteId, form: p.form, text: p.text, media: p.media, handle: p.handle,
+    draftId: p.draftId, wsId: p.wsId, noteId: p.noteId, form: p.form, posts: p.posts, text: p.text, media: p.media, handle: p.handle,
     filledAt: p.filledAt, expiresAt: p.expiresAt,
   };
 }
@@ -102,7 +113,7 @@ export function endPublished(p: PendingPost, o: PublishOutcome): void {
   dropPending(p.wsId);
   ended.set(p.wsId, {
     draftId: p.draftId, why: 'published', at: Date.now(), cleared: true,
-    outcome: o.outcome, tweetId: o.tweetId, handle: p.handle, detail: o.detail,
+    outcome: o.outcome, tweetId: o.tweetId, count: o.tweetIds.length, handle: p.handle, detail: o.detail,
   });
 }
 
@@ -124,6 +135,8 @@ export const sameText = (a: string, b: string): boolean => a.replace(/\s/g, '') 
 
 type BoxState = {
   found?: boolean; count?: number; text?: string; media?: number;
+  /** 每一条的字和它那块里挂的图(推串;单条推就 1 个) */
+  boxes?: Array<{ text?: string; media?: number }>;
   dialogs?: number; boxesAnywhere?: number; loggedOut?: boolean; ready?: string; width?: number;
 } | null;
 type ClearState = { state?: 'empty' | 'cleared' | 'not-cleared' | 'no-box'; via?: string; left?: string } | null;
@@ -140,13 +153,19 @@ type MediaState = {
   blobs?: number; removes?: number; inGroup?: number; buttonEnabled?: boolean; testids?: string[];
 } | null;
 
+/** 填进 X 的一条:字 + 磁盘上的图(调用方从 media:// 解出来) */
+export type FillPost = { readonly text: string; readonly files: readonly string[] };
+
+type StepState = { state?: string; have?: number; testids?: string[] } | null;
+
 /**
- * 打开发推弹窗 → 框得是空的(没字也没图)、只有一个 → 有图先喂图等 X 传完(第④期)→ 贴一次字 → 读回核对。没成就清掉。
- * files = 磁盘绝对路径(调用方从 media:// 解出来)。
+ * 打开发推弹窗 → 框得是空的(没字也没图)、只有一个 → 一条一条填:第 2 条起先点「+」加一条(推串,2026-10-28),
+ * 有图先喂图等 X 传完(第④期)→ 贴一次字 → 全部读回核对。没成就清掉。
  * ⚠️ 先图后字:2.5-b(2026-06)真机定的顺序 —— 字先进去再喂图,X 重画编辑器时会和贴字抢。
+ * ⚠️ 推串的图只挂到「当前这条」上(X 的工具栏跟着光标走)—— 喂图前先点一下那条。
  * ⚠️ 调之前网页必须已被执行器占着。
  */
-export async function fillCompose(wcId: number, text: string, files: readonly string[] = []): Promise<FillOutcome> {
+export async function fillCompose(wcId: number, posts: readonly FillPost[]): Promise<FillOutcome> {
   const ports = webviewPorts(wcId);
   const go = await ports.goto(X_PAGE_NAME.compose, {});
   if (!go.ok) return { ok: false, why: `发推弹窗没打开:${go.reason ?? '?'}` };
@@ -163,43 +182,81 @@ export async function fillCompose(wcId: number, text: string, files: readonly st
     return { ok: false, why: box?.loggedOut ? 'X 没登录 —— 先在 X 网页里登录' : `发推弹窗里找不到正文框(${seen(box)})` };
   }
   if (box.count !== 1) return { ok: false, why: `发推弹窗里有 ${box.count} 个正文框,不知道该填哪个` };
+  if ((box.boxes?.length ?? 1) > 1) return { ok: false, why: `发推弹窗里已经是 ${box.boxes!.length} 条的推串(可能是 X 留着的上一次)—— 没往里填` };
   if ((box.text ?? '') !== '') {
     return { ok: false, why: `发推框里已经有字(「${box.text!.slice(0, 30)}」,可能是 X 留着的上一次)—— 没往里填,免得两段拼在一起` };
   }
   if ((box.media ?? 0) > 0) return { ok: false, why: `发推框里已经挂着 ${box.media} 张图(可能是 X 留着的上一次)—— 没往里填` };
   const page = resolvePage({ wcId });
   if ('error' in page) return { ok: false, why: page.error };
-  if (files.length > 0) {
-    const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.composeFileInput, files, check: { kind: 'none' } });
-    if (fed.status === 'failed') return { ok: false, why: await undo(wcId, `图没放进去:${fed.reason}`) };
-    const m = (await ports.runScript(X_SCRIPTS.composeMediaReady, { want: files.length })) as MediaState;
-    if (m?.state !== 'ready') {
-      const what = m?.state === 'timeout'
-        ? `60 秒还没传完:挂上 ${m.attached ?? 0} / ${files.length} 张、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
-          + `(信号 blob ${m.blobs ?? '?'} / removeMedia ${m.removes ?? '?'} / attachments ${m.inGroup ?? '?'};弹窗里的 testid:${(m.testids ?? []).join(',')})`
-        : m?.state === 'too-many' ? `挂上了 ${m.attached} 张,比要的 ${files.length} 张多`
-          : `弹窗不见了(${m?.state ?? '脚本没回话'})`;
-      console.warn(`[x.post] 图没传好:${what}`);
-      return { ok: false, why: await undo(wcId, `图没传好:${what}`) };
+
+  const thread = posts.length > 1;
+  /** 已经往框里放过东西没有(放过了,没成就要清) */
+  let touched = false;
+  let fedSoFar = 0;
+  for (const [k, post] of posts.entries()) {
+    const which = thread ? `第 ${k + 1} 条` : '';
+    if (k > 0) {
+      const add = (await ports.runScript(X_SCRIPTS.composeAddPost, { index: k })) as StepState;
+      if (add?.state !== 'added') {
+        const what = add?.state === 'no-button' ? `弹窗里找不到「+」按钮(弹窗里的 testid:${(add.testids ?? []).join(',')})`
+          : add?.state === 'wrong-count' ? `加之前框数是 ${add.have} 个,应该是 ${k} 个`
+            : `${add?.state ?? '脚本没回话'}${add?.have !== undefined ? `(现在 ${add.have} 个框)` : ''}`;
+        console.warn(`[x.post] 推串${which}没加出来:${what}`);
+        return { ok: false, why: await undo(wcId, `推串${which}没加出来:${what}`) };
+      }
     }
-    console.log(`[x.post] ${files.length} 张图已挂上发推框`);
+    if (post.files.length > 0) {
+      if (thread) {
+        const f = (await ports.runScript(X_SCRIPTS.composeFocus, { index: k })) as StepState;
+        if (f?.state !== 'ok') return { ok: false, why: await undo(wcId, `${which}点不中(${f?.state ?? '脚本没回话'})—— 图不知道挂到哪条`) };
+      }
+      const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.composeFileInput, files: post.files, check: { kind: 'none' } });
+      touched = true;
+      if (fed.status === 'failed') return { ok: false, why: await undo(wcId, `${which}图没放进去:${fed.reason}`) };
+      fedSoFar += post.files.length;
+      const m = (await ports.runScript(X_SCRIPTS.composeMediaReady, { want: fedSoFar })) as MediaState;
+      if (m?.state !== 'ready') {
+        const what = m?.state === 'timeout'
+          ? `60 秒还没传完:挂上 ${m.attached ?? 0} / ${fedSoFar} 张、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
+            + `(信号 blob ${m.blobs ?? '?'} / removeMedia ${m.removes ?? '?'} / attachments ${m.inGroup ?? '?'};弹窗里的 testid:${(m.testids ?? []).join(',')})`
+          : m?.state === 'too-many' ? `挂上了 ${m.attached} 张,比要的 ${fedSoFar} 张多`
+            : `弹窗不见了(${m?.state ?? '脚本没回话'})`;
+        console.warn(`[x.post] ${which}图没传好:${what}`);
+        return { ok: false, why: await undo(wcId, `${which}图没传好:${what}`) };
+      }
+      console.log(`[x.post] ${which}${post.files.length} 张图已挂上发推框`);
+    }
+    if (post.text.trim() === '') continue;
+    const typed = await inputEngine.type(page.pageId, { anchor: composeBoxAnchor(k), text: post.text, check: { kind: 'none' } });
+    if (typed.status === 'failed') {
+      return { ok: false, why: touched || k > 0 ? await undo(wcId, `${which}字没填进去:${typed.reason}`) : `没填进去:${typed.reason}` };
+    }
+    touched = true;
   }
-  if (text.trim() === '') return { ok: true };
-  const typed = await inputEngine.type(page.pageId, { anchor: X_ANCHORS.composeBox, text, check: { kind: 'none' } });
-  if (typed.status === 'failed') return { ok: false, why: files.length > 0 ? await undo(wcId, `字没填进去:${typed.reason}`) : `没填进去:${typed.reason}` };
 
   /** 读回核对:粘贴后编辑器要一点时间画出来,最多等 3 秒 */
-  let got = '';
+  let bad = '';
   for (let n = 0; n < 12; n += 1) {
     const b = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
-    got = b?.text ?? '';
-    if (sameText(got, text)) return { ok: true };
+    const got = b?.boxes ?? [];
+    if (got.length !== posts.length) bad = `框里是 ${got.length} 条,排好的是 ${posts.length} 条`;
+    else {
+      const k = posts.findIndex((p, i) => !sameText(got[i].text ?? '', p.text));
+      if (k === -1) {
+        /** 每条的图数:推串里图挂错条只提醒(X 的推串结构没在真机上量过,按条数的信号未必准)—— 人在 X 上看得见 */
+        const off = thread ? posts.map((p, i) => [i, p.files.length, got[i].media ?? 0]).filter(([, want, have]) => want !== have) : [];
+        if (off.length > 0) console.warn(`[x.post] ⚠️ 推串每条的图数对不上(按条数可能不准,请在 X 上看一眼):${off.map(([i, w, h]) => `第 ${i + 1} 条 要 ${w} 看到 ${h}`).join(';')}`);
+        return { ok: true };
+      }
+      bad = `${thread ? `第 ${k + 1} 条` : ''}框里:「${(got[k].text ?? '').slice(0, 40)}」`;
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
   const c = await clearCompose(wcId);
   return {
     ok: false,
-    why: `填进去的和排好的对不上(框里:「${got.slice(0, 40)}」)—— ${c.cleared ? '已清掉' : `清也没清掉:${c.detail}`}`,
+    why: `填进去的和排好的对不上(${bad})—— ${c.cleared ? '已清掉' : `清也没清掉:${c.detail}`}`,
   };
 }
 
@@ -225,8 +282,11 @@ export async function clearCompose(wcId: number): Promise<ClearOutcome> {
 export type PublishOutcome = {
   readonly outcome: 'sent' | 'unseen' | 'failed';
   readonly detail: string;
+  /** 第一条的 id(单条推就是那条) */
   readonly tweetId?: string;
-  /** 发出去的字(以点发布前框里的为准 —— 人可能在 X 上又改过) */
+  /** 推串每条的 id,按顺序;没核对上的是 ''(单条推 1 个) */
+  readonly tweetIds: readonly string[];
+  /** 发出去的字(以点发布前框里的为准 —— 人可能在 X 上又改过);推串各条用空行连起来 */
   readonly sentText: string;
   /** 点发布前框里挂着几张图 */
   readonly sentMedia: number;
@@ -237,20 +297,24 @@ type SendState = { state?: string; toastId?: string; why?: string } | null;
 type FindState = { tweetId?: string; photos?: number; why?: string; seen?: number } | null;
 
 /**
- * 点 X 的「发布」→ 去我的主页核对(作者是我、正文对得上、时间不早于点发布)。
- * 设计 §2:核对以**框里的字**为准 —— 人在 X 上又改了几个字,发出去的是改后的,记 editedOnX。
+ * 点 X 的「发布」(推串是「全部发布」,同一个按钮)→ 去核对每一条(作者是我、正文对得上、时间不早于点发布、图数够)。
+ * 设计 §2:核对以**框里的字**为准 —— 人在 X 上又改了几个字 / 加减了条,发出去的是改后的,记 editedOnX。
  * ⚠️ 只点一次;点了以后无论核对上没有都不重试(重试 = 可能发两条)。
  * ⚠️ 调之前网页必须已被执行器占着(fill 留下的锁)。
  */
 export async function publishCompose(wcId: number, p: PendingPost): Promise<PublishOutcome> {
   const ports = webviewPorts(wcId);
   const box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
-  if (!box?.found) return { outcome: 'failed', detail: `发推弹窗不在了(${seen(box)})—— 没点发布`, sentText: p.text, sentMedia: p.media.length, editedOnX: false };
-  const sentText = box.text ?? '';
+  const base = { tweetIds: [] as string[], sentText: p.text, sentMedia: p.media.length, editedOnX: false };
+  if (!box?.found) return { ...base, outcome: 'failed', detail: `发推弹窗不在了(${seen(box)})—— 没点发布` };
+  const boxes = (box.boxes ?? []).map((b) => ({ text: b.text ?? '', media: b.media ?? 0 }));
+  const n = boxes.length;
+  const sentText = boxes.map((b) => b.text).join('\n\n');
   /** 图以框里挂着的为准(人可能在 X 上删了一张) */
   const sentMedia = box.media ?? 0;
-  if (sentText.trim() === '' && sentMedia === 0) return { outcome: 'failed', detail: '发推框是空的 —— 没点发布', sentText, sentMedia, editedOnX: false };
-  const editedOnX = !sameText(sentText, p.text) || sentMedia !== p.media.length;
+  if (sentText.trim() === '' && sentMedia === 0) return { ...base, sentText, sentMedia, outcome: 'failed', detail: '发推框是空的 —— 没点发布' };
+  const editedOnX = n !== p.posts.length || boxes.some((b, i) => !sameText(b.text, p.posts[i].text)) || sentMedia !== p.media.length;
+  const sentBase = { sentText, sentMedia, editedOnX };
 
   const since = Date.now();
   const sent = (await ports.runScript(X_SCRIPTS.composeSend, {})) as SendState;
@@ -258,7 +322,7 @@ export async function publishCompose(wcId: number, p: PendingPost): Promise<Publ
     const what = sent?.state === 'not-sent' ? '点了发布,15 秒弹窗还在 —— X 没接受(看一眼 X 上有没有报错)'
       : sent?.state === 'disabled' ? 'X 的发布按钮是灰的(字数超了?)—— 没点'
       : `没点成发布:${sent?.state ?? '脚本没回话'}${sent?.why ? `(${sent.why})` : ''}`;
-    return { outcome: sent?.state === 'not-sent' ? 'unseen' : 'failed', detail: what, sentText, sentMedia, editedOnX };
+    return { ...sentBase, tweetIds: [], outcome: sent?.state === 'not-sent' ? 'unseen' : 'failed', detail: what };
   }
 
   /**
@@ -266,33 +330,70 @@ export async function publishCompose(wcId: number, p: PendingPost): Promise<Publ
    * ⚠️ 10-28 真机:发完马上打开主页,X 给的还是旧时间线(我的 7 条旧推,新推要刷新才出来)→ 没核对上。
    * 所以先开「已发送」提示条里的那条推的页面(直接、页面就停在新推上,人也不用自己刷);
    * 没有提示条链接 / 那里没对上,才去主页,主页第一次没有再重新加载一次。
+   * 推串:单条推的页面上整串都在(上面是前几条,下面是我自己接的);主页看「回复」那页(后几条在那里)。
    */
+  const thread = n > 1;
+  const home = thread ? X_PAGE_NAME.withReplies : X_PAGE_NAME.profile;
+  const homeName = thread ? '你主页的「回复」' : '你主页';
   const places: Array<{ name: string; params: Record<string, string>; where: string }> = [
     ...(sent.toastId ? [{ name: X_PAGE_NAME.status, params: { tweetId: sent.toastId }, where: '这条推的页面' }] : []),
-    { name: X_PAGE_NAME.profile, params: { handle: p.handle }, where: '你主页' },
-    { name: X_PAGE_NAME.profile, params: { handle: p.handle }, where: '你主页(重新加载后)' },
+    { name: home, params: { handle: p.handle }, where: homeName },
+    { name: home, params: { handle: p.handle }, where: `${homeName}(重新加载后)` },
   ];
+  const ids: string[] = boxes.map(() => '');
+  const wheres: string[] = boxes.map(() => '');
+  const short: Array<{ id: string; photos: number; where: string } | null> = boxes.map(() => null);
+  const settled = (i: number): boolean => ids[i] !== '' || short[i] !== null;
   const tried: string[] = [];
-  for (const at of places) {
+  const visitedStatus = new Set<string>(sent.toastId ? [sent.toastId] : []);
+  for (let pi = 0; pi < places.length && !boxes.every((_, i) => settled(i)); pi += 1) {
+    const at = places[pi];
     const go = await ports.goto(at.name, at.params);
     if (!go.ok) { tried.push(`${at.where}没打开:${go.reason ?? '?'}`); continue; }
-    const found = (await ports.runScript(X_SCRIPTS.findMyPost, { needle: replyNeedle(sentText), me: p.handle, since, photos: sentMedia })) as FindState;
-    if (found?.why === 'no-photos') {
-      return {
-        outcome: 'unseen', tweetId: found.tweetId, sentText, sentMedia, editedOnX,
-        detail: `在${at.where}找到了这条,但只看到 ${found.photos ?? 0} 张图(发的时候挂着 ${sentMedia} 张)—— 请在 X 上看一眼图全不全`,
-      };
+    const misses: number[] = [];
+    let seenN: number | undefined;
+    let whyX: string | undefined;
+    for (const [i, b] of boxes.entries()) {
+      if (settled(i)) continue;
+      const found = (await ports.runScript(X_SCRIPTS.findMyPost, {
+        needle: replyNeedle(b.text), me: p.handle, since, photos: b.media, exclude: ids.filter((x) => x !== ''),
+      })) as FindState;
+      if (found?.why === 'no-photos' && found.tweetId) short[i] = { id: found.tweetId, photos: found.photos ?? 0, where: at.where };
+      else if (found?.tweetId) { ids[i] = found.tweetId; wheres[i] = at.where; }
+      else { misses.push(i); seenN = found?.seen; whyX = found?.why; }
     }
-    if (found?.tweetId) {
-      const also = sent.toastId && sent.toastId !== found.tweetId ? `(X 提示条里的是 ${sent.toastId},不一样)` : '';
-      return { outcome: 'sent', detail: `在${at.where}核对到了${also}`, tweetId: found.tweetId, sentText, sentMedia, editedOnX };
+    if (misses.length > 0) {
+      tried.push(thread
+        ? `${at.where}没找到第 ${misses.map((i) => i + 1).join('、')} 条(页面上你的推文 ${seenN ?? '?'} 条)`
+        : `${at.where}没找到(页面上你的推文 ${seenN ?? '?'} 条${whyX && whyX !== 'not-found' ? `,${whyX}` : ''})`);
+      /** 推串:认到了第一条但后面没齐 → 去第一条的页面(整串都在那里),排在下一处之前 */
+      if (thread && ids[0] !== '' && !visitedStatus.has(ids[0])) {
+        visitedStatus.add(ids[0]);
+        places.splice(pi + 1, 0, { name: X_PAGE_NAME.status, params: { tweetId: ids[0] }, where: '第一条的页面' });
+      }
     }
-    tried.push(`${at.where}没找到(页面上你的推文 ${found?.seen ?? '?'} 条${found?.why && found.why !== 'not-found' ? `,${found.why}` : ''})`);
   }
-  return {
-    outcome: 'unseen',
-    detail: `点了发布、弹窗关了,但没核对上:${tried.join(';')}${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''} —— 请在 X 上看一眼`,
-    tweetId: sent.toastId, sentText, sentMedia, editedOnX,
-  };
-}
 
+  const tweetId = ids[0] || short[0]?.id || undefined;
+  const out = { ...sentBase, tweetIds: ids.map((x, i) => x || short[i]?.id || '') };
+  if (boxes.every((_, i) => ids[i] !== '')) {
+    const also = sent.toastId && !ids.includes(sent.toastId) ? `(X 提示条里的是 ${sent.toastId},不一样)` : '';
+    const detail = thread ? `${n} 条都核对到了(在${[...new Set(wheres)].join('、')})${also}` : `在${wheres[0]}核对到了${also}`;
+    return { ...out, outcome: 'sent', detail, tweetId: ids[0] };
+  }
+  const parts: string[] = [];
+  short.forEach((s, i) => {
+    if (!s) return;
+    parts.push(thread
+      ? `第 ${i + 1} 条只看到 ${s.photos} 张图(发的时候挂着 ${boxes[i].media} 张)`
+      : `在${s.where}找到了这条,但只看到 ${s.photos} 张图(发的时候挂着 ${sentMedia} 张)—— 请在 X 上看一眼图全不全`);
+  });
+  const missing = boxes.map((_, i) => i).filter((i) => !settled(i));
+  if (missing.length > 0) {
+    const got = boxes.filter((_, i) => ids[i] !== '').length;
+    parts.push(thread
+      ? `点了全部发布、弹窗关了,核对到 ${got} / ${n} 条:${tried.join(';')}${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''}`
+      : `点了发布、弹窗关了,但没核对上:${tried.join(';')}${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''} —— 请在 X 上看一眼`);
+  }
+  return { ...out, outcome: 'unseen', tweetId: tweetId ?? sent.toastId, detail: thread ? `${parts.join(';')} —— 请在 X 上看一眼` : parts.join(';') };
+}

@@ -64,7 +64,7 @@ export function XNotePosted({ wsId, subjectId: noteId, instanceId }: ViewNoticeP
   const sent = posts.filter((p) => p.status === 'sent').length;
   const line = (p: NotePost, i: number) => (
     <div key={p.draftId} style={{ display: 'flex', gap: 8, alignItems: 'baseline', color: COLOR[p.status], fontSize: i < 0 ? 13 : 12 }}>
-      <span>{MARK[p.status][0]} {when(p.endedAt)} @{p.handle}{p.media > 0 ? ` · ${p.media} 张图` : ''} · {p.status === 'failed' && p.detail ? `没发出去:${p.detail}` : MARK[p.status][1]}</span>
+      <span>{MARK[p.status][0]} {when(p.endedAt)} @{p.handle}{p.count > 1 ? ` · 推串 ${p.count} 条` : ''}{p.media > 0 ? ` · ${p.media} 张图` : ''} · {p.status === 'failed' && p.detail ? `没发出去:${p.detail}` : MARK[p.status][1]}</span>
       {p.tweetId && <button type="button" style={link} title={`在 X 上打开 ${p.tweetId}`} onClick={() => { void show(p.tweetId!); }}>查看 ↗</button>}
     </div>
   );

@@ -26,7 +26,7 @@ beforeEach(() => { document.body.innerHTML = ''; });
 describe('发推框状态', () => {
   it('⭐ 只认弹窗里的框,不认首页内嵌框;表情图片按 alt 拼回', async () => {
     page('<span>早上好</span><img alt="🙏"><span>!</span>');
-    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: true, count: 1, text: '早上好🙏!', media: 0 });
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: true, count: 1, text: '早上好🙏!', media: 0, boxes: [{ text: '早上好🙏!', media: 0 }] });
   });
   it('弹窗不在 → 等满 8 秒报 found:false(不拿首页内嵌框充数)', async () => {
     page(null);
@@ -203,5 +203,81 @@ describe('带图(第④期):数图 / 等传完 / 清图', () => {
     attach(1);
     (document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') as HTMLElement).textContent = '';
     expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared', via: 'media' });
+  });
+});
+
+describe('推串(10-28):几条框 / 加一条 / 点中 / 一起清 / 核对不重复认', () => {
+  const buildP = (id: string, params: Record<string, unknown>) => X_DOM_SCRIPTS.find((s) => s.id === id)!.build(params);
+  /** 像 X 的推串弹窗:每条一块(框 + 它自己的图),底下一个「+」按钮;点「+」加一块 */
+  const threadDialog = (items: Array<{ text: string; imgs?: number }>, withAdd = true): HTMLElement => {
+    document.body.innerHTML = '<div data-testid="tweetTextarea_0" contenteditable="true">首页内嵌框</div>';
+    const d = document.createElement('div');
+    d.setAttribute('role', 'dialog');
+    const list = document.createElement('div');
+    d.append(list);
+    const addItem = (text: string, imgs = 0): void => {
+      const i = list.children.length;
+      const it = document.createElement('div');
+      it.innerHTML = `<div><div data-testid="tweetTextarea_${i}" contenteditable="true">${text}</div><div data-testid="tweetTextarea_${i}_label"></div></div>`
+        + '<div data-testid="attachments">' + Array.from({ length: imgs }, (_, k) => `<img src="blob:i${i}k${k}">`).join('') + '</div>';
+      list.append(it);
+    };
+    items.forEach((x) => addItem(x.text, x.imgs));
+    if (withAdd) {
+      const add = document.createElement('button');
+      add.setAttribute('data-testid', 'addButton');
+      add.addEventListener('click', () => setTimeout(() => addItem(''), 50));
+      d.append(add);
+    }
+    document.body.append(d);
+    return d;
+  };
+
+  it('⭐ 读框:每条的字和它自己那块里的图;tweetTextarea_0_label 不算一条', async () => {
+    threadDialog([{ text: '第一条', imgs: 4 }, { text: '2/2', imgs: 2 }]);
+    const r = await run(build(X_SCRIPTS.composeBoxState));
+    expect(r).toMatchObject({ found: true, count: 1, text: '第一条', media: 6, boxes: [{ text: '第一条', media: 4 }, { text: '2/2', media: 2 }] });
+  });
+
+  it('⭐ 点「+」→ 等到第 2 个框出来 → added;框数不对 → wrong-count(不乱点)', async () => {
+    threadDialog([{ text: '第一条' }]);
+    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }))).toEqual({ state: 'added', have: 2 });
+    expect(document.querySelector('[role="dialog"] [data-testid="tweetTextarea_1"]')).not.toBeNull();
+    expect(await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }))).toEqual({ state: 'wrong-count', have: 2 });
+  });
+
+  it('找不到「+」→ no-button,带弹窗里的 testid(真机据此对准)', async () => {
+    threadDialog([{ text: '第一条' }], false);
+    const r = await run(buildP(X_SCRIPTS.composeAddPost, { index: 1 }));
+    expect(r.state).toBe('no-button');
+    expect(r.testids).toContain('tweetTextarea_0');
+  });
+
+  it('点中第 2 条 → 焦点在它上;没有这条 → no-box', async () => {
+    threadDialog([{ text: 'a' }, { text: 'b' }]);
+    expect(await run(buildP(X_SCRIPTS.composeFocus, { index: 1 }))).toEqual({ state: 'ok' });
+    expect(document.activeElement?.getAttribute('data-testid')).toBe('tweetTextarea_1');
+    expect(await run(buildP(X_SCRIPTS.composeFocus, { index: 5 }))).toEqual({ state: 'no-box', have: 2 });
+  });
+
+  it('⭐ 清框:每条的字都删光(从最后一条往前);首页内嵌框不动', async () => {
+    const d = threadDialog([{ text: '第一条' }, { text: '第二条' }]);
+    d.querySelectorAll('[contenteditable]').forEach((b) => b.addEventListener('keydown', (e) => {
+      const t = b.textContent ?? '';
+      if ((e as KeyboardEvent).key === 'Backspace') b.textContent = t.slice(0, -1);
+    }));
+    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared', via: 'keys' });
+    expect([...d.querySelectorAll('[contenteditable]')].map((b) => b.textContent)).toEqual(['', '']);
+    expect(document.body.textContent).toContain('首页内嵌框');
+  });
+
+  it('⭐ 核对:已经认领过的 id 不再认(两条字很像时别认成同一条)', async () => {
+    const now = Date.now();
+    const art = (id: string, text: string) =>
+      `<article data-testid="tweet"><a href="/me/status/${id}"><time datetime="${new Date(now).toISOString()}"></time></a><div data-testid="tweetText">${text}</div></article>`;
+    document.body.innerHTML = art('101', '第一段 1/2') + art('102', '第一段 2/2');
+    const find = (exclude: string[]) => run(buildP(X_SCRIPTS.findMyPost, { needle: '第一段', me: 'me', since: now, photos: 0, exclude }));
+    expect(await find([])).toEqual({ tweetId: '101', photos: 0 });
+    expect(await find(['101'])).toEqual({ tweetId: '102', photos: 0 });
   });
 });

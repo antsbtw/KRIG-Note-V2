@@ -10,7 +10,8 @@
  */
 
 import type { AnchorResolver } from '@platform/main/web-capability/page/control';
-import { X_ANCHORS } from './x-pages';
+import { X_ANCHORS, composeBoxAnchor } from './x-pages';
+import { X_THREAD_MAX } from './x-post-compose';
 
 /**
  * ⚠️⚠️ **这张表当前是坏的,而且我知道它坏** ——
@@ -41,6 +42,9 @@ const SELECTORS: Readonly<Record<string, string>> = {
    * ⚠️ 首页内嵌框也有一个 —— 只认弹窗里的;弹窗里有没有,第④期真机第一次跑时确认。
    */
   [X_ANCHORS.composeFileInput]: '[role="dialog"] input[data-testid="fileInput"]',
+  /** 推串第 2…25 条的正文框(X 按 tweetTextarea_1、_2… 编号;2026-10-28 按 X 现行结构写,待真机) */
+  ...Object.fromEntries(Array.from({ length: X_THREAD_MAX - 1 }, (_, i) =>
+    [composeBoxAnchor(i + 1), `[role="dialog"] [data-testid="tweetTextarea_${i + 1}"]`])),
 };
 
 /** ⭐ 本模块的锚点表 —— 启动时 **push** 给底座 */

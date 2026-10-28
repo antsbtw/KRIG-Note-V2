@@ -271,8 +271,42 @@ export function fillProblem(ms: readonly PostMedia[]): string | null {
   return null;
 }
 
+/** X 一个推串最多几条 */
+export const X_THREAD_MAX = 25;
+/** 现在能填进 X 的发法(推串 2026-10-28 用户「先把推文的各种形式搞完善」从第⑤期提前) */
+export const FILLABLE: readonly PostForm[] = ['single', 'thread'];
+const LATER: Partial<Record<PostForm, string>> = { longPost: '第⑤期', article: '第⑥期', image: '第④期剩下的' };
+
+/** 这种发法现在还不能填进 X 的话,为什么(x.post.fill 的 preflight 先挡,不碰网页) */
+export function formNotFillable(form: PostForm): string | null {
+  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推和推串`;
+}
+
+/**
+ * 按这种发法排出来的这几条,现在能不能填进 X —— 不能的话为什么。
+ * 预览窗的「发布」按钮和 x.post.fill 用同一句,不各写一份。
+ */
+export function fillBlock(opt: PostOption): string | null {
+  const notYet = formNotFillable(opt.form);
+  if (notYet) return notYet;
+  if (!opt.available) return `这段内容不能这么发:${opt.why ?? '没有这种发法'}`;
+  const n = opt.posts.length;
+  if (n === 0) return '正文是空的';
+  if (opt.form === 'single' && n !== 1) return `排出来是 ${n} 条,单条推只能 1 条`;
+  if (n > X_THREAD_MAX) return `排出来是 ${n} 条,X 一个推串最多 ${X_THREAD_MAX} 条 —— 删短一点,或改发 X 文章`;
+  for (const [k, p] of opt.posts.entries()) {
+    const why = fillProblem(p.media)
+      ?? (p.text.trim() === '' && p.media.length === 0 ? '是空的' : null)
+      ?? (p.weight > X_POST_LIMIT ? `超过字数了(${p.weight} / ${X_POST_LIMIT})` : null);
+    if (why) return n > 1 ? `第 ${k + 1} 条:${why}` : why === '是空的' ? '正文是空的' : why;
+  }
+  return null;
+}
+
 const draft = (texts: readonly TextUnit[], media: readonly PostMedia[], suffix = ''): PostDraft => {
-  const text = joinTexts(texts) + suffix;
+  const body = joinTexts(texts);
+  /** 只有图的那条:页码前不留空行(10-28 测试抓到「\n\n2/2」) */
+  const text = body === '' ? suffix.trimStart() : body + suffix;
   return { text, weight: xWeightedLength(text), media };
 };
 

@@ -49,6 +49,18 @@ const h = vi.hoisted(() => ({
   /** 每一步的先后(看先图后字) */
   order: [] as string[],
   sentMedia: 0,
+  /** 推串:第 2 条起的框(第 1 条是 box) */
+  extra: [] as string[],
+  /** 每条挂了几张图(推串;下标 = 第几条) */
+  perBox: [] as number[],
+  /** X 的「当前这条」(放图挂到它上) */
+  active: 0,
+  /** 「+」按钮找不到 */
+  addFails: false,
+  /** 点发布后真的出现在 X 上的(id、字、图数) */
+  published: [] as Array<{ id: string; text: string; photos: number }>,
+  /** 只核对得到前几条(推串核对到一半) */
+  visibleCount: null as number | null,
 }));
 
 vi.mock('@storage/surreal/client', () => ({
@@ -57,14 +69,14 @@ vi.mock('@storage/surreal/client', () => ({
     query: async (sql: string, v: Record<string, unknown>) => {
       if (h.dbDown) throw new Error('库连不上');
       if (sql.includes("UPSERT type::record('x_post'")) {
-        const row = { account: v.account, handle: v.handle, note_id: v.note, text: v.text, media: v.media, content_hash: v.hash, status: 'filled', caller: v.caller };
+        const row = { account: v.account, handle: v.handle, note_id: v.note, text: v.text, media: v.media, post_count: v.count, content_hash: v.hash, status: 'filled', caller: v.caller };
         h.posts.set(String(v.id), row);
         return [[row]];
       }
       if (sql.includes("UPDATE type::record('x_post'")) {
         const row = h.posts.get(String(v.id));
         if (!row) return [[]];
-        Object.assign(row, { status: v.status, detail: v.detail, tweet_id: v.tweet, sent_text: v.sent, sent_media: v.sentMedia, edited_on_x: v.edited, ended_at: new Date() });
+        Object.assign(row, { status: v.status, detail: v.detail, tweet_id: v.tweet, tweet_ids: v.tweets, sent_text: v.sent, sent_media: v.sentMedia, edited_on_x: v.edited, ended_at: new Date() });
         return [[row]];
       }
       if (sql.includes('FROM x_post') && sql.includes('note_id = $note')) {
@@ -86,14 +98,18 @@ vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
   traceRecorder: { lifecycle: () => undefined },
   inputEngine: {
     feed: async (_p: string, input: { anchor: string; files: string[] }) => {
-      h.fed.push([...input.files]); h.order.push('feed');
-      h.media += h.attachAs ?? input.files.length;
+      h.fed.push([...input.files]); h.order.push(`feed@${h.active}`);
+      const n = h.attachAs ?? input.files.length;
+      h.media += n;
+      h.perBox[h.active] = (h.perBox[h.active] ?? 0) + n;
       return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } };
     },
-    type: async (_p: string, input: { text: string }) => {
-      h.order.push('type');
+    type: async (_p: string, input: { anchor: string; text: string }) => {
+      const k = Number(/^x\.composeBox(?:\.(\d+))?$/.exec(input.anchor)?.[1] ?? 0);
+      h.order.push(`type@${k}`);
       h.typed.push(input.text);
-      h.box = (h.box ?? '') + (h.landsAs ?? input.text);
+      if (k === 0) h.box = (h.box ?? '') + (h.landsAs ?? input.text);
+      else h.extra[k - 1] += h.landsAs ?? input.text;
       return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } };
     },
   },
@@ -105,10 +121,28 @@ vi.mock('@modules/x/x-account-repo', () => ({ readWsAccount: async () => ({ wsId
 vi.mock('@modules/x/x-collect-ports', () => ({
   webviewPorts: () => ({
     /** 打开发推页 = X 弹出一个新的空弹窗(上一次发完弹窗关了) */
-    goto: async (name: string) => { h.goto.push(name); if (name === 'x.compose' && h.box === null) { h.box = ''; h.media = 0; } return { ok: true }; },
+    goto: async (name: string) => {
+      h.goto.push(name);
+      if (name === 'x.compose' && h.box === null) { h.box = ''; h.media = 0; h.extra = []; h.perBox = []; h.active = 0; }
+      return { ok: true };
+    },
     runScript: async (id: string, params: Record<string, unknown>) => {
       if (id === 'x.composeBoxState' && h.missesLeft > 0) { h.missesLeft -= 1; return { found: false, dialogs: 0, boxesAnywhere: 0, ready: 'loading' }; }
-      if (id === 'x.composeBoxState') return h.box === null ? { found: false } : { found: true, count: 1, text: h.box.trim(), media: h.media };
+      if (id === 'x.composeBoxState') {
+        if (h.box === null) return { found: false };
+        const texts = [h.box, ...h.extra];
+        /** 单条:那条那块就是整个弹窗(真脚本的 itemOf 同理) */
+        const boxes = texts.map((t, i) => ({ text: t.trim(), media: texts.length === 1 ? h.media : h.perBox[i] ?? 0 }));
+        return { found: true, count: 1, text: h.box.trim(), media: h.media, boxes };
+      }
+      if (id === 'x.composeAddPost') {
+        if (h.addFails) return { state: 'no-button', testids: ['tweetButton', 'tweetTextarea_0'] };
+        if (Number(params.index) !== 1 + h.extra.length) return { state: 'wrong-count', have: 1 + h.extra.length };
+        h.extra.push(''); h.active = h.extra.length;
+        h.order.push(`add@${h.active}`);
+        return { state: 'added', have: 1 + h.extra.length };
+      }
+      if (id === 'x.composeFocus') { h.active = Number(params.index); h.order.push(`focus@${h.active}`); return { state: 'ok' }; }
       if (id === 'x.composeMediaReady') {
         const want = Number(params.want);
         return h.media === want ? { state: 'ready', attached: h.media } : h.media > want ? { state: 'too-many', attached: h.media }
@@ -118,20 +152,29 @@ vi.mock('@modules/x/x-collect-ports', () => ({
         h.sends += 1;
         if (h.sendAs !== 'closed') return { state: h.sendAs };
         h.sentMedia = h.media;
-        h.box = null; h.media = 0;
+        const texts = [h.box ?? '', ...h.extra];
+        h.published = texts.map((t, i) => ({
+          id: String(1900000000000000001n + BigInt(i)), text: t, photos: texts.length === 1 ? h.media : h.perBox[i] ?? 0,
+        }));
+        h.box = null; h.media = 0; h.extra = []; h.perBox = []; h.active = 0;
         return h.toast ? { state: 'closed', toastId: '1900000000000000001' } : { state: 'closed' };
       }
       if (id === 'x.findMyPost') {
         if (!h.profileHas) return { why: 'not-found', seen: 3 };
         if (h.staleLooks > 0) { h.staleLooks -= 1; return { why: 'not-found', seen: 7 }; }
-        const photos = h.photosOnProfile ?? h.sentMedia;
-        return photos >= Number(params.photos) ? { tweetId: '1900000000000000001', photos } : { why: 'no-photos', tweetId: '1900000000000000001', photos };
+        const norm = (t: string) => t.replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, '');
+        const exclude = (params.exclude as string[] | undefined) ?? [];
+        const shown = h.published.slice(0, h.visibleCount ?? h.published.length);
+        const hit = shown.find((x) => !exclude.includes(x.id) && norm(x.text).includes(String(params.needle)));
+        if (!hit) return { why: 'not-found', seen: shown.length };
+        const photos = h.photosOnProfile ?? hit.photos;
+        return photos >= Number(params.photos) ? { tweetId: hit.id, photos } : { why: 'no-photos', tweetId: hit.id, photos };
       }
       if (id === 'x.composeClear') {
         if (h.box === null) return { state: 'no-box' };
-        if (h.box === '' && h.media === 0) return { state: 'empty' };
+        if (h.box === '' && h.media === 0 && h.extra.every((t) => t === '')) return { state: 'empty' };
         if (h.clearFails) return { state: 'not-cleared', left: h.box.slice(0, 40) };
-        h.box = ''; h.media = 0;
+        h.box = ''; h.media = 0; h.extra = []; h.perBox = [];
         return { state: 'cleared', via: 'backspace' };
       }
       throw new Error(`没想到的脚本 ${id}`);
@@ -154,6 +197,7 @@ beforeEach(() => {
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0; h.toast = true; h.staleLooks = 0;
   h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
+  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -212,9 +256,9 @@ describe('x.post.fill 填进 X(不发)', () => {
   }, 10_000);
 
   it('本期不能填的发法 / 要转图的块 / 视频 / 不在本机的图 / SVG → refused,网页一下没碰', async () => {
-    const thread = await execute('x.post.fill', fillIn('x', { form: 'thread' }), { caller: 'ui' });
-    expect(thread).toMatchObject({ ok: false, kind: 'refused' });
-    expect(!thread.ok && thread.why).toContain('第⑤期');
+    const long = await execute('x.post.fill', fillIn('x', { form: 'longPost' }), { caller: 'ui' });
+    expect(long).toMatchObject({ ok: false, kind: 'refused' });
+    expect(!long.ok && long.why).toContain('第⑤期');
     const cases: Array<[unknown, string]> = [
       [{ type: 'mathBlock', attrs: { latex: 'E=mc^2' } }, '公式要先转成图'],
       [{ type: 'videoBlock', attrs: { src: 'media://videos/v.mp4' } }, '视频还不能填进 X'],
@@ -246,7 +290,7 @@ describe('带图(第④期)', () => {
     const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图一张'), img('media://images/a.png'), img('media://images/b.jpg')] }, { caller: 'ui' });
     expect(r).toMatchObject({ ok: true, value: { text: '配图一张', media: ['media://images/a.png', 'media://images/b.jpg'] } });
     expect(h.fed).toEqual([['/m/images/a.png', '/m/images/b.jpg']]);
-    expect(h.order).toEqual(['feed', 'type']);
+    expect(h.order).toEqual(['feed@0', 'type@0']);
     expect(h.media).toBe(2);
     const d = draftOf(r);
     expect(h.posts.get(d)).toMatchObject({ status: 'filled', media: ['media://images/a.png', 'media://images/b.jpg'] });
@@ -255,7 +299,7 @@ describe('带图(第④期)', () => {
   it('只有图没有字 → 只喂图不贴字', async () => {
     const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [img('media://images/a.png')] }, { caller: 'ui' });
     expect(r).toMatchObject({ ok: true });
-    expect(h.order).toEqual(['feed']);
+    expect(h.order).toEqual(['feed@0']);
   });
 
   it('⭐ 图在本机找不到了 → failed 说清楚,网页没碰之前就停(一张都不少发)', async () => {
@@ -315,6 +359,81 @@ describe('带图(第④期)', () => {
     expect(await execute('x.post.cancel', { wsId: 'ws-1', draftId: d }, { caller: 'ui' })).toMatchObject({ ok: true });
     expect(h.media).toBe(0);
     expect(h.box).toBe('');
+  });
+});
+
+describe('推串(10-28,用户「先把推文的各种形式搞完善」)', () => {
+  const img = (n: number) => ({ type: 'image', attrs: { src: `media://images/p${n}.png` } });
+  /** 截图那篇:一句话 + 6 张图 → 排成 2 条(4 张 + 2 张) */
+  const sixImages = () => ({ wsId: 'ws-1', form: 'thread', noteId: 'N6', content: [para('什么是VPS?'), ...[1, 2, 3, 4, 5, 6].map(img)] });
+  beforeEach(() => { for (let n = 1; n <= 6; n += 1) h.disk.set(`media://images/p${n}.png`, `/m/images/p${n}.png`); });
+
+  it('⭐ 一条条填:第 1 条放 4 张图贴字 → 点「+」→ 点中第 2 条放 2 张图贴「2/2」;草稿和记录带着每条', async () => {
+    const r = await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.order).toEqual(['focus@0', 'feed@0', 'type@0', 'add@1', 'focus@1', 'feed@1', 'type@1']);
+    expect(h.fed.map((g) => g.length)).toEqual([4, 2]);
+    expect(h.typed).toEqual(['什么是VPS?\n\n1/2', '2/2']);
+    const p = (await pending()).pending as unknown as { posts: Array<{ text: string; media: string[] }>; media: string[] };
+    expect(p.posts.map((x) => x.media.length)).toEqual([4, 2]);
+    expect(p.media).toHaveLength(6);
+    const row = [...h.posts.values()][0];
+    expect(row).toMatchObject({ post_count: 2, note_id: 'N6' });
+    expect(lock.lockHolder('page:7')).not.toBeNull();
+  });
+
+  it('⭐ 全部发布 → 每条都核对到(两条认成两个不同的 id)→ sent;记录 tweet_ids;note 顶上记「推串 2 条」', async () => {
+    await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    const draftId = (await pending()).pending!.draftId;
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { tweetIds: ['1900000000000000001', '1900000000000000002'] } });
+    expect(h.sends).toBe(1);
+    const row = h.posts.get(draftId)!;
+    expect(row).toMatchObject({ status: 'sent', tweet_id: '1900000000000000001', tweet_ids: ['1900000000000000001', '1900000000000000002'] });
+    expect(String(row.detail)).toContain('2 条都核对到了');
+    expect((await pending()).ended).toMatchObject({ outcome: 'sent', count: 2 });
+    const of = await execute('x.post.ofNote', { noteId: 'N6' }, { caller: 'ui' });
+    expect(of).toMatchObject({ ok: true, value: { posts: [{ count: 2, status: 'sent' }] } });
+  });
+
+  it('⭐ 只核对到第 1 条 → unseen「核对到 1 / 2 条」,记录里第 2 条是空的;不再点第二次', async () => {
+    await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    const draftId = (await pending()).pending!.draftId;
+    h.visibleCount = 1;
+    /** 没有提示条:先去主页「回复」认到第 1 条 → 再去第 1 条的页面找后面 */
+    h.toast = false;
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('核对到 1 / 2 条');
+    expect(h.posts.get(draftId)).toMatchObject({ status: 'unseen', tweet_ids: ['1900000000000000001', ''] });
+    expect(h.sends).toBe(1);
+    expect(h.goto.slice(-3)).toEqual(['x.withReplies', 'x.status', 'x.withReplies']);
+  });
+
+  it('找不到「+」→ failed 带弹窗里的 testid、已放进去的清掉、不留锁', async () => {
+    h.addFails = true;
+    const r = await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('第 2 条没加出来');
+    expect(!r.ok && r.why).toContain('tweetButton');
+    expect(!r.ok && r.why).toContain('已清掉');
+    expect(h.box).toBe('');
+    expect(lock.lockHolder('page:7')).toBeNull();
+  });
+
+  it('超过 X 的 25 条 → refused,网页没碰', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'thread', content: Array.from({ length: 26 }, () => para('字'.repeat(130))) }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'refused' });
+    expect(!r.ok && r.why).toContain('最多 25 条');
+    expect(h.goto).toEqual([]);
+  });
+
+  it('「发过没」按整段字认(不带每条末尾的 1/N)—— 预览窗拿整段查得到推串', async () => {
+    await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    const draftId = (await pending()).pending!.draftId;
+    await execute('x.post.publish', { wsId: 'ws-1', draftId }, { caller: 'ui' });
+    const hist = await execute('x.post.history', { wsId: 'ws-1', text: '什么是VPS?' }, { caller: 'ui' });
+    expect(hist).toMatchObject({ ok: true, value: { posted: [{ draftId }] } });
   });
 });
 
