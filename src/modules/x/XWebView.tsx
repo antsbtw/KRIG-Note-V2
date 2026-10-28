@@ -165,6 +165,14 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
     else bus.slot.openRight(X_TASK_VIEW_ID);
   }, [workspaceId]);
 
+  /** ✕ 关掉本栏 —— 用框架给的 slot(见文件头「handleClose 用 slot prop,不推导」),与 note / 运营同一手法 */
+  const handleClose = useCallback(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    if (slot === 'right') bus.slot.closeRight();
+    else bus.slot.closeLeft();
+  }, [workspaceId, slot]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 顶条:地址显示 + 召出右栏 */}
@@ -227,6 +235,17 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
           }}
         >
           ⊞
+        </button>
+        <button
+          type="button"
+          onClick={handleClose}
+          title="关闭 X"
+          style={{
+            background: 'transparent', border: 'none', color: 'var(--text-secondary, #aaa)',
+            cursor: 'pointer', fontSize: 14, padding: '3px 6px', flex: '0 0 auto',
+          }}
+        >
+          ✕
         </button>
       </div>
 
