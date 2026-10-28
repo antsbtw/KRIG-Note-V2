@@ -189,6 +189,23 @@ describe('markdown-core / inline marks', () => {
     expect(marks).toEqual(['bold', 'link']);
   });
 
+  it('裸网址 → link mark;末尾中英文标点、不配对的右括号不算网址', () => {
+    const link = (t: string) =>
+      parseInline(t).filter((n) => n.marks?.some((m) => m.type === 'link')).map((n) => n.text);
+    expect(link('详见 https://x.com/antsBTW')).toEqual(['https://x.com/antsBTW']);
+    expect(link('见 https://a.com/x。下一句')).toEqual(['https://a.com/x']);
+    expect(link('(https://a.com/x), 然后')).toEqual(['https://a.com/x']);
+    expect(link('https://zh.wikipedia.org/wiki/A_(B) 后')).toEqual(['https://zh.wikipedia.org/wiki/A_(B)']);
+    expect(link('看 https://a.com**粗**')).toEqual(['https://a.com']);
+    // 后面的文字原样保留,不丢字
+    expect(parseInline('见 https://a.com/x。下一句').map((n) => n.text).join('')).toBe('见 https://a.com/x。下一句');
+  });
+
+  it('[text](url) 里的网址不重复成链接', () => {
+    const nodes = parseInline('[官网](https://a.com) 结束');
+    expect(nodes.filter((n) => n.marks?.some((m) => m.type === 'link')).map((n) => n.text)).toEqual(['官网']);
+  });
+
   it('code 为叶子，内部 ** 不再解析', () => {
     const nodes = parseInline('`**不是粗**`');
     expect(nodes).toEqual([{ type: 'text', text: '**不是粗**', marks: [{ type: 'code' }] }]);

@@ -27,6 +27,8 @@ import { buildThoughtAnchorPlugin } from './plugins/build-thought-anchor-plugin'
 import { buildTitleGuardPlugin } from './plugins/build-title-guard-plugin';
 import { buildNoteLinkCommandPlugin } from './plugins/build-note-link-command-plugin';
 import { buildPasteMediaPlugin } from './plugins/build-paste-media-plugin';
+import { buildMarkdownPastePlugin } from './plugins/build-markdown-paste-plugin';
+import { buildHtmlPasteNormalizePlugin } from './plugins/build-html-paste-normalize-plugin';
 import { buildVocabHighlightPlugin } from './plugins/build-vocab-highlight-plugin';
 import { buildCodeSyntaxHighlightPlugin } from './plugins/build-code-syntax-highlight-plugin';
 import { buildBlockSelectionPlugin } from './plugins/build-block-selection-plugin';
@@ -133,6 +135,7 @@ export function buildEditorView(
   const enableVocabHighlight = optIn(pluginToggles?.vocabHighlight);
   const enableNoteLinkCommand = optIn(pluginToggles?.noteLinkCommand);
   const enablePasteMedia = optIn(pluginToggles?.pasteMedia);
+  const enableMarkdownPaste = optIn(pluginToggles?.markdownPaste);
   const enableDropCursor = optIn(pluginToggles?.dropCursor);
   const enableSlash = optIn(pluginToggles?.slash);
   const enableBlockSelection = optIn(pluginToggles?.blockSelection);
@@ -175,6 +178,10 @@ export function buildEditorView(
     buildThoughtAnchorPlugin(),
     ...(enableNoteLinkCommand ? [buildNoteLinkCommandPlugin()] : []),
     ...(enablePasteMedia ? [buildPasteMediaPlugin()] : []),
+    // markdown 粘贴:必须在 title-guard / paste-media 之后(handlePaste 按插件顺序问,先 true 先得)
+    ...(enableMarkdownPaste ? [buildMarkdownPastePlugin()] : []),
+    // Word / 网页 / Notion 富文本:PM 解析 html 前先改写(Word 列表、任务列表、页面底色字);始终开
+    buildHtmlPasteNormalizePlugin(),
     ...(enableVocabHighlight ? [buildVocabHighlightPlugin()] : []),
     ...(enableCodeSyntaxHighlight ? [buildCodeSyntaxHighlightPlugin()] : []),
     // 折叠逻辑 + 行内三角入口:同一开关(没有折叠能力时三角也没意义)
