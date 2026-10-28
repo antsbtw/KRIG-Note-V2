@@ -69,7 +69,11 @@ type HoldPageCmd = Sampling & { op: 'holdPage'; wsId: string; ms: number; purpos
  * 诊断:在这个 ws 的 X 网页里跑一段 JS(可返回 Promise),或用 CDP 发一次「真」输入(insertText / 按键)—— 2026-10-28 推串填不进去要看现场。
  * ⚠️ 只看 / 只填,绝不发:js 里出现 tweetButton 直接拒(免得我手滑点了发布)。
  */
-type ProbeCmd = { op: 'probe'; wsId: string; js?: string; insertText?: string; key?: 'Enter' | 'Backspace' };
+type ProbeCmd = {
+  op: 'probe'; wsId: string; js?: string; insertText?: string; key?: 'Enter' | 'Backspace';
+  /** 先跑这几条 CDP(只收 Emulation.* / Input.* / DOM.* / Runtime.evaluate 之外的读) */
+  cdp?: Array<{ method: string; params?: Record<string, unknown> }>;
+};
 type SingleCmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd | HoldPageCmd | CallCmd | CapsCmd | ProbeCmd;
 /** 同时跑 2–4 条(不能套 parallel);第 i 条晚 i × staggerMs 开跑 */
 type ParallelCmd = Sampling & { op: 'parallel'; cmds: SingleCmd[]; staggerMs?: number };
@@ -100,7 +104,8 @@ function validate(c: unknown): Cmd | string {
   if (top?.op === 'probe') {
     const pr = top as Partial<ProbeCmd>;
     if (typeof pr.wsId !== 'string') return 'probe 要 wsId';
-    if (pr.js === undefined && pr.insertText === undefined && pr.key === undefined) return 'probe 要 js / insertText / key 之一';
+    if (pr.js === undefined && pr.insertText === undefined && pr.key === undefined && pr.cdp === undefined) return 'probe 要 js / insertText / key / cdp 之一';
+    if (pr.cdp !== undefined && (!Array.isArray(pr.cdp) || pr.cdp.some((c) => typeof c?.method !== 'string' || !/^(Emulation|Input|DOM)\./.test(c.method)))) return 'probe 的 cdp 只收 Emulation.* / Input.* / DOM.*';
     if (pr.js !== undefined && (typeof pr.js !== 'string' || /tweetButton/.test(pr.js))) return 'probe 的 js 要字符串,且不许碰 tweetButton(诊断只看不发)';
     return top as unknown as ProbeCmd;
   }
@@ -290,11 +295,14 @@ async function runProbe(cmd: ProbeCmd): Promise<unknown> {
   if (!wc) return { ok: false, why: `wc#${wcId} 不在了` };
   console.log(`[x.dev] probe wc#${wcId}${cmd.js ? ' js' : ''}${cmd.insertText !== undefined ? ' insertText' : ''}${cmd.key ? ` key ${cmd.key}` : ''}`);
   const out: Record<string, unknown> = { ok: true };
-  if (cmd.insertText !== undefined || cmd.key) {
+  if (cmd.insertText !== undefined || cmd.key || cmd.cdp) {
     const dbg = wc.debugger;
     const mine = !dbg.isAttached();
     if (mine) dbg.attach('1.3');
     try {
+      const got: unknown[] = [];
+      for (const c of cmd.cdp ?? []) got.push(await dbg.sendCommand(c.method, c.params ?? {}));
+      if (cmd.cdp) out.cdp = got;
       if (cmd.insertText !== undefined) await dbg.sendCommand('Input.insertText', { text: cmd.insertText });
       if (cmd.key) {
         const code = cmd.key === 'Enter' ? 13 : 8;
