@@ -106,13 +106,14 @@ export const sameText = (a: string, b: string): boolean => a.replace(/\s/g, '') 
 
 type BoxState = {
   found?: boolean; count?: number; text?: string;
-  dialogs?: number; boxesAnywhere?: number; loggedOut?: boolean; ready?: string;
+  dialogs?: number; boxesAnywhere?: number; loggedOut?: boolean; ready?: string; width?: number;
 } | null;
 type ClearState = { state?: 'empty' | 'cleared' | 'not-cleared' | 'no-box'; via?: string; left?: string } | null;
 
 /** 找不到框时页面上有什么(给人和日志看) */
 const seen = (b: BoxState): string =>
-  `页面上弹窗 ${b?.dialogs ?? '?'} 个、发推框 ${b?.boxesAnywhere ?? '?'} 个(含首页内嵌那个)、加载 ${b?.ready ?? '?'}`;
+  `页面上弹窗 ${b?.dialogs ?? '?'} 个、发推框 ${b?.boxesAnywhere ?? '?'} 个(含首页内嵌那个)、加载 ${b?.ready ?? '?'}`
+  + (b?.width === 0 ? '、页面宽 0 —— X 网页没显示出来(被收起了?)' : `、页面宽 ${b?.width ?? '?'}`);
 
 export type FillOutcome = { readonly ok: true } | { readonly ok: false; readonly why: string };
 

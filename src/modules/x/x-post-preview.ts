@@ -26,30 +26,46 @@ type Open = { root: Root; host: HTMLElement; stop: () => void; timer?: number; u
 const X_OPEN_WAIT_MS = 20_000;
 
 /**
- * X 网页没开 → 在 note 的另一栏打开它,等它登记好。
+ * X 不在台上 → 在 note 的另一栏打开(拉到前台),等它登记好。
  * note 在哪一栏从编辑器实例 id 读(`<ws>::slot:<left|right>`,记忆 project-dont-guess-own-slot:读状态不猜)。
+ *
+ * ⚠️⚠️ 「X 开着」看 slotBinding(在不在栏里),不看网页登记(2026-10-27 真机):
+ * 点 ✕ 关 X 后框架把它 display:none 保活,网页还活着、还登记着(后台采集照用,不动它);
+ * 以登记为准就会往看不见的零尺寸页面里填 —— X 在那里不弹发推弹窗。
+ * ⚠️ 拉回前台可能换一个网页实例(保活的那份挂在另一个位置上会被卸掉重建),
+ * 所以等「登记变了」;实例没换就不会变,等 1.5 秒照用原来那份。
  */
 async function ensureXOpen(wsId: string, instanceId: string): Promise<string | null> {
-  if (getXHostState(wsId)) return null;
   const ws = workspaceManager.get(wsId);
   const bus = workspaceManager.getBus(wsId);
   if (!ws || !bus) return '找不到这个工作区';
-  if (ws.slotBinding.left !== X_WEB_VIEW_ID && ws.slotBinding.right !== X_WEB_VIEW_ID) {
-    const m = /::slot:(left|right)$/.exec(instanceId);
-    if (!m) return `认不出这篇 note 在哪一栏(${instanceId})—— 先自己把 X 打开再点发布`;
-    const r = m[1] === 'left' ? bus.slot.openRight(X_WEB_VIEW_ID) : bus.slot.openLeft(X_WEB_VIEW_ID);
-    if (!r.ok) return `X 网页没打开:${r.reason}`;
+  if (ws.slotBinding.left === X_WEB_VIEW_ID || ws.slotBinding.right === X_WEB_VIEW_ID) {
+    return getXHostState(wsId) ? null : waitHost(wsId, () => true);
   }
+  const m = /::slot:(left|right)$/.exec(instanceId);
+  if (!m) return `认不出这篇 note 在哪一栏(${instanceId})—— 先自己把 X 打开再点发布`;
+  const before = getXHostState(wsId)?.wcId ?? null;
+  const t0 = Date.now();
+  const r = m[1] === 'left' ? bus.slot.openRight(X_WEB_VIEW_ID) : bus.slot.openLeft(X_WEB_VIEW_ID);
+  if (!r.ok) return `X 网页没打开:${r.reason}`;
+  console.log(`[x-post] X 不在台上(保活网页 wc#${before ?? '无'}),已在${m[1] === 'left' ? '右' : '左'}栏打开`);
+  return waitHost(wsId, (wcId) => wcId !== before || Date.now() - t0 > X_SAME_INSTANCE_MS);
+}
+
+const X_SAME_INSTANCE_MS = 1500;
+
+function waitHost(wsId: string, ready: (wcId: number) => boolean): Promise<string | null> {
   return new Promise((resolve) => {
     const t0 = Date.now();
     let off = (): void => undefined;
     const done = (why: string | null): void => { off(); clearInterval(t); resolve(why); };
     const check = (): void => {
-      if (getXHostState(wsId)) done(null);
+      const h = getXHostState(wsId);
+      if (h && ready(h.wcId)) done(null);
       else if (Date.now() - t0 > X_OPEN_WAIT_MS) done(`X 网页 ${X_OPEN_WAIT_MS / 1000} 秒还没加载好 —— 等它出来再点一次发布`);
     };
     off = subscribeXHost(check);
-    const t = setInterval(check, 500);
+    const t = setInterval(check, 250);
     check();
   });
 }

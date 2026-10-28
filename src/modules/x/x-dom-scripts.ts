@@ -463,6 +463,7 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
           boxesAnywhere: document.querySelectorAll('[data-testid="tweetTextarea_0"]').length,
           loggedOut: !!document.querySelector('[data-testid="loginButton"], [data-testid="login"]'),
           ready: document.readyState,
+          width: window.innerWidth,
         });
         return;
       }
