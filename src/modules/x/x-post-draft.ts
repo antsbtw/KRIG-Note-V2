@@ -261,25 +261,37 @@ export async function publishCompose(wcId: number, p: PendingPost): Promise<Publ
     return { outcome: sent?.state === 'not-sent' ? 'unseen' : 'failed', detail: what, sentText, sentMedia, editedOnX };
   }
 
-  /** 到我的主页上找 —— 弹窗关了不等于发出去了(X 可能弹错误提示后关窗) */
-  const go = await ports.goto(X_PAGE_NAME.profile, { handle: p.handle });
-  if (!go.ok) {
-    return { outcome: 'unseen', detail: `点了发布、弹窗关了,但去主页核对没打开:${go.reason ?? '?'} —— 请在 X 上看一眼`, tweetId: sent.toastId, sentText, sentMedia, editedOnX };
-  }
-  const found = (await ports.runScript(X_SCRIPTS.findMyPost, { needle: replyNeedle(sentText), me: p.handle, since, photos: sentMedia })) as FindState;
-  if (found?.why === 'no-photos') {
-    return {
-      outcome: 'unseen', tweetId: found.tweetId, sentText, sentMedia, editedOnX,
-      detail: `在你主页上找到了这条,但只看到 ${found.photos ?? 0} 张图(发的时候挂着 ${sentMedia} 张)—— 请在 X 上看一眼图全不全`,
-    };
-  }
-  if (found?.tweetId) {
-    const also = sent.toastId && sent.toastId !== found.tweetId ? `(X 提示条里的是 ${sent.toastId},不一样)` : '';
-    return { outcome: 'sent', detail: `在你主页上核对到了${also}`, tweetId: found.tweetId, sentText, sentMedia, editedOnX };
+  /**
+   * 去核对 —— 弹窗关了不等于发出去了(X 可能弹错误提示后关窗)。
+   * ⚠️ 10-28 真机:发完马上打开主页,X 给的还是旧时间线(我的 7 条旧推,新推要刷新才出来)→ 没核对上。
+   * 所以先开「已发送」提示条里的那条推的页面(直接、页面就停在新推上,人也不用自己刷);
+   * 没有提示条链接 / 那里没对上,才去主页,主页第一次没有再重新加载一次。
+   */
+  const places: Array<{ name: string; params: Record<string, string>; where: string }> = [
+    ...(sent.toastId ? [{ name: X_PAGE_NAME.status, params: { tweetId: sent.toastId }, where: '这条推的页面' }] : []),
+    { name: X_PAGE_NAME.profile, params: { handle: p.handle }, where: '你主页' },
+    { name: X_PAGE_NAME.profile, params: { handle: p.handle }, where: '你主页(重新加载后)' },
+  ];
+  const tried: string[] = [];
+  for (const at of places) {
+    const go = await ports.goto(at.name, at.params);
+    if (!go.ok) { tried.push(`${at.where}没打开:${go.reason ?? '?'}`); continue; }
+    const found = (await ports.runScript(X_SCRIPTS.findMyPost, { needle: replyNeedle(sentText), me: p.handle, since, photos: sentMedia })) as FindState;
+    if (found?.why === 'no-photos') {
+      return {
+        outcome: 'unseen', tweetId: found.tweetId, sentText, sentMedia, editedOnX,
+        detail: `在${at.where}找到了这条,但只看到 ${found.photos ?? 0} 张图(发的时候挂着 ${sentMedia} 张)—— 请在 X 上看一眼图全不全`,
+      };
+    }
+    if (found?.tweetId) {
+      const also = sent.toastId && sent.toastId !== found.tweetId ? `(X 提示条里的是 ${sent.toastId},不一样)` : '';
+      return { outcome: 'sent', detail: `在${at.where}核对到了${also}`, tweetId: found.tweetId, sentText, sentMedia, editedOnX };
+    }
+    tried.push(`${at.where}没找到(页面上你的推文 ${found?.seen ?? '?'} 条${found?.why && found.why !== 'not-found' ? `,${found.why}` : ''})`);
   }
   return {
     outcome: 'unseen',
-    detail: `点了发布、弹窗关了,但在你主页上没找到这条(主页上你的推文 ${found?.seen ?? '?'} 条${found?.why && found.why !== 'not-found' ? `,${found.why}` : ''})${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''} —— 请在 X 上看一眼`,
+    detail: `点了发布、弹窗关了,但没核对上:${tried.join(';')}${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''} —— 请在 X 上看一眼`,
     tweetId: sent.toastId, sentText, sentMedia, editedOnX,
   };
 }

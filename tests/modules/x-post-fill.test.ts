@@ -31,6 +31,10 @@ const h = vi.hoisted(() => ({
   /** 点发布:closed / not-sent / disabled;closed 时 profileHas 决定主页上找不找得到 */
   sendAs: 'closed' as string,
   profileHas: true,
+  /** X 的「已发送」提示条里带不带链接 */
+  toast: true,
+  /** 前几次核对看不到新推(10-28 真机:主页给旧时间线) */
+  staleLooks: 0,
   sends: 0,
   /** 发推框里挂着几张图 */
   media: 0,
@@ -108,10 +112,11 @@ vi.mock('@modules/x/x-collect-ports', () => ({
         if (h.sendAs !== 'closed') return { state: h.sendAs };
         h.sentMedia = h.media;
         h.box = null; h.media = 0;
-        return { state: 'closed', toastId: '1900000000000000001' };
+        return h.toast ? { state: 'closed', toastId: '1900000000000000001' } : { state: 'closed' };
       }
       if (id === 'x.findMyPost') {
         if (!h.profileHas) return { why: 'not-found', seen: 3 };
+        if (h.staleLooks > 0) { h.staleLooks -= 1; return { why: 'not-found', seen: 7 }; }
         const photos = h.photosOnProfile ?? h.sentMedia;
         return photos >= Number(params.photos) ? { tweetId: '1900000000000000001', photos } : { why: 'no-photos', tweetId: '1900000000000000001', photos };
       }
@@ -140,7 +145,7 @@ const pending = async () => ((await execute('x.post.pending', { wsId: 'ws-1' }, 
 beforeEach(() => {
   h.rows.length = 0; h.goto.length = 0; h.typed.length = 0;
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
-  h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0;
+  h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0; h.toast = true; h.staleLooks = 0;
   h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
@@ -373,7 +378,8 @@ describe('x.post.publish 发出去(第③期)', () => {
     const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
     expect(r).toMatchObject({ ok: true, value: { tweetId: '1900000000000000001', url: 'https://x.com/me/status/1900000000000000001', editedOnX: false } });
     expect(h.sends).toBe(1);
-    expect(h.goto).toEqual(['x.compose', 'x.profile']);
+    /** 有提示条链接 → 直接开那条推的页面核对(页面停在新推上) */
+    expect(h.goto).toEqual(['x.compose', 'x.status']);
     expect(lock.lockHolder('page:7')).toBeNull();
     expect(h.posts.get(d)).toMatchObject({ status: 'sent', tweet_id: '1900000000000000001', sent_text: '今天读了一篇论文' });
     expect(await pending()).toMatchObject({ pending: null, ended: { why: 'published', outcome: 'sent' } });
@@ -421,6 +427,27 @@ describe('x.post.publish 发出去(第③期)', () => {
     expect(await execute('x.post.publish', { wsId: 'ws-1', draftId: 'draft_假的' }, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused' });
     await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
     expect(await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused' });
+    expect(h.sends).toBe(1);
+  });
+});
+
+describe('核对去哪儿找(10-28 真机:发完马上开主页是旧时间线)', () => {
+  it('⭐ 没有提示条链接 → 去主页;第一次没有 → 重新加载主页再找到 → sent', async () => {
+    h.toast = false; h.staleLooks = 1;
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.goto).toEqual(['x.compose', 'x.profile', 'x.profile']);
+    expect(h.sends).toBe(1);
+  });
+  it('那条推的页面上没对上 → 再去主页找(两处都写进原因)', async () => {
+    h.staleLooks = 3;
+    const d = draftOf(await execute('x.post.fill', fillIn(), { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(h.goto).toEqual(['x.compose', 'x.status', 'x.profile', 'x.profile']);
+    expect(!r.ok && r.why).toContain('这条推的页面没找到');
+    expect(!r.ok && r.why).toContain('重新加载后');
     expect(h.sends).toBe(1);
   });
 });
