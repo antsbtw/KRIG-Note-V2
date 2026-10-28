@@ -297,6 +297,8 @@ export type XDataInvoke =
   | { readonly op: 'postPending'; readonly wsId: string }
   | { readonly op: 'postPublish'; readonly wsId: string; readonly draftId: string }
   | { readonly op: 'postHistory'; readonly wsId: string; readonly text: string }
+  | { readonly op: 'postOfNote'; readonly noteId: string }
+  | { readonly op: 'postShow'; readonly wsId: string; readonly tweetId: string }
   /**
    * ⚠️ 2026-10-26 logAction / logPersonProgress / logPersonCollect 退役(Module5-04 第 4 步):
    * 取关和采主页搬进主进程,动作 / 进度 / 每个标签页的结果由主进程当场记,不再由界面上报。

@@ -36,7 +36,7 @@ const X_OPEN_WAIT_MS = 20_000;
  * ⚠️ 拉回前台可能换一个网页实例(保活的那份挂在另一个位置上会被卸掉重建),
  * 所以等「登记变了」;实例没换就不会变,等 1.5 秒照用原来那份。
  */
-async function ensureXOpen(wsId: string, instanceId: string): Promise<string | null> {
+export async function ensureXOpen(wsId: string, instanceId: string): Promise<string | null> {
   const ws = workspaceManager.get(wsId);
   const bus = workspaceManager.getBus(wsId);
   if (!ws || !bus) return '找不到这个工作区';
@@ -83,7 +83,7 @@ export function closePostPreview(): void {
   o.host.remove();
 }
 
-export function openPostPreview(wsId: string, instanceId: string, initialForm?: PostForm): void {
+export function openPostPreview(wsId: string, instanceId: string, initialForm?: PostForm, noteId?: string): void {
   closePostPreview();
   const te = requireCapabilityApi<TextEditingApi>('text-editing').api;
 
@@ -119,7 +119,8 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
     if (why) { fill = { phase: 'failed', why }; draw(); return; }
     fill = { phase: 'filling', step: '填进 X 发推框…' };
     draw();
-    const r = await xDataCall({ op: 'postFill', wsId, form, content: latest as PmNode[] });
+    /** noteId 进发推记录:note 顶上「发过」那行按它查(第③b期) */
+    const r = await xDataCall({ op: 'postFill', wsId, form, content: latest as PmNode[], noteId });
     /** 预览窗中途被关了也要记:X 上那条的「回 note 改」靠它找回 note */
     if (r.status === 'ok') rememberDraftNote((r.value as { draftId: string }).draftId, instanceId);
     if (open !== me) return;

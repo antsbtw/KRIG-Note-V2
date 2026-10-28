@@ -283,7 +283,7 @@ AI                     ─┘                          ▼
 - X 上的 KRIG 条:「确认发布」真的发;结局留在条上(✅ + 查看 ↗ / ⚠️ 没核对上 / ❌ 没发出去),点「知道了」收起。
 - 没写进 `x_action_log`:那张表是「对某个人的动作」(取关 / 关注 / 点赞 / 回复);发推不对某个人,`x_post` 就是它的动作记录。
 
-**③b(下一步)**:note 顶部通用提示挂点(发过 / 链接)、回复指定推文。
+**③b**:note 顶部通用提示挂点(发过 / 链接)—— 10-28 代码完成,见 §12;回复指定推文 —— 下一步。
 
 ⚠️ 待真机:弹窗发布按钮的 testid(`tweetButton`)、发完 X 有没有「已发送」提示条、主页上能不能马上看到新推。
 
@@ -308,4 +308,17 @@ AI                     ─┘                          ▼
   - 修:先开提示条链接那条推的页面核对(页面也就停在新推上,人不用自己刷);没链接 / 没对上才去主页,主页第一次没有再重新加载一次;每处没找到都写进原因。
 - 这条的 `x_post` 记录停在 unseen(带 tweet_id)—— 「发过」提醒照样算它,没改。
 - 撤回时点掉图的按钮还没在真机上走过。
+
+## 12. 第③b期 · note 顶上「发过」(10-28,代码完成,待真机)
+
+用户 10-28:「同意你的建议,按部就班推进」→ ③b 先做 note 顶上那行,再做回复指定推文,然后 ④ 剩下的 / ④b。
+
+- **框架挂点** `src/slot/interaction-registries/view-notice-registry/`:view 在内容顶上放 `<ViewNotices view=… subjectId=…>`,别的模块 `viewNoticeRegistry.register({ id, view, Component })` 挂一行;没东西说就 return null;一个挂件出错只坏它那一行。不是给 X 开的,别的模块也能挂。
+- **note 侧**(不认识 X):NoteView 顶上放挂点(不随正文滚动);外框带 `data-note-id`;右键时报 `custom.noteId`(note 自己的 context-info provider)。
+- **X 侧**:
+  - 「𝕏 发到 X」把右键报的 noteId 带进 `x.post.fill` → `x_post.note_id`(之前没带,记录里查不出是哪篇)。
+  - `x.post.ofNote`(input):这篇 note 点过发布的(发出去 / 没核对上 / 没发出去),撤回的不算。
+  - `x.post.show`(control,AI 也能调):在 X 网页上打开某条推;X 上有待发草稿占着网页时被拒(不把等确认的发推框导航走)。
+  - `XNotePosted` 挂在 note-view:「𝕏 这篇发过 N 次 · 最近:✅ 10-28 15:19 @antsbtw · 1 张图 · 发出去了 查看 ↗」,多次可展开;「查看 ↗」X 不在台上先在 note 另一栏打开。发布刚结束(确认条那边的轮询看到)→ 重查。
+- 10-28 那条真发的推(2115372762189422699)记录原是 unseen、没有 note_id:用户截图确认发出 → 改 sent、补 note_id(detail 里注明)。
 

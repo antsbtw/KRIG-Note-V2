@@ -136,6 +136,8 @@ const CAP_OF_OP: Readonly<Record<string, string | ((p: XDataInvoke) => string)>>
   postPending: 'x.post.pending',
   postPublish: 'x.post.publish',
   postHistory: 'x.post.history',
+  postOfNote: 'x.post.ofNote',
+  postShow: 'x.post.show',
   followQueueControl: (p) => ((p as { action?: string }).action === 'resume' ? 'x.followQueue.resume' : 'x.followQueue.control'),
 };
 

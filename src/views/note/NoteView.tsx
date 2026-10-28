@@ -22,6 +22,7 @@ import { useMarkdownImport } from './use-markdown-import';
 import { useActiveNoteDocSync } from './use-active-note-doc-sync';
 import { runRendererProgress } from '@shell/global-progress-overlay/run-renderer-progress';
 import { TocIndicator } from './toc/TocIndicator';
+import { ViewNotices } from '@slot/interaction-registries/view-notice-registry/view-notice-registry';
 import './note.css';
 
 interface NoteViewProps {
@@ -208,7 +209,9 @@ export function NoteView({ workspaceId, slot = 'left' }: NoteViewProps) {
 
   const Host = textEditing.Host;
   return (
-    <div className="krig-note-view-frame">
+    <div className="krig-note-view-frame" data-note-id={activeNoteId}>
+      {/* 顶部提示挂点:别的模块挂的提示(如 X「这篇发过」);note 不认识挂的是谁 */}
+      <ViewNotices view="note-view" wsId={workspaceId} subjectId={activeNoteId} instanceId={instanceId} />
       <div className="krig-note-view" data-view-id="note-view">
         <div className="krig-note-view-content">
           {/* key=activeNoteId:切 note 时强制重挂编辑器,新实例用新 doc 初始化(走 mount

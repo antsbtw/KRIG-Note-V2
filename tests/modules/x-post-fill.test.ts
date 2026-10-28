@@ -67,6 +67,12 @@ vi.mock('@storage/surreal/client', () => ({
         Object.assign(row, { status: v.status, detail: v.detail, tweet_id: v.tweet, sent_text: v.sent, sent_media: v.sentMedia, edited_on_x: v.edited, ended_at: new Date() });
         return [[row]];
       }
+      if (sql.includes('FROM x_post') && sql.includes('note_id = $note')) {
+        return [[...h.posts.entries()]
+          .filter(([, r]) => r.note_id === v.note && ['sent', 'unseen', 'failed'].includes(String(r.status)))
+          .reverse()
+          .map(([id, r]) => ({ id: `x_post:${id}`, ...r }))];
+      }
       if (sql.includes('FROM x_post')) {
         return [[...h.posts.entries()]
           .filter(([, r]) => r.account === v.a && r.content_hash === v.h && (r.status === 'sent' || r.status === 'unseen'))
@@ -98,7 +104,8 @@ vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7, 
 vi.mock('@modules/x/x-account-repo', () => ({ readWsAccount: async () => ({ wsId: 'ws-1', handle: 'me', restId: 'ME' }) }));
 vi.mock('@modules/x/x-collect-ports', () => ({
   webviewPorts: () => ({
-    goto: async (name: string) => { h.goto.push(name); return { ok: true }; },
+    /** 打开发推页 = X 弹出一个新的空弹窗(上一次发完弹窗关了) */
+    goto: async (name: string) => { h.goto.push(name); if (name === 'x.compose' && h.box === null) { h.box = ''; h.media = 0; } return { ok: true }; },
     runScript: async (id: string, params: Record<string, unknown>) => {
       if (id === 'x.composeBoxState' && h.missesLeft > 0) { h.missesLeft -= 1; return { found: false, dialogs: 0, boxesAnywhere: 0, ready: 'loading' }; }
       if (id === 'x.composeBoxState') return h.box === null ? { found: false } : { found: true, count: 1, text: h.box.trim(), media: h.media };
@@ -449,6 +456,41 @@ describe('核对去哪儿找(10-28 真机:发完马上开主页是旧时间线)'
     expect(!r.ok && r.why).toContain('这条推的页面没找到');
     expect(!r.ok && r.why).toContain('重新加载后');
     expect(h.sends).toBe(1);
+  });
+});
+
+describe('note 顶上「发过」(第③b期)', () => {
+  const ofNote = async (noteId: string) => ((await execute('x.post.ofNote', { noteId }, { caller: 'ui' })) as { value: { posts: Array<{ draftId: string; status: string; tweetId?: string; handle: string }> } }).value.posts;
+
+  it('⭐ fill 带着 noteId(右键报的)→ 记录挂到这篇;发出去的、没核对上的查得到,撤回的不算,别的 note 的不混', async () => {
+    const c = draftOf(await execute('x.post.fill', fillIn('撤回的', { noteId: 'N1' }), { caller: 'ui' }));
+    await execute('x.post.cancel', { wsId: 'ws-1', draftId: c }, { caller: 'ui' });
+    const s1 = draftOf(await execute('x.post.fill', fillIn('第一次', { noteId: 'N1' }), { caller: 'ui' }));
+    await execute('x.post.publish', { wsId: 'ws-1', draftId: s1 }, { caller: 'ui' });
+    h.profileHas = false;
+    const s2 = draftOf(await execute('x.post.fill', fillIn('第二次', { noteId: 'N1' }), { caller: 'ui' }));
+    await execute('x.post.publish', { wsId: 'ws-1', draftId: s2 }, { caller: 'ui' });
+    h.profileHas = true;
+    const o = draftOf(await execute('x.post.fill', fillIn('别的 note', { noteId: 'N2' }), { caller: 'ui' }));
+    await execute('x.post.publish', { wsId: 'ws-1', draftId: o }, { caller: 'ui' });
+    const posts = await ofNote('N1');
+    expect(posts.map((p) => [p.draftId, p.status])).toEqual([[s2, 'unseen'], [s1, 'sent']]);
+    expect(posts[1]).toMatchObject({ tweetId: '1900000000000000001', handle: 'me' });
+    expect(await ofNote('N3')).toEqual([]);
+  });
+
+  it('⭐ x.post.show 在 X 网页上打开那条推;AI 也能调(只看不动);id 不是数字 → 拒', async () => {
+    expect(await execute('x.post.show', { wsId: 'ws-1', tweetId: '1900000000000000001' }, { caller: 'ai' })).toMatchObject({ ok: true });
+    expect(h.goto).toEqual(['x.status']);
+    expect(lock.lockHolder('page:7')).toBeNull();
+    expect(await execute('x.post.show', { wsId: 'ws-1', tweetId: 'abc' }, { caller: 'ui' })).toMatchObject({ ok: false });
+  });
+
+  it('X 上有待发草稿占着网页 → show 被拒(不把等确认的发推框导航走)', async () => {
+    await execute('x.post.fill', fillIn(), { caller: 'ui' });
+    const r = await execute('x.post.show', { wsId: 'ws-1', tweetId: '1900000000000000001' }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false });
+    expect(h.goto).toEqual(['x.compose']);
   });
 });
 

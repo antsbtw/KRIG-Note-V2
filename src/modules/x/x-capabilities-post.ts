@@ -7,6 +7,7 @@
  * 第①期 x.post.prepare(只排版,input:不碰 X 网页、不对外)。
  * 第②期 x.post.fill(填进 X 发推弹窗不发,占着网页等人确认)/ x.post.cancel(清框、放网页)/ x.post.pending(查待发草稿)。
  * 第③期 x.post.publish(人在 X 上看过点确认 → 点 X 的发布 → 去主页核对)/ x.post.history(这段字发过没)。
+ * 第③b期(10-28)x.post.ofNote(这篇 note 发过哪些,note 顶上那行用)/ x.post.show(在 X 网页上打开某条推)。
  * 第④a期(10-28)fill 带图:note 里存在本机图片库的图先喂进 X 再贴字;转图 / 视频是第④期剩下的,还没做。
  * 每份草稿在 x_post 里一行(fill 建、cancel / publish 写结局)。
  */
@@ -18,7 +19,9 @@ import {
   DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
   publishCompose, viewOf, type CancelWhy, type PendingPost,
 } from './x-post-draft';
-import { findPosted, recordEnded, recordFilled } from './x-post-repo';
+import { findNotePosts, findPosted, recordEnded, recordFilled } from './x-post-repo';
+import { webviewPorts } from './x-collect-ports';
+import { X_PAGE_NAME } from './x-pages';
 
 const isPmNode = (v: unknown): v is PmNode => !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';
 
@@ -215,6 +218,35 @@ export function registerXPostCapabilities(): void {
     parse: (o) => ({ wsId: str(o, 'wsId'), text: str(o, 'text') }),
     account: true,
     run: async (i, acc) => ({ posted: await findPosted(acc.restId, i.text) }),
+  });
+
+  xCap<{ noteId: string }>('input', {
+    id: 'x.post.ofNote',
+    describe: '这篇 note 点过几次发布、各自怎样(发出去 / 点了没核对上 / 没发出去)、哪个号、推文 id —— 撤回的不算',
+    inputDoc: { noteId: 'note id' },
+    parse: (o) => ({ noteId: str(o, 'noteId') }),
+    subject: (i) => `note:${i.noteId}`,
+    /** 每切一篇 note 就问一次,算状态查询:成功不打终端、记录留 7 天(同 pending) */
+    probe: true,
+    run: async (i) => ({ posts: await findNotePosts(i.noteId) }),
+  });
+
+  xCap<{ wsId: string; tweetId: string }>('control', {
+    id: 'x.post.show',
+    describe: '在这个 workspace 的 X 网页上打开某条推文(只看,不动它)',
+    inputDoc: { wsId: '哪个 workspace 的 X 网页', tweetId: '推文 id' },
+    parse: (o) => {
+      const tweetId = str(o, 'tweetId');
+      if (!/^\d+$/.test(tweetId)) throw new Bad('tweetId 要数字');
+      return { wsId: str(o, 'wsId'), tweetId };
+    },
+    page: (i) => `打开推文 ${i.tweetId}`,
+    subject: (i) => `x_tweet:${i.tweetId}`,
+    run: async (i, _a, page) => {
+      const go = await webviewPorts(page.wcId).goto(X_PAGE_NAME.status, { tweetId: i.tweetId });
+      if (!go.ok) throw capFailed(`没打开那条推文:${go.reason ?? '?'}`);
+      return { tweetId: i.tweetId };
+    },
   });
 
   xCap<{ wsId: string }>('input', {

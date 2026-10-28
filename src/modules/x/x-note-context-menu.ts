@@ -17,6 +17,12 @@ import { openPostPreview } from './x-post-preview';
 
 const NOTE_VIEW = 'note-view';
 
+/** 右键的是哪篇 note(note 自己在右键时报的 custom.noteId);没有 = 记录里不挂 note */
+function rightClickedNoteId(): string | undefined {
+  const v = contextMenuController.getState().context.custom.noteId;
+  return typeof v === 'string' && v !== '' ? v : undefined;
+}
+
 /** 右键那一刻的 note 编辑器(快照优先,没有就取有焦点的) */
 function noteInstanceId(): string | null {
   const fromMenu = contextMenuController.getState().context.custom.pmInstanceId;
@@ -31,7 +37,7 @@ function openFromNote(wsId: string, form?: 'article'): void {
     window.alert('找不到要发的 note —— 先点一下 note 里的内容,再右键「𝕏 发到 X」');
     return;
   }
-  openPostPreview(wsId, id, form);
+  openPostPreview(wsId, id, form, rightClickedNoteId());
 }
 
 export function registerXNoteContextMenu(): void {

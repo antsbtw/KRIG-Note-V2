@@ -68,3 +68,25 @@ export async function findPosted(account: string, text: string, limit = 5): Prom
     endedAt: isoOf(r.ended_at),
   }));
 }
+
+/** 一篇 note 点过发布的(发出去 / 点了没核对上 / 没发出去),新的在前 —— note 顶上「发过」那行用(第③b期) */
+export type NotePost = {
+  readonly draftId: string; readonly handle: string; readonly status: 'sent' | 'unseen' | 'failed';
+  readonly tweetId?: string; readonly endedAt: string; readonly detail?: string; readonly media: number;
+};
+
+export async function findNotePosts(noteId: string, limit = 20): Promise<NotePost[]> {
+  const [rows] = await getXDB().query<[Array<{
+    id: { id?: unknown } | string; handle: string; status: 'sent' | 'unseen' | 'failed';
+    tweet_id?: string; ended_at?: unknown; detail?: string; sent_media?: number; media?: string[];
+  }>]>(
+    `SELECT id, handle, status, tweet_id, ended_at, detail, sent_media, media FROM x_post
+      WHERE note_id = $note AND status IN ['sent', 'unseen', 'failed'] ORDER BY ended_at DESC LIMIT $n`,
+    { note: noteId, n: limit },
+  );
+  return (rows ?? []).map((r) => ({
+    draftId: typeof r.id === 'string' ? r.id.replace(/^x_post:/, '') : String(r.id?.id ?? ''),
+    handle: r.handle, status: r.status, tweetId: r.tweet_id, endedAt: isoOf(r.ended_at), detail: r.detail,
+    media: r.sent_media ?? r.media?.length ?? 0,
+  }));
+}

@@ -29,8 +29,20 @@ export async function refreshPending(wsId: string): Promise<void> {
   const e = entry(wsId);
   const next = r.value as PendingSnap;
   if (JSON.stringify(next) === JSON.stringify(e.snap)) return;
+  const newlyEnded = next.ended && next.ended.draftId !== e.snap.ended?.draftId ? next.ended : null;
   e.snap = next;
   for (const cb of e.subs) cb();
+  if (newlyEnded) for (const cb of endedSubs) cb(wsId, newlyEnded);
+}
+
+/**
+ * 一份草稿刚结束(发出去 / 撤回 / 没成)—— 不开轮询,只是搭别人的轮询(X 顶上的确认条在问)顺便告诉一声。
+ * note 顶上「发过」那行靠它刷新(第③b期)。
+ */
+const endedSubs = new Set<(wsId: string, ended: DraftEnded) => void>();
+export function subscribeEnded(cb: (wsId: string, ended: DraftEnded) => void): () => void {
+  endedSubs.add(cb);
+  return () => { endedSubs.delete(cb); };
 }
 
 export function pendingSnap(wsId: string): PendingSnap {

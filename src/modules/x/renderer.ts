@@ -38,6 +38,8 @@ import { XTaskView } from './XTaskView';
 import { registerXCommands } from './x-commands';
 import { startXHostSync } from './x-host-sync';
 import { registerXNoteContextMenu } from './x-note-context-menu';
+import { XNotePosted } from './XNotePosted';
+import { viewNoticeRegistry } from '@slot/interaction-registries/view-notice-registry/view-notice-registry';
 import { X_WEB_VIEW_ID, X_OPS_VIEW_ID, X_TASK_VIEW_ID } from './x-view-id';
 
 /** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份(定义在 x-view-id.ts) */
@@ -140,3 +142,6 @@ startXHostSync();
 
 /** note 右键菜单里 X 的两项 —— X 自己挂,删 X 跟着走 */
 registerXNoteContextMenu();
+
+/** note 顶上「这篇发过」那行 —— 挂在 note 的顶部提示挂点上,删 X 跟着走(发推第③b期) */
+viewNoticeRegistry.register({ id: 'x.note-view.posted', view: 'note-view', Component: XNotePosted });

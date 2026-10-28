@@ -26,13 +26,28 @@
  */
 
 import { contextMenuRegistry } from '@slot/interaction-registries/context-menu-registry/context-menu-registry';
+import { contextInfoProviderRegistry } from '@slot/interaction-registries/context-info-provider-registry';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { LearningApi } from '@capabilities/learning/types';
 
 const VIEW = 'note-view';
 
+/**
+ * 右键时告诉大家「右键的是哪篇 note」(custom.noteId,2026-10-28)—— 读 NoteView 外框上的 data-note-id。
+ * 别的模块挂的右键命令(如 X「𝕏 发到 X」)要知道是哪篇,不用自己去翻 note 的状态。
+ */
+export function noteContextInfo(target: HTMLElement): Record<string, unknown> {
+  const noteId = target.closest('[data-note-id]')?.getAttribute('data-note-id');
+  return noteId ? { noteId } : {};
+}
+
+function registerNoteContextInfo(): void {
+  contextInfoProviderRegistry.register({ id: 'note-view', provider: noteContextInfo });
+}
+
 export function registerContextMenu(): void {
+  registerNoteContextInfo();
   const te = requireCapabilityApi<TextEditingApi>('text-editing').ui.contextMenu;
   const lr = requireCapabilityApi<LearningApi>('learning').ui.contextMenu;
   contextMenuRegistry.register([
