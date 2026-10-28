@@ -85,6 +85,7 @@ export interface TextEditingHostProps {
  * - vocabHighlight:  词汇高亮 + hover tooltip(NoteView 词汇学习用)
  * - noteLinkCommand: [[ 触发双链搜索面板(NoteView 知识图谱用)
  * - pasteMedia:     剪贴板图片 → image block(NoteView mediaStore 集成)
+ * - markdownPaste:  粘贴像 markdown 的纯文字 → 转成真正的块(Cmd+Shift+V 不转)
  * - dropCursor:     拖拽时蓝线指示插入位置
  * - slash:          / 触发 slashMenuController(turn-into 入口)
  * - blockSelection: Notion-like 同级 sibling 多块选择(Esc/Shift+Arrow/Arrow 移动/右键菜单)
@@ -109,6 +110,7 @@ export interface TextEditingPluginToggles {
   vocabHighlight?: boolean;
   noteLinkCommand?: boolean;
   pasteMedia?: boolean;
+  markdownPaste?: boolean;
   dropCursor?: boolean;
   slash?: boolean;
   blockSelection?: boolean;

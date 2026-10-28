@@ -4,7 +4,8 @@
  * 采用 ② markdownToProseMirror.parseInline 的**递归嵌套**实现（设计文档差异矩阵
  * 判定 ② 的 inline 是超集：支持 mark 递归嵌套 + 删除线 strike，① 是 flat 正则）。
  *
- * 支持：bold(**) / italic(*) / strike(~~) / code(`) / link([](())) / inline math($$…$)。
+ * 支持：bold(**) / italic(*) / strike(~~) / code(`) / link([](())) / inline math($$…$) /
+ * 裸网址自动成链接（GFM autolink literal：`https://…` / `http://…`）。
  * mark 可任意层嵌套（如 `[**X**](url)` / `**[X](url)**`），算法：匹配到一个 mark
  * 分隔符后**递归**解析其内部文本，再把当前 mark 叠加到每个子 node 上。
  * code（字面）与 mathInline（inline node，非 mark）为叶子，不再递归。
@@ -30,7 +31,25 @@ export function applyMark(nodes: PMNode[], mark: PMMark): PMNode[] {
 }
 
 /**
- * 解析 inline：bold / italic / strike / code / link / inline math。
+ * 裸网址末尾的标点不算网址（`见 https://a.com/x。` / `(https://a.com)`）。
+ * 右括号只在网址里括号不配对时才剥 —— `https://zh.wikipedia.org/wiki/A_(B)` 要保住。
+ */
+function trimUrlTail(url: string): string {
+  let u = url;
+  for (;;) {
+    const last = u[u.length - 1];
+    if ('.,;:!?\'"'.includes(last)) {
+      u = u.slice(0, -1);
+    } else if (last === ')' && (u.match(/\(/g)?.length ?? 0) < (u.match(/\)/g)?.length ?? 0)) {
+      u = u.slice(0, -1);
+    } else {
+      return u;
+    }
+  }
+}
+
+/**
+ * 解析 inline：bold / italic / strike / code / link / inline math / 裸网址。
  *
  * V2 已实现 marks：bold / italic / code / link / underline / strike / highlight
  * mathInline → inline node `{ type: 'mathInline', attrs: { latex } }`
@@ -40,7 +59,7 @@ export function parseInline(text: string): PMNode[] {
 
   const nodes: PMNode[] = [];
   const regex =
-    /(\*\*([\s\S]+?)\*\*|~~([\s\S]+?)~~|\*([^\*\n]+?)\*|`([^`\n]+?)`|\[([^\]]+)\]\(([^)]+)\)|\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$)/g;
+    /(\*\*([\s\S]+?)\*\*|~~([\s\S]+?)~~|\*([^\*\n]+?)\*|`([^`\n]+?)`|\[([^\]]+)\]\(([^)]+)\)|\$([^\s$][^$\n]*?[^\s$]|[^\s$])\$|(https?:\/\/[A-Za-z0-9\-._~:/?#[\]@!$&'()+,;=%]+))/g;
 
   let lastIndex = 0;
   let match;
@@ -73,6 +92,13 @@ export function parseInline(text: string): PMNode[] {
     } else if (match[8] !== undefined) {
       // mathInline → 目标节点名（inline node）
       nodes.push({ type: 'mathInline', attrs: { latex: match[8] } });
+    } else if (match[9] !== undefined) {
+      // 裸网址 → link mark;末尾标点退回给后面的普通文字
+      const url = trimUrlTail(match[9]);
+      nodes.push({ type: 'text', text: url, marks: [{ type: 'link', attrs: { href: url } }] });
+      regex.lastIndex = match.index + url.length;
+      lastIndex = regex.lastIndex;
+      continue;
     }
 
     lastIndex = match.index + match[0].length;
