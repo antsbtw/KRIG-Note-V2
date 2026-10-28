@@ -11,7 +11,9 @@ import { taskItemNodeView } from './node-view';
 const taskListNodeSpec: NodeSpec = {
   content: 'taskItem+',
   group: 'block',
-  parseDOM: [{ tag: 'ul[data-type="task-list"]' }],
+  // priority > 默认 50:bulletList 的 `ul` / listItem 的 `li` 先注册,同优先级时先命中 →
+  // 任务列表复制粘贴(KRIG 内部 / 网页 / Word)全被解析成无序列表、勾选丢失
+  parseDOM: [{ tag: 'ul[data-type="task-list"]', priority: 60 }],
   toDOM() {
     return ['ul', { 'data-type': 'task-list', class: 'krig-task-list' }, 0];
   },
@@ -40,6 +42,7 @@ const taskItemNodeSpec: NodeSpec = {
   parseDOM: [
     {
       tag: 'li[data-type="task-item"]',
+      priority: 60,
       getAttrs(node) {
         const el = node as HTMLElement;
         const rawIndent = el.getAttribute('data-indent');
