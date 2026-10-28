@@ -135,6 +135,8 @@ export const sameText = (a: string, b: string): boolean => a.replace(/\s/g, '') 
 
 type BoxState = {
   found?: boolean; count?: number; text?: string; media?: number;
+  /** 还在上传的图(缩略图旁的进度圈) */
+  busy?: number;
   /** 每一条的字和它那块里挂的图(推串;单条推就 1 个) */
   boxes?: Array<{ text?: string; media?: number }>;
   dialogs?: number; boxesAnywhere?: number; loggedOut?: boolean; ready?: string; width?: number;
@@ -149,8 +151,8 @@ const seen = (b: BoxState): string =>
 export type FillOutcome = { readonly ok: true } | { readonly ok: false; readonly why: string };
 
 type MediaState = {
-  state?: 'ready' | 'too-many' | 'timeout' | 'no-dialog'; attached?: number;
-  blobs?: number; removes?: number; inGroup?: number; buttonEnabled?: boolean; testids?: string[];
+  state?: 'ready' | 'too-many' | 'timeout' | 'no-dialog'; attached?: number; waited?: number;
+  blobs?: number; removes?: number; inGroup?: number; busy?: number; buttonEnabled?: boolean; testids?: string[];
 } | null;
 
 /** 填进 X 的一条:字 + 磁盘上的图(调用方从 media:// 解出来) */
@@ -218,14 +220,14 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
       const m = (await ports.runScript(X_SCRIPTS.composeMediaReady, { want: fedSoFar })) as MediaState;
       if (m?.state !== 'ready') {
         const what = m?.state === 'timeout'
-          ? `60 秒还没传完:挂上 ${m.attached ?? 0} / ${fedSoFar} 张、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
+          ? `60 秒还没传完:挂上 ${m.attached ?? 0} / ${fedSoFar} 张、还在上传 ${m.busy ?? '?'} 张、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
             + `(信号 blob ${m.blobs ?? '?'} / removeMedia ${m.removes ?? '?'} / attachments ${m.inGroup ?? '?'};弹窗里的 testid:${(m.testids ?? []).join(',')})`
           : m?.state === 'too-many' ? `挂上了 ${m.attached} 张,比要的 ${fedSoFar} 张多`
             : `弹窗不见了(${m?.state ?? '脚本没回话'})`;
         console.warn(`[x.post] ${which}图没传好:${what}`);
         return { ok: false, why: await undo(wcId, `${which}图没传好:${what}`) };
       }
-      console.log(`[x.post] ${which}${post.files.length} 张图已挂上发推框`);
+      console.log(`[x.post] ${which}${post.files.length} 张图已挂上发推框、传完了(等了 ${((m.waited ?? 0) / 1000).toFixed(1)} 秒)`);
     }
     if (post.text.trim() === '') continue;
     const typed = await inputEngine.type(page.pageId, { anchor: composeBoxAnchor(k), text: post.text, check: { kind: 'none' } });
@@ -295,7 +297,10 @@ export type PublishOutcome = {
 };
 
 type SendState = { state?: string; toastId?: string; why?: string } | null;
-type FindState = { tweetId?: string; photos?: number; why?: string; seen?: number } | null;
+type FindState = { tweetId?: string; photos?: number; tiles?: number; why?: string; seen?: number } | null;
+
+/** 点发布前最多等多久让图传完(推串前几条的图可能还在后台传) */
+const UPLOAD_WAIT_MS = 60_000;
 
 /**
  * 点 X 的「发布」(推串是「全部发布」,同一个按钮)→ 去核对每一条(作者是我、正文对得上、时间不早于点发布、图数够)。
@@ -305,9 +310,20 @@ type FindState = { tweetId?: string; photos?: number; why?: string; seen?: numbe
  */
 export async function publishCompose(wcId: number, p: PendingPost): Promise<PublishOutcome> {
   const ports = webviewPorts(wcId);
-  const box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
+  let box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
   const base = { tweetIds: [] as string[], sentText: p.text, sentMedia: p.media.length, editedOnX: false };
   if (!box?.found) return { ...base, outcome: 'failed', detail: `发推弹窗不在了(${seen(box)})—— 没点发布` };
+  /**
+   * 图没传完不点发布:10-28 真机推串第 1 条 4 张图发出去只剩 2 张,疑似没传完(待日志证实)。
+   * 等满 60 秒还在传 → 不点,说清楚。
+   */
+  for (const t0 = Date.now(); (box?.busy ?? 0) > 0 && Date.now() - t0 < UPLOAD_WAIT_MS;) {
+    await new Promise((r) => setTimeout(r, 500));
+    box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
+    if (!box?.found) return { ...base, outcome: 'failed', detail: `等图传完时发推弹窗不见了(${seen(box)})—— 没点发布` };
+  }
+  console.log(`[x.post] 点发布前:${(box.boxes ?? []).map((b, i) => `第 ${i + 1} 条 ${[...(b.text ?? '')].length} 字 ${b.media ?? 0} 张图`).join(' / ')};还在上传 ${box.busy ?? 0} 张`);
+  if ((box.busy ?? 0) > 0) return { ...base, outcome: 'failed', detail: `等了 ${UPLOAD_WAIT_MS / 1000} 秒还有 ${box.busy} 张图在上传 —— 没点发布(在 X 上看一眼图是不是卡住了)` };
   const boxes = (box.boxes ?? []).map((b) => ({ text: b.text ?? '', media: b.media ?? 0 }));
   const n = boxes.length;
   const sentText = boxes.map((b) => b.text).join('\n\n');
@@ -361,6 +377,7 @@ export async function publishCompose(wcId: number, p: PendingPost): Promise<Publ
       })) as FindState;
       if (found?.why === 'no-photos' && found.tweetId) short[i] = { id: found.tweetId, photos: found.photos ?? 0, where: at.where };
       else if (found?.tweetId) { ids[i] = found.tweetId; wheres[i] = at.where; }
+      if (found?.tweetId) console.log(`[x.post] 核对${thread ? `第 ${i + 1} 条` : ''}(${at.where}):${found.tweetId} 看到 ${found.photos ?? 0} 张图(图格 ${found.tiles ?? '?'} 个),要 ${b.media} 张`);
       else { misses.push(i); seenN = found?.seen; whyX = found?.why; }
     }
     if (misses.length > 0) {

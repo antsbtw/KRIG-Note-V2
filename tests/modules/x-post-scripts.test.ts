@@ -26,7 +26,7 @@ beforeEach(() => { document.body.innerHTML = ''; });
 describe('发推框状态', () => {
   it('⭐ 只认弹窗里的框,不认首页内嵌框;表情图片按 alt 拼回', async () => {
     page('<span>早上好</span><img alt="🙏"><span>!</span>');
-    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: true, count: 1, text: '早上好🙏!', media: 0, boxes: [{ text: '早上好🙏!', media: 0 }] });
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: true, count: 1, text: '早上好🙏!', media: 0, busy: 0, boxes: [{ text: '早上好🙏!', media: 0 }] });
   });
   it('弹窗不在 → 等满 8 秒报 found:false(不拿首页内嵌框充数)', async () => {
     page(null);
@@ -114,7 +114,7 @@ describe('在我主页上找刚发的那条(第③期)', () => {
   const art = (handle: string, id: string, text: string, at: number, photos = 0): string =>
     `<article data-testid="tweet"><a href="/${handle}/status/${id}"><time datetime="${new Date(at).toISOString()}"></time></a>`
     + (text === '' ? '' : `<div data-testid="tweetText">${text}</div>`)
-    + '<div data-testid="tweetPhoto"><img></div>'.repeat(photos) + '</article>';
+    + Array.from({ length: photos }, (_, k) => `<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/${id}_${k}?format=jpg&name=small"></div>`).join('') + '</article>';
   const find = (needle: string, since: number, photos = 0) =>
     run(X_DOM_SCRIPTS.find((s) => s.id === X_SCRIPTS.findMyPost)!.build({ needle, me: 'Me', since, photos }));
   it('⭐ 作者是我 + 正文对得上 + 时间不早于点发布 → 那条的 id;别人同样的字 / 我以前同样的字都不算', async () => {
@@ -122,12 +122,12 @@ describe('在我主页上找刚发的那条(第③期)', () => {
     document.body.innerHTML = art('other', '111', '今天读了一篇论文', now)
       + art('me', '222', '今天读了一篇论文', now - 3_600_000)
       + art('me', '333', '今天读了一篇<img alt="📚">论文', now);
-    expect(await find('今天读了一篇📚论文', now)).toEqual({ tweetId: '333', photos: 0 });
+    expect(await find('今天读了一篇📚论文', now)).toEqual({ tweetId: '333', photos: 0, tiles: 0 });
   });
   it('⭐ 我以前发过一模一样的字(排在前面)→ 不算,认时间不早于点发布的那条', async () => {
     const now = Date.now();
     document.body.innerHTML = art('me', '222', '今天读了一篇论文', now - 3_600_000) + art('me', '444', '今天读了一篇论文', now + 1000);
-    expect(await find('今天读了一篇论文', now)).toEqual({ tweetId: '444', photos: 0 });
+    expect(await find('今天读了一篇论文', now)).toEqual({ tweetId: '444', photos: 0, tiles: 0 });
   });
   it('没有 → 等满 10 秒报 not-found,带上页面上我的推文数', async () => {
     const now = Date.now();
@@ -137,13 +137,21 @@ describe('在我主页上找刚发的那条(第③期)', () => {
   it('⭐ 带图(第④期):字对上、图够数 → 那条;图数不够的同字推文不算', async () => {
     const now = Date.now();
     document.body.innerHTML = art('me', '555', '配图', now, 1) + art('me', '666', '配图', now, 2);
-    expect(await find('配图', now, 2)).toEqual({ tweetId: '666', photos: 2 });
+    expect(await find('配图', now, 2)).toEqual({ tweetId: '666', photos: 2, tiles: 2 });
   });
   it('⭐ 纯图推(没有字):认作者 + 时间 + 图数;有字的不算', async () => {
     const now = Date.now();
     document.body.innerHTML = art('me', '777', '有字的', now, 1) + art('me', '888', '', now, 1);
-    expect(await find('', now, 1)).toEqual({ tweetId: '888', photos: 1 });
+    expect(await find('', now, 1)).toEqual({ tweetId: '888', photos: 1, tiles: 1 });
   });
+  it('⭐ 同一张图画了两层(图格套图格 / 同地址不同尺寸)只算一张 —— 10-28 真机:实际 2 张被数成 4 张判成对上', async () => {
+    const now = Date.now();
+    const tile = (u: string) => `<div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/${u}?format=jpg&name=small"><div data-testid="tweetPhoto"><img src="https://pbs.twimg.com/media/${u}?format=jpg&name=large"></div></div>`;
+    document.body.innerHTML = `<article data-testid="tweet"><a href="/me/status/321"><time datetime="${new Date(now).toISOString()}"></time></a>`
+      + `<div data-testid="tweetText">配图</div>${tile('A')}${tile('B')}</article>`;
+    expect(await find('配图', now, 2)).toEqual({ tweetId: '321', photos: 2, tiles: 4 });
+    expect(await find('配图', now, 4)).toEqual({ why: 'no-photos', tweetId: '321', photos: 2 });
+  }, 15_000);
   it('字对上但图不够 → 等满 10 秒报 no-photos,带那条的 id 和看到几张', async () => {
     const now = Date.now();
     document.body.innerHTML = art('me', '999', '配图', now, 1);
@@ -177,7 +185,14 @@ describe('带图(第④期):数图 / 等传完 / 清图', () => {
   });
   it('⭐ 挂够了 + 发布按钮亮了 → ready', async () => {
     button(attach(2), false);
-    expect(await ready(2)).toEqual({ state: 'ready', attached: 2 });
+    expect(await ready(2)).toMatchObject({ state: 'ready', attached: 2 });
+  });
+  it('⭐ 还在上传:进度圈挨着图才算(字数圈不算);框状态带 busy', async () => {
+    const d = attach(2);
+    d.insertAdjacentHTML('beforeend', '<div class="toolbar"><div role="progressbar" aria-valuenow="10"></div></div>');
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toMatchObject({ media: 2, busy: 0 });
+    d.querySelector('img[src^="blob:"]')!.parentElement!.insertAdjacentHTML('beforeend', '<div><div role="progressbar"></div></div>');
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toMatchObject({ media: 2, busy: 1 });
   });
   it('比要的多 → too-many(框里本来就有图)', async () => {
     button(attach(3), false);
@@ -292,7 +307,7 @@ describe('推串(10-28):几条框 / 加一条 / 点中 / 一起清 / 核对不�
       `<article data-testid="tweet"><a href="/me/status/${id}"><time datetime="${new Date(now).toISOString()}"></time></a><div data-testid="tweetText">${text}</div></article>`;
     document.body.innerHTML = art('101', '第一段 1/2') + art('102', '第一段 2/2');
     const find = (exclude: string[]) => run(buildP(X_SCRIPTS.findMyPost, { needle: '第一段', me: 'me', since: now, photos: 0, exclude }));
-    expect(await find([])).toEqual({ tweetId: '101', photos: 0 });
-    expect(await find(['101'])).toEqual({ tweetId: '102', photos: 0 });
+    expect(await find([])).toEqual({ tweetId: '101', photos: 0, tiles: 0 });
+    expect(await find(['101'])).toEqual({ tweetId: '102', photos: 0, tiles: 0 });
   });
 });

@@ -61,6 +61,8 @@ const h = vi.hoisted(() => ({
   published: [] as Array<{ id: string; text: string; photos: number }>,
   /** 只核对得到前几条(推串核对到一半) */
   visibleCount: null as number | null,
+  /** 还在上传的图:每读一次框状态减一;Infinity = 一直传不完 */
+  busy: 0,
 }));
 
 vi.mock('@storage/surreal/client', () => ({
@@ -133,7 +135,9 @@ vi.mock('@modules/x/x-collect-ports', () => ({
         const texts = [h.box, ...h.extra];
         /** 单条:那条那块就是整个弹窗(真脚本的 itemOf 同理) */
         const boxes = texts.map((t, i) => ({ text: t.trim(), media: texts.length === 1 ? h.media : h.perBox[i] ?? 0 }));
-        return { found: true, count: 1, text: h.box.trim(), media: h.media, boxes };
+        const busy = h.busy;
+        if (h.busy > 0) h.busy -= 1;
+        return { found: true, count: 1, text: h.box.trim(), media: h.media, busy: Number.isFinite(busy) ? busy : 1, boxes };
       }
       if (id === 'x.composeAddPost') {
         if (h.addFails) return { state: 'no-button', testids: ['tweetButton', 'tweetTextarea_0'] };
@@ -197,7 +201,7 @@ beforeEach(() => {
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0; h.toast = true; h.staleLooks = 0;
   h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
-  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null;
+  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -408,6 +412,29 @@ describe('推串(10-28,用户「先把推文的各种形式搞完善」)', () =>
     expect(h.posts.get(draftId)).toMatchObject({ status: 'unseen', tweet_ids: ['1900000000000000001', ''] });
     expect(h.sends).toBe(1);
     expect(h.goto.slice(-3)).toEqual(['x.withReplies', 'x.status', 'x.withReplies']);
+  });
+
+  it('⭐ 点发布前图还在上传 → 等传完再点(10-28 真机:没传完就发,第 1 条少了 2 张)', async () => {
+    await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    const draftId = (await pending()).pending!.draftId;
+    h.busy = 2;
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.busy).toBe(0);
+    expect(h.sends).toBe(1);
+  });
+
+  it('等满 60 秒图还在传 → 不点发布,failed 说清楚', async () => {
+    await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    const draftId = (await pending()).pending!.draftId;
+    h.busy = Infinity;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    const p = execute('x.post.publish', { wsId: 'ws-1', draftId }, { caller: 'ui' });
+    await vi.advanceTimersByTimeAsync(61_000);
+    const r = await p;
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('在上传');
+    expect(h.sends).toBe(0);
   });
 
   it('找不到「+」→ failed 带弹窗里的 testid、已放进去的清掉、不留锁', async () => {

@@ -474,7 +474,18 @@ const ATTACHED_JS = String.raw`
       var blobs = Object.keys(urls).length;
       var removes = dlg.querySelectorAll('[data-testid="removeMedia"]').length;
       var inGroup = dlg.querySelectorAll('[data-testid="attachments"] img').length;
-      return { n: Math.max(blobs, removes, inGroup), blobs: blobs, removes: removes, inGroup: inGroup };
+      /**
+       * 还在上传的图:缩略图上的进度圈(role=progressbar)—— 往上找到第一个含 blob: 图的那层,那层里没有正文框才算。
+       * ⚠️ 字数圈也是 progressbar:它往上找到含图的那层是整条 / 整个弹窗,里面有正文框 → 不算。
+       * 10-28 真机:第 1 条 4 张图显示着就点了「+」/ 发布,发出去只剩 2 张 —— 疑似没传完就走了(没真机数据证实,这个数据就是为了证实)。
+       */
+      var busy = 0;
+      dlg.querySelectorAll('[role="progressbar"]').forEach(function (p) {
+        var el = p.parentElement;
+        while (el && el !== dlg.parentElement && !el.querySelector('img[src^="blob:"], [style*="blob:"]')) el = el.parentElement;
+        if (el && el !== dlg.parentElement && !el.querySelector('[data-testid^="tweetTextarea_"]')) busy += 1;
+      });
+      return { n: Math.max(blobs, removes, inGroup), blobs: blobs, removes: removes, inGroup: inGroup, busy: busy };
     };`;
 
 /**
@@ -524,7 +535,8 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
         var dlg = boxes[0].closest('[role="dialog"]');
         /** 推串:每条的字和它自己那块里挂的图 */
         var all = boxesIn(dlg).map(function (b) { return { text: textOf(b).trim(), media: attachedIn(itemOf(b, dlg)).n }; });
-        resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim(), media: attachedIn(dlg).n, boxes: all });
+        var whole = attachedIn(dlg);
+        resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim(), media: whole.n, busy: whole.busy, boxes: all });
         return;
       }
       if (Date.now() - t0 > 8000) {
@@ -698,14 +710,14 @@ const COMPOSE_MEDIA_READY_SRC = String.raw`(function () {
       var btn = dlg.querySelector('[data-testid="tweetButton"]');
       var enabled = !!btn && btn.getAttribute('aria-disabled') !== 'true' && !btn.disabled;
       if (a.n > want) { resolve({ state: 'too-many', attached: a.n }); return; }
-      if (a.n === want && enabled) {
+      if (a.n === want && enabled && a.busy === 0) {
         if (!since) since = Date.now();
-        else if (Date.now() - since >= 800) { resolve({ state: 'ready', attached: a.n }); return; }
+        else if (Date.now() - since >= 1500) { resolve({ state: 'ready', attached: a.n, waited: Date.now() - t0 }); return; }
       } else since = 0;
       if (Date.now() - t0 > 60000) {
         var ids = {};
         dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
-        resolve({ state: 'timeout', attached: a.n, blobs: a.blobs, removes: a.removes, inGroup: a.inGroup, buttonEnabled: enabled, testids: Object.keys(ids).slice(0, 40) });
+        resolve({ state: 'timeout', attached: a.n, blobs: a.blobs, removes: a.removes, inGroup: a.inGroup, busy: a.busy, buttonEnabled: enabled, testids: Object.keys(ids).slice(0, 40) });
         return;
       }
       setTimeout(tick, 300);
@@ -842,8 +854,18 @@ const FIND_MY_POST_SRC = String.raw`(function () {
             var tx = arts[i].querySelector('[data-testid="tweetText"]');
             var textOk = needle === '' ? !tx || norm(textOf(tx)) === '' : !!tx && norm(textOf(tx)).indexOf(needle) !== -1;
             if (!textOk || !isFinite(at) || at < since) continue;
-            var got = arts[i].querySelectorAll('[data-testid="tweetPhoto"]').length;
-            if (got >= photos) return { id: m[2], photos: got };
+            /**
+             * 图数 = tweetPhoto 里不同的图片地址(去掉 ?format=… 参数)。
+             * ⚠️ 10-28 真机:第 1 条实际 2 张图,按 tweetPhoto 个数数却 ≥4 判成「对上了」—— 同一张图被数了两次。
+             * 图还没加载出来(没有地址)就不算 —— 不退回按个数数(那正是数错的来源);没够数会接着等,最多 10 秒。
+             */
+            var srcs = {};
+            var tiles = arts[i].querySelectorAll('[data-testid="tweetPhoto"]');
+            tiles.forEach(function (tp) {
+              tp.querySelectorAll('img[src]').forEach(function (im) { srcs[(im.getAttribute('src') || '').split('?')[0]] = 1; });
+            });
+            var got = Object.keys(srcs).filter(function (k) { return k !== ''; }).length;
+            if (got >= photos) return { id: m[2], photos: got, tiles: tiles.length };
             if (!short) short = { id: m[2], photos: got };
           }
         }
@@ -853,7 +875,7 @@ const FIND_MY_POST_SRC = String.raw`(function () {
       var t0 = Date.now();
       var tick = function () {
         var hit = look();
-        if (hit) { resolve({ tweetId: hit.id, photos: hit.photos }); return; }
+        if (hit) { resolve({ tweetId: hit.id, photos: hit.photos, tiles: hit.tiles }); return; }
         if (Date.now() - t0 > 10000) {
           resolve(short ? { why: 'no-photos', tweetId: short.id, photos: short.photos } : { why: 'not-found', seen: seen });
           return;
