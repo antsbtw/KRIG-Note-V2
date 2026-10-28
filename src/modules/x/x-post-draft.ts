@@ -242,6 +242,19 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
       return { ok: false, why: touched || k > 0 ? await undo(wcId, `${which}字没填进去:${typed.reason}`) : `没填进去:${typed.reason}` };
     }
     touched = true;
+    /**
+     * 贴完先确认 X 里真有这条字,再往下(点「+」/ 下一条)。
+     * 10-28 真机:弹窗刚开就贴,X 随后把弹窗重画了一遍 —— 字没了、「+」也换了一个,点「+」5 秒没反应。
+     * 框还是空的(被冲掉)→ 留痕后重贴一次;不是空的却对不上 → 不重贴(免得贴两遍),走到最后的读回核对报出来。
+     */
+    let landed = await waitBoxText(wcId, k, post.text);
+    if (landed.state === 'empty') {
+      console.warn(`[x.post] ${which || '正文'}贴完 X 里还是空的(弹窗可能刚重画过)—— 重贴一次`);
+      const again = await inputEngine.type(page.pageId, { anchor: composeBoxAnchor(k), text: post.text, check: { kind: 'none' } });
+      if (again.status === 'failed') return { ok: false, why: await undo(wcId, `${which}字没填进去(重贴):${again.reason}`) };
+      landed = await waitBoxText(wcId, k, post.text);
+      if (landed.state === 'empty') return { ok: false, why: await undo(wcId, `${which}贴了两次 X 里都是空的`) };
+    }
   }
 
   /** 读回核对:粘贴后编辑器要一点时间画出来,最多等 3 秒 */
@@ -267,6 +280,19 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
     ok: false,
     why: `填进去的和排好的对不上(${bad})—— ${c.cleared ? '已清掉' : `清也没清掉:${c.detail}`}`,
   };
+}
+
+/** 等第 k 个框里出现这条字(最多 3 秒):ok / empty(一直空)/ other(有字但对不上,交给最后的读回核对) */
+async function waitBoxText(wcId: number, k: number, want: string): Promise<{ state: 'ok' | 'empty' | 'other' }> {
+  const ports = webviewPorts(wcId);
+  let last = '';
+  for (let n = 0; n < 12; n += 1) {
+    const b = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
+    last = b?.boxes?.[k]?.text ?? '';
+    if (sameText(last, want)) return { state: 'ok' };
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return { state: last.trim() === '' ? 'empty' : 'other' };
 }
 
 /** 填到一半没成:清掉已经放进去的,把清的结局接在原因后面 */

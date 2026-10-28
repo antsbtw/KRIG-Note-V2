@@ -667,7 +667,8 @@ const COMPOSE_ADD_POST_SRC = String.raw`(function () {
     btn.click();
     var t0 = Date.now();
     var tick = function () {
-      var n = boxesIn(dlg).length;
+      /** 每次重新找弹窗:X 可能重画弹窗,手里那个旧节点就不长了 */
+      var n = boxesIn(dialogOf() || dlg).length;
       if (n > idx) { resolve({ state: 'added', have: n }); return; }
       if (Date.now() - t0 > 5000) {
         /** 没加出来:带回现场(按钮名 / 点完灰没灰 / 第一条 X 看到几个字 / 弹窗里有什么 / 有没有别的弹层)—— 10-28 真机长文第 2 条加不出来,只有 timeout 看不出为什么 */

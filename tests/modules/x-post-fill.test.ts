@@ -63,6 +63,8 @@ const h = vi.hoisted(() => ({
   visibleCount: null as number | null,
   /** 还在上传的图:每读一次框状态减一;Infinity = 一直传不完 */
   busy: 0,
+  /** 前几次贴字被 X 冲掉(10-28 真机:弹窗刚开就贴,X 重画后框是空的) */
+  wipes: 0,
 }));
 
 vi.mock('@storage/surreal/client', () => ({
@@ -110,6 +112,7 @@ vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
       const k = Number(/^x\.composeBox(?:\.(\d+))?$/.exec(input.anchor)?.[1] ?? 0);
       h.order.push(`type@${k}`);
       h.typed.push(input.text);
+      if (h.wipes > 0) { h.wipes -= 1; return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } }; }
       if (k === 0) h.box = (h.box ?? '') + (h.landsAs ?? input.text);
       else h.extra[k - 1] += h.landsAs ?? input.text;
       return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } };
@@ -201,7 +204,7 @@ beforeEach(() => {
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0; h.toast = true; h.staleLooks = 0;
   h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
-  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0;
+  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0; h.wipes = 0;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -447,6 +450,25 @@ describe('推串(10-28,用户「先把推文的各种形式搞完善」)', () =>
     expect(h.box).toBe('');
     expect(lock.lockHolder('page:7')).toBeNull();
   });
+
+  it('⭐ 10-28 真机:第 1 条贴完被 X 冲掉 → 留痕重贴一次,再点「+」,推串照样填好', async () => {
+    h.wipes = 1;
+    const r = await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.typed).toHaveLength(3);
+    expect(h.typed[0]).toBe(h.typed[1]);
+    expect(h.extra).toHaveLength(1);
+    await execute('x.post.cancel', { wsId: 'ws-1', draftId: (await pending()).pending!.draftId }, { caller: 'ui' });
+  });
+
+  it('贴两次都被冲掉 → failed 说清楚、不点「+」、不留锁', async () => {
+    h.wipes = 2;
+    const r = await execute('x.post.fill', sixImages(), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('贴了两次 X 里都是空的');
+    expect(h.extra).toHaveLength(0);
+    expect(lock.lockHolder('page:7')).toBeNull();
+ }, 15_000);
 
   it('超过 X 的 25 条 → refused,网页没碰', async () => {
     const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'thread', content: Array.from({ length: 26 }, () => para('字'.repeat(130))) }, { caller: 'ui' });
