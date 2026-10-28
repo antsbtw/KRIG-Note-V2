@@ -12,6 +12,7 @@
 
 import { Plugin } from 'prosemirror-state';
 import { Fragment, type Node as PMNode } from 'prosemirror-model';
+import { SLASH_CLEAR_META } from '../../plugins/build-slash-plugin';
 
 function isEmptyColumn(column: PMNode): boolean {
   if (column.type.name !== 'column') return false;
@@ -22,8 +23,10 @@ function isEmptyColumn(column: PMNode): boolean {
 
 export function columnCollapsePlugin(): Plugin {
   return new Plugin({
-    appendTransaction(_transactions, oldState, newState) {
+    appendTransaction(transactions, oldState, newState) {
       if (oldState.doc.eq(newState.doc)) return null;
+      // slash 选项前的清场删除:栏只是暂时空,命令马上填内容,不算用户删光(见 SLASH_CLEAR_META)
+      if (transactions.some((t) => t.getMeta(SLASH_CLEAR_META))) return null;
 
       // 收集 oldState 中每个 columnList 内各 column 的空/非空状态
       const oldColumnStates = new Map<number, boolean[]>();
