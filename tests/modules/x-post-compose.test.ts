@@ -156,7 +156,7 @@ describe('推串在哪断', () => {
   });
   it('分隔线强制断开', () => {
     const posts = thread([p('a'), hr, p('b')]);
-    expect(posts.map((x) => x.text)).toEqual(['a\n\n1/2', 'b\n\n2/2']);
+    expect(posts.map((x) => x.text)).toEqual(['a 1/2', 'b 2/2']);
   });
   it('小标题开新的一条', () => {
     const posts = thread([p('前言'), h('第一节'), p('正文')]);
@@ -166,10 +166,10 @@ describe('推串在哪断', () => {
     const sentence = '这'.repeat(60) + '。';
     const posts = thread([p(sentence.repeat(4))]);
     expect(posts.length).toBe(2);
-    posts.forEach((x) => expect(x.text.replace(/\n\n\d+\/\d+$/, '').endsWith('。')).toBe(true));
+    posts.forEach((x) => expect(x.text.replace(/ \d+\/\d+$/, '').endsWith('。')).toBe(true));
   });
   it('一句话本身超长:只能硬断,并提示', () => {
-    /** 300 个汉字 = 600 加权;每条最多 273(留 7 给「\n\n1/3」)→ 3 条 */
+    /** 300 个汉字 = 600 加权;每条最多 274(留 6 给「 1/3」)→ 3 条 */
     const r = composePost([p('长'.repeat(300))]);
     const posts = r.options.find((o) => o.form === 'thread')!.posts;
     expect(posts.length).toBe(3);
@@ -185,10 +185,10 @@ describe('推串在哪断', () => {
 });
 
 describe('推串:能不能填进 X(10-28)', () => {
-  it('⭐ 一句话 + 6 张图 → 2 条(4 + 2);只有图的那条正文就是「2/2」,前面不留空行', () => {
+  it('⭐ 一句话 + 6 张图 → 2 条(4 + 2);页码跟在正文后同一行(用户 10-28 选的);只有图的那条正文就是「2/2」', () => {
     const posts = thread([p('什么是VPS?'), ...[1, 2, 3, 4, 5, 6].map((n) => img(`media://images/${n}.png`))]);
     expect(posts.map((x) => x.media.length)).toEqual([4, 2]);
-    expect(posts.map((x) => x.text)).toEqual(['什么是VPS?\n\n1/2', '2/2']);
+    expect(posts.map((x) => x.text)).toEqual(['什么是VPS? 1/2', '2/2']);
   });
   it('⭐ fillBlock:推串现在能填;某条要转图 → 说是第几条;长推还不能填', async () => {
     const { fillBlock } = await import('../../src/modules/x/x-post-compose');

@@ -52,8 +52,8 @@ export type PostPlan = {
 
 const LONG_POST_LIMIT = 25000;
 const MAX_IMAGES = 4;
-/** 推串每条末尾留给「\n\n12/34」的位置 */
-const THREAD_SUFFIX_RESERVE = 7;
+/** 推串每条末尾留给「 12/34」的位置 */
+const THREAD_SUFFIX_RESERVE = 6;
 const THREAD_BUDGET = X_POST_LIMIT - THREAD_SUFFIX_RESERVE;
 const RENDER_LABEL: Record<RenderWhat, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块' };
 
@@ -305,7 +305,7 @@ export function fillBlock(opt: PostOption): string | null {
 
 const draft = (texts: readonly TextUnit[], media: readonly PostMedia[], suffix = ''): PostDraft => {
   const body = joinTexts(texts);
-  /** 只有图的那条:页码前不留空行(10-28 测试抓到「\n\n2/2」) */
+  /** 只有图的那条:正文就是页码,前面不留空格 */
   const text = body === '' ? suffix.trimStart() : body + suffix;
   return { text, weight: xWeightedLength(text), media };
 };
@@ -385,7 +385,8 @@ function buildThread(units: readonly Unit[], warn: Set<string>): PostDraft[] {
   }
   flush();
   const n = done.length;
-  return done.map((c, i) => draft(c.texts, c.media, n > 1 ? `\n\n${i + 1}/${n}` : ''));
+  /** 页码跟在正文后面同一行(用户 10-28 选的:空一行再写页码,在 X 上看着像另一条) */
+  return done.map((c, i) => draft(c.texts, c.media, n > 1 ? ` ${i + 1}/${n}` : ''));
 }
 
 // ── 合起来 ──

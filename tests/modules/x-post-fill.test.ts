@@ -373,7 +373,7 @@ describe('推串(10-28,用户「先把推文的各种形式搞完善」)', () =>
     expect(r).toMatchObject({ ok: true });
     expect(h.order).toEqual(['focus@0', 'feed@0', 'type@0', 'add@1', 'focus@1', 'feed@1', 'type@1']);
     expect(h.fed.map((g) => g.length)).toEqual([4, 2]);
-    expect(h.typed).toEqual(['什么是VPS?\n\n1/2', '2/2']);
+    expect(h.typed).toEqual(['什么是VPS? 1/2', '2/2']);
     const p = (await pending()).pending as unknown as { posts: Array<{ text: string; media: string[] }>; media: string[] };
     expect(p.posts.map((x) => x.media.length)).toEqual([4, 2]);
     expect(p.media).toHaveLength(6);
