@@ -5,7 +5,8 @@
  * 再按五种发法各排一份,给出建议的那种。界面(预览窗)和 AI 都经能力 x.post.prepare 调它。
  *
  * ⚠️ 不静默丢东西:X 发不了的(音频 / 文件 / 外链视频)、只能降级的(行内公式)、认不出的块,都进 warnings。
- * ⚠️ 公式 / 代码 / Mermaid / 表格 这期只标「要转成图」(media.kind = render),真渲染在第④期。
+ * ⚠️ 公式 / 代码 / Mermaid / 表格 这期只标「要转成图」(media.kind = render),真渲染是第④期剩下的(还没做)。
+ * 第④a期(10-28)能填进 X 的附件只有 note 里存在本机图片库的图(fillProblem 判)。
  */
 import { X_POST_LIMIT, xWeightedLength } from './x-post-length';
 
@@ -121,7 +122,7 @@ const addText = (ctx: Ctx, text: string, role: Role, list?: number): void => {
 const addMedia = (ctx: Ctx, m: PostMedia): void => { ctx.units.push({ k: 'media', m }); };
 const render = (ctx: Ctx, what: RenderWhat, source: string): void => {
   addMedia(ctx, { kind: 'render', what, source });
-  ctx.warn.add('公式 / 代码 / Mermaid / 表格 会转成图附上(第④期才真渲染,现在预览只是占位)');
+  ctx.warn.add('公式 / 代码 / Mermaid / 表格 会转成图附上(转图还没做,现在预览只是占位)');
 };
 
 /** 容器里的东西压成一段字(引用 / 提示框用);里面的附件照样带出来 */
@@ -250,6 +251,23 @@ function mediaProblem(ms: readonly PostMedia[]): string | null {
   if (c.videos > 0 && c.images > 0) return 'X 一条推里视频和图片不能同时有';
   if (c.videos > 1) return 'X 一条推最多 1 个视频';
   if (c.images > MAX_IMAGES) return `X 一条推最多 ${MAX_IMAGES} 张图(这里 ${c.images} 张)`;
+  return null;
+}
+
+/** X 收的图片格式(SVG 不收,要先转成图) */
+const X_IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+
+/**
+ * 这条推的附件现在能不能填进 X —— 不能的话为什么(预览窗的按钮和 x.post.fill 用同一句,不各写一份)。
+ * 第④a期只做 note 里存在本机图片库(media://)的图;转图 / 视频是第④期剩下的,还没做。
+ */
+export function fillProblem(ms: readonly PostMedia[]): string | null {
+  for (const m of ms) {
+    if (m.kind === 'render') return `${RENDER_LABEL[m.what]}要先转成图(转图还没做)—— 现在先把它去掉再发`;
+    if (m.kind === 'video') return '视频还不能填进 X(还没做)—— 现在先把它去掉再发';
+    if (!m.src.startsWith('media://')) return `有张图不在本机图片库里(${m.src.slice(0, 40)})—— 现在只能发存在本机的图`;
+    if (!X_IMAGE_EXT.test(m.src)) return /\.svg$/i.test(m.src) ? 'SVG 图 X 不收,要先转成图(转图还没做)' : `X 不收这种图(${m.src.split('/').pop()})—— 只收 jpg / png / gif / webp`;
+  }
   return null;
 }
 
@@ -383,7 +401,7 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
         note: '要 Premium(还认不出你的号是不是 Premium)', posts: [whole],
       },
       { form: 'article', label: 'X 文章', available: true, note: 'X 文章要 Premium;表格 / 公式 / 代码在文章里原样排(第⑥期)', posts: [article] },
-      { form: 'image', label: '整段转图', available: false, why: '第④期做:整段排成一张图 + 一句话正文', posts: [] },
+      { form: 'image', label: '整段转图', available: false, why: '还没做(第④期剩下的):整段排成一张图 + 一句话正文', posts: [] },
     ],
     warnings: [...ctx.warn],
   };

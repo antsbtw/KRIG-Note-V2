@@ -8,7 +8,7 @@
  * ⚠️ 字不能在这里改(用户 10-27 定 B:字只在 note 里改,note 是唯一原文)。
  */
 import { useEffect, useState } from 'react';
-import type { PostDraft, PostForm, PostMedia, PostPlan } from './x-post-compose';
+import { fillProblem, type PostDraft, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
 import type { PostedBefore } from './x-post-repo';
@@ -123,14 +123,14 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
   const draft = pending.pending;
   const now = useNow(draft !== null);
   const ended = pending.ended && pending.ended.at >= openedAt ? pending.ended : null;
-  /** 发布按钮能不能点 —— 不能的话为什么(写在按钮的提示里) */
+  /** 发布按钮能不能点 —— 不能的话为什么(按钮上方写出来,提示里也有) */
   const blockWhy = !plan || plan.empty || !current ? '没有可发的内容'
     : draft ? '左边 X 上已经有一份在等你确认'
       : fill.phase === 'filling' ? '正在填'
         : current.form !== 'single' ? `「${current.label}」还不能填进 X(现在只做单条推)`
-          : current.posts[0]?.media.length ? '带图第④期才能填进 X'
-            : limit !== null && (current.posts[0]?.weight ?? 0) > limit ? '超过字数了'
-              : null;
+          : fillProblem(current.posts[0]?.media ?? [])
+            ?? (limit !== null && (current.posts[0]?.weight ?? 0) > limit ? '超过字数了'
+              : null);
 
   return (
     <div style={{
@@ -213,7 +213,11 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '10px 12px', borderTop: '1px solid var(--border-popup)' }}>
+      {/** 不能发的原因写出来 —— 只放在按钮提示里,截图上看着像坏了(10-28 用户:「带图片的推文还发不了呀?」) */}
+      {blockWhy && fill.phase !== 'filling' && (
+        <div style={{ padding: '8px 12px 0', fontSize: 12, color: '#d97706', borderTop: '1px solid var(--border-popup)' }}>现在不能发:{blockWhy}</div>
+      )}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', padding: '10px 12px', borderTop: blockWhy && fill.phase !== 'filling' ? 'none' : '1px solid var(--border-popup)' }}>
         <button type="button" style={btn} onClick={onBackToNote} title="字只在 note 里改;改了这里跟着变">回 note 改</button>
         <button type="button" style={btnOff} disabled title="定时发:第⑦期">⏰ 定时</button>
         <button type="button" style={blockWhy ? { ...btnMain, opacity: 0.4, cursor: 'default' } : btnMain} disabled={blockWhy !== null}

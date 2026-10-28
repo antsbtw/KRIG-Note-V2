@@ -36,6 +36,11 @@ const SELECTORS: Readonly<Record<string, string>> = {
    * 待真机:弹窗是不是 role="dialog"(发推第②期 10-27 按 X 现行结构写的,没在真机上量过)。
    */
   [X_ANCHORS.composeBox]: '[role="dialog"] [data-testid="tweetTextarea_0"]',
+  /**
+   * ⭐ fileInput 这个 testid 2026-06 真机量过(X 文章编辑器里有,阶段 2.5-b 发图也用过)。
+   * ⚠️ 首页内嵌框也有一个 —— 只认弹窗里的;弹窗里有没有,第④期真机第一次跑时确认。
+   */
+  [X_ANCHORS.composeFileInput]: '[role="dialog"] input[data-testid="fileInput"]',
 };
 
 /** ⭐ 本模块的锚点表 —— 启动时 **push** 给底座 */

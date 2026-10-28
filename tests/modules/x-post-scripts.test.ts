@@ -26,7 +26,7 @@ beforeEach(() => { document.body.innerHTML = ''; });
 describe('发推框状态', () => {
   it('⭐ 只认弹窗里的框,不认首页内嵌框;表情图片按 alt 拼回', async () => {
     page('<span>早上好</span><img alt="🙏"><span>!</span>');
-    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: true, count: 1, text: '早上好🙏!' });
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toEqual({ found: true, count: 1, text: '早上好🙏!', media: 0 });
   });
   it('弹窗不在 → 等满 8 秒报 found:false(不拿首页内嵌框充数)', async () => {
     page(null);
@@ -111,25 +111,97 @@ describe('点发布(第③期)', () => {
 });
 
 describe('在我主页上找刚发的那条(第③期)', () => {
-  const art = (handle: string, id: string, text: string, at: number): string =>
-    `<article data-testid="tweet"><a href="/${handle}/status/${id}"><time datetime="${new Date(at).toISOString()}"></time></a><div data-testid="tweetText">${text}</div></article>`;
-  const find = (needle: string, since: number) =>
-    run(X_DOM_SCRIPTS.find((s) => s.id === X_SCRIPTS.findMyPost)!.build({ needle, me: 'Me', since }));
+  const art = (handle: string, id: string, text: string, at: number, photos = 0): string =>
+    `<article data-testid="tweet"><a href="/${handle}/status/${id}"><time datetime="${new Date(at).toISOString()}"></time></a>`
+    + (text === '' ? '' : `<div data-testid="tweetText">${text}</div>`)
+    + '<div data-testid="tweetPhoto"><img></div>'.repeat(photos) + '</article>';
+  const find = (needle: string, since: number, photos = 0) =>
+    run(X_DOM_SCRIPTS.find((s) => s.id === X_SCRIPTS.findMyPost)!.build({ needle, me: 'Me', since, photos }));
   it('⭐ 作者是我 + 正文对得上 + 时间不早于点发布 → 那条的 id;别人同样的字 / 我以前同样的字都不算', async () => {
     const now = Date.now();
     document.body.innerHTML = art('other', '111', '今天读了一篇论文', now)
       + art('me', '222', '今天读了一篇论文', now - 3_600_000)
       + art('me', '333', '今天读了一篇<img alt="📚">论文', now);
-    expect(await find('今天读了一篇📚论文', now)).toEqual({ tweetId: '333' });
+    expect(await find('今天读了一篇📚论文', now)).toEqual({ tweetId: '333', photos: 0 });
   });
   it('⭐ 我以前发过一模一样的字(排在前面)→ 不算,认时间不早于点发布的那条', async () => {
     const now = Date.now();
     document.body.innerHTML = art('me', '222', '今天读了一篇论文', now - 3_600_000) + art('me', '444', '今天读了一篇论文', now + 1000);
-    expect(await find('今天读了一篇论文', now)).toEqual({ tweetId: '444' });
+    expect(await find('今天读了一篇论文', now)).toEqual({ tweetId: '444', photos: 0 });
   });
   it('没有 → 等满 10 秒报 not-found,带上页面上我的推文数', async () => {
     const now = Date.now();
     document.body.innerHTML = art('me', '222', '别的字', now);
     expect(await find('今天读了一篇论文', now)).toEqual({ why: 'not-found', seen: 1 });
   }, 15_000);
+  it('⭐ 带图(第④期):字对上、图够数 → 那条;图数不够的同字推文不算', async () => {
+    const now = Date.now();
+    document.body.innerHTML = art('me', '555', '配图', now, 1) + art('me', '666', '配图', now, 2);
+    expect(await find('配图', now, 2)).toEqual({ tweetId: '666', photos: 2 });
+  });
+  it('⭐ 纯图推(没有字):认作者 + 时间 + 图数;有字的不算', async () => {
+    const now = Date.now();
+    document.body.innerHTML = art('me', '777', '有字的', now, 1) + art('me', '888', '', now, 1);
+    expect(await find('', now, 1)).toEqual({ tweetId: '888', photos: 1 });
+  });
+  it('字对上但图不够 → 等满 10 秒报 no-photos,带那条的 id 和看到几张', async () => {
+    const now = Date.now();
+    document.body.innerHTML = art('me', '999', '配图', now, 1);
+    expect(await find('配图', now, 2)).toEqual({ why: 'no-photos', tweetId: '999', photos: 1 });
+  }, 15_000);
+});
+
+describe('带图(第④期):数图 / 等传完 / 清图', () => {
+  /** 弹窗里挂 n 张图:每张一个 blob: 的 img + 同一 URL 的背景图(只算一张)+ 移除按钮(点了就拿掉这张) */
+  const attach = (n: number, removable = true): Element => {
+    page('配图');
+    const d = document.querySelector('[role="dialog"]')!;
+    for (let i = 0; i < n; i += 1) {
+      const it = document.createElement('div');
+      it.innerHTML = `<div style="background-image: url(&quot;blob:https://x.com/u${i}&quot;)"></div><img src="blob:https://x.com/u${i}">`
+        + (removable ? '<button aria-label="Remove media"></button>' : '');
+      it.querySelector('button')?.addEventListener('click', () => it.remove());
+      d.append(it);
+    }
+    return d;
+  };
+  const ready = (want: number) => run(X_DOM_SCRIPTS.find((s) => s.id === X_SCRIPTS.composeMediaReady)!.build({ want }));
+  const button = (d: Element, disabled: boolean): void => {
+    d.insertAdjacentHTML('beforeend', `<button data-testid="tweetButton" ${disabled ? 'aria-disabled="true"' : ''}></button>`);
+  };
+
+  it('⭐ 框状态里数图:同一 blob 的 img 和背景图只算一张;首页内嵌框外的图不算', async () => {
+    attach(2);
+    document.body.insertAdjacentHTML('afterbegin', '<img src="blob:https://x.com/outside">');
+    expect(await run(build(X_SCRIPTS.composeBoxState))).toMatchObject({ found: true, media: 2 });
+  });
+  it('⭐ 挂够了 + 发布按钮亮了 → ready', async () => {
+    button(attach(2), false);
+    expect(await ready(2)).toEqual({ state: 'ready', attached: 2 });
+  });
+  it('比要的多 → too-many(框里本来就有图)', async () => {
+    button(attach(3), false);
+    expect(await ready(2)).toEqual({ state: 'too-many', attached: 3 });
+  });
+  it('⭐ 按钮一直灰(还在传)→ 等满 60 秒 timeout,带各信号和弹窗里的 testid', async () => {
+    const d = attach(1);
+    button(d, true);
+    const r = await ready(1);
+    expect(r).toMatchObject({ state: 'timeout', attached: 1, blobs: 1, buttonEnabled: false });
+    expect(r.testids).toContain('tweetButton');
+  }, 70_000);
+  it('⭐ 清框:先点掉图再删字 → cleared;点不掉图 → not-cleared 说还挂着几张', async () => {
+    attach(2);
+    const box = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') as HTMLElement;
+    box.addEventListener('keydown', () => { box.textContent = (box.textContent ?? '').slice(0, -1); });
+    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared' });
+    expect(document.querySelectorAll('[role="dialog"] img').length).toBe(0);
+    attach(1, false);
+    expect(await run(build(X_SCRIPTS.composeClear))).toEqual({ state: 'not-cleared', left: '还挂着 1 张图(没找到移除按钮)' });
+  });
+  it('只有图没有字 → 点掉图就算清了', async () => {
+    attach(1);
+    (document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') as HTMLElement).textContent = '';
+    expect(await run(build(X_SCRIPTS.composeClear))).toMatchObject({ state: 'cleared', via: 'media' });
+  });
 });

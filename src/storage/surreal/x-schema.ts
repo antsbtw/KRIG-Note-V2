@@ -1854,6 +1854,26 @@ DEFINE INDEX IF NOT EXISTS idx_post_hash ON x_post FIELDS account, content_hash;
 DEFINE INDEX IF NOT EXISTS idx_post_note ON x_post FIELDS note_id;
 `;
 
+/**
+ * ⭐ 1.2.43 —— 发推记录带图(2026-10-28,发推第④期)
+ * media = 填进去的图(note 里的 media:// 地址,按顺序);sent_media = 点发布那一刻框里挂着几张(人可能在 X 上删了一张)。
+ */
+const X_SCHEMA_1_2_43 = `
+DEFINE FIELD IF NOT EXISTS media      ON x_post TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS sent_media ON x_post TYPE option<int>;
+`;
+
+export async function x_migration_1_2_43(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_43);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');
+  if (!('media' in (t?.fields ?? {})) || !('sent_media' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.43] x_post 没加上 media / sent_media —— 发推带的图记不住');
+  console.log('[x-schema 1.2.43] 发推记录带图 x_post.media / sent_media');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.43', appliedAt = $now, description = '发推记录带图'`,
+    { rid: new RecordId('schema_version', '1.2.43'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_42(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_42);
   const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');

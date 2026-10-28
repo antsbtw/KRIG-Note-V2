@@ -15,26 +15,31 @@ export type PostStatus = 'filled' | 'cancelled' | 'sent' | 'unseen' | 'failed';
 export const contentHash = (text: string): string => createHash('sha256').update(text.replace(/\s/g, '')).digest('hex').slice(0, 32);
 
 export async function recordFilled(r: {
-  draftId: string; account: string; handle: string; wsId: string; noteId?: string; form: PostForm; text: string; caller: string;
+  draftId: string; account: string; handle: string; wsId: string; noteId?: string; form: PostForm; text: string;
+  /** 带的图(media:// 地址);没图不写(NONE) */
+  media?: readonly string[]; caller: string;
 }): Promise<void> {
   const [rows] = await getXDB().query<[unknown[]]>(
     `UPSERT type::record('x_post', $id) CONTENT {
-      account: $account, handle: $handle, ws_id: $ws, note_id: $note, form: $form, text: $text,
+      account: $account, handle: $handle, ws_id: $ws, note_id: $note, form: $form, text: $text, media: $media,
       content_hash: $hash, status: 'filled', caller: $caller, filled_at: time::now()
     }`,
-    { id: r.draftId, account: r.account, handle: r.handle, ws: r.wsId, note: r.noteId, form: r.form, text: r.text, hash: contentHash(r.text), caller: r.caller },
+    {
+      id: r.draftId, account: r.account, handle: r.handle, ws: r.wsId, note: r.noteId, form: r.form, text: r.text,
+      media: r.media && r.media.length > 0 ? [...r.media] : undefined, hash: contentHash(r.text), caller: r.caller,
+    },
   );
   if (!rows || rows.length !== 1) throw new Error(`[x.post] 发推记录没建上(${r.draftId})`);
 }
 
 export async function recordEnded(draftId: string, e: {
-  status: Exclude<PostStatus, 'filled'>; detail?: string; tweetId?: string; sentText?: string; editedOnX?: boolean;
+  status: Exclude<PostStatus, 'filled'>; detail?: string; tweetId?: string; sentText?: string; sentMedia?: number; editedOnX?: boolean;
 }): Promise<void> {
   const [rows] = await getXDB().query<[unknown[]]>(
     `UPDATE type::record('x_post', $id) MERGE {
-      status: $status, detail: $detail, tweet_id: $tweet, sent_text: $sent, edited_on_x: $edited, ended_at: time::now()
+      status: $status, detail: $detail, tweet_id: $tweet, sent_text: $sent, sent_media: $sentMedia, edited_on_x: $edited, ended_at: time::now()
     }`,
-    { id: draftId, status: e.status, detail: e.detail, tweet: e.tweetId, sent: e.sentText, edited: e.editedOnX },
+    { id: draftId, status: e.status, detail: e.detail, tweet: e.tweetId, sent: e.sentText, sentMedia: e.sentMedia, edited: e.editedOnX },
   );
   if (!rows || rows.length !== 1) throw new Error(`[x.post] 发推记录没更新上(${draftId} → ${e.status}):这份草稿没有记录行`);
 }

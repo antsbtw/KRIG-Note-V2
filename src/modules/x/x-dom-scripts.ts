@@ -97,6 +97,11 @@ export const X_SCRIPTS = {
    * 等弹窗关掉才算点成;顺手读 X 的「已发送」提示条里的链接(有就带回 tweetId,没有也不算失败 —— 由主页核对定)。
    */
   composeSend: 'x.composeSend' as ScriptId,
+  /**
+   * ⭐ 发推第④a期(2026-10-28):喂完图后等 X 传完 —— 挂上的图够数、「发布」按钮亮了(X 上传中按钮是灰的)。
+   * 等不到就带回弹窗里有哪些 testid,真机第一次跑时据此对准。
+   */
+  composeMediaReady: 'x.composeMediaReady' as ScriptId,
   /** ⭐⭐ 发推第③期:在我的主页上找我刚发的那条(作者是我、正文对得上、时间不早于点发布)→ 推文 id */
   findMyPost: 'x.findMyPost' as ScriptId,
 } as const;
@@ -445,8 +450,29 @@ const REPLY_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
+ * 弹窗里挂了几张图(发推第④期,2026-10-28)—— 几个脚本共用的一段。
+ * ⚠️ X 的附件预览没有在真机上量过:三种信号取大的 —— 不同的 blob: 图(img 和背景图同一个 URL 只算一次)/
+ * removeMedia 按钮 / attachments 里的 img。都带回去,真机第一次跑时看哪个准。
+ */
+const ATTACHED_JS = String.raw`
+    var attachedIn = function (dlg) {
+      if (!dlg) return { n: 0, blobs: 0, removes: 0, inGroup: 0 };
+      var urls = {};
+      var nodes = dlg.querySelectorAll('img, [style*="blob:"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var u = nodes[i].tagName === 'IMG' ? (nodes[i].getAttribute('src') || '')
+          : ((/url\(["']?(blob:[^"')]+)/.exec(nodes[i].getAttribute('style') || '') || [])[1] || '');
+        if (u.indexOf('blob:') === 0) urls[u] = 1;
+      }
+      var blobs = Object.keys(urls).length;
+      var removes = dlg.querySelectorAll('[data-testid="removeMedia"]').length;
+      var inGroup = dlg.querySelectorAll('[data-testid="attachments"] img').length;
+      return { n: Math.max(blobs, removes, inGroup), blobs: blobs, removes: removes, inGroup: inGroup };
+    };`;
+
+/**
  * ⭐ 发推弹窗里的正文框(发推第②期,2026-10-27)。⚠️ 只认 role=dialog 里的 —— 首页时间线顶上还有一个同 testid 的内嵌框。
- * 最多等 8 秒(弹窗是导航后才画出来的)。返回 { found, count, text }。
+ * 最多等 8 秒(弹窗是导航后才画出来的)。返回 { found, count, text, media:挂了几张图 }。
  */
 const COMPOSE_BOX_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
@@ -458,10 +484,14 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
       });
       return out;
     };
+    ${ATTACHED_JS}
     var t0 = Date.now();
     var tick = function () {
       var boxes = document.querySelectorAll('[role="dialog"] [data-testid="tweetTextarea_0"]');
-      if (boxes.length > 0) { resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim() }); return; }
+      if (boxes.length > 0) {
+        resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim(), media: attachedIn(boxes[0].closest('[role="dialog"]')).n });
+        return;
+      }
       if (Date.now() - t0 > 8000) {
         /** 找不到时带回页面实况,好分清:弹窗没出来 / 框换了名字 / 没登录 / 页面还在加载 */
         resolve({
@@ -481,16 +511,36 @@ const COMPOSE_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
- * 清空发推弹窗的正文框:一个一个按 Backspace(删不动换 Delete),直到空 —— X 的编辑器不认页面设的全选。
- * state:empty(本来就空)/ cleared(带 via)/ not-cleared(带 left:剩下的开头)/ no-box(弹窗已经不在了)
+ * 清空发推弹窗:先把挂着的图一张张点掉(第④a期),再把正文一个一个按 Backspace(删不动换 Delete)删到空 —— X 的编辑器不认页面设的全选。
+ * state:empty(本来就空)/ cleared(带 via)/ not-cleared(带 left:剩下的开头 / 还剩几张图)/ no-box(弹窗已经不在了)
  */
 const COMPOSE_CLEAR_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
     var box = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
     if (!box) { resolve({ state: 'no-box' }); return; }
+    ${ATTACHED_JS}
+    var dlg = box.closest('[role="dialog"]');
     var left = function () { return (box.textContent || '').trim(); };
     var size = function () { return left().length + box.querySelectorAll('img').length; };
-    if (size() === 0) { resolve({ state: 'empty' }); return; }
+    if (size() === 0 && attachedIn(dlg).n === 0) { resolve({ state: 'empty' }); return; }
+    /** 图的移除按钮:removeMedia,或 aria-label 写着移除 / 删除的(没在真机上量过,两样都认) */
+    var removeBtn = function () {
+      var b = dlg.querySelector('[data-testid="removeMedia"]');
+      if (b) return b;
+      var bs = dlg.querySelectorAll('button[aria-label], [role="button"][aria-label]');
+      for (var i = 0; i < bs.length; i++) if (/remove media|移除|删除/i.test(bs[i].getAttribute('aria-label') || '')) return bs[i];
+      return null;
+    };
+    var unmedia = function (tries, done) {
+      if (attachedIn(dlg).n === 0) { done(true); return; }
+      var b = removeBtn();
+      if (!b || tries <= 0) { done(false); return; }
+      b.click();
+      setTimeout(function () { unmedia(tries - 1, done); }, 150);
+    };
+    unmedia(10, function (noMedia) {
+    if (!noMedia) { resolve({ state: 'not-cleared', left: '还挂着 ' + attachedIn(dlg).n + ' 张图(没找到移除按钮)' }); return; }
+    if (size() === 0) { resolve({ state: 'cleared', via: 'media', presses: 0 }); return; }
     box.focus();
     /**
      * ⚠️ 10-27 真机:X 的编辑器(Draft.js)不认页面上设的全选 —— 光标停在末尾,一次 Backspace 只删一个字
@@ -517,6 +567,44 @@ const COMPOSE_CLEAR_SRC = String.raw`(function () {
       }, 30);
     };
     step();
+    });
+  });
+})();`;
+
+/**
+ * 喂完图后等 X 传完。__WANT__ = 该挂几张。挂够了、「发布」按钮亮着、稳住 0.8 秒 → ready。
+ * state:ready / too-many(比要的多 —— 框里本来就有图?)/ timeout(带各信号 + 弹窗里的 testid)/ no-dialog
+ */
+const COMPOSE_MEDIA_READY_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    ${ATTACHED_JS}
+    var want = __WANT__;
+    var dlgOf = function () {
+      var b = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
+      return b ? b.closest('[role="dialog"]') : null;
+    };
+    var t0 = Date.now();
+    var since = 0;
+    var tick = function () {
+      var dlg = dlgOf();
+      if (!dlg) { resolve({ state: 'no-dialog' }); return; }
+      var a = attachedIn(dlg);
+      var btn = dlg.querySelector('[data-testid="tweetButton"]');
+      var enabled = !!btn && btn.getAttribute('aria-disabled') !== 'true' && !btn.disabled;
+      if (a.n > want) { resolve({ state: 'too-many', attached: a.n }); return; }
+      if (a.n === want && enabled) {
+        if (!since) since = Date.now();
+        else if (Date.now() - since >= 800) { resolve({ state: 'ready', attached: a.n }); return; }
+      } else since = 0;
+      if (Date.now() - t0 > 60000) {
+        var ids = {};
+        dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
+        resolve({ state: 'timeout', attached: a.n, blobs: a.blobs, removes: a.removes, inGroup: a.inGroup, buttonEnabled: enabled, testids: Object.keys(ids).slice(0, 40) });
+        return;
+      }
+      setTimeout(tick, 300);
+    };
+    tick();
   });
 })();`;
 
@@ -612,13 +700,14 @@ const COMPOSE_SEND_SRC = String.raw`(function () {
 })();`;
 
 /**
- * 在我的主页上找我刚发的那条。__NEEDLE__ 同 replyNeedle;__ME__ 我的 handle(小写);__SINCE__ 点发布的时刻(ms,留 2 分钟钟差)。
- * 返回 { tweetId } / { why: 'not-found', seen: 页面上我的推文数 }
+ * 在我的主页上找我刚发的那条。__NEEDLE__ 同 replyNeedle;__ME__ 我的 handle(小写);__SINCE__ 点发布的时刻(ms,留 2 分钟钟差);
+ * __PHOTOS__ 该带几张图(第④a期:图数也要对上;纯图推 needle 为空,只靠作者 + 时间 + 图数)。
+ * 返回 { tweetId, photos } / { why: 'no-photos', tweetId, photos:字对上了但图不够 } / { why: 'not-found', seen: 页面上我的推文数 }
  */
 const FIND_MY_POST_SRC = String.raw`(function () {
   return new Promise(function (resolve) {
     try {
-      var needle = __NEEDLE__, me = __ME__, since = __SINCE__ - 120000;
+      var needle = __NEEDLE__, me = __ME__, since = __SINCE__ - 120000, photos = __PHOTOS__;
       var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, ''); };
       var textOf = function (el) {
         var out = '';
@@ -629,8 +718,10 @@ const FIND_MY_POST_SRC = String.raw`(function () {
         return out;
       };
       var seen = 0;
+      var short = null;
       var look = function () {
         seen = 0;
+        short = null;
         var arts = document.querySelectorAll('article[data-testid="tweet"]');
         for (var i = 0; i < arts.length; i++) {
           var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
@@ -641,17 +732,24 @@ const FIND_MY_POST_SRC = String.raw`(function () {
             seen += 1;
             var at = Date.parse(ts[j].getAttribute('datetime') || '');
             var tx = arts[i].querySelector('[data-testid="tweetText"]');
-            if (tx && norm(textOf(tx)).indexOf(needle) !== -1 && isFinite(at) && at >= since) return m[2];
+            var textOk = needle === '' ? !tx || norm(textOf(tx)) === '' : !!tx && norm(textOf(tx)).indexOf(needle) !== -1;
+            if (!textOk || !isFinite(at) || at < since) continue;
+            var got = arts[i].querySelectorAll('[data-testid="tweetPhoto"]').length;
+            if (got >= photos) return { id: m[2], photos: got };
+            if (!short) short = { id: m[2], photos: got };
           }
         }
         return null;
       };
-      if (!needle || !me) { resolve({ why: 'no-needle-or-me' }); return; }
+      if ((!needle && !photos) || !me) { resolve({ why: 'no-needle-or-me' }); return; }
       var t0 = Date.now();
       var tick = function () {
-        var id = look();
-        if (id) { resolve({ tweetId: id }); return; }
-        if (Date.now() - t0 > 10000) { resolve({ why: 'not-found', seen: seen }); return; }
+        var hit = look();
+        if (hit) { resolve({ tweetId: hit.id, photos: hit.photos }); return; }
+        if (Date.now() - t0 > 10000) {
+          resolve(short ? { why: 'no-photos', tweetId: short.id, photos: short.photos } : { why: 'not-found', seen: seen });
+          return;
+        }
         setTimeout(tick, 300);
       };
       tick();
@@ -874,6 +972,12 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
     build: (params) => FIND_MY_POST_SRC
       .replace('__NEEDLE__', () => JSON.stringify(String(params.needle ?? '')))
       .replace('__ME__', () => JSON.stringify(String(params.me ?? '').toLowerCase()))
-      .replace('__SINCE__', () => String(Number(params.since) || 0)),
+      .replace('__SINCE__', () => String(Number(params.since) || 0))
+      .replace('__PHOTOS__', () => String(Math.max(0, Math.floor(Number(params.photos) || 0)))),
+  },
+  {
+    id: X_SCRIPTS.composeMediaReady,
+    purpose: 'X:喂完图后等 X 传完(图挂够了、「发布」按钮亮了)—— 只读',
+    build: (params) => COMPOSE_MEDIA_READY_SRC.replace('__WANT__', () => String(Math.max(0, Math.floor(Number(params.want) || 0)))),
   },
 ];

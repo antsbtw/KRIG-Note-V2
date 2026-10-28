@@ -10,6 +10,7 @@
  *  · 没成的都不留锁:框里有残字 / 读回对不上(并清掉)/ 这种发法本期不能填 / 带图
  *  · AI 调 fill 被拒(对外动作,P3 前要人批复);AI 调 cancel / pending 可以
  *  · 网页没了(锁被收回)→ 草稿当没有
+ *  · 第④期带图:先喂图等 X 传完再贴字;图传不好 → 清掉(连图)、不留锁;发后主页上图数要对上
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -31,6 +32,19 @@ const h = vi.hoisted(() => ({
   sendAs: 'closed' as string,
   profileHas: true,
   sends: 0,
+  /** 发推框里挂着几张图 */
+  media: 0,
+  /** 喂进去的文件(每次一组) */
+  fed: [] as string[][],
+  /** 喂图后 X 挂上几张;null = 照喂的数 */
+  attachAs: null as number | null,
+  /** 主页上那条带几张图;null = 和发的时候一样 */
+  photosOnProfile: null as number | null,
+  /** 磁盘上有的图(media:// → 路径) */
+  disk: new Map<string, string>([['media://images/a.png', '/m/images/a.png'], ['media://images/b.jpg', '/m/images/b.jpg']]),
+  /** 每一步的先后(看先图后字) */
+  order: [] as string[],
+  sentMedia: 0,
 }));
 
 vi.mock('@storage/surreal/client', () => ({
@@ -39,14 +53,14 @@ vi.mock('@storage/surreal/client', () => ({
     query: async (sql: string, v: Record<string, unknown>) => {
       if (h.dbDown) throw new Error('库连不上');
       if (sql.includes("UPSERT type::record('x_post'")) {
-        const row = { account: v.account, handle: v.handle, note_id: v.note, text: v.text, content_hash: v.hash, status: 'filled', caller: v.caller };
+        const row = { account: v.account, handle: v.handle, note_id: v.note, text: v.text, media: v.media, content_hash: v.hash, status: 'filled', caller: v.caller };
         h.posts.set(String(v.id), row);
         return [[row]];
       }
       if (sql.includes("UPDATE type::record('x_post'")) {
         const row = h.posts.get(String(v.id));
         if (!row) return [[]];
-        Object.assign(row, { status: v.status, detail: v.detail, tweet_id: v.tweet, sent_text: v.sent, edited_on_x: v.edited, ended_at: new Date() });
+        Object.assign(row, { status: v.status, detail: v.detail, tweet_id: v.tweet, sent_text: v.sent, sent_media: v.sentMedia, edited_on_x: v.edited, ended_at: new Date() });
         return [[row]];
       }
       if (sql.includes('FROM x_post')) {
@@ -61,34 +75,51 @@ vi.mock('@storage/surreal/client', () => ({
 vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
   traceRecorder: { lifecycle: () => undefined },
   inputEngine: {
+    feed: async (_p: string, input: { anchor: string; files: string[] }) => {
+      h.fed.push([...input.files]); h.order.push('feed');
+      h.media += h.attachAs ?? input.files.length;
+      return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } };
+    },
     type: async (_p: string, input: { text: string }) => {
+      h.order.push('type');
       h.typed.push(input.text);
       h.box = (h.box ?? '') + (h.landsAs ?? input.text);
       return { status: 'ok', value: { checked: false, landed: false, attempts: 1 } };
     },
   },
 }));
+vi.mock('@platform/main/media/media-store-impl', () => ({ resolveMediaPath: (src: string) => h.disk.get(src) ?? null }));
 vi.mock('@platform/main/web-capability/wiring/web-collect-engine', () => ({ resolve: () => ({ pageId: 'p7' }) }));
 vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7, url: '' }), listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
 vi.mock('@modules/x/x-account-repo', () => ({ readWsAccount: async () => ({ wsId: 'ws-1', handle: 'me', restId: 'ME' }) }));
 vi.mock('@modules/x/x-collect-ports', () => ({
   webviewPorts: () => ({
     goto: async (name: string) => { h.goto.push(name); return { ok: true }; },
-    runScript: async (id: string) => {
+    runScript: async (id: string, params: Record<string, unknown>) => {
       if (id === 'x.composeBoxState' && h.missesLeft > 0) { h.missesLeft -= 1; return { found: false, dialogs: 0, boxesAnywhere: 0, ready: 'loading' }; }
-      if (id === 'x.composeBoxState') return h.box === null ? { found: false } : { found: true, count: 1, text: h.box.trim() };
+      if (id === 'x.composeBoxState') return h.box === null ? { found: false } : { found: true, count: 1, text: h.box.trim(), media: h.media };
+      if (id === 'x.composeMediaReady') {
+        const want = Number(params.want);
+        return h.media === want ? { state: 'ready', attached: h.media } : h.media > want ? { state: 'too-many', attached: h.media }
+          : { state: 'timeout', attached: h.media, blobs: h.media, removes: 0, inGroup: 0, buttonEnabled: false, testids: ['tweetButton'] };
+      }
       if (id === 'x.composeSend') {
         h.sends += 1;
         if (h.sendAs !== 'closed') return { state: h.sendAs };
-        h.box = null;
+        h.sentMedia = h.media;
+        h.box = null; h.media = 0;
         return { state: 'closed', toastId: '1900000000000000001' };
       }
-      if (id === 'x.findMyPost') return h.profileHas ? { tweetId: '1900000000000000001' } : { why: 'not-found', seen: 3 };
+      if (id === 'x.findMyPost') {
+        if (!h.profileHas) return { why: 'not-found', seen: 3 };
+        const photos = h.photosOnProfile ?? h.sentMedia;
+        return photos >= Number(params.photos) ? { tweetId: '1900000000000000001', photos } : { why: 'no-photos', tweetId: '1900000000000000001', photos };
+      }
       if (id === 'x.composeClear') {
         if (h.box === null) return { state: 'no-box' };
-        if (h.box === '') return { state: 'empty' };
+        if (h.box === '' && h.media === 0) return { state: 'empty' };
         if (h.clearFails) return { state: 'not-cleared', left: h.box.slice(0, 40) };
-        h.box = '';
+        h.box = ''; h.media = 0;
         return { state: 'cleared', via: 'backspace' };
       }
       throw new Error(`没想到的脚本 ${id}`);
@@ -110,6 +141,7 @@ beforeEach(() => {
   h.rows.length = 0; h.goto.length = 0; h.typed.length = 0;
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0;
+  h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -167,13 +199,21 @@ describe('x.post.fill 填进 X(不发)', () => {
     expect(lock.lockHolder('page:7')).toBeNull();
   }, 10_000);
 
-  it('本期不能填的发法 / 带图 → refused,网页一下没碰', async () => {
+  it('本期不能填的发法 / 要转图的块 / 视频 / 不在本机的图 / SVG → refused,网页一下没碰', async () => {
     const thread = await execute('x.post.fill', fillIn('x', { form: 'thread' }), { caller: 'ui' });
     expect(thread).toMatchObject({ ok: false, kind: 'refused' });
     expect(!thread.ok && thread.why).toContain('第⑤期');
-    const img = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), { type: 'image', attrs: { src: 'media://a.png' } }] }, { caller: 'ui' });
-    expect(img).toMatchObject({ ok: false, kind: 'refused' });
-    expect(!img.ok && img.why).toContain('第④期');
+    const cases: Array<[unknown, string]> = [
+      [{ type: 'mathBlock', attrs: { latex: 'E=mc^2' } }, '公式要先转成图'],
+      [{ type: 'videoBlock', attrs: { src: 'media://videos/v.mp4' } }, '视频还不能填进 X'],
+      [{ type: 'image', attrs: { src: 'https://example.com/a.png' } }, '不在本机图片库'],
+      [{ type: 'image', attrs: { src: 'media://images/c.svg' } }, 'SVG'],
+    ];
+    for (const [block, why] of cases) {
+      const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), block] }, { caller: 'ui' });
+      expect(r).toMatchObject({ ok: false, kind: 'refused' });
+      expect(!r.ok && r.why).toContain(why);
+    }
     expect(h.goto).toEqual([]);
     expect(lock.lockHolder('page:7')).toBeNull();
   });
@@ -184,6 +224,85 @@ describe('x.post.fill 填进 X(不发)', () => {
     expect(!r.ok && r.why).toContain('批复');
     expect(h.goto).toEqual([]);
     expect(h.rows.at(-1)?.caller).toBe('ai');
+  });
+});
+
+const img = (src: string) => ({ type: 'image', attrs: { src } });
+
+describe('带图(第④期)', () => {
+  it('⭐ 先喂图(磁盘路径)、等 X 传完,再贴字;草稿和记录里带着图', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图一张'), img('media://images/a.png'), img('media://images/b.jpg')] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { text: '配图一张', media: ['media://images/a.png', 'media://images/b.jpg'] } });
+    expect(h.fed).toEqual([['/m/images/a.png', '/m/images/b.jpg']]);
+    expect(h.order).toEqual(['feed', 'type']);
+    expect(h.media).toBe(2);
+    const d = draftOf(r);
+    expect(h.posts.get(d)).toMatchObject({ status: 'filled', media: ['media://images/a.png', 'media://images/b.jpg'] });
+  });
+
+  it('只有图没有字 → 只喂图不贴字', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [img('media://images/a.png')] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.order).toEqual(['feed']);
+  });
+
+  it('⭐ 图在本机找不到了 → failed 说清楚,网页没碰之前就停(一张都不少发)', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('x'), img('media://images/gone.png')] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('找不到了');
+    expect(h.fed).toEqual([]);
+    expect(lock.lockHolder('page:7')).toBeNull();
+  });
+
+  it('⭐ X 只挂上一张(传不好)→ failed 带页面实况、连图清掉、没贴字、不留锁', async () => {
+    h.attachAs = 1;
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('两张'), img('media://images/a.png'), img('media://images/b.jpg')] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('挂上 1 / 2');
+    expect(!r.ok && r.why).toContain('已清掉');
+    expect(h.typed).toEqual([]);
+    expect(h.media).toBe(0);
+    expect(lock.lockHolder('page:7')).toBeNull();
+    expect((await pending()).pending).toBeNull();
+  });
+
+  it('框里已经挂着图(上一次留的)→ 不往里放', async () => {
+    h.media = 1;
+    const r = await execute('x.post.fill', fillIn(), { caller: 'ui' });
+    expect(!r.ok && r.why).toContain('已经挂着 1 张图');
+    expect(h.fed).toEqual([]);
+    expect(h.typed).toEqual([]);
+  });
+
+  it('⭐ 发出去:主页上那条图数对上 → sent,记下发出时挂着几张', async () => {
+    const d = draftOf(await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), img('media://images/a.png')] }, { caller: 'ui' }));
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { editedOnX: false } });
+    expect(h.posts.get(d)).toMatchObject({ status: 'sent', sent_media: 1 });
+  });
+
+  it('⭐ 主页上找到了字但图不够 → unseen「图全不全」', async () => {
+    const d = draftOf(await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), img('media://images/a.png'), img('media://images/b.jpg')] }, { caller: 'ui' }));
+    h.photosOnProfile = 1;
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('只看到 1 张图');
+    expect(h.posts.get(d)).toMatchObject({ status: 'unseen' });
+    expect(h.sends).toBe(1);
+  });
+
+  it('人在 X 上删了一张图 → 以框里的为准(核对 1 张),记「在 X 上改过」', async () => {
+    const d = draftOf(await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), img('media://images/a.png'), img('media://images/b.jpg')] }, { caller: 'ui' }));
+    h.media = 1;
+    const r = await execute('x.post.publish', { wsId: 'ws-1', draftId: d }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { editedOnX: true } });
+  });
+
+  it('撤回带图的草稿 → 图和字一起清掉', async () => {
+    const d = draftOf(await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), img('media://images/a.png')] }, { caller: 'ui' }));
+    expect(await execute('x.post.cancel', { wsId: 'ws-1', draftId: d }, { caller: 'ui' })).toMatchObject({ ok: true });
+    expect(h.media).toBe(0);
+    expect(h.box).toBe('');
   });
 });
 

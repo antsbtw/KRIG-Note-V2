@@ -7,11 +7,12 @@
  * 第①期 x.post.prepare(只排版,input:不碰 X 网页、不对外)。
  * 第②期 x.post.fill(填进 X 发推弹窗不发,占着网页等人确认)/ x.post.cancel(清框、放网页)/ x.post.pending(查待发草稿)。
  * 第③期 x.post.publish(人在 X 上看过点确认 → 点 X 的发布 → 去主页核对)/ x.post.history(这段字发过没)。
+ * 第④a期(10-28)fill 带图:note 里存在本机图片库的图先喂进 X 再贴字;转图 / 视频是第④期剩下的,还没做。
  * 每份草稿在 x_post 里一行(fill 建、cancel / publish 写结局)。
  */
 import { capFailed, capRefused, execute } from '@platform/main/capability/capability';
 import { Bad, str, xCap, type O } from './x-capabilities-common';
-import { composePost, type PmNode, type PostForm, type PostPlan } from './x-post-compose';
+import { composePost, fillProblem, type PmNode, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
 import { releasePage } from './x-page-lock';
 import {
   DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
@@ -40,7 +41,7 @@ const logRecordError = (draftId: string, e: unknown): void => {
 const FORMS: readonly PostForm[] = ['single', 'thread', 'longPost', 'article', 'image'];
 /** 第②期能填进 X 的发法;别的先如实拒 */
 const FILLABLE: readonly PostForm[] = ['single'];
-const LATER: Partial<Record<PostForm, string>> = { thread: '第⑤期', longPost: '第⑤期', article: '第⑥期', image: '第④期' };
+const LATER: Partial<Record<PostForm, string>> = { thread: '第⑤期', longPost: '第⑤期', article: '第⑥期', image: '第④期剩下的' };
 
 /** content / noteId 两种给法(prepare、fill 共用) */
 function parseSource(o: O): PrepareIn {
@@ -62,6 +63,20 @@ async function planOf(i: PrepareIn): Promise<PostPlan> {
   if (!note) throw capFailed(`note ${i.noteId} 不存在(或已删除)`);
   const doc = unwrapPmDoc(note.doc) as { content?: PmNode[] };
   return composePost(doc.content ?? []);
+}
+
+/** 图的 media:// → 磁盘路径;解不出来(文件没了)就拒,不少发一张 */
+async function mediaFiles(media: readonly PostMedia[]): Promise<{ srcs: string[]; files: string[] }> {
+  const srcs = media.map((m) => (m.kind === 'render' ? '' : m.src));
+  if (srcs.length === 0) return { srcs, files: [] };
+  /** 动态 import:媒体库拖着 Electron,X 的单测不必拉进来 */
+  const { resolveMediaPath } = await import('@platform/main/media/media-store-impl');
+  const files = srcs.map((src) => {
+    const f = resolveMediaPath(src);
+    if (!f) throw capFailed(`图在本机图片库里找不到了(${src})—— 在 note 里重新放一下这张图再发`);
+    return f;
+  });
+  return { srcs, files };
 }
 
 /** 超时没确认:走执行器的 cancel(caller timer)—— 和人点取消同一条路、同样留痕 */
@@ -93,7 +108,7 @@ export function registerXPostCapabilities(): void {
 
   xCap<FillIn>('output', {
     id: 'x.post.fill',
-    describe: '把 note 的内容按某种发法排好,填进 X 的发推弹窗 —— 不发;网页一直占着,等人在 X 上看过再确认(publish)或取消(cancel),10 分钟没确认自动撤回',
+    describe: '把 note 的内容按某种发法排好,填进 X 的发推弹窗(note 里存在本机的图一起放进去,最多 4 张)—— 不发;网页一直占着,等人在 X 上看过再确认(publish)或取消(cancel),10 分钟没确认自动撤回',
     inputDoc: {
       wsId: '哪个 workspace 的号',
       form: `发法:${FORMS.join(' / ')}(本期只能 single)`,
@@ -120,24 +135,26 @@ export function registerXPostCapabilities(): void {
       if (!opt?.available) throw capRefused(`这段内容不能这么发:${opt?.why ?? '没有这种发法'}`);
       const post = opt.posts[0];
       if (opt.posts.length !== 1) throw capRefused(`排出来是 ${opt.posts.length} 条,单条推只能 1 条`);
-      if (post.media.length > 0) throw capRefused(`带了 ${post.media.length} 个图 / 视频 / 要转图的块 —— 带图第④期才能填进 X;先去掉再发`);
-      if (post.text.trim() === '') throw capRefused('正文是空的');
-      const r = await fillCompose(page.wcId, post.text);
+      const mediaWhy = fillProblem(post.media);
+      if (mediaWhy) throw capRefused(mediaWhy);
+      if (post.text.trim() === '' && post.media.length === 0) throw capRefused('正文是空的');
+      const { srcs, files } = await mediaFiles(post.media);
+      const r = await fillCompose(page.wcId, post.text, files);
       if (!r.ok) throw capFailed(r.why);
       const now = Date.now();
       const p: PendingPost = {
         draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId,
-        form: i.form, text: post.text, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
+        form: i.form, text: post.text, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
       };
       try {
-        await recordFilled({ draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form, text: post.text, caller });
+        await recordFilled({ draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form, text: post.text, media: srcs, caller });
       } catch (e) {
         /** 记不下来就不留这份草稿:发出去了却查不到「发过」比填不进去更糟 */
         const c = await clearCompose(page.wcId);
         throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${c.cleared ? '框已清掉' : `框没清掉:${c.detail}`}`);
       }
       addPending(p, cancelOnTimeout);
-      console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${post.weight} 字)草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
+      console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${post.weight} 字${srcs.length > 0 ? `、${srcs.length} 张图` : ''})草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
       return viewOf(p);
     },
   });
@@ -182,10 +199,10 @@ export function registerXPostCapabilities(): void {
       const o = await publishCompose(page.wcId, p);
       endPublished(p, o);
       releasePage(page.token);
-      await recordEnded(p.draftId, { status: o.outcome, detail: o.detail, tweetId: o.tweetId, sentText: o.sentText, editedOnX: o.editedOnX })
+      await recordEnded(p.draftId, { status: o.outcome, detail: o.detail, tweetId: o.tweetId, sentText: o.sentText, sentMedia: o.sentMedia, editedOnX: o.editedOnX })
         .catch((e) => logRecordError(p.draftId, e));
       const url = o.tweetId ? `https://x.com/${p.handle}/status/${o.tweetId}` : undefined;
-      console.log(`[x.post] 发布 ${p.draftId}(@${p.handle}):${o.outcome} —— ${o.detail}${url ? ` ${url}` : ''}${o.editedOnX ? '(在 X 上改过字)' : ''}`);
+      console.log(`[x.post] 发布 ${p.draftId}(@${p.handle},${o.sentMedia} 张图):${o.outcome} —— ${o.detail}${url ? ` ${url}` : ''}${o.editedOnX ? '(在 X 上改过字)' : ''}`);
       if (o.outcome !== 'sent') throw capFailed(o.detail);
       return { draftId: p.draftId, tweetId: o.tweetId, url, handle: p.handle, editedOnX: o.editedOnX };
     },

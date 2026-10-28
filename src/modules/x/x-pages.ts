@@ -418,6 +418,8 @@ export const X_ANCHORS = {
   replyBox: 'x.replyBox' as AnchorName,
   /** 发推弹窗里的正文框(发推第②期,2026-10-27)—— 首页底下还有一个内嵌发推框,只认弹窗里的 */
   composeBox: 'x.composeBox' as AnchorName,
+  /** 发推弹窗里的选图控件(发推第④期,2026-10-28)—— 喂磁盘文件给它,X 自己上传 */
+  composeFileInput: 'x.composeFileInput' as AnchorName,
 } as const;
 
 /**

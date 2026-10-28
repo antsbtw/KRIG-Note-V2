@@ -34,6 +34,8 @@ export type PendingPost = {
   readonly noteId?: string;
   readonly form: PostForm;
   readonly text: string;
+  /** 带的图(note 里的 media:// 地址,第④期) */
+  readonly media: readonly string[];
   readonly handle: string;
   readonly filledAt: number;
   readonly expiresAt: number;
@@ -72,7 +74,7 @@ export function pendingPost(wsId: string): PendingPost | null {
 
 export function viewOf(p: PendingPost): PendingView {
   return {
-    draftId: p.draftId, wsId: p.wsId, noteId: p.noteId, form: p.form, text: p.text, handle: p.handle,
+    draftId: p.draftId, wsId: p.wsId, noteId: p.noteId, form: p.form, text: p.text, media: p.media, handle: p.handle,
     filledAt: p.filledAt, expiresAt: p.expiresAt,
   };
 }
@@ -121,7 +123,7 @@ export function stopPostDraftTimers(): void {
 export const sameText = (a: string, b: string): boolean => a.replace(/\s/g, '') === b.replace(/\s/g, '');
 
 type BoxState = {
-  found?: boolean; count?: number; text?: string;
+  found?: boolean; count?: number; text?: string; media?: number;
   dialogs?: number; boxesAnywhere?: number; loggedOut?: boolean; ready?: string; width?: number;
 } | null;
 type ClearState = { state?: 'empty' | 'cleared' | 'not-cleared' | 'no-box'; via?: string; left?: string } | null;
@@ -133,11 +135,18 @@ const seen = (b: BoxState): string =>
 
 export type FillOutcome = { readonly ok: true } | { readonly ok: false; readonly why: string };
 
+type MediaState = {
+  state?: 'ready' | 'too-many' | 'timeout' | 'no-dialog'; attached?: number;
+  blobs?: number; removes?: number; inGroup?: number; buttonEnabled?: boolean; testids?: string[];
+} | null;
+
 /**
- * 打开发推弹窗 → 框得是空的、只有一个 → 贴一次 → 读回核对。对不上就清掉。
+ * 打开发推弹窗 → 框得是空的(没字也没图)、只有一个 → 有图先喂图等 X 传完(第④期)→ 贴一次字 → 读回核对。没成就清掉。
+ * files = 磁盘绝对路径(调用方从 media:// 解出来)。
+ * ⚠️ 先图后字:2.5-b(2026-06)真机定的顺序 —— 字先进去再喂图,X 重画编辑器时会和贴字抢。
  * ⚠️ 调之前网页必须已被执行器占着。
  */
-export async function fillCompose(wcId: number, text: string): Promise<FillOutcome> {
+export async function fillCompose(wcId: number, text: string, files: readonly string[] = []): Promise<FillOutcome> {
   const ports = webviewPorts(wcId);
   const go = await ports.goto(X_PAGE_NAME.compose, {});
   if (!go.ok) return { ok: false, why: `发推弹窗没打开:${go.reason ?? '?'}` };
@@ -157,10 +166,27 @@ export async function fillCompose(wcId: number, text: string): Promise<FillOutco
   if ((box.text ?? '') !== '') {
     return { ok: false, why: `发推框里已经有字(「${box.text!.slice(0, 30)}」,可能是 X 留着的上一次)—— 没往里填,免得两段拼在一起` };
   }
+  if ((box.media ?? 0) > 0) return { ok: false, why: `发推框里已经挂着 ${box.media} 张图(可能是 X 留着的上一次)—— 没往里填` };
   const page = resolvePage({ wcId });
   if ('error' in page) return { ok: false, why: page.error };
+  if (files.length > 0) {
+    const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.composeFileInput, files, check: { kind: 'none' } });
+    if (fed.status === 'failed') return { ok: false, why: await undo(wcId, `图没放进去:${fed.reason}`) };
+    const m = (await ports.runScript(X_SCRIPTS.composeMediaReady, { want: files.length })) as MediaState;
+    if (m?.state !== 'ready') {
+      const what = m?.state === 'timeout'
+        ? `60 秒还没传完:挂上 ${m.attached ?? 0} / ${files.length} 张、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
+          + `(信号 blob ${m.blobs ?? '?'} / removeMedia ${m.removes ?? '?'} / attachments ${m.inGroup ?? '?'};弹窗里的 testid:${(m.testids ?? []).join(',')})`
+        : m?.state === 'too-many' ? `挂上了 ${m.attached} 张,比要的 ${files.length} 张多`
+          : `弹窗不见了(${m?.state ?? '脚本没回话'})`;
+      console.warn(`[x.post] 图没传好:${what}`);
+      return { ok: false, why: await undo(wcId, `图没传好:${what}`) };
+    }
+    console.log(`[x.post] ${files.length} 张图已挂上发推框`);
+  }
+  if (text.trim() === '') return { ok: true };
   const typed = await inputEngine.type(page.pageId, { anchor: X_ANCHORS.composeBox, text, check: { kind: 'none' } });
-  if (typed.status === 'failed') return { ok: false, why: `没填进去:${typed.reason}` };
+  if (typed.status === 'failed') return { ok: false, why: files.length > 0 ? await undo(wcId, `字没填进去:${typed.reason}`) : `没填进去:${typed.reason}` };
 
   /** 读回核对:粘贴后编辑器要一点时间画出来,最多等 3 秒 */
   let got = '';
@@ -177,6 +203,12 @@ export async function fillCompose(wcId: number, text: string): Promise<FillOutco
   };
 }
 
+/** 填到一半没成:清掉已经放进去的,把清的结局接在原因后面 */
+async function undo(wcId: number, why: string): Promise<string> {
+  const c = await clearCompose(wcId);
+  return `${why} —— ${c.cleared ? '已清掉' : `清也没清掉:${c.detail}`}`;
+}
+
 export type ClearOutcome = { readonly cleared: boolean; readonly detail: string };
 
 /** 清空框;清掉了(或本来就空 / 弹窗不在)→ 回首页把弹窗关掉。清不掉不导航(别把字留在一个看不见的弹窗里) */
@@ -186,7 +218,7 @@ export async function clearCompose(wcId: number): Promise<ClearOutcome> {
   if (c?.state === 'not-cleared') return { cleared: false, detail: `框里还剩「${c.left ?? ''}」` };
   if (c?.state !== 'cleared' && c?.state !== 'empty' && c?.state !== 'no-box') return { cleared: false, detail: `清框脚本没回话(${JSON.stringify(c)})` };
   const go = await ports.goto(X_PAGE_NAME.home, {});
-  const detail = c.state === 'no-box' ? '弹窗已经不在了' : c.state === 'empty' ? '框本来就是空的' : `已清空(${c.via})`;
+  const detail = c.state === 'no-box' ? '弹窗已经不在了' : c.state === 'empty' ? '框本来就是空的' : `已清空(${c.via === 'media' ? '只有图' : c.via})`;
   return { cleared: true, detail: go.ok ? detail : `${detail};回首页没成:${go.reason ?? '?'}` };
 }
 
@@ -196,11 +228,13 @@ export type PublishOutcome = {
   readonly tweetId?: string;
   /** 发出去的字(以点发布前框里的为准 —— 人可能在 X 上又改过) */
   readonly sentText: string;
+  /** 点发布前框里挂着几张图 */
+  readonly sentMedia: number;
   readonly editedOnX: boolean;
 };
 
 type SendState = { state?: string; toastId?: string; why?: string } | null;
-type FindState = { tweetId?: string; why?: string; seen?: number } | null;
+type FindState = { tweetId?: string; photos?: number; why?: string; seen?: number } | null;
 
 /**
  * 点 X 的「发布」→ 去我的主页核对(作者是我、正文对得上、时间不早于点发布)。
@@ -211,10 +245,12 @@ type FindState = { tweetId?: string; why?: string; seen?: number } | null;
 export async function publishCompose(wcId: number, p: PendingPost): Promise<PublishOutcome> {
   const ports = webviewPorts(wcId);
   const box = (await ports.runScript(X_SCRIPTS.composeBoxState, {})) as BoxState;
-  if (!box?.found) return { outcome: 'failed', detail: `发推弹窗不在了(${seen(box)})—— 没点发布`, sentText: p.text, editedOnX: false };
+  if (!box?.found) return { outcome: 'failed', detail: `发推弹窗不在了(${seen(box)})—— 没点发布`, sentText: p.text, sentMedia: p.media.length, editedOnX: false };
   const sentText = box.text ?? '';
-  if (sentText.trim() === '') return { outcome: 'failed', detail: '发推框是空的 —— 没点发布', sentText, editedOnX: false };
-  const editedOnX = !sameText(sentText, p.text);
+  /** 图以框里挂着的为准(人可能在 X 上删了一张) */
+  const sentMedia = box.media ?? 0;
+  if (sentText.trim() === '' && sentMedia === 0) return { outcome: 'failed', detail: '发推框是空的 —— 没点发布', sentText, sentMedia, editedOnX: false };
+  const editedOnX = !sameText(sentText, p.text) || sentMedia !== p.media.length;
 
   const since = Date.now();
   const sent = (await ports.runScript(X_SCRIPTS.composeSend, {})) as SendState;
@@ -222,23 +258,29 @@ export async function publishCompose(wcId: number, p: PendingPost): Promise<Publ
     const what = sent?.state === 'not-sent' ? '点了发布,15 秒弹窗还在 —— X 没接受(看一眼 X 上有没有报错)'
       : sent?.state === 'disabled' ? 'X 的发布按钮是灰的(字数超了?)—— 没点'
       : `没点成发布:${sent?.state ?? '脚本没回话'}${sent?.why ? `(${sent.why})` : ''}`;
-    return { outcome: sent?.state === 'not-sent' ? 'unseen' : 'failed', detail: what, sentText, editedOnX };
+    return { outcome: sent?.state === 'not-sent' ? 'unseen' : 'failed', detail: what, sentText, sentMedia, editedOnX };
   }
 
   /** 到我的主页上找 —— 弹窗关了不等于发出去了(X 可能弹错误提示后关窗) */
   const go = await ports.goto(X_PAGE_NAME.profile, { handle: p.handle });
   if (!go.ok) {
-    return { outcome: 'unseen', detail: `点了发布、弹窗关了,但去主页核对没打开:${go.reason ?? '?'} —— 请在 X 上看一眼`, tweetId: sent.toastId, sentText, editedOnX };
+    return { outcome: 'unseen', detail: `点了发布、弹窗关了,但去主页核对没打开:${go.reason ?? '?'} —— 请在 X 上看一眼`, tweetId: sent.toastId, sentText, sentMedia, editedOnX };
   }
-  const found = (await ports.runScript(X_SCRIPTS.findMyPost, { needle: replyNeedle(sentText), me: p.handle, since })) as FindState;
+  const found = (await ports.runScript(X_SCRIPTS.findMyPost, { needle: replyNeedle(sentText), me: p.handle, since, photos: sentMedia })) as FindState;
+  if (found?.why === 'no-photos') {
+    return {
+      outcome: 'unseen', tweetId: found.tweetId, sentText, sentMedia, editedOnX,
+      detail: `在你主页上找到了这条,但只看到 ${found.photos ?? 0} 张图(发的时候挂着 ${sentMedia} 张)—— 请在 X 上看一眼图全不全`,
+    };
+  }
   if (found?.tweetId) {
     const also = sent.toastId && sent.toastId !== found.tweetId ? `(X 提示条里的是 ${sent.toastId},不一样)` : '';
-    return { outcome: 'sent', detail: `在你主页上核对到了${also}`, tweetId: found.tweetId, sentText, editedOnX };
+    return { outcome: 'sent', detail: `在你主页上核对到了${also}`, tweetId: found.tweetId, sentText, sentMedia, editedOnX };
   }
   return {
     outcome: 'unseen',
     detail: `点了发布、弹窗关了,但在你主页上没找到这条(主页上你的推文 ${found?.seen ?? '?'} 条${found?.why && found.why !== 'not-found' ? `,${found.why}` : ''})${sent.toastId ? `;X 提示条里有个链接 ${sent.toastId}` : ''} —— 请在 X 上看一眼`,
-    tweetId: sent.toastId, sentText, editedOnX,
+    tweetId: sent.toastId, sentText, sentMedia, editedOnX,
   };
 }
 

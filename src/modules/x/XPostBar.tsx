@@ -87,7 +87,7 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
     <div style={{ ...bar, flexWrap: 'wrap' }}>
       <b style={{ flex: 'none' }}>KRIG</b>
       <span style={{ flex: 1, minWidth: 200 }}>
-        已填进下面的发推框 —— 这就是发出去的样子,核对一下。
+        已填进下面的发推框{draft.media.length > 0 ? `(带 ${draft.media.length} 张图)` : ''} —— 这就是发出去的样子,核对一下。
         <span style={{ color: 'var(--text-muted)' }}> {mmss(draft.expiresAt - now)} 后没确认自动撤回</span>
         {note && <div style={{ fontSize: 12, color: note.startsWith('❌') ? '#e5484d' : '#d97706', marginTop: 2 }}>{note}</div>}
       </span>
