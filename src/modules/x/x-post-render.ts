@@ -10,7 +10,7 @@
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
-import { needsImage, type PmNode } from './x-post-compose';
+import { countImageBlocks, imageSections, needsImage, SECTION_MIN_SHOTS, type PmNode } from './x-post-compose';
 
 type Shot = { readonly src: string } | { readonly error: string };
 
@@ -18,24 +18,36 @@ type Shot = { readonly src: string } | { readonly error: string };
 const shots = new Map<string, Shot | Promise<Shot>>();
 const SHOTS_MAX = 200;
 
-/** 记住结果用的 key:块本身(去掉块 id —— 同样的公式挪个位置不用重画) */
+/** 记住结果用的 key:块本身(去掉块 id 和我们自己标的结果 —— 同样的公式挪个位置不用重画) */
 function keyOf(n: PmNode): string {
   const attrs = { ...(n.attrs ?? {}) } as Record<string, unknown>;
-  delete attrs.id;
+  for (const k of ['id', 'xImage', 'xImageError', 'xSectionImage', 'xSectionImageError']) delete attrs[k];
   return JSON.stringify({ t: n.type, a: attrs, c: n.content ?? null });
 }
 
-async function shoot(n: PmNode): Promise<Shot> {
+/** 画好的取回来;没画过就开始画(进行中的是 Promise) */
+function cached(key: string, draw: () => Promise<Shot>): Shot | Promise<Shot> {
+  let got = shots.get(key);
+  if (got === undefined) {
+    if (shots.size >= SHOTS_MAX) shots.clear();
+    const p = draw().then((r) => { shots.set(key, r); return r; });
+    shots.set(key, p);
+    got = p;
+  }
+  return got;
+}
+
+async function shoot(what: string, draw: (te: TextEditingApi) => Promise<{ dataUrl: string }>): Promise<Shot> {
   try {
     const te = requireCapabilityApi<TextEditingApi>('text-editing');
-    const img = await te.renderBlockImage(n);
+    const img = await draw(te);
     const media = requireCapabilityApi<MediaStorageApi>('media-storage');
     const put = await media.mediaPutBase64(img.dataUrl, 'image/png', 'x-post-render.png');
     if (!put.success || !put.mediaUrl) return { error: `存进图片库没成:${put.error ?? '?'}` };
     return { src: put.mediaUrl };
   } catch (e) {
     const why = e instanceof Error ? e.message : String(e);
-    console.warn(`[x-post] ${n.type} 转图没成:${why}`);
+    console.warn(`[x-post] ${what} 转图没成:${why}`);
     return { error: why };
   }
 }
@@ -48,18 +60,29 @@ export function annotateImages(content: readonly PmNode[]): { nodes: PmNode[]; p
   const pending: Promise<unknown>[] = [];
   const walk = (n: PmNode): PmNode => {
     if (needsImage(n) !== null) {
-      const key = keyOf(n);
-      let got = shots.get(key);
-      if (got === undefined) {
-        if (shots.size >= SHOTS_MAX) shots.clear();
-        const p = shoot(n).then((r) => { shots.set(key, r); return r; });
-        shots.set(key, p);
-        got = p;
-      }
+      const got = cached(keyOf(n), () => shoot(n.type, (te) => te.renderBlockImage(n)));
       if (got instanceof Promise) { pending.push(got); return n; }
       return { ...n, attrs: { ...(n.attrs ?? {}), ...('src' in got ? { xImage: got.src } : { xImageError: got.error }) } };
     }
     return n.content ? { ...n, content: n.content.map(walk) } : n;
   };
   return { nodes: content.map(walk), pending };
+}
+
+/**
+ * 整篇转图(10-29):要转图的块够多时,把整篇按节(imageSections)画成图,标在每节第一个块的
+ * attrs.xSectionImage / xSectionImageError 上。不够多就原样返回(那个选项不给,不白画)。
+ */
+export function annotateSections(content: readonly PmNode[]): { nodes: PmNode[]; pending: Promise<unknown>[] } {
+  const nodes = [...content];
+  const pending: Promise<unknown>[] = [];
+  if (countImageBlocks(content) < SECTION_MIN_SHOTS) return { nodes, pending };
+  for (const idx of imageSections(content)) {
+    const sec = idx.map((k) => content[k]);
+    const got = cached(`section:${sec.map(keyOf).join('\n')}`, () => shoot('整篇转图一节', (te) => te.renderBlocksImage(sec)));
+    if (got instanceof Promise) { pending.push(got); continue; }
+    const head = nodes[idx[0]];
+    nodes[idx[0]] = { ...head, attrs: { ...(head.attrs ?? {}), ...('src' in got ? { xSectionImage: got.src } : { xSectionImageError: got.error }) } };
+  }
+  return { nodes, pending };
 }

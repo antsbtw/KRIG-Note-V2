@@ -102,6 +102,144 @@ export async function renderBlockImage(node: BlockJson): Promise<BlockImage> {
   }
 }
 
+/**
+ * ⭐ 把几个块(一节)原样排进一张卡片(整篇转图,用户 10-29 选「整篇转图 + 分条」)。
+ * 字、列表、引用照常排;公式 / 流程图 / 函数图像 / SVG 图嵌成 SVG;代码 / 表格 / HTML 同单块;普通图片转成 data URI 嵌进去
+ * (外链 / media:// 直接引用会污染 canvas 出不了 PNG)。宽度、字号和单块卡片一样。
+ */
+export async function renderBlocksImage(nodes: readonly BlockJson[]): Promise<BlockImage> {
+  const box = el('div', { display: 'flex', flexDirection: 'column', gap: '14px' });
+  for (const n of nodes) {
+    const e = await blockEl(n);
+    if (e) box.appendChild(e);
+  }
+  if (box.childElementCount === 0) throw new Error('这一节是空的');
+  return htmlCard(box);
+}
+
+async function blockEl(n: BlockJson): Promise<HTMLElement | null> {
+  switch (n.type) {
+    case 'paragraph': case 'heading': {
+      const head = n.type === 'heading' || n.attrs?.isTitle === true;
+      const level = (n.attrs?.level as number | undefined) ?? 2;
+      const p = el('div', { fontSize: `${head ? TEXT_SIZE + Math.max(2, 8 - level * 2) : TEXT_SIZE}px`, fontWeight: head ? '700' : '400', lineHeight: '1.7' });
+      inline(n.content, p);
+      return p.childNodes.length > 0 ? p : null;
+    }
+    case 'bulletList': case 'orderedList': case 'taskList': {
+      const l = el(n.type === 'orderedList' ? 'ol' : 'ul', { margin: '0', paddingLeft: '1.4em', lineHeight: '1.7', listStyleType: n.type === 'taskList' ? 'none' : '' });
+      if (n.type === 'orderedList' && typeof n.attrs?.start === 'number') l.setAttribute('start', String(n.attrs.start));
+      for (const item of n.content ?? []) {
+        const li = el('li', { marginLeft: `${((item.attrs?.indent as number | undefined) ?? 0) * 1.4}em` });
+        if (n.type === 'taskList') li.appendChild(el('span', {}, item.attrs?.checked ? '☑ ' : '☐ '));
+        await children(item.content, li);
+        l.appendChild(li);
+      }
+      return l;
+    }
+    case 'blockquote': {
+      const q = el('div', { borderLeft: `4px solid ${CARD_MUTED}`, paddingLeft: '14px', color: '#c4c8cc' });
+      await children(n.content, q);
+      return q;
+    }
+    case 'callout': {
+      const c = el('div', { display: 'flex', gap: '10px', background: CARD_MUTED, borderRadius: '8px', padding: '12px 14px' });
+      c.appendChild(el('span', {}, (n.attrs?.emoji as string) || '💡'));
+      const body = el('div', { flex: '1' });
+      await children(n.content, body);
+      c.appendChild(body);
+      return c;
+    }
+    case 'horizontalRule': return el('hr', { border: '0', borderTop: `1px solid ${CARD_MUTED}`, margin: '4px 0', width: '100%' });
+    case 'toggleList': case 'columnList': case 'column': case 'frameBlock': case 'listItem': case 'taskItem': {
+      const d = el('div', { display: 'flex', flexDirection: 'column', gap: '10px' });
+      await children(n.content, d);
+      return d;
+    }
+    case 'mathBlock': {
+      const tex = ((n.attrs?.latex as string) || textOf(n)).trim();
+      if (tex === '') return null;
+      const r = renderTeX(tex, MATH_SIZE, true);
+      return svgEl(r.svg, r.width, r.height);
+    }
+    case 'codeBlock': {
+      const lang = ((n.attrs?.language as string) || '').toLowerCase();
+      const src = textOf(n);
+      if (lang === 'mermaid') {
+        const svg = await renderMermaidToExportSvg(src);
+        const size = svgSize(svg);
+        if (!size) throw new Error('流程图渲染出来量不出尺寸');
+        return svgEl(svg, size.width, size.height);
+      }
+      const pre = el('pre', { margin: '0', fontFamily: MONO, fontSize: `${CODE_SIZE}px`, lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#0d0e10', borderRadius: '8px', padding: '12px' });
+      pre.textContent = src.replace(/\n$/, '');
+      return pre;
+    }
+    case 'mathVisual': {
+      const svg = (n.attrs?.thumbnail as string) || '';
+      if (svg.trim() === '') throw new Error('函数图像还没生成缩略图(在 note 里双击进全屏画一次再退出)');
+      const size = svgSize(svg);
+      if (!size) throw new Error('函数图像量不出尺寸');
+      return svgEl(svg, size.width, size.height);
+    }
+    case 'image': {
+      const src = (n.attrs?.src as string) || '';
+      if (src === '') return null;
+      const res = await fetch(src);
+      if (!res.ok) throw new Error(`读不到图(${res.status}):${src.slice(0, 60)}`);
+      if (/\.svg$/i.test(src)) {
+        const svg = await res.text();
+        const size = svgSize(svg);
+        if (!size) throw new Error('SVG 图量不出尺寸');
+        return svgEl(svg, size.width, size.height);
+      }
+      const img = document.createElement('img');
+      img.src = await blobToDataUrl(await res.blob());
+      await img.decode();
+      Object.assign(img.style, { display: 'block', maxWidth: '100%', borderRadius: '8px' });
+      return img;
+    }
+    case 'table': return tableEl(n);
+    case 'htmlBlock': {
+      const b = el('div', {});
+      b.innerHTML = textOf(n);
+      b.querySelectorAll('script').forEach((x) => x.remove());
+      return b;
+    }
+    default: {
+      const t = textOf(n).trim();
+      return t === '' ? null : el('div', { lineHeight: '1.7' }, t);
+    }
+  }
+}
+
+async function children(nodes: readonly BlockJson[] | undefined, into: HTMLElement): Promise<void> {
+  for (const c of nodes ?? []) {
+    const e = await blockEl(c);
+    if (e) into.appendChild(e);
+  }
+}
+
+/** SVG 嵌进 HTML:比内容区宽就等比缩小,居中 */
+function svgEl(svg: string, w: number, h: number): HTMLElement {
+  const k = Math.min(1, CONTENT_W / w);
+  const d = el('div', { display: 'flex', justifyContent: 'center' });
+  d.innerHTML = svg.replace(/currentColor/g, CARD_FG).replace(/<svg\b([^>]*)>/i, (_a, attrs: string) => {
+    const vb = /\bviewBox\s*=/i.test(attrs) ? '' : ` viewBox="0 0 ${w} ${h}"`;
+    return `<svg${attrs.replace(/\s(width|height|style)\s*=\s*"[^"]*"/gi, '')}${vb} width="${w * k}" height="${h * k}">`;
+  });
+  return d;
+}
+
+function blobToDataUrl(b: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error ?? new Error('读图失败'));
+    r.readAsDataURL(b);
+  });
+}
+
 // ── SVG 卡片 ──
 
 /** 量 SVG 的尺寸:width/height(px)→ 退 viewBox */

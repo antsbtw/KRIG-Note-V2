@@ -4,7 +4,7 @@
  * 钉三件事:每种块转成什么样 / 建议哪种发法 / 推串在哪断。
  */
 import { describe, it, expect } from 'vitest';
-import { composePost, fillProblem, needsImage, type PmNode } from '../../src/modules/x/x-post-compose';
+import { composePost, fillBlock, fillProblem, imageSections, needsImage, type PmNode } from '../../src/modules/x/x-post-compose';
 
 const t = (text: string, marks?: PmNode['marks']): PmNode => ({ type: 'text', text, marks });
 const p = (...c: (string | PmNode)[]): PmNode => ({ type: 'paragraph', content: c.map((x) => (typeof x === 'string' ? t(x) : x)) });
@@ -172,12 +172,12 @@ describe('建议哪种发法', () => {
     expect(r.options.find((o) => o.form === 'single')!.available).toBe(false);
     expect(r.suggested).toBe('thread');
   });
-  it('五种发法都列出来;「整段转图」这期还不能用并写明原因', () => {
+  it('五种发法都列出来;没有要转图的块时「整篇转图」不给并写明原因', () => {
     const r = composePost([p('a')]);
     expect(r.options.map((o) => o.form)).toEqual(['single', 'thread', 'longPost', 'article', 'image']);
     const img2 = r.options.find((o) => o.form === 'image')!;
     expect(img2.available).toBe(false);
-    expect(img2.why).toBeTruthy();
+    expect(img2.why).toContain('不到 2 个');
   });
   it('长推写明要 Premium', () => {
     expect(composePost([p('a')]).options.find((o) => o.form === 'longPost')!.note).toContain('Premium');
@@ -261,5 +261,38 @@ describe('推串:能不能填进 X(10-28)', () => {
     expect(fillBlock(opt([p('甲'.repeat(200)), p('乙'.repeat(200))], 'thread'))).toBeNull();
     expect(fillBlock(opt([p('甲'.repeat(100)), hr, p('乙'), { type: 'mathBlock', content: [t('E=mc^2')] }], 'thread'))).toContain('第 2 条');
     expect(fillBlock(opt([p('短')], 'longPost'))).toContain('第⑤期');
+  });
+});
+
+describe('⭐ 10-29 整篇转图 + 分条', () => {
+  const math = (latex: string, attrs: Record<string, unknown> = {}): PmNode => ({ type: 'mathBlock', attrs: { latex, ...attrs } });
+  const opt = (nodes: PmNode[]) => composePost(nodes).options.find((o) => o.form === 'image')!;
+
+  it('只有 1 个要转图的块:不给这个选项', () => {
+    expect(opt([p('a'), math('x')]).available).toBe(false);
+  });
+  it('按小标题 / 分隔线切节,一节一条;正文是这节开头;还没画好就是占位、不能填', () => {
+    const o = opt([p('开头一段'), math('a'), h('第二节'), p('说明'), math('b'), hr, p('收尾')]);
+    expect(o.available).toBe(true);
+    expect(o.posts.map((x) => x.text)).toEqual(['开头一段 1/3', '第二节 2/3', '收尾 3/3']);
+    expect(o.posts.every((x) => x.media.length === 1 && x.media[0].kind === 'render')).toBe(true);
+    expect(fillBlock(o)).toContain('还没转成图');
+  });
+  it('每节第一个块标了 xSectionImage → 那条带这张图,能填;标了 xSectionImageError → 原因给人看', () => {
+    const ok = opt([p('甲', ), math('a'), h('乙'), math('b')].map((n, i) => (i === 0 || i === 2 ? { ...n, attrs: { ...(n.attrs ?? {}), xSectionImage: `media://images/s${i}.png` } } : n)));
+    expect(ok.posts.map((x) => x.media[0])).toEqual([
+      { kind: 'image', src: 'media://images/s0.png', alt: '甲', fromBlock: 'section' },
+      { kind: 'image', src: 'media://images/s2.png', alt: '乙', fromBlock: 'section' },
+    ]);
+    expect(fillBlock(ok)).toBeNull();
+    const bad = opt([{ ...p('甲'), attrs: { xSectionImageError: '画坏了' } }, math('a'), math('b')]);
+    expect(fillBlock(bad)).toContain('画坏了');
+  });
+  it('一节字太多 / 块太多也切;开头太长截断', () => {
+    const long = '长'.repeat(200);
+    const o = opt([p(long), p(long), math('a'), math('b')]);
+    expect(o.posts.length).toBe(2);
+    expect(o.posts[0].text).toBe(`${'长'.repeat(60)}… 1/2`);
+    expect(imageSections(Array.from({ length: 10 }, () => p('x')))).toEqual([[0, 1, 2, 3, 4, 5, 6, 7], [8, 9]]);
   });
 });

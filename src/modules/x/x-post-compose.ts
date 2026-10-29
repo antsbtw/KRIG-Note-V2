@@ -20,7 +20,8 @@ export type PmNode = {
   readonly text?: string;
 };
 
-export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html' | 'svg' | 'inlineMath';
+/** section:整篇转图时的一节(不是单个块;needsImage 不会给出它) */
+export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html' | 'svg' | 'inlineMath' | 'section';
 export type PostMedia =
   /** fromBlock:这张是哪种块转成的图(转图才有)—— 一图一条要认它 */
   | { readonly kind: 'image'; readonly src: string; readonly alt: string; readonly fromBlock?: RenderWhat }
@@ -59,7 +60,7 @@ const MAX_IMAGES = 4;
 const THREAD_SUFFIX_RESERVE = 6;
 const THREAD_BUDGET = X_POST_LIMIT - THREAD_SUFFIX_RESERVE;
 const RENDER_LABEL: Record<RenderWhat, string> = {
-  math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块', svg: 'SVG 图', inlineMath: '带行内公式的段落',
+  math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块', svg: 'SVG 图', inlineMath: '带行内公式的段落', section: '这一节',
 };
 
 /** 短代码发文字(用户 10-28 选「短的发文字」;3 行 / 80 字是我提的界线) */
@@ -320,12 +321,12 @@ export function fillProblem(ms: readonly PostMedia[]): string | null {
 /** X 一个推串最多几条 */
 export const X_THREAD_MAX = 25;
 /** 现在能填进 X 的发法(推串 2026-10-28 用户「先把推文的各种形式搞完善」从第⑤期提前) */
-export const FILLABLE: readonly PostForm[] = ['single', 'thread'];
-const LATER: Partial<Record<PostForm, string>> = { longPost: '第⑤期', article: '第⑥期', image: '第④期剩下的' };
+export const FILLABLE: readonly PostForm[] = ['single', 'thread', 'image'];
+const LATER: Partial<Record<PostForm, string>> = { longPost: '第⑤期', article: '第⑥期' };
 
 /** 这种发法现在还不能填进 X 的话,为什么(x.post.fill 的 preflight 先挡,不碰网页) */
 export function formNotFillable(form: PostForm): string | null {
-  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推和推串`;
+  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推、推串、整篇转图`;
 }
 
 /**
@@ -463,6 +464,71 @@ function buildThread(units: readonly Unit[], warn: Set<string>): PostDraft[] {
   return done.map((c, i) => draft(c.texts, c.media, n > 1 ? ` ${i + 1}/${n}` : ''));
 }
 
+// ── 整篇转图 ──
+
+/**
+ * ⭐ 整篇转图(用户 10-29 选「整篇转图 + 分条」):要转图的块有好几个时,给一个选项 ——
+ * 整篇按节画成图(文字、公式、表格… 原样排在一起),一节一张图一条推,正文是这节的开头。
+ * 怎么切节(我定的,不是用户定的):小标题 / 分隔线处切;一节的字超过 SECTION_CHARS 或块数超过 SECTION_BLOCKS
+ * 也切(防一节画成一张很长的图,X 时间线上只露一截)。只切 note 的顶层块。
+ * 画图在渲染进程(x-post-render 的 annotateSections),画好的标在每节第一个块的 attrs.xSectionImage / xSectionImageError。
+ */
+const SECTION_CHARS = 300;
+const SECTION_BLOCKS = 8;
+/** 要转图的块至少这么多,才给「整篇转图」(用户 10-29:「检查到多个这样的 block,给用户一个选项」) */
+export const SECTION_MIN_SHOTS = 2;
+
+/** 整篇里要转图的块有几个(往容器里递归) */
+export function countImageBlocks(nodes: readonly PmNode[]): number {
+  let n = 0;
+  for (const c of nodes) n += needsImage(c) !== null ? 1 : countImageBlocks(c.content ?? []);
+  return n;
+}
+
+/** 切节:每节是 nodes 的下标(分隔线本身不进任何一节) */
+export function imageSections(nodes: readonly PmNode[]): number[][] {
+  const out: number[][] = [];
+  let cur: number[] = [];
+  let chars = 0;
+  const flush = (): void => { if (cur.length > 0) out.push(cur); cur = []; chars = 0; };
+  nodes.forEach((n, i) => {
+    if (n.type === 'horizontalRule') { flush(); return; }
+    const len = [...textOf(n)].length;
+    if (cur.length > 0 && (n.type === 'heading' || chars + len > SECTION_CHARS || cur.length >= SECTION_BLOCKS)) flush();
+    cur.push(i);
+    chars += len;
+  });
+  flush();
+  return out;
+}
+
+/** 一节的开头当正文:第一个有字的块的第一行,太长截断 */
+const OPENING_CHARS = 60;
+function opening(nodes: readonly PmNode[]): string {
+  for (const n of nodes) {
+    const line = textOf(n).split('\n').map((l) => l.trim()).find((l) => l !== '');
+    if (!line) continue;
+    const g = [...segmenter.segment(line)].map((x) => x.segment);
+    return g.length > OPENING_CHARS ? `${g.slice(0, OPENING_CHARS).join('')}…` : line;
+  }
+  return '';
+}
+
+function buildSections(nodes: readonly PmNode[]): PostDraft[] {
+  const secs = imageSections(nodes);
+  const n = secs.length;
+  return secs.map((idx, i) => {
+    const sec = idx.map((k) => nodes[k]);
+    const head = sec[0].attrs ?? {};
+    const src = head.xSectionImage as string | undefined;
+    const text = opening(sec);
+    const m: PostMedia = src
+      ? { kind: 'image', src, alt: text || '整篇转图', fromBlock: 'section' }
+      : { kind: 'render', what: 'section', source: text, error: head.xSectionImageError as string | undefined };
+    return draft(text === '' ? [] : [{ k: 'text', text, role: 'para' }], [m], n > 1 ? ` ${i + 1}/${n}` : '');
+  });
+}
+
 // ── 合起来 ──
 
 export function composePost(nodes: readonly PmNode[]): PostPlan {
@@ -481,6 +547,8 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
   const renders = media.filter((m) => m.kind === 'render');
   const headings = texts.filter((u) => u.role === 'heading').length;
   const hasTable = renders.some((m) => m.kind === 'render' && m.what === 'table');
+  const imageBlocks = countImageBlocks(nodes);
+  const sections = imageBlocks >= SECTION_MIN_SHOTS ? buildSections(nodes) : [];
 
   let suggested: PostForm;
   let reason: string;
@@ -512,7 +580,12 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
         note: '要 Premium(还认不出你的号是不是 Premium)', posts: [whole],
       },
       { form: 'article', label: 'X 文章', available: true, note: 'X 文章要 Premium;表格 / 公式 / 代码在文章里原样排(第⑥期)', posts: [article] },
-      { form: 'image', label: '整段转图', available: false, why: '还没做(第④期剩下的):整段排成一张图 + 一句话正文', posts: [] },
+      {
+        form: 'image', label: '整篇转图', available: sections.length > 0 && sections.length <= X_THREAD_MAX,
+        why: sections.length === 0 ? `要转图的块不到 ${SECTION_MIN_SHOTS} 个,用不着整篇转图`
+          : sections.length > X_THREAD_MAX ? `切出来 ${sections.length} 节,超过 X 推串的 ${X_THREAD_MAX} 条` : undefined,
+        note: '整篇按节画成图,一节一张一条推,排版和 note 里一样', posts: sections,
+      },
     ],
     warnings: [...ctx.warn],
   };

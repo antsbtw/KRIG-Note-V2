@@ -143,6 +143,8 @@ export interface TextEditingApi {
    * 渲染进程用;画不出来 throw(带原因)。X 发推第④期起用(2026-10-28)。
    */
   readonly renderBlockImage: (node: import('./render/render-block-image').BlockJson) => Promise<import('./render/render-block-image').BlockImage>;
+  /** 几个块(一节)原样排进一张卡片(整篇转图,10-29) */
+  readonly renderBlocksImage: (nodes: readonly import('./render/render-block-image').BlockJson[]) => Promise<import('./render/render-block-image').BlockImage>;
 
   /** 工厂函数 */
   readonly createEmptyDoc: () => DriverSerialized;

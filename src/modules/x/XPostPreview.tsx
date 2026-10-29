@@ -57,7 +57,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML', svg: 'SVG 图', inlineMath: '行内公式段' };
+const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML', svg: 'SVG 图', inlineMath: '行内公式段', section: '这一节' };
 const box = { border: '1px solid var(--border-popup)', borderRadius: 8 } as const;
 const btn = {
   background: 'transparent', border: '1px solid var(--border-popup)', borderRadius: 4,
@@ -126,7 +126,7 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
     ?? plan?.options.find((o) => o.available && formNotFillable(o.form) === null)?.form;
   const preferred = plan ? (formNotFillable(plan.suggested) === null ? plan.suggested : fallback ?? plan.suggested) : undefined;
   const current = plan ? plan.options.find((o) => o.form === (form ?? preferred)) : undefined;
-  const limit = current?.form === 'single' || current?.form === 'thread' ? X_POST_LIMIT : current?.form === 'longPost' ? 25000 : null;
+  const limit = current?.form === 'single' || current?.form === 'thread' || current?.form === 'image' ? X_POST_LIMIT : current?.form === 'longPost' ? 25000 : null;
   const draft = pending.pending;
   const now = useNow(draft !== null);
   const ended = pending.ended && pending.ended.at >= openedAt ? pending.ended : null;
@@ -172,7 +172,7 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
                     border: '1px solid var(--border-popup)',
                     background: o.form === current.form ? 'var(--accent-bg)' : 'transparent', color: 'inherit',
                   }}>
-                  {o.label}{o.form === 'thread' && o.available ? ` ${o.posts.length} 条` : ''}{o.form === plan.suggested ? ' ✓' : ''}
+                  {o.label}{(o.form === 'thread' || o.form === 'image') && o.available ? ` ${o.posts.length} 条` : ''}{o.form === plan.suggested ? ' ✓' : ''}
                 </button>
               ))}
             </div>

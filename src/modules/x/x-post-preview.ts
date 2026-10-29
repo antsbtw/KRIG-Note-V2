@@ -19,7 +19,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getXHostState, subscribeXHost } from './x-host-registry';
 import { X_WEB_VIEW_ID } from './x-view-id';
 import { pendingSnap, refreshPending, rememberDraftNote, subscribePending } from './x-post-pending-store';
-import { annotateImages } from './x-post-render';
+import { annotateImages, annotateSections } from './x-post-render';
 
 const DEBOUNCE_MS = 300;
 
@@ -141,7 +141,11 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
 
   const prepare = async (raw: unknown[]): Promise<void> => {
     /** 要转图的块先标上画好的图;还没画好的先按占位排,画完再排一次 */
-    const { nodes: content, pending } = annotateImages(raw as PmNode[]);
+    const one = annotateImages(raw as PmNode[]);
+    /** 整篇转图按原内容画(和单块的结果互不影响) */
+    const whole = annotateSections(one.nodes);
+    const content = whole.nodes;
+    const pending = [...one.pending, ...whole.pending];
     latest = content;
     const my = ++seq;
     if (pending.length > 0) void Promise.all(pending).then(() => { if (my === seq && open === me) void prepare(raw); });
