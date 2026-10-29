@@ -8,7 +8,8 @@
  * ⚠️ 字不能在这里改(用户 10-27 定 B:字只在 note 里改,note 是唯一原文)。
  */
 import { useEffect, useState } from 'react';
-import { fillBlock, formNotFillable, type PostDraft, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
+import { fillBlock, formNotFillable, type PostDraft, type PostForm, type PostMedia, type PostPlan, type ThreadEdit, type ThreadLayout } from './x-post-compose';
+import { mergeNext, moveMedia, splitBefore } from './x-post-layout';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
 import type { PostedBefore } from './x-post-repo';
@@ -39,6 +40,8 @@ export type PreviewProps = {
   readonly onBackToNote: () => void;
   readonly onClose: () => void;
   readonly onPublish: (form: PostForm) => void;
+  /** 推串手动分条改了(null = 恢复自动排) */
+  readonly onLayout: (l: ThreadLayout | null) => void;
   /** 这段字以前发过的(x.post.history)—— 只提醒,不拦(用户 10-21「有问题提示就好了」) */
   readonly posted: readonly PostedBefore[];
 };
@@ -115,8 +118,77 @@ function PostCard({ post, handle, limit, last }: { post: PostDraft; handle: stri
   );
 }
 
-export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pending, openedAt, onBackToNote, onClose, onPublish, posted }: PreviewProps) {
+/**
+ * 推串调整分条(用户 10-29「让用户自己拖动合并」):每条拆成件 —— 字一段段列出,段之间能「从这里分开」;
+ * 相邻两条之间能「合并」;图能拖到别的条。字不能在这里改(字只在 note 里改)。
+ */
+function ThreadEditor({ edit, posts, limit, onLayout }: { edit: ThreadEdit; posts: readonly PostDraft[]; limit: number | null; onLayout: (l: ThreadLayout) => void }) {
+  const [over, setOver] = useState<number | null>(null);
+  const link = { ...btn, border: 'none', padding: '2px 6px', fontSize: 11, color: '#1d9bf0' } as const;
+  return (
+    <div>
+      {edit.posts.map((idx, k) => {
+        const texts = idx.filter((i) => edit.items[i].k === 'text');
+        const media = idx.filter((i) => edit.items[i].k === 'media');
+        const post = posts[k];
+        const bad = post && limit !== null && post.weight > limit;
+        return (
+          <div key={k}>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setOver(k); }}
+              onDragLeave={() => setOver((o) => (o === k ? null : o))}
+              onDrop={(e) => {
+                e.preventDefault();
+                setOver(null);
+                const item = Number(e.dataTransfer.getData('text/x-post-item'));
+                if (Number.isInteger(item)) onLayout(moveMedia(edit.key, edit.posts, item, k));
+              }}
+              style={{ ...box, padding: 8, background: over === k ? 'var(--accent-bg)' : 'transparent' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+                第 {k + 1} 条{post ? ` · ${post.weight}${limit !== null ? ` / ${limit}` : ''}` : ''}{bad ? ' ⚠ 超了' : ''}{media.length > 4 ? ' ⚠ 图超过 4 张' : ''}
+              </div>
+              {texts.map((i, j) => {
+                const it = edit.items[i];
+                return (
+                  <div key={i}>
+                    {j > 0 && <button type="button" style={link} onClick={() => onLayout(splitBefore(edit.key, edit.items, edit.posts, k, i))}>✂ 从这里分开</button>}
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 13, lineHeight: 1.5 }}>{it.k === 'text' ? it.text : ''}</div>
+                  </div>
+                );
+              })}
+              {media.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                  {media.map((i) => {
+                    const it = edit.items[i];
+                    const m = it.k === 'media' ? it.m : null;
+                    return (
+                      <div key={i} draggable title="拖到别的条" onDragStart={(e) => e.dataTransfer.setData('text/x-post-item', String(i))}
+                        style={{ width: 88, height: 66, ...box, overflow: 'hidden', cursor: 'grab', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11 }}>
+                        {m?.kind === 'image' ? <img src={m.src} alt={m.alt} draggable={false} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          : m?.kind === 'render' ? (RENDER_NAME[m.what] ?? m.what) : '🎬'}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            {k < edit.posts.length - 1 && (
+              <div style={{ textAlign: 'center', margin: '4px 0' }}>
+                <button type="button" style={link} onClick={() => onLayout(mergeNext(edit.key, edit.items, edit.posts, k))}>⊕ 和下一条合并</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {edit.posts.length > 1 && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>图可以拖到别的条;字在 note 里改</div>}
+    </div>
+  );
+}
+
+export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pending, openedAt, onBackToNote, onClose, onPublish, onLayout, posted }: PreviewProps) {
   const [form, setForm] = useState<PostForm | null>(initialForm ?? null);
+  /** 推串「调整分条」模式 */
+  const [editing, setEditing] = useState(false);
   const plan = state.kind === 'ok' ? state.plan : null;
   /** 人没选过 → 跟着建议走(note 改了建议可能变);人选的那种变得不可用 → 回到建议 */
   useEffect(() => {
@@ -184,8 +256,17 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
             </div>
             {current.note && <div style={{ fontSize: 11, color: '#d97706', marginBottom: 8 }}>ⓘ {current.note}</div>}
             {current.form === 'article' && plan.title && <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{plan.title}</div>}
+            {current.form === 'thread' && (
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginBottom: 6 }}>
+                {plan.threadEdit.manual && <button type="button" style={btn} onClick={() => onLayout(null)} title="丢掉手动排的,回到自动分条">↺ 恢复自动</button>}
+                <button type="button" style={editing ? btnMain : btn} onClick={() => setEditing(!editing)}
+                  title="合并相邻两条、从某段字前分开、把图拖到别的条">{editing ? '✓ 调好了' : '✎ 调整分条'}</button>
+              </div>
+            )}
             <div style={{ ...box, padding: 12 }}>
-              {current.posts.map((p, i) => <PostCard key={i} post={p} handle={handle} limit={limit} last={i === current.posts.length - 1} />)}
+              {current.form === 'thread' && editing
+                ? <ThreadEditor edit={plan.threadEdit} posts={current.posts} limit={limit} onLayout={onLayout} />
+                : current.posts.map((p, i) => <PostCard key={i} post={p} handle={handle} limit={limit} last={i === current.posts.length - 1} />)}
             </div>
             {posted.length > 0 && (
               <div style={{ marginTop: 8, fontSize: 12, color: '#d97706' }}>

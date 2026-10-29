@@ -14,7 +14,7 @@
  */
 import { capFailed, capRefused, execute } from '@platform/main/capability/capability';
 import { Bad, str, xCap, type O } from './x-capabilities-common';
-import { FILLABLE, composePost, fillBlock, formNotFillable, type PmNode, type PostForm, type PostMedia, type PostPlan } from './x-post-compose';
+import { FILLABLE, composePost, fillBlock, formNotFillable, type PmNode, type PostForm, type PostMedia, type PostPlan, type ThreadLayout } from './x-post-compose';
 import { releasePage } from './x-page-lock';
 import {
   DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, type DraftPost, type FillPost, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
@@ -26,7 +26,8 @@ import { X_PAGE_NAME } from './x-pages';
 
 const isPmNode = (v: unknown): v is PmNode => !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';
 
-type PrepareIn = { readonly content?: readonly PmNode[]; readonly noteId?: string };
+/** layout:推串人排过的分条(预览里合并 / 分开 / 挪图,10-29);对不上就照自动排,warnings 里说 */
+type PrepareIn = { readonly content?: readonly PmNode[]; readonly noteId?: string; readonly layout?: ThreadLayout };
 type FillIn = PrepareIn & { readonly wsId: string; readonly form: PostForm };
 type CancelIn = { readonly wsId: string; readonly draftId: string; readonly why: CancelWhy };
 type DraftIn = { readonly wsId: string; readonly draftId: string };
@@ -47,23 +48,33 @@ const FORMS: readonly PostForm[] = ['single', 'thread', 'longPost', 'article', '
 /** content / noteId 两种给法(prepare、fill 共用) */
 function parseSource(o: O): PrepareIn {
   const noteId = typeof o.noteId === 'string' && o.noteId !== '' ? o.noteId : undefined;
+  const layout = parseLayout(o.layout);
   if (o.content !== undefined) {
     if (!Array.isArray(o.content) || !o.content.every(isPmNode)) throw new Bad('content 要块数组(每个有 type)');
-    return { content: o.content as PmNode[], noteId };
+    return { content: o.content as PmNode[], noteId, layout };
   }
   if (noteId === undefined) throw new Bad('要 content(块数组)或 noteId');
-  return { noteId };
+  return { noteId, layout };
+}
+
+function parseLayout(v: unknown): ThreadLayout | undefined {
+  if (v === undefined || v === null) return undefined;
+  const l = v as { key?: unknown; posts?: unknown };
+  if (typeof l.key !== 'string' || !Array.isArray(l.posts) || !l.posts.every((p) => Array.isArray(p) && p.every((i) => Number.isInteger(i)))) {
+    throw new Bad('layout 要 { key: string, posts: number[][] }(x.post.prepare 返回的 threadEdit 里有 key 和 posts)');
+  }
+  return { key: l.key, posts: l.posts as number[][] };
 }
 
 async function planOf(i: PrepareIn): Promise<PostPlan> {
-  if (i.content) return composePost(i.content);
+  if (i.content) return composePost(i.content, i.layout);
   /** 动态 import:X 的单测不必把 note 存储整套拖进来 */
   const { getNote } = await import('@platform/main/note/capability-impl');
   const { unwrapPmDoc } = await import('@platform/main/note/envelope');
   const note = await getNote(i.noteId as string);
   if (!note) throw capFailed(`note ${i.noteId} 不存在(或已删除)`);
   const doc = unwrapPmDoc(note.doc) as { content?: PmNode[] };
-  return composePost(doc.content ?? []);
+  return composePost(doc.content ?? [], i.layout);
 }
 
 /** 图的 media:// → 磁盘路径;解不出来(文件没了)就拒,不少发一张 */
@@ -94,6 +105,7 @@ export function registerXPostCapabilities(): void {
     inputDoc: {
       content: '可选:块数组(PM JSON,界面给选区 / 整篇;给了就不读库)',
       noteId: '可选:note id —— 不给 content 时到库里读整篇',
+      layout: '可选:推串手动分条 { key, posts }(在返回的 threadEdit 上改 posts:每条放哪几件;key 原样带回)',
     },
     parse: parseSource,
     subject: (i) => (i.noteId ? `note:${i.noteId}` : undefined),
@@ -115,6 +127,7 @@ export function registerXPostCapabilities(): void {
       form: `发法:${FORMS.join(' / ')}(现在能填的:${FILLABLE.join(' / ')})`,
       content: '可选:块数组(PM JSON,界面给选区 / 整篇;给了就不读库)',
       noteId: '可选:note id —— 不给 content 时到库里读整篇;给了也会记在草稿上',
+      layout: '可选:推串手动分条(同 x.post.prepare)',
     },
     parse: (o) => {
       if (!FORMS.includes(o.form as PostForm)) throw new Bad(`form 只认 ${FORMS.join(' / ')}`);

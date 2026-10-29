@@ -12,7 +12,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import { xDataCall } from './x-data-types';
-import type { PmNode, PostForm, PostPlan } from './x-post-compose';
+import type { PmNode, PostForm, PostPlan, ThreadLayout } from './x-post-compose';
 import { XPostPreview, type PreviewState, type FillState } from './XPostPreview';
 import type { PostedBefore } from './x-post-repo';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
@@ -102,6 +102,9 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
   let posted: readonly PostedBefore[] = [];
   /** 最新的那段内容 —— 点发布时填的就是它(和预览上看到的同一份) */
   let latest: unknown[] = [];
+  /** 推串人排过的分条(预览里合并 / 分开 / 挪图);note 改了对不上,排版会照自动排并说一句,这里随之清掉 */
+  let layout: ThreadLayout | null = null;
+  let lastRaw: unknown[] | null = null;
   const openedAt = Date.now();
   const draw = (): void => {
     if (open !== me) return;
@@ -111,6 +114,7 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
       onBackToNote: () => { te.focusInstance(instanceId); },
       onClose: closePostPreview,
       onPublish: (form: PostForm) => { void publish(form); },
+      onLayout: (l: ThreadLayout | null) => { layout = l; if (lastRaw) void prepare(lastRaw); },
     }));
   };
   const publish = async (form: PostForm): Promise<void> => {
@@ -121,7 +125,7 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
     fill = { phase: 'filling', step: '填进 X 发推框…' };
     draw();
     /** noteId 进发推记录:note 顶上「发过」那行按它查(第③b期) */
-    const r = await xDataCall({ op: 'postFill', wsId, form, content: latest as PmNode[], noteId });
+    const r = await xDataCall({ op: 'postFill', wsId, form, content: latest as PmNode[], noteId, layout: form === 'thread' ? layout ?? undefined : undefined });
     /** 预览窗中途被关了也要记:X 上那条的「回 note 改」靠它找回 note */
     if (r.status === 'ok') rememberDraftNote((r.value as { draftId: string }).draftId, instanceId);
     if (open !== me) return;
@@ -141,6 +145,7 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
 
   const prepare = async (raw: unknown[]): Promise<void> => {
     /** 要转图的块先标上画好的图;还没画好的先按占位排,画完再排一次 */
+    lastRaw = raw;
     const one = annotateImages(raw as PmNode[]);
     /** 整篇转图按原内容画(和单块的结果互不影响) */
     const whole = annotateSections(one.nodes);
@@ -149,8 +154,9 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
     latest = content;
     const my = ++seq;
     if (pending.length > 0) void Promise.all(pending).then(() => { if (my === seq && open === me) void prepare(raw); });
-    const r = await xDataCall({ op: 'postPrepare', content });
+    const r = await xDataCall({ op: 'postPrepare', content, layout: layout ?? undefined });
     if (my !== seq || open !== me) return;
+    if (r.status === 'ok' && layout && !(r.value as PostPlan).threadEdit.manual) layout = null;
     state = r.status === 'ok' ? { kind: 'ok', plan: r.value as PostPlan } : { kind: 'failed', why: r.reason };
     if (r.status !== 'ok') console.warn(`[x-post] 排版没成:${r.reason}`);
     draw();

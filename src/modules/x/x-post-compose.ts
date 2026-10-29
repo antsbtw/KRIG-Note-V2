@@ -51,6 +51,8 @@ export type PostPlan = {
   /** note 标题(整篇发时有;X 文章用) */
   readonly title?: string;
   readonly options: readonly PostOption[];
+  /** 推串的「件」和分组(预览里手动合并 / 分开 / 拖图用) */
+  readonly threadEdit: ThreadEdit;
   readonly warnings: readonly string[];
 };
 
@@ -343,6 +345,7 @@ export function fillBlock(opt: PostOption): string | null {
   if (n > X_THREAD_MAX) return `排出来是 ${n} 条,X 一个推串最多 ${X_THREAD_MAX} 条 —— 删短一点,或改发 X 文章`;
   for (const [k, p] of opt.posts.entries()) {
     const why = fillProblem(p.media)
+      ?? mediaProblem(p.media)
       ?? (p.text.trim() === '' && p.media.length === 0 ? '是空的' : null)
       ?? (p.weight > X_POST_LIMIT ? `超过字数了(${p.weight} / ${X_POST_LIMIT})` : null);
     if (why) return n > 1 ? `第 ${k + 1} 条:${why}` : why === '是空的' ? '正文是空的' : why;
@@ -402,8 +405,20 @@ const isShot = (m: PostMedia): boolean => m.kind === 'render' || (m.kind === 'im
  * pack:转成的图也合并(一条最多 4 张)—— 一图一条排出来超过 THREAD_SUGGEST_MAX 条时用,
  * 代价是 X 时间线上拼格显示会裁(点开看全图),选项上写明。
  */
+type Group = { texts: TextUnit[]; media: PostMedia[] };
+
 function buildThread(units: readonly Unit[], warn: Set<string>, pack = false): PostDraft[] {
-  type Cur = { texts: TextUnit[]; media: PostMedia[] };
+  return drafts(threadGroups(units, warn, pack));
+}
+
+/** 每组一条推;页码跟在正文后面同一行(用户 10-28 选的:空一行再写页码,在 X 上看着像另一条) */
+function drafts(groups: readonly Group[]): PostDraft[] {
+  const n = groups.length;
+  return groups.map((c, i) => draft(c.texts, c.media, n > 1 ? ` ${i + 1}/${n}` : ''));
+}
+
+function threadGroups(units: readonly Unit[], warn: Set<string>, pack = false): Group[] {
+  type Cur = Group;
   const done: Cur[] = [];
   let cur: Cur = { texts: [], media: [] };
   const nonEmpty = (): boolean => cur.texts.length > 0 || cur.media.length > 0;
@@ -463,9 +478,70 @@ function buildThread(units: readonly Unit[], warn: Set<string>, pack = false): P
     }
   }
   flush();
-  const n = done.length;
-  /** 页码跟在正文后面同一行(用户 10-28 选的:空一行再写页码,在 X 上看着像另一条) */
-  return done.map((c, i) => draft(c.texts, c.media, n > 1 ? ` ${i + 1}/${n}` : ''));
+  return done;
+}
+
+// ── 推串手动排(用户 10-29「让用户自己拖动合并」)──
+
+/**
+ * 推串拆成「件」:一段字 / 一张图。自动排好的每条是几件,人在预览里合并 / 分开 / 拖图改的就是「哪条放哪几件」。
+ * 只改分组,不改字、不改顺序里的字(字只在 note 里改)。
+ */
+export type ThreadItem = { readonly k: 'text'; readonly text: string } | { readonly k: 'media'; readonly m: PostMedia };
+/** 人排的:posts[i] = 第 i 条放哪几件(下标进 items);key 是这些件的指纹 —— note 改了对不上就作废,重新自动排 */
+export type ThreadLayout = { readonly key: string; readonly posts: readonly (readonly number[])[] };
+export type ThreadEdit = {
+  readonly key: string;
+  readonly items: readonly ThreadItem[];
+  /** 现在每条放哪几件(人排过就是人排的) */
+  readonly posts: readonly (readonly number[])[];
+  readonly manual: boolean;
+};
+
+/** 图的指纹不看 src:转图还在画(render)和画好了(image)是同一件 */
+const mediaKey = (m: PostMedia): string =>
+  m.kind === 'render' ? `shot:${m.what}` : m.kind === 'image' && m.fromBlock ? `shot:${m.fromBlock}` : `${m.kind}:${m.src}`;
+
+function layoutKey(items: readonly ThreadItem[]): string {
+  const s = items.map((it) => (it.k === 'text' ? `t:${it.text}` : `m:${mediaKey(it.m)}`)).join('\u0000');
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return `${items.length}:${h.toString(36)}`;
+}
+
+/** 人排的用不了(note 改了 / 件对不上)→ 为什么;用得了 → null */
+function layoutProblem(layout: ThreadLayout, key: string, n: number): string | null {
+  if (layout.key !== key) return 'note 内容变了';
+  const seen = new Set<number>();
+  for (const post of layout.posts) {
+    if (post.length === 0) return '有一条是空的';
+    for (const i of post) {
+      if (!Number.isInteger(i) || i < 0 || i >= n || seen.has(i)) return '分组对不上';
+      seen.add(i);
+    }
+  }
+  return seen.size === n ? null : '有的件没放进任何一条';
+}
+
+function threadEdit(groups: readonly Group[], layout: ThreadLayout | undefined, warn: Set<string>): { groups: Group[]; edit: ThreadEdit } {
+  const items: ThreadItem[] = [];
+  const texts: TextUnit[] = [];
+  const auto: number[][] = groups.map((g) => {
+    const idx: number[] = [];
+    for (const u of g.texts) { idx.push(items.length); texts[items.length] = u; items.push({ k: 'text', text: u.text }); }
+    for (const m of g.media) { idx.push(items.length); items.push({ k: 'media', m }); }
+    return idx;
+  });
+  const key = layoutKey(items);
+  const why = layout ? layoutProblem(layout, key, items.length) : 'none';
+  if (layout && why) warn.add(`手动排的分条用不上了(${why}),已重新自动排`);
+  if (why) return { groups: [...groups], edit: { key, items, posts: auto, manual: false } };
+  const posts = (layout as ThreadLayout).posts;
+  const mine = posts.map((idx) => ({
+    texts: idx.filter((i) => items[i].k === 'text').map((i) => texts[i]),
+    media: idx.flatMap((i) => { const it = items[i]; return it.k === 'media' ? [it.m] : []; }),
+  }));
+  return { groups: mine, edit: { key, items, posts, manual: true } };
 }
 
 // ── 整篇转图 ──
@@ -536,7 +612,7 @@ function buildSections(nodes: readonly PmNode[]): PostDraft[] {
 
 // ── 合起来 ──
 
-export function composePost(nodes: readonly PmNode[]): PostPlan {
+export function composePost(nodes: readonly PmNode[], layout?: ThreadLayout): PostPlan {
   const ctx = unitsOf(nodes);
 
   const texts = ctx.units.filter((u): u is TextUnit => u.k === 'text');
@@ -547,11 +623,13 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
   /** 一图一条:转成的图超过 1 张,一条推放不下(拼在一起 X 会裁) */
   const mediaWhy = (shots > 1 ? `转成的图有 ${shots} 张,一图一条要发推串` : null) ?? mediaProblem(media);
   const singleWhy = whole.weight > X_POST_LIMIT ? `${whole.weight} / ${X_POST_LIMIT},超了 ${whole.weight - X_POST_LIMIT}` : mediaWhy;
-  const oneEach = buildThread(ctx.units, ctx.warn);
+  const oneEach = threadGroups(ctx.units, ctx.warn);
   /** 一图一条超过 3 条:转成的图也并起来(一条最多 4 张),条数少了才用 */
-  const packed = oneEach.length > THREAD_SUGGEST_MAX ? buildThread(ctx.units, ctx.warn, true) : oneEach;
-  const thread = packed.length < oneEach.length ? packed : oneEach;
-  const threadPacked = thread !== oneEach;
+  const packed = oneEach.length > THREAD_SUGGEST_MAX ? threadGroups(ctx.units, ctx.warn, true) : oneEach;
+  const autoGroups = packed.length < oneEach.length ? packed : oneEach;
+  const threadPacked = autoGroups !== oneEach;
+  const edited = threadEdit(autoGroups, layout, ctx.warn);
+  const thread = drafts(edited.groups);
   const renders = media.filter((m) => m.kind === 'render');
   const headings = texts.filter((u) => u.role === 'heading').length;
   const hasTable = renders.some((m) => m.kind === 'render' && m.what === 'table');
@@ -591,7 +669,8 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
       { form: 'single', label: '单条推', available: singleWhy === null, why: singleWhy ?? undefined, posts: [whole] },
       {
         form: 'thread', label: '推串', available: thread.length > 0, posts: thread,
-        note: threadPacked ? `一图一条要 ${oneEach.length} 条,太长,转成的图并在一起了 —— X 时间线上几张图拼格显示会裁,点开看全图` : undefined,
+        note: edited.edit.manual ? '按你手动排的分条'
+          : threadPacked ? `一图一条要 ${oneEach.length} 条,太长,转成的图并在一起了 —— X 时间线上几张图拼格显示会裁,点开看全图` : undefined,
       },
       {
         form: 'longPost', label: '长推', available: whole.weight <= LONG_POST_LIMIT && mediaWhy === null,
@@ -605,6 +684,7 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
         note: '整篇画成一张图一条推,排版和 note 里一样', posts: sections,
       },
     ],
+    threadEdit: edited.edit,
     warnings: [...ctx.warn],
   };
 }

@@ -24,7 +24,7 @@ import type { SearchRecipe } from '@shared/types/x-timeline-types';
 import type { TweetRecord } from './x-timeline-audit';
 import type { XUserRecord } from './x-user-audit';
 import type { PeopleFilter } from './x-people-query';
-import type { PmNode, PostForm } from './x-post-compose';
+import type { PmNode, PostForm, ThreadLayout } from './x-post-compose';
 
 /**
  * ⚠️ 通道名**不在这里** —— 在 `@shared/ipc/channel-names` 的 `X_DATA_INVOKE`。
@@ -291,8 +291,8 @@ export type XDataInvoke =
   /** ⭐ 现在能不能取关(每日上限 + 最小间隔)—— dayStartIso 由 renderer 按本地时区给 */
   | { readonly op: 'unfollowGate'; readonly dayStartIso: string }
   /** ⭐ 发推:note 内容 → 发文方案(能力 x.post.prepare,只排版不发)—— 回 `PostPlan` */
-  | { readonly op: 'postPrepare'; readonly content?: readonly PmNode[]; readonly noteId?: string }
-  | { readonly op: 'postFill'; readonly wsId: string; readonly form: PostForm; readonly content?: readonly PmNode[]; readonly noteId?: string }
+  | { readonly op: 'postPrepare'; readonly content?: readonly PmNode[]; readonly noteId?: string; readonly layout?: ThreadLayout }
+  | { readonly op: 'postFill'; readonly wsId: string; readonly form: PostForm; readonly content?: readonly PmNode[]; readonly noteId?: string; readonly layout?: ThreadLayout }
   | { readonly op: 'postCancel'; readonly wsId: string; readonly draftId: string; readonly why?: 'user' | 'back-to-note' | 'timeout' }
   | { readonly op: 'postPending'; readonly wsId: string }
   | { readonly op: 'postPublish'; readonly wsId: string; readonly draftId: string }
