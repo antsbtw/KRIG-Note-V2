@@ -81,6 +81,11 @@ function MediaCell({ m }: { m: PostMedia }) {
 /** X 的 1 / 2 / 3 / 4 图版式:2 = 左右;3 = 左大右二;4 = 田字 */
 function MediaGrid({ media }: { media: readonly PostMedia[] }) {
   if (media.length === 0) return null;
+  /** 单张图 X 按原比例整张显示(10-29 真机:X 发推框里转图整张都在),预览别再按 16:9 裁 */
+  const only = media[0];
+  if (media.length === 1 && only.kind === 'image') {
+    return <div style={{ ...box, overflow: 'hidden', marginTop: 8 }}><img src={only.src} alt={only.alt} style={{ display: 'block', width: '100%', height: 'auto' }} /></div>;
+  }
   const n = Math.min(media.length, 4);
   const areas = n === 1 ? '"a"' : n === 2 ? '"a b"' : n === 3 ? '"a b" "a c"' : '"a b" "c d"';
   return (
