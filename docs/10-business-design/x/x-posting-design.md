@@ -364,3 +364,9 @@ AI                     ─┘                          ▼
 - 用户 10-28 定:代码 →「短的发文字」(3 行内且 ≤80 字发文字,更长转图;阈值是我提的)。
 - 零件现成:src/lib/svg-to-png.ts、mathjax-svg renderTeX、renderMermaidToExportSvg、collect-renderable-blocks(6 月旧管道已拆,零件闲置)。
 - 测法:一个 note 每种块各一个,先只看预览(零对外),满意再真发。
+
+### 13.4 无图推串「+」加不出来(10-28,✅ 已修,用户真机通过)
+- 现象:第 1 条填好后点「+」,第 1 条字被清空、第 2 条没出来。
+- 真因(收件箱 probe 在 X 网页上对照实验):X 的「+」只认真点击 —— 脚本 .click() / 合成鼠标序列都会清字不加条;CDP Input.dispatchMouseEvent 一点就好。之前「弹窗被重画」「没点中就贴」两个推断均证否。
+- 修:输入底座 tap 加 trusted(CDP 真点击);X 锚点 x.composeAddButton;加条脚本拆 check / wait(43c9f892)。
+- 同日:推串排条不再见小标题就开新条(整节塞得下就接着写);建议的发法还不能填时预览先选能发的(96371812)。
