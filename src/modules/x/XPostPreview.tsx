@@ -143,7 +143,8 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
 
   return (
     <div style={{
-      position: 'fixed', top: 56, right: 16, width: 400, maxHeight: 'calc(100vh - 80px)', zIndex: 9000,
+      /** 手机屏那么大(用户 10-29:「至少像一台手机屏幕」;iPhone 约 440×956)—— 看到的和读者手机上的宽度一样;窗口不够高就占满 */
+      position: 'fixed', top: 56, right: 16, width: 440, height: 'min(956px, calc(100vh - 80px))', zIndex: 9000,
       display: 'flex', flexDirection: 'column', background: 'var(--bg-popup)', color: 'var(--text-bright)',
       ...box, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', fontSize: 13,
       fontFamily: '-apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif',
