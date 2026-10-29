@@ -10,7 +10,7 @@
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { MediaStorageApi } from '@capabilities/media-storage/types';
-import { countImageBlocks, imageSections, needsImage, SECTION_MIN_SHOTS, type PmNode } from './x-post-compose';
+import { imageSections, needsImage, sectionsOffered, type PmNode } from './x-post-compose';
 
 type Shot = { readonly src: string } | { readonly error: string };
 
@@ -70,13 +70,13 @@ export function annotateImages(content: readonly PmNode[]): { nodes: PmNode[]; p
 }
 
 /**
- * 整篇转图(10-29):要转图的块够多时,把整篇按节(imageSections)画成图,标在每节第一个块的
+ * 整篇转图(10-29):给这个选项时(sectionsOffered:转图块够多 / 推串太长),把整篇按节(imageSections)画成图,标在每节第一个块的
  * attrs.xSectionImage / xSectionImageError 上。不够多就原样返回(那个选项不给,不白画)。
  */
 export function annotateSections(content: readonly PmNode[]): { nodes: PmNode[]; pending: Promise<unknown>[] } {
   const nodes = [...content];
   const pending: Promise<unknown>[] = [];
-  if (countImageBlocks(content) < SECTION_MIN_SHOTS) return { nodes, pending };
+  if (!sectionsOffered(content)) return { nodes, pending };
   for (const idx of imageSections(content)) {
     const sec = idx.map((k) => content[k]);
     const got = cached(`section:${sec.map(keyOf).join('\n')}`, () => shoot('整篇转图一节', (te) => te.renderBlocksImage(sec)));

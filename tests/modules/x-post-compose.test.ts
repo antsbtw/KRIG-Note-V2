@@ -110,17 +110,22 @@ describe('每种块转成什么样', () => {
       shot('codeBlock', 3, { language: 'mermaid' }, [t('graph TD')]),
       img('media://images/cat.png'), p('完'),
     ];
-    const posts = thread(doc);
-    expect(posts.map((x) => [x.text.replace(/ ?\d+\/\d+$/, ''), x.media.length])).toEqual([
+    /** 3 条以内:一图一条 */
+    const short = doc.slice(0, 5);
+    expect(thread(short).map((x) => [x.text.replace(/ ?\d+\/\d+$/, ''), x.media.length])).toEqual([
       ['质能方程如下:', 1],
       ['', 1],
-      ['安装:\n\nnpm install krig', 1],
-      ['', 1],
-      ['完', 1],
+      ['安装:\n\nnpm install krig', 0],
     ]);
-    const r = composePost(doc);
+    const r = composePost(short);
     expect(r.options.find((o) => o.form === 'single')!.why).toContain('一图一条');
     expect(r.suggested).toBe('thread');
+    /** ⭐ 一图一条要 5 条 > 3:转成的图并在一起(一条最多 4 张),写明拼格会裁 */
+    const all = composePost(doc);
+    const th = all.options.find((o) => o.form === 'thread')!;
+    expect(th.posts.map((x) => x.media.length)).toEqual([4, 1]);
+    expect(th.note).toContain('拼格');
+    expect(all.suggested).toBe('thread');
   });
   it('分隔线不出字', () => expect(single([p('a'), hr, p('b')]).text).toBe('a\n\nb'));
   it('提示框:图标 + 正文', () => {
@@ -154,13 +159,17 @@ describe('建议哪种发法', () => {
     expect(r.suggested).toBe('thread');
     expect(r.options.find((o) => o.form === 'single')!.available).toBe(false);
   });
-  it('超 280 且有两个以上小标题 → X 文章', () => {
-    const r = composePost([h('一'), p('字'.repeat(100)), h('二'), p('字'.repeat(100))]);
-    expect(r.suggested).toBe('article');
+  it('⭐ 10-29 推串 3 条以内照常建议推串(有小标题也是)', () => {
+    expect(composePost([h('一'), p('字'.repeat(100)), h('二'), p('字'.repeat(100))]).suggested).toBe('thread');
   });
-  it('超 280 且有表格 → X 文章', () => {
-    const r = composePost([p('字'.repeat(150)), { type: 'table', content: [] }]);
-    expect(r.suggested).toBe('article');
+  it('⭐ 10-29 推串超过 3 条:纯文字长文 → 整篇转图(3 张以内);有结构且画图也超 3 张 → X 文章', () => {
+    const long = [p('字'.repeat(250)), p('字'.repeat(250)), p('字'.repeat(250)), p('字'.repeat(250))];
+    const r = composePost(long);
+    expect(r.options.find((o) => o.form === 'thread')!.posts.length).toBeGreaterThan(3);
+    expect(r.suggested).toBe('image');
+    expect(r.reason).toContain('超过 3 条');
+    const many = [1, 2, 3, 4].flatMap((i) => [h(`节${i}`), p('字'.repeat(250))]);
+    expect(composePost(many).suggested).toBe('article');
   });
   it('短,但有公式 → 单条推 + 转图附上', () => {
     const r = composePost([p('公式'), { type: 'mathBlock', attrs: { latex: 'a' } }]);
@@ -289,10 +298,10 @@ describe('⭐ 10-29 整篇转图 + 分条', () => {
     expect(fillBlock(bad)).toContain('画坏了');
   });
   it('一节字太多 / 块太多也切;开头太长截断', () => {
-    const long = '长'.repeat(200);
+    const long = '长'.repeat(400);
     const o = opt([p(long), p(long), math('a'), math('b')]);
     expect(o.posts.length).toBe(2);
     expect(o.posts[0].text).toBe(`${'长'.repeat(60)}… 1/2`);
-    expect(imageSections(Array.from({ length: 10 }, () => p('x')))).toEqual([[0, 1, 2, 3, 4, 5, 6, 7], [8, 9]]);
+    expect(imageSections(Array.from({ length: 14 }, () => p('x')))).toEqual([[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [12, 13]]);
   });
 });
