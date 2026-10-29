@@ -22,7 +22,8 @@ export type PmNode = {
 
 export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html' | 'svg' | 'inlineMath';
 export type PostMedia =
-  | { readonly kind: 'image'; readonly src: string; readonly alt: string }
+  /** fromBlock:这张是哪种块转成的图(转图才有)—— 一图一条要认它 */
+  | { readonly kind: 'image'; readonly src: string; readonly alt: string; readonly fromBlock?: RenderWhat }
   | { readonly kind: 'video'; readonly src: string }
   /** 要渲染成图的块(第④期才真渲染) */
   | { readonly kind: 'render'; readonly what: RenderWhat; readonly source: string; readonly error?: string };
@@ -155,7 +156,7 @@ const addMedia = (ctx: Ctx, m: PostMedia): void => { ctx.units.push({ k: 'media'
 /** 要转图的块:画好了(attrs.xImage)就是一张图;没画好就是占位(带画不出来的原因),fillProblem 会挡 */
 const render = (ctx: Ctx, n: PmNode, what: RenderWhat, source: string): void => {
   const src = n.attrs?.xImage as string | undefined;
-  if (src) { addMedia(ctx, { kind: 'image', src, alt: `${RENDER_LABEL[what]}(转成的图)` }); return; }
+  if (src) { addMedia(ctx, { kind: 'image', src, alt: `${RENDER_LABEL[what]}(转成的图)`, fromBlock: what }); return; }
   const error = n.attrs?.xImageError as string | undefined;
   addMedia(ctx, { kind: 'render', what, source, error });
   if (error) ctx.warn.add(`${RENDER_LABEL[what]}没转成图:${error}`);
@@ -393,6 +394,9 @@ function hardSplit(s: string, budget: number): string[] {
   return out;
 }
 
+/** 转图出来的(或还在转的)—— 一图一条:用户 10-29 选,多图拼在一起 X 会裁掉 */
+const isShot = (m: PostMedia): boolean => m.kind === 'render' || (m.kind === 'image' && m.fromBlock !== undefined);
+
 function buildThread(units: readonly Unit[], warn: Set<string>): PostDraft[] {
   type Cur = { texts: TextUnit[]; media: PostMedia[] };
   const done: Cur[] = [];
@@ -422,7 +426,14 @@ function buildThread(units: readonly Unit[], warn: Set<string>): PostDraft[] {
   for (const [i, u] of units.entries()) {
     if (u.k === 'break') { flush(); continue; }
     if (u.k === 'media') {
-      if (mediaProblem([...cur.media, u.m]) !== null) flush();
+      /** 转成的图单独一条(前面挨着的字跟它一条,比如「质能方程如下:」),后面的字另起 */
+      if (isShot(u.m)) {
+        if (cur.media.length > 0) flush();
+        cur.media.push(u.m);
+        flush();
+        continue;
+      }
+      if (cur.media.some(isShot) || mediaProblem([...cur.media, u.m]) !== null) flush();
       cur.media.push(u.m);
       continue;
     }
@@ -462,7 +473,9 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
   const media = ctx.units.flatMap((u) => (u.k === 'media' ? [u.m] : []));
   const whole = draft(texts, media);
   const article = draft(texts.filter((u) => u.role !== 'title'), media);
-  const mediaWhy = mediaProblem(media);
+  const shots = media.filter(isShot).length;
+  /** 一图一条:转成的图超过 1 张,一条推放不下(拼在一起 X 会裁) */
+  const mediaWhy = (shots > 1 ? `转成的图有 ${shots} 张,一图一条要发推串` : null) ?? mediaProblem(media);
   const singleWhy = whole.weight > X_POST_LIMIT ? `${whole.weight} / ${X_POST_LIMIT},超了 ${whole.weight - X_POST_LIMIT}` : mediaWhy;
   const thread = buildThread(ctx.units, ctx.warn);
   const renders = media.filter((m) => m.kind === 'render');

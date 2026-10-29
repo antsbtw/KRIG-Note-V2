@@ -92,12 +92,35 @@ describe('每种块转成什么样', () => {
   });
   it('⭐ 转好的(attrs.xImage)当一张图附上;转不出来的(xImageError)挡住并说原因', () => {
     const ok = single([p('看'), { type: 'mathBlock', attrs: { latex: 'E', xImage: 'media://images/r1.png' } }]);
-    expect(ok.media).toEqual([{ kind: 'image', src: 'media://images/r1.png', alt: '公式(转成的图)' }]);
+    expect(ok.media).toEqual([{ kind: 'image', src: 'media://images/r1.png', alt: '公式(转成的图)', fromBlock: 'math' }]);
     expect(fillProblem(ok.media)).toBeNull();
     const bad = composePost([p('看'), { type: 'table', attrs: { xImageError: '表格是空的' }, content: [] }]);
     const m = bad.options[0].posts[0].media;
     expect(fillProblem(m)).toBe('表格没转成图:表格是空的');
     expect(bad.warnings.join()).toContain('表格没转成图');
+  });
+  it('⭐ 10-29 一图一条:转成的图各占一条,前面挨着的字跟它一条;多于 1 张单条推不能发', () => {
+    const shot = (type: string, n: number, extra: Record<string, unknown> = {}, content?: PmNode[]): PmNode =>
+      ({ type, attrs: { ...extra, xImage: `media://images/s${n}.png` }, content });
+    const doc: PmNode[] = [
+      p('质能方程如下:'), shot('mathBlock', 1, { latex: 'E=mc^2' }),
+      p('能量 ', { type: 'mathInline', attrs: { latex: 'E' } }, ' 守恒'),
+      p('安装:'), { type: 'codeBlock', attrs: { language: 'sh' }, content: [t('npm install krig')] },
+      shot('codeBlock', 2, { language: 'ts' }, [t('a\nb\nc\nd')]),
+      shot('codeBlock', 3, { language: 'mermaid' }, [t('graph TD')]),
+      img('media://images/cat.png'), p('完'),
+    ];
+    const posts = thread(doc);
+    expect(posts.map((x) => [x.text.replace(/ ?\d+\/\d+$/, ''), x.media.length])).toEqual([
+      ['质能方程如下:', 1],
+      ['', 1],
+      ['安装:\n\nnpm install krig', 1],
+      ['', 1],
+      ['完', 1],
+    ]);
+    const r = composePost(doc);
+    expect(r.options.find((o) => o.form === 'single')!.why).toContain('一图一条');
+    expect(r.suggested).toBe('thread');
   });
   it('分隔线不出字', () => expect(single([p('a'), hr, p('b')]).text).toBe('a\n\nb'));
   it('提示框:图标 + 正文', () => {
@@ -208,7 +231,7 @@ describe('推串在哪断', () => {
     const sentence = '这'.repeat(60) + '。';
     const posts = thread([p(sentence.repeat(4))]);
     expect(posts.length).toBe(2);
-    posts.forEach((x) => expect(x.text.replace(/ \d+\/\d+$/, '').endsWith('。')).toBe(true));
+    posts.forEach((x) => expect(x.text.replace(/ ?\d+\/\d+$/, '').endsWith('。')).toBe(true));
   });
   it('一句话本身超长:只能硬断,并提示', () => {
     /** 300 个汉字 = 600 加权;每条最多 274(留 6 给「 1/3」)→ 3 条 */
