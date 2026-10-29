@@ -4,7 +4,7 @@
  * 钉三件事:每种块转成什么样 / 建议哪种发法 / 推串在哪断。
  */
 import { describe, it, expect } from 'vitest';
-import { composePost, type PmNode } from '../../src/modules/x/x-post-compose';
+import { composePost, fillProblem, needsImage, type PmNode } from '../../src/modules/x/x-post-compose';
 
 const t = (text: string, marks?: PmNode['marks']): PmNode => ({ type: 'text', text, marks });
 const p = (...c: (string | PmNode)[]): PmNode => ({ type: 'paragraph', content: c.map((x) => (typeof x === 'string' ? t(x) : x)) });
@@ -51,28 +51,53 @@ describe('每种块转成什么样', () => {
     const link = { type: 'link', attrs: { href: 'https://a.com' } };
     expect(single([p(t('这', [link, { type: 'bold' }]), t('篇', [link]))]).text).toBe('这篇 https://a.com');
   });
-  it('换行 / note 链接 / 行内公式', () => {
-    const r = composePost([p('a', { type: 'hardBreak' }, 'b', { type: 'noteLink', attrs: { label: '另一篇' } }, { type: 'mathInline', attrs: { latex: 'x^2' } })]);
-    expect(r.options[0].posts[0].text).toBe('a\nb另一篇$x^2$');
-    expect(r.warnings.join()).toContain('行内公式');
+  it('换行 / note 链接', () => {
+    const r = composePost([p('a', { type: 'hardBreak' }, 'b', { type: 'noteLink', attrs: { label: '另一篇' } })]);
+    expect(r.options[0].posts[0].text).toBe('a\nb另一篇');
+  });
+  it('⭐ 带行内公式的段落整段转成图(用户 10-28 选),正文不留这段字;列表里的行内公式仍按源码并提示', () => {
+    const math = { type: 'mathInline', attrs: { latex: 'x^2' } };
+    const r = single([p('前言'), p('能量 ', math, ' 守恒')]);
+    expect(r.text).toBe('前言');
+    expect(r.media).toMatchObject([{ kind: 'render', what: 'inlineMath' }]);
+    const li = composePost([{ type: 'bulletList', content: [{ type: 'listItem', content: [p('项 ', math)] }] }]);
+    expect(li.options[0].posts[0].text).toContain('$x^2$');
+    expect(li.warnings.join()).toContain('行内公式');
   });
   it('图片进附图,alt 取 alt 或图片说明', () => {
     const r = single([p('看图'), img('media://a.png', '猫'), { type: 'image', attrs: { src: 'media://b.png' }, content: [p('狗')] }]);
     expect(r.text).toBe('看图');
     expect(r.media).toEqual([{ kind: 'image', src: 'media://a.png', alt: '猫' }, { kind: 'image', src: 'media://b.png', alt: '狗' }]);
   });
-  it('公式 / 代码 / Mermaid / 表格 转成图(正文不留源码),并提示', () => {
+  it('公式 / 长代码 / Mermaid / 表格 / SVG 图转成图(正文不留源码);短代码发字', () => {
     const r = composePost([
       p('公式如下'),
       { type: 'mathBlock', attrs: { latex: 'E=mc^2' } },
       { type: 'codeBlock', attrs: { language: 'ts' }, content: [t('let a = 1')] },
+      { type: 'codeBlock', attrs: { language: 'ts' }, content: [t('a\nb\nc\nd')] },
       { type: 'codeBlock', attrs: { language: 'mermaid' }, content: [t('graph TD')] },
       { type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', content: [p('A')] }] }] },
+      img('media://images/x.svg'),
     ]);
     const post = r.options[0].posts[0];
-    expect(post.text).toBe('公式如下');
-    expect(post.media.map((m) => (m.kind === 'render' ? m.what : m.kind))).toEqual(['math', 'code', 'mermaid', 'table']);
-    expect(r.warnings.join()).toContain('转成图');
+    expect(post.text).toBe('公式如下\n\nlet a = 1');
+    expect(post.media.map((m) => (m.kind === 'render' ? m.what : m.kind))).toEqual(['math', 'code', 'mermaid', 'table', 'svg']);
+  });
+  it('⭐ 短代码界线:3 行以内且 80 字以内发字,多一点就转图', () => {
+    const code = (s: string) => ({ type: 'codeBlock', attrs: { language: 'sh' }, content: [t(s)] });
+    expect(needsImage(code('a\nb\nc'))).toBeNull();
+    expect(needsImage(code('a\nb\nc\nd'))).toBe('code');
+    expect(needsImage(code('x'.repeat(80)))).toBeNull();
+    expect(needsImage(code('x'.repeat(81)))).toBe('code');
+  });
+  it('⭐ 转好的(attrs.xImage)当一张图附上;转不出来的(xImageError)挡住并说原因', () => {
+    const ok = single([p('看'), { type: 'mathBlock', attrs: { latex: 'E', xImage: 'media://images/r1.png' } }]);
+    expect(ok.media).toEqual([{ kind: 'image', src: 'media://images/r1.png', alt: '公式(转成的图)' }]);
+    expect(fillProblem(ok.media)).toBeNull();
+    const bad = composePost([p('看'), { type: 'table', attrs: { xImageError: '表格是空的' }, content: [] }]);
+    const m = bad.options[0].posts[0].media;
+    expect(fillProblem(m)).toBe('表格没转成图:表格是空的');
+    expect(bad.warnings.join()).toContain('表格没转成图');
   });
   it('分隔线不出字', () => expect(single([p('a'), hr, p('b')]).text).toBe('a\n\nb'));
   it('提示框:图标 + 正文', () => {

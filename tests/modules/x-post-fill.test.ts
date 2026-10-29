@@ -279,10 +279,11 @@ describe('x.post.fill 填进 X(不发)', () => {
     expect(long).toMatchObject({ ok: false, kind: 'refused' });
     expect(!long.ok && long.why).toContain('第⑤期');
     const cases: Array<[unknown, string]> = [
-      [{ type: 'mathBlock', attrs: { latex: 'E=mc^2' } }, '公式要先转成图'],
+      [{ type: 'mathBlock', attrs: { latex: 'E=mc^2' } }, '公式还没转成图'],
       [{ type: 'videoBlock', attrs: { src: 'media://videos/v.mp4' } }, '视频还不能填进 X'],
       [{ type: 'image', attrs: { src: 'https://example.com/a.png' } }, '不在本机图片库'],
-      [{ type: 'image', attrs: { src: 'media://images/c.svg' } }, 'SVG'],
+      [{ type: 'image', attrs: { src: 'media://images/c.svg' } }, 'SVG 图还没转成图'],
+      [{ type: 'mathBlock', attrs: { latex: 'x', xImageError: 'MathJax 报错' } }, '公式没转成图:MathJax 报错'],
     ];
     for (const [block, why] of cases) {
       const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('配图'), block] }, { caller: 'ui' });

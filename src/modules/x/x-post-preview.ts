@@ -19,6 +19,7 @@ import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
 import { getXHostState, subscribeXHost } from './x-host-registry';
 import { X_WEB_VIEW_ID } from './x-view-id';
 import { pendingSnap, refreshPending, rememberDraftNote, subscribePending } from './x-post-pending-store';
+import { annotateImages } from './x-post-render';
 
 const DEBOUNCE_MS = 300;
 
@@ -138,10 +139,13 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
   };
   me.unsub = subscribePending(wsId, draw);
 
-  const prepare = async (content: unknown[]): Promise<void> => {
+  const prepare = async (raw: unknown[]): Promise<void> => {
+    /** 要转图的块先标上画好的图;还没画好的先按占位排,画完再排一次 */
+    const { nodes: content, pending } = annotateImages(raw as PmNode[]);
     latest = content;
     const my = ++seq;
-    const r = await xDataCall({ op: 'postPrepare', content: content as PmNode[] });
+    if (pending.length > 0) void Promise.all(pending).then(() => { if (my === seq && open === me) void prepare(raw); });
+    const r = await xDataCall({ op: 'postPrepare', content });
     if (my !== seq || open !== me) return;
     state = r.status === 'ok' ? { kind: 'ok', plan: r.value as PostPlan } : { kind: 'failed', why: r.reason };
     if (r.status !== 'ok') console.warn(`[x-post] 排版没成:${r.reason}`);

@@ -5,8 +5,10 @@
  * 再按五种发法各排一份,给出建议的那种。界面(预览窗)和 AI 都经能力 x.post.prepare 调它。
  *
  * ⚠️ 不静默丢东西:X 发不了的(音频 / 文件 / 外链视频)、只能降级的(行内公式)、认不出的块,都进 warnings。
- * ⚠️ 公式 / 代码 / Mermaid / 表格 这期只标「要转成图」(media.kind = render),真渲染是第④期剩下的(还没做)。
- * 第④a期(10-28)能填进 X 的附件只有 note 里存在本机图片库的图(fillProblem 判)。
+ * ⭐ 转图(第④期剩下的,10-28):X 显示不了的块(needsImage 认)由预览窗先画成 PNG 存进图片库,
+ *   在块的 attrs 上标 xImage(media:// 地址)或 xImageError(画不出来的原因)再交给这里 ——
+ *   有 xImage 就当一张图附上;没有(还没画 / 画不出来)就是 render 占位,fillProblem 挡住不让填。
+ *   画图要 DOM,只能在渲染进程做;这里仍是纯函数。⚠️ AI 直接调 x.post.fill 时没人先画,转图块会被挡(P3 再补)。
  */
 import { X_POST_LIMIT, xWeightedLength } from './x-post-length';
 
@@ -18,12 +20,12 @@ export type PmNode = {
   readonly text?: string;
 };
 
-export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html';
+export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html' | 'svg' | 'inlineMath';
 export type PostMedia =
   | { readonly kind: 'image'; readonly src: string; readonly alt: string }
   | { readonly kind: 'video'; readonly src: string }
   /** 要渲染成图的块(第④期才真渲染) */
-  | { readonly kind: 'render'; readonly what: RenderWhat; readonly source: string };
+  | { readonly kind: 'render'; readonly what: RenderWhat; readonly source: string; readonly error?: string };
 
 export type PostDraft = { readonly text: string; readonly weight: number; readonly media: readonly PostMedia[] };
 export type PostForm = 'single' | 'thread' | 'longPost' | 'article' | 'image';
@@ -55,7 +57,37 @@ const MAX_IMAGES = 4;
 /** 推串每条末尾留给「 12/34」的位置 */
 const THREAD_SUFFIX_RESERVE = 6;
 const THREAD_BUDGET = X_POST_LIMIT - THREAD_SUFFIX_RESERVE;
-const RENDER_LABEL: Record<RenderWhat, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块' };
+const RENDER_LABEL: Record<RenderWhat, string> = {
+  math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块', svg: 'SVG 图', inlineMath: '带行内公式的段落',
+};
+
+/** 短代码发文字(用户 10-28 选「短的发文字」;3 行 / 80 字是我提的界线) */
+const SHORT_CODE_LINES = 3;
+const SHORT_CODE_CHARS = 80;
+const isShortCode = (src: string): boolean => {
+  const t = src.replace(/\n+$/, '');
+  return t.split('\n').length <= SHORT_CODE_LINES && [...t].length <= SHORT_CODE_CHARS;
+};
+
+/**
+ * 这个块发 X 时要不要先画成图 —— 要的话是哪种(预览窗据此去画,排版据此认)。
+ * 只认块本身(不往里递归);容器里的由调用方递归到。
+ */
+export function needsImage(n: PmNode): RenderWhat | null {
+  switch (n.type) {
+    case 'mathBlock': return 'math';
+    case 'codeBlock': {
+      if (((n.attrs?.language as string) || '').toLowerCase() === 'mermaid') return 'mermaid';
+      return isShortCode(textOf(n)) ? null : 'code';
+    }
+    case 'table': return 'table';
+    case 'htmlBlock': return 'html';
+    case 'mathVisual': return 'mathVisual';
+    case 'image': return /\.svg$/i.test((n.attrs?.src as string) || '') ? 'svg' : null;
+    case 'paragraph': case 'heading': return (n.content ?? []).some((c) => c.type === 'mathInline') ? 'inlineMath' : null;
+    default: return null;
+  }
+}
 
 // ── 第一步:块 → 单元 ──
 
@@ -120,9 +152,13 @@ const addText = (ctx: Ctx, text: string, role: Role, list?: number): void => {
   ctx.units.push({ k: 'text', text, role, list });
 };
 const addMedia = (ctx: Ctx, m: PostMedia): void => { ctx.units.push({ k: 'media', m }); };
-const render = (ctx: Ctx, what: RenderWhat, source: string): void => {
-  addMedia(ctx, { kind: 'render', what, source });
-  ctx.warn.add('公式 / 代码 / Mermaid / 表格 会转成图附上(转图还没做,现在预览只是占位)');
+/** 要转图的块:画好了(attrs.xImage)就是一张图;没画好就是占位(带画不出来的原因),fillProblem 会挡 */
+const render = (ctx: Ctx, n: PmNode, what: RenderWhat, source: string): void => {
+  const src = n.attrs?.xImage as string | undefined;
+  if (src) { addMedia(ctx, { kind: 'image', src, alt: `${RENDER_LABEL[what]}(转成的图)` }); return; }
+  const error = n.attrs?.xImageError as string | undefined;
+  addMedia(ctx, { kind: 'render', what, source, error });
+  if (error) ctx.warn.add(`${RENDER_LABEL[what]}没转成图:${error}`);
 };
 
 /** 容器里的东西压成一段字(引用 / 提示框用);里面的附件照样带出来 */
@@ -159,6 +195,12 @@ function list(node: PmNode, ctx: Ctx, indent: number, listId: number): void {
 }
 
 function block(n: PmNode, ctx: Ctx, indent: number): void {
+  /** 带行内公式的段落 / 标题:整段转成图(用户 10-28 选的),正文里不留这段字 */
+  if (needsImage(n) === 'inlineMath') {
+    if (n.attrs?.isTitle) { const s = inline(n.content, ctx); if (s.trim() !== '' && ctx.title === undefined) ctx.title = s; }
+    render(ctx, n, 'inlineMath', textOf(n));
+    return;
+  }
   switch (n.type) {
     case 'paragraph':
       if (n.attrs?.isTitle) {
@@ -183,6 +225,7 @@ function block(n: PmNode, ctx: Ctx, indent: number): void {
     case 'image': {
       const src = (n.attrs?.src as string) || '';
       if (src === '') return;
+      if (needsImage(n) === 'svg') { render(ctx, n, 'svg', src); return; }
       addMedia(ctx, { kind: 'image', src, alt: (n.attrs?.alt as string) || textOf(n).trim() });
       return;
     }
@@ -196,15 +239,17 @@ function block(n: PmNode, ctx: Ctx, indent: number): void {
     }
     case 'audioBlock': ctx.warn.add('音频 X 发不了,已略过'); return;
     case 'fileBlock': ctx.warn.add('文件 X 发不了,已略过'); return;
-    case 'mathBlock': render(ctx, 'math', (n.attrs?.latex as string) || textOf(n)); return;
+    case 'mathBlock': render(ctx, n, 'math', (n.attrs?.latex as string) || textOf(n)); return;
     case 'codeBlock': {
-      const lang = ((n.attrs?.language as string) || '').toLowerCase();
-      render(ctx, lang === 'mermaid' ? 'mermaid' : 'code', textOf(n));
+      const what = needsImage(n);
+      /** 短代码直接发字(用户 10-28 选「短的发文字」) */
+      if (what === null) { addText(ctx, textOf(n).replace(/\n+$/, ''), 'para'); return; }
+      render(ctx, n, what, textOf(n));
       return;
     }
-    case 'mathVisual': render(ctx, 'mathVisual', (n.attrs?.thumbnail as string) || ''); return;
-    case 'htmlBlock': render(ctx, 'html', textOf(n)); return;
-    case 'table': render(ctx, 'table', (n.content ?? []).map((row) => (row.content ?? []).map(textOf).join(' | ')).join('\n')); return;
+    case 'mathVisual': render(ctx, n, 'mathVisual', (n.attrs?.thumbnail as string) || ''); return;
+    case 'htmlBlock': render(ctx, n, 'html', textOf(n)); return;
+    case 'table': render(ctx, n, 'table', (n.content ?? []).map((row) => (row.content ?? []).map(textOf).join(' | ')).join('\n')); return;
     case 'tweetBlock': {
       const url = (n.attrs?.tweetUrl as string) || '';
       if (url !== '') addText(ctx, url, 'para');
@@ -263,10 +308,10 @@ const X_IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
  */
 export function fillProblem(ms: readonly PostMedia[]): string | null {
   for (const m of ms) {
-    if (m.kind === 'render') return `${RENDER_LABEL[m.what]}要先转成图(转图还没做)—— 现在先把它去掉再发`;
+    if (m.kind === 'render') return m.error ? `${RENDER_LABEL[m.what]}没转成图:${m.error}` : `${RENDER_LABEL[m.what]}还没转成图(预览窗打开时会自动转,转好再发)`;
     if (m.kind === 'video') return '视频还不能填进 X(还没做)—— 现在先把它去掉再发';
     if (!m.src.startsWith('media://')) return `有张图不在本机图片库里(${m.src.slice(0, 40)})—— 现在只能发存在本机的图`;
-    if (!X_IMAGE_EXT.test(m.src)) return /\.svg$/i.test(m.src) ? 'SVG 图 X 不收,要先转成图(转图还没做)' : `X 不收这种图(${m.src.split('/').pop()})—— 只收 jpg / png / gif / webp`;
+    if (!X_IMAGE_EXT.test(m.src)) return `X 不收这种图(${m.src.split('/').pop()})—— 只收 jpg / png / gif / webp`;
   }
   return null;
 }

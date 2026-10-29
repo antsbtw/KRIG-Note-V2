@@ -57,7 +57,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML' };
+const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML', svg: 'SVG 图', inlineMath: '行内公式段' };
 const box = { border: '1px solid var(--border-popup)', borderRadius: 8 } as const;
 const btn = {
   background: 'transparent', border: '1px solid var(--border-popup)', borderRadius: 4,
@@ -71,9 +71,9 @@ function MediaCell({ m }: { m: PostMedia }) {
   if (m.kind === 'image') return <div style={cell}><img src={m.src} alt={m.alt} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>;
   if (m.kind === 'video') return <div style={cell}>🎬 视频</div>;
   return (
-    <div style={{ ...cell, flexDirection: 'column', padding: 6, fontSize: 11, color: 'var(--text)' }} title={m.source}>
-      <div>{RENDER_NAME[m.what] ?? m.what} → 图</div>
-      <div style={{ opacity: 0.6, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.source.slice(0, 40)}</div>
+    <div style={{ ...cell, flexDirection: 'column', padding: 6, fontSize: 11, color: m.error ? '#e5484d' : 'var(--text)' }} title={m.error ?? m.source}>
+      <div>{RENDER_NAME[m.what] ?? m.what} {m.error ? '没转成图' : '→ 图(转换中…)'}</div>
+      <div style={{ opacity: 0.6, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{(m.error ?? m.source).slice(0, 40)}</div>
     </div>
   );
 }

@@ -138,6 +138,12 @@ export interface TextEditingApi {
   /** 取当前 noteLink active EditorView(NoteLinkSearchPanel 用)*/
   readonly getNoteLinkActiveView: () => unknown | null;
 
+  /**
+   * 把一个块(PM JSON)画成一张 PNG(深色卡片):公式 / 代码 / Mermaid / 表格 / HTML / 函数图像 / SVG 图 / 带行内公式的段落。
+   * 渲染进程用;画不出来 throw(带原因)。X 发推第④期起用(2026-10-28)。
+   */
+  readonly renderBlockImage: (node: import('./render/render-block-image').BlockJson) => Promise<import('./render/render-block-image').BlockImage>;
+
   /** 工厂函数 */
   readonly createEmptyDoc: () => DriverSerialized;
   readonly extractFirstParagraphText: (data: DriverSerialized) => string;
