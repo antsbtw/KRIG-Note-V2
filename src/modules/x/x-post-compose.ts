@@ -580,7 +580,20 @@ export function countImageBlocks(nodes: readonly PmNode[]): number {
 
 /** 画成哪几张:现在整篇一张(用户选 A);留成数组,以后太长要分张(B)只改这里 */
 export function imageSections(nodes: readonly PmNode[]): number[][] {
-  return nodes.length === 0 ? [] : [nodes.map((_, i) => i)];
+  const from = leadText(nodes) === null ? 0 : 1;
+  return nodes.length <= from ? [] : [nodes.slice(from).map((_, i) => i + from)];
+}
+
+/**
+ * 开头第一块拿来当推文正文、图里不画它(用户 10-29:「note 有标题时,标题当推文正文,图里就不再画标题」
+ * 「开头的第一个 block 如果不超过文字长度,没有行内公式就做正文」)—— 能拿就返回它的字,不能就 null(照旧:开头一句当正文、整篇都画)。
+ * 能拿:段落 / 标题、有字、没有行内公式(needsImage 为 null)、一条推装得下;后面还得有东西可画。
+ */
+export function leadText(nodes: readonly PmNode[]): string | null {
+  const n = nodes[0];
+  if (!n || nodes.length < 2 || (n.type !== 'paragraph' && n.type !== 'heading') || needsImage(n) !== null) return null;
+  const s = inline(n.content, { units: [], warn: new Set(), listSeq: 0 }).trim();
+  return s !== '' && xWeightedLength(s) <= X_POST_LIMIT ? s : null;
 }
 
 /** 一节的开头当正文:第一个有字的块的第一行,太长截断 */
@@ -602,7 +615,7 @@ function buildSections(nodes: readonly PmNode[]): PostDraft[] {
     const sec = idx.map((k) => nodes[k]);
     const head = sec[0].attrs ?? {};
     const src = head.xSectionImage as string | undefined;
-    const text = opening(sec);
+    const text = (i === 0 ? leadText(nodes) : null) ?? opening(sec);
     const m: PostMedia = src
       ? { kind: 'image', src, alt: text || '整篇转图', fromBlock: 'section' }
       : { kind: 'render', what: 'section', source: text, error: head.xSectionImageError as string | undefined };

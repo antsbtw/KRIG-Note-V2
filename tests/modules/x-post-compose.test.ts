@@ -286,16 +286,27 @@ describe('⭐ 10-29 整篇转图(整篇一张图,用户选 A)', () => {
     expect(o.posts[0].media).toEqual([{ kind: 'render', what: 'section', source: '开头一段', error: undefined }]);
     expect(fillBlock(o)).toContain('还没转成图');
   });
-  it('第一个块标了 xSectionImage → 带这张图,能填;标了 xSectionImageError → 原因给人看', () => {
-    const ok = opt([{ ...p('甲'), attrs: { xSectionImage: 'media://images/s0.png' } }, math('a')]);
+  it('图的第一个块标了 xSectionImage → 带这张图,能填;标了 xSectionImageError → 原因给人看', () => {
+    const ok = opt([p('甲'), math('a', { xSectionImage: 'media://images/s0.png' })]);
     expect(ok.posts[0].media).toEqual([{ kind: 'image', src: 'media://images/s0.png', alt: '甲', fromBlock: 'section' }]);
     expect(fillBlock(ok)).toBeNull();
-    const bad = opt([{ ...p('甲'), attrs: { xSectionImageError: '画坏了' } }, math('a')]);
+    const bad = opt([p('甲'), math('a', { xSectionImageError: '画坏了' })]);
     expect(fillBlock(bad)).toContain('画坏了');
+  });
+  it('⭐ 10-29 开头第一块(标题 / 段落,没行内公式,装得下)当正文,图里不画它', () => {
+    expect(imageSections([h('转图测试'), p('质能方程'), math('a')])).toEqual([[1, 2]]);
+    expect(opt([h('转图测试'), p('质能方程'), math('a')]).posts[0].text).toBe('转图测试');
+    expect(opt([title('笔记'), math('a')]).posts[0].text).toBe('笔记');
+    /** 第一块是公式 / 带行内公式 / 太长:照旧整篇都画,开头一句当正文 */
+    expect(imageSections([math('a'), p('说明')])).toEqual([[0, 1]]);
+    const inl = { type: 'paragraph', content: [t('能量 '), { type: 'mathInline', attrs: { latex: 'E' } }] } as PmNode;
+    expect(imageSections([inl, math('a')])).toEqual([[0, 1]]);
+    expect(imageSections([p('长'.repeat(200)), math('a')])).toEqual([[0, 1]]);
   });
   it('开头太长截断;imageSections 整篇一份', () => {
     expect(opt([p('长'.repeat(400)), math('a')]).posts[0].text).toBe(`${'长'.repeat(60)}…`);
-    expect(imageSections([p('x'), hr, p('y')])).toEqual([[0, 1, 2]]);
+    expect(imageSections([p('x'), hr, p('y')])).toEqual([[1, 2]]);
+    expect(imageSections([p('x')])).toEqual([[0]]);
     expect(imageSections([])).toEqual([]);
   });
 });
