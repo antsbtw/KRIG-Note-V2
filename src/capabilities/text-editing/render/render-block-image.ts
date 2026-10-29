@@ -103,7 +103,7 @@ export async function renderBlockImage(node: BlockJson): Promise<BlockImage> {
 }
 
 /**
- * ⭐ 把几个块(一节)原样排进一张卡片(整篇转图,用户 10-29 选「整篇转图 + 分条」)。
+ * ⭐ 把几个块(一节)原样排进一张卡片(整篇转图,用户 10-29 定:整篇一张图)。
  * 字、列表、引用照常排;公式 / 流程图 / 函数图像 / SVG 图嵌成 SVG;代码 / 表格 / HTML 同单块;普通图片转成 data URI 嵌进去
  * (外链 / media:// 直接引用会污染 canvas 出不了 PNG)。宽度、字号和单块卡片一样。
  */

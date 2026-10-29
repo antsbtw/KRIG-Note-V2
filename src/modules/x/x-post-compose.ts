@@ -471,19 +471,16 @@ function buildThread(units: readonly Unit[], warn: Set<string>, pack = false): P
 // ── 整篇转图 ──
 
 /**
- * ⭐ 整篇转图(用户 10-29 选「整篇转图 + 分条」):要转图的块有好几个时,给一个选项 ——
- * 整篇按节画成图(文字、公式、表格… 原样排在一起),一节一张图一条推,正文是这节的开头。
- * 怎么切节(我定的,不是用户定的):小标题 / 分隔线处切;一节的字超过 SECTION_CHARS 或块数超过 SECTION_BLOCKS
- * 也切(防一节画成一张很长的图,X 时间线上只露一截)。只切 note 的顶层块。
- * 画图在渲染进程(x-post-render 的 annotateSections),画好的标在每节第一个块的 attrs.xSectionImage / xSectionImageError。
+ * ⭐ 整篇转图(用户 10-29 定):
+ *  - 短文 + 普通图片(没有要转图的块,推串 3 条以内装得下)→ 照旧单条推 / 推串,一条最多 4 张图;
+ *  - 其他(有公式 / 代码 / 流程图 / 表格… 要转图的块,或太长)→ 建议整篇画成**一张图**一条推(用户选 A:「一律整篇一张图」),或 X 文章。
+ * 一张图里文字、公式、表格… 原样排在一起,正文是 note 开头一句。单条推 / 推串照样能手动选,只是不建议。
+ * 画图在渲染进程(x-post-render 的 annotateSections),画好的标在第一个块的 attrs.xSectionImage / xSectionImageError。
+ * ⚠️ 很长的 note 画成一张很高的图:X 时间线上会不会只露一截、PNG 会不会超 X 的 5MB 都没实测(10-29)。
  */
-const SECTION_CHARS = 600;
-const SECTION_BLOCKS = 12;
-/** 要转图的块至少这么多,才给「整篇转图」(用户 10-29:「检查到多个这样的 block,给用户一个选项」) */
-export const SECTION_MIN_SHOTS = 2;
 /**
  * ⭐ 推串超过这么多条就不建议(用户 10-29:「超过3条短推都不建议了」「按照3建议吧,太长是没有意义的」)。
- * 只是不建议,用户自己选照样能发。超了按顺序退:整篇转图 → 图合并的推串 → X 文章(有结构的)。
+ * 只是不建议,用户自己选照样能发。
  */
 export const THREAD_SUGGEST_MAX = 3;
 
@@ -493,9 +490,9 @@ function unitsOf(nodes: readonly PmNode[]): Ctx {
   return ctx;
 }
 
-/** 给不给「整篇转图」:要转图的块有好几个,或一图一条的推串超过 THREAD_SUGGEST_MAX 条(纯文字长文也给) */
+/** 是不是「短文 + 普通图片」之外的(要转图的块 / 推串超 3 条)—— 是就给整篇转图并建议它 */
 export function sectionsOffered(nodes: readonly PmNode[]): boolean {
-  return countImageBlocks(nodes) >= SECTION_MIN_SHOTS || buildThread(unitsOf(nodes).units, new Set()).length > THREAD_SUGGEST_MAX;
+  return countImageBlocks(nodes) > 0 || buildThread(unitsOf(nodes).units, new Set()).length > THREAD_SUGGEST_MAX;
 }
 
 /** 整篇里要转图的块有几个(往容器里递归) */
@@ -505,21 +502,9 @@ export function countImageBlocks(nodes: readonly PmNode[]): number {
   return n;
 }
 
-/** 切节:每节是 nodes 的下标(分隔线本身不进任何一节) */
+/** 画成哪几张:现在整篇一张(用户选 A);留成数组,以后太长要分张(B)只改这里 */
 export function imageSections(nodes: readonly PmNode[]): number[][] {
-  const out: number[][] = [];
-  let cur: number[] = [];
-  let chars = 0;
-  const flush = (): void => { if (cur.length > 0) out.push(cur); cur = []; chars = 0; };
-  nodes.forEach((n, i) => {
-    if (n.type === 'horizontalRule') { flush(); return; }
-    const len = [...textOf(n)].length;
-    if (cur.length > 0 && (n.type === 'heading' || chars + len > SECTION_CHARS || cur.length >= SECTION_BLOCKS)) flush();
-    cur.push(i);
-    chars += len;
-  });
-  flush();
-  return out;
+  return nodes.length === 0 ? [] : [nodes.map((_, i) => i)];
 }
 
 /** 一节的开头当正文:第一个有字的块的第一行,太长截断 */
@@ -570,32 +555,30 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
   const renders = media.filter((m) => m.kind === 'render');
   const headings = texts.filter((u) => u.role === 'heading').length;
   const hasTable = renders.some((m) => m.kind === 'render' && m.what === 'table');
-  const offered = countImageBlocks(nodes) >= SECTION_MIN_SHOTS || oneEach.length > THREAD_SUGGEST_MAX;
+  const imageBlocks = countImageBlocks(nodes);
+  const offered = imageBlocks > 0 || oneEach.length > THREAD_SUGGEST_MAX;
   const sections = offered ? buildSections(nodes) : [];
   const sectionsOk = sections.length > 0 && sections.length <= X_THREAD_MAX;
 
   let suggested: PostForm;
   let reason: string;
-  if (singleWhy === null) {
+  if (!offered && singleWhy === null) {
     suggested = 'single';
-    reason = renders.length > 0
-      ? `${whole.weight} / ${X_POST_LIMIT},一条发得下;${[...new Set(renders.map((m) => RENDER_LABEL[(m as { what: RenderWhat }).what]))].join(' / ')} 会转成图附上`
-      : `${whole.weight} / ${X_POST_LIMIT},一条发得下`;
-  } else if (thread.length <= THREAD_SUGGEST_MAX) {
+    reason = `${whole.weight} / ${X_POST_LIMIT},一条发得下`;
+  } else if (!offered) {
     suggested = 'thread';
-    reason = `${singleWhy},按段落拆成 ${thread.length} 条${threadPacked ? '(转成的图并在一起)' : ''}`;
-  } else if (sectionsOk && sections.length <= THREAD_SUGGEST_MAX) {
+    reason = `${singleWhy},按段落拆成 ${thread.length} 条`;
+  } else if (sectionsOk) {
     suggested = 'image';
-    reason = `推串要 ${thread.length} 条,超过 ${THREAD_SUGGEST_MAX} 条太长;整篇按节画成 ${sections.length} 张图,一张一条`;
+    reason = imageBlocks > 0
+      ? `有${[...new Set(media.flatMap((m) => (m.kind === 'render' ? [m.what] : m.kind === 'image' && m.fromBlock ? [m.fromBlock] : [])).map((w) => RENDER_LABEL[w]))].join(' / ')},整篇画成一张图一条推,排版和 note 里一样`
+      : `推串要 ${oneEach.length} 条,超过 ${THREAD_SUGGEST_MAX} 条太长;整篇画成一张图一条推`;
   } else if (headings >= 2 || hasTable) {
     suggested = 'article';
-    reason = `推串要 ${thread.length} 条,超过 ${THREAD_SUGGEST_MAX} 条太长;有${hasTable ? '表格' : `${headings} 个小标题`},结构像文章`;
-  } else if (sectionsOk && sections.length < thread.length) {
-    suggested = 'image';
-    reason = `推串要 ${thread.length} 条;整篇转图 ${sections.length} 条,少一些 —— 都超过 ${THREAD_SUGGEST_MAX} 条,考虑删短`;
+    reason = `有${hasTable ? '表格' : `${headings} 个小标题`},结构像文章`;
   } else {
     suggested = 'thread';
-    reason = `${singleWhy},按段落拆成 ${thread.length} 条 —— 超过 ${THREAD_SUGGEST_MAX} 条,考虑删短`;
+    reason = `${singleWhy ?? ''},按段落拆成 ${thread.length} 条`;
   }
 
   return {
@@ -618,9 +601,8 @@ export function composePost(nodes: readonly PmNode[]): PostPlan {
       { form: 'article', label: 'X 文章', available: true, note: 'X 文章要 Premium;表格 / 公式 / 代码在文章里原样排(第⑥期)', posts: [article] },
       {
         form: 'image', label: '整篇转图', available: sectionsOk,
-        why: sections.length === 0 ? `要转图的块不到 ${SECTION_MIN_SHOTS} 个、推串也不长,用不着整篇转图`
-          : sections.length > X_THREAD_MAX ? `切出来 ${sections.length} 节,超过 X 推串的 ${X_THREAD_MAX} 条` : undefined,
-        note: '整篇按节画成图,一节一张一条推,排版和 note 里一样', posts: sections,
+        why: sectionsOk ? undefined : '只有文字和普通图片、也不长 —— 用不着整篇转图',
+        note: '整篇画成一张图一条推,排版和 note 里一样', posts: sections,
       },
     ],
     warnings: [...ctx.warn],

@@ -70,7 +70,7 @@ export function annotateImages(content: readonly PmNode[]): { nodes: PmNode[]; p
 }
 
 /**
- * 整篇转图(10-29):给这个选项时(sectionsOffered:转图块够多 / 推串太长),把整篇按节(imageSections)画成图,标在每节第一个块的
+ * 整篇转图(10-29):给这个选项时(sectionsOffered:有转图块 / 推串太长),把整篇(imageSections,现在整篇一张)画成图,标在第一个块的
  * attrs.xSectionImage / xSectionImageError 上。不够多就原样返回(那个选项不给,不白画)。
  */
 export function annotateSections(content: readonly PmNode[]): { nodes: PmNode[]; pending: Promise<unknown>[] } {
