@@ -71,9 +71,15 @@ type HoldPageCmd = Sampling & { op: 'holdPage'; wsId: string; ms: number; purpos
  */
 type ProbeCmd = {
   op: 'probe'; wsId: string; js?: string; insertText?: string; key?: 'Enter' | 'Backspace';
+  /**
+   * 先把网页打开到这个 x.com 地址、等加载完再跑 js(2026-10-30:js 里自己 location.href 跳转,
+   * executeJavaScript 永远不回话,收件箱一条接一条排队全卡死)
+   */
+  nav?: string;
   /** 先跑这几条 CDP(只收 Emulation.* / Input.* / DOM.* / Runtime.evaluate 之外的读) */
   cdp?: Array<{ method: string; params?: Record<string, unknown> }>;
 };
+const PROBE_JS_MS = 60_000;
 type SingleCmd = SearchCmd | PersonCmd | UserListCmd | FollowCheckCmd | RelationCmd | DraftCmd | EngageCmd | HoldPageCmd | CallCmd | CapsCmd | ProbeCmd;
 /** 同时跑 2–4 条(不能套 parallel);第 i 条晚 i × staggerMs 开跑 */
 type ParallelCmd = Sampling & { op: 'parallel'; cmds: SingleCmd[]; staggerMs?: number };
@@ -104,7 +110,8 @@ function validate(c: unknown): Cmd | string {
   if (top?.op === 'probe') {
     const pr = top as Partial<ProbeCmd>;
     if (typeof pr.wsId !== 'string') return 'probe 要 wsId';
-    if (pr.js === undefined && pr.insertText === undefined && pr.key === undefined && pr.cdp === undefined) return 'probe 要 js / insertText / key / cdp 之一';
+    if (pr.js === undefined && pr.insertText === undefined && pr.key === undefined && pr.cdp === undefined && pr.nav === undefined) return 'probe 要 js / insertText / key / cdp / nav 之一';
+    if (pr.nav !== undefined && (typeof pr.nav !== 'string' || !/^https:\/\/x\.com\//.test(pr.nav))) return 'probe 的 nav 只收 https://x.com/ 开头的地址';
     if (pr.cdp !== undefined && (!Array.isArray(pr.cdp) || pr.cdp.some((c) => typeof c?.method !== 'string' || !/^(Emulation|Input|DOM)\./.test(c.method)))) return 'probe 的 cdp 只收 Emulation.* / Input.* / DOM.*';
     if (pr.js !== undefined && (typeof pr.js !== 'string' || /tweetButton/.test(pr.js))) return 'probe 的 js 要字符串,且不许碰 tweetButton(诊断只看不发)';
     return top as unknown as ProbeCmd;
@@ -313,8 +320,15 @@ async function runProbe(cmd: ProbeCmd): Promise<unknown> {
       if (mine) dbg.detach();
     }
   }
+  if (cmd.nav) {
+    try { await wc.loadURL(cmd.nav); } catch (e) { return { ok: false, why: `打开 ${cmd.nav} 没成:${e instanceof Error ? e.message : String(e)}` }; }
+    out.url = wc.getURL();
+  }
   if (cmd.js) {
-    try { out.result = await wc.executeJavaScript(cmd.js, true); } catch (e) { return { ok: false, why: `js 抛错:${e instanceof Error ? e.message : String(e)}` }; }
+    /** 页面跳走(js 里导航 / X 自己跳)executeJavaScript 不回话 —— 60 秒没回就放弃,别卡住后面的指令 */
+    let t: NodeJS.Timeout | undefined;
+    const late = new Promise<never>((_r, reject) => { t = setTimeout(() => reject(new Error('60 秒没回话(页面跳走了?)')), PROBE_JS_MS); });
+    try { out.result = await Promise.race([wc.executeJavaScript(cmd.js, true), late]); } catch (e) { return { ok: false, why: `js 抛错:${e instanceof Error ? e.message : String(e)}` }; } finally { clearTimeout(t); }
   }
   return out;
 }

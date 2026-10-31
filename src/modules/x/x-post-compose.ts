@@ -11,6 +11,7 @@
  *   画图要 DOM,只能在渲染进程做;这里仍是纯函数。⚠️ AI 直接调 x.post.fill 时没人先画,转图块会被挡(P3 再补)。
  */
 import { X_POST_LIMIT, xWeightedLength } from './x-post-length';
+import { articleDraft, articleProblem, type ArticleDraft } from './x-post-article';
 
 export type PmNode = {
   readonly type: string;
@@ -20,8 +21,11 @@ export type PmNode = {
   readonly text?: string;
 };
 
-/** section:整篇转图时的一节(不是单个块;needsImage 不会给出它) */
-export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html' | 'svg' | 'inlineMath' | 'section';
+/**
+ * section:整篇转图时的一节;columns:X 文章里的分栏(整块拼成一张图,用户 10-30 选 A)
+ * —— 这两种都不是 needsImage 给出的(推文里分栏照常拆开发)
+ */
+export type RenderWhat = 'math' | 'code' | 'mermaid' | 'table' | 'mathVisual' | 'html' | 'svg' | 'inlineMath' | 'section' | 'columns';
 export type PostMedia =
   /** fromBlock:这张是哪种块转成的图(转图才有)—— 一图一条要认它 */
   | { readonly kind: 'image'; readonly src: string; readonly alt: string; readonly fromBlock?: RenderWhat }
@@ -40,6 +44,8 @@ export type PostOption = {
   /** 可用但有前提(如要 Premium) */
   readonly note?: string;
   readonly posts: readonly PostDraft[];
+  /** X 文章才有:一步一步怎么填进 X 文章编辑器(第⑥期,x-post-article) */
+  readonly article?: ArticleDraft;
 };
 export type PostPlan = {
   readonly empty: boolean;
@@ -61,8 +67,8 @@ const MAX_IMAGES = 4;
 /** 推串每条末尾留给「 12/34」的位置 */
 const THREAD_SUFFIX_RESERVE = 6;
 const THREAD_BUDGET = X_POST_LIMIT - THREAD_SUFFIX_RESERVE;
-const RENDER_LABEL: Record<RenderWhat, string> = {
-  math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块', svg: 'SVG 图', inlineMath: '带行内公式的段落', section: '这一节',
+export const RENDER_LABEL: Record<RenderWhat, string> = {
+  math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML 块', svg: 'SVG 图', inlineMath: '带行内公式的段落', section: '这一节', columns: '分栏',
 };
 
 /** 短代码发文字(用户 10-28 选「短的发文字」;3 行 / 80 字是我提的界线) */
@@ -323,12 +329,12 @@ export function fillProblem(ms: readonly PostMedia[]): string | null {
 /** X 一个推串最多几条 */
 export const X_THREAD_MAX = 25;
 /** 现在能填进 X 的发法(推串 2026-10-28 用户「先把推文的各种形式搞完善」从第⑤期提前) */
-export const FILLABLE: readonly PostForm[] = ['single', 'thread', 'image'];
-const LATER: Partial<Record<PostForm, string>> = { longPost: '第⑤期', article: '第⑥期' };
+export const FILLABLE: readonly PostForm[] = ['single', 'thread', 'image', 'article'];
+const LATER: Partial<Record<PostForm, string>> = { longPost: '第⑤期' };
 
 /** 这种发法现在还不能填进 X 的话,为什么(x.post.fill 的 preflight 先挡,不碰网页) */
 export function formNotFillable(form: PostForm): string | null {
-  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推、推串、整篇转图`;
+  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推、推串、整篇转图、X 文章`;
 }
 
 /**
@@ -339,6 +345,7 @@ export function fillBlock(opt: PostOption): string | null {
   const notYet = formNotFillable(opt.form);
   if (notYet) return notYet;
   if (!opt.available) return `这段内容不能这么发:${opt.why ?? '没有这种发法'}`;
+  if (opt.form === 'article') return opt.article ? articleProblem(opt.article) : '没排出文章';
   const n = opt.posts.length;
   if (n === 0) return '正文是空的';
   if (opt.form === 'single' && n !== 1) return `排出来是 ${n} 条,单条推只能 1 条`;
@@ -690,7 +697,7 @@ export function composePost(nodes: readonly PmNode[], layout?: ThreadLayout): Po
         why: whole.weight > LONG_POST_LIMIT ? `长推最多 ${LONG_POST_LIMIT} 字` : mediaWhy ?? undefined,
         note: '要 Premium(还认不出你的号是不是 Premium)', posts: [whole],
       },
-      { form: 'article', label: 'X 文章', available: true, note: 'X 文章要 Premium;表格 / 公式 / 代码在文章里原样排(第⑥期)', posts: [article] },
+      { form: 'article', label: 'X 文章', available: true, note: 'X 文章要 Premium;公式 / 表格 / 代码用 X 自己的,流程图 / 分栏转成图', posts: [article], article: articleDraft(nodes) },
       {
         form: 'image', label: '整篇转图', available: sectionsOk,
         why: sectionsOk ? undefined : '只有文字和普通图片、也不长 —— 用不着整篇转图',

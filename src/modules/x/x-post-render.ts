@@ -64,7 +64,14 @@ export function annotateImages(content: readonly PmNode[]): { nodes: PmNode[]; p
       if (got instanceof Promise) { pending.push(got); return n; }
       return { ...n, attrs: { ...(n.attrs ?? {}), ...('src' in got ? { xImage: got.src } : { xImageError: got.error }) } };
     }
-    return n.content ? { ...n, content: n.content.map(walk) } : n;
+    const inner = n.content ? { ...n, content: n.content.map(walk) } : n;
+    /** 分栏:X 文章里整块拼成一张图(用户 10-30 选 A)—— 里面的块照样各自标(推文里分栏是拆开发的) */
+    if (n.type === 'columnList') {
+      const got = cached(`columns:${keyOf(n)}`, () => shoot('分栏', (te) => te.renderBlocksImage([n])));
+      if (got instanceof Promise) { pending.push(got); return inner; }
+      return { ...inner, attrs: { ...(inner.attrs ?? {}), ...('src' in got ? { xImage: got.src } : { xImageError: got.error }) } };
+    }
+    return inner;
   };
   return { nodes: content.map(walk), pending };
 }

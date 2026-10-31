@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { fillBlock, formNotFillable, type PostDraft, type PostForm, type PostMedia, type PostPlan, type ThreadEdit, type ThreadLayout } from './x-post-compose';
 import { mergeNext, moveMedia, splitBefore } from './x-post-layout';
+import type { ArticleDraft, ArticleStep } from './x-post-article';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
 import type { PostedBefore } from './x-post-repo';
@@ -60,7 +61,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML', svg: 'SVG 图', inlineMath: '行内公式段', section: '这一节' };
+const RENDER_NAME: Record<string, string> = { math: '公式', code: '代码', mermaid: 'Mermaid', table: '表格', mathVisual: '函数图像', html: 'HTML', svg: 'SVG 图', inlineMath: '行内公式段', section: '这一节', columns: '分栏' };
 const box = { border: '1px solid var(--border-popup)', borderRadius: 8 } as const;
 const btn = {
   background: 'transparent', border: '1px solid var(--border-popup)', borderRadius: 4,
@@ -185,6 +186,52 @@ function ThreadEditor({ edit, posts, limit, onLayout }: { edit: ThreadEdit; post
   );
 }
 
+/** 标在 X 自己功能 / 转图块旁边的小字:这一块到了 X 文章里是什么 */
+const tag = (s: string) => <span style={{ float: 'right', fontSize: 10, color: 'var(--text-muted)', marginLeft: 6 }}>{s}</span>;
+
+function tableRows(md: string): string[][] {
+  return md.split('\n').filter((l, i) => i !== 1).map((l) => l.replace(/^\|\s?|\s?\|$/g, '').split(/\s?(?<!\\)\|\s?/).map((c) => c.replace(/\\\|/g, '|')));
+}
+
+function ArticleStepView({ s }: { s: ArticleStep }) {
+  const mono = { fontFamily: 'Menlo, monospace', fontSize: 12, background: 'var(--bg-card)', borderRadius: 6, padding: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-all' } as const;
+  switch (s.k) {
+    /** html 是 x-post-article 自己转义拼出来的(只有 p / strong / em / s / a / ul / ol / li / blockquote / br) */
+    case 'html': return <div className="x-article-html" style={{ fontSize: 15, lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: s.html }} />;
+    case 'heading': return <div style={{ fontSize: s.level === 1 ? 20 : 17, fontWeight: 700, margin: '6px 0 2px' }}>{s.text}</div>;
+    case 'latex': return <div style={mono}>{tag('X 公式')}{s.latex}</div>;
+    case 'code': return <div style={mono}>{tag(`X 代码块${s.language ? ` · ${s.language}` : ''}`)}{s.code}</div>;
+    case 'table': return (
+      <div>{tag('X 表格')}
+        <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}><tbody>
+          {tableRows(s.markdown).map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j} style={{ border: '1px solid var(--border-popup)', padding: '2px 6px', fontWeight: i === 0 ? 700 : 400 }}>{c}</td>)}</tr>)}
+        </tbody></table>
+      </div>
+    );
+    case 'divider': return <hr style={{ border: 0, borderTop: '1px solid var(--border-popup)', width: '100%' }} />;
+    case 'media': {
+      const m = s.m;
+      if (m.kind === 'image') return <div>{m.fromBlock && tag(`${RENDER_NAME[m.fromBlock] ?? m.fromBlock} → 图`)}<img src={m.src} alt={m.alt} style={{ display: 'block', width: '100%', height: 'auto', borderRadius: 6 }} /></div>;
+      return <div style={{ ...box, padding: 8 }}><MediaCell m={m} /></div>;
+    }
+    default: return null;
+  }
+}
+
+/** X 文章的样子:封面(5:2)/ 标题 / 一块块正文 —— X 自己功能做的块旁边标一下 */
+function ArticleView({ a }: { a: ArticleDraft }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <style>{'.x-article-html p{margin:0 0 8px}.x-article-html blockquote{margin:0 0 8px;padding-left:12px;border-left:3px solid var(--border-popup);color:var(--text)}.x-article-html ul,.x-article-html ol{margin:0 0 8px;padding-left:22px}.x-article-html a{color:#1d9bf0}'}</style>
+      <div style={{ ...box, aspectRatio: '5 / 2', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
+        {a.coverDefault ? <img src={a.coverDefault} alt="封面" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '没有封面(note 里没有图片)'}
+      </div>
+      <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.3 }}>{a.title || <span style={{ color: '#d97706' }}>(没有标题)</span>}</div>
+      {a.steps.map((s, i) => <ArticleStepView key={i} s={s} />)}
+    </div>
+  );
+}
+
 export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pending, openedAt, onBackToNote, onClose, onPublish, onLayout, posted }: PreviewProps) {
   const [form, setForm] = useState<PostForm | null>(initialForm ?? null);
   /** 推串「调整分条」模式 */
@@ -255,7 +302,6 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
               ))}
             </div>
             {current.note && <div style={{ fontSize: 11, color: '#d97706', marginBottom: 8 }}>ⓘ {current.note}</div>}
-            {current.form === 'article' && plan.title && <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>{plan.title}</div>}
             {current.form === 'thread' && (
               <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginBottom: 6 }}>
                 {plan.threadEdit.manual && <button type="button" style={btn} onClick={() => onLayout(null)} title="丢掉手动排的,回到自动分条">↺ 恢复自动</button>}
@@ -264,7 +310,8 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
               </div>
             )}
             <div style={{ ...box, padding: 12 }}>
-              {current.form === 'thread' && editing
+              {current.form === 'article' && current.article ? <ArticleView a={current.article} />
+                : current.form === 'thread' && editing
                 ? <ThreadEditor edit={plan.threadEdit} posts={current.posts} limit={limit} onLayout={onLayout} />
                 : current.posts.map((p, i) => <PostCard key={i} post={p} handle={handle} limit={limit} last={i === current.posts.length - 1} />)}
             </div>
@@ -278,9 +325,9 @@ export function XPostPreview({ state, handle, wholeDoc, initialForm, fill, pendi
                 ))}
               </div>
             )}
-            {plan.warnings.length > 0 && (
+            {(current.article?.warnings ?? plan.warnings).length > 0 && (
               <div style={{ marginTop: 8, fontSize: 12, color: '#d97706' }}>
-                {plan.warnings.map((w) => <div key={w}>⚠ {w}</div>)}
+                {(current.article?.warnings ?? plan.warnings).map((w) => <div key={w}>⚠ {w}</div>)}
               </div>
             )}
           </>

@@ -151,7 +151,18 @@ async function blockEl(n: BlockJson): Promise<HTMLElement | null> {
       return c;
     }
     case 'horizontalRule': return el('hr', { border: '0', borderTop: `1px solid ${CARD_MUTED}`, margin: '4px 0', width: '100%' });
-    case 'toggleList': case 'columnList': case 'column': case 'frameBlock': case 'listItem': case 'taskItem': {
+    /** 分栏:并排(和 note 里一样);拖过的列宽按比例,没拖过等宽 */
+    case 'columnList': {
+      const row = el('div', { display: 'flex', gap: '12px', alignItems: 'flex-start' });
+      for (const c of n.content ?? []) {
+        const w = c.attrs?.width;
+        const col = el('div', { flex: typeof w === 'number' && w > 0 ? `${w} 1 0` : '1 1 0', minWidth: '0', display: 'flex', flexDirection: 'column', gap: '10px' });
+        await children(c.content, col);
+        row.appendChild(col);
+      }
+      return row;
+    }
+    case 'toggleList': case 'column': case 'frameBlock': case 'listItem': case 'taskItem': {
       const d = el('div', { display: 'flex', flexDirection: 'column', gap: '10px' });
       await children(n.content, d);
       return d;
@@ -197,7 +208,17 @@ async function blockEl(n: BlockJson): Promise<HTMLElement | null> {
       img.src = await blobToDataUrl(await res.blob());
       await img.decode();
       Object.assign(img.style, { display: 'block', maxWidth: '100%', borderRadius: '8px' });
-      return img;
+      /** 图下的说明(note 里图片块的 caption,如「截图一」) */
+      const cap = (n.content ?? []).filter((c) => textOf(c).trim() !== '');
+      if (cap.length === 0) return img;
+      const fig = el('div', { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px' });
+      fig.appendChild(img);
+      for (const c of cap) {
+        const line = el('div', { fontSize: `${CODE_SIZE}px`, color: '#a0a4a8', textAlign: 'center', lineHeight: '1.5' });
+        inline(c.content, line);
+        fig.appendChild(line);
+      }
+      return fig;
     }
     case 'table': return tableEl(n);
     case 'htmlBlock': {
