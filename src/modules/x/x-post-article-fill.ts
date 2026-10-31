@@ -21,7 +21,13 @@ export type ArticleFillOutcome = { readonly ok: true; readonly editId: string; r
 
 type Act = { state?: string; why?: string; editId?: string; [k: string]: unknown } | null;
 
-const UPLOAD_WAIT_MS = 90_000;
+/**
+ * 等图传完:每张插完最多等 PER_IMAGE_UPLOAD_MS,最后整篇再等 UPLOAD_WAIT_MS。
+ * ⚠️ 判「传完」靠正文里的图从 blob: 变成 X 的地址 —— 这一点没在真机上见过(10-30 脚本喂的图一直是 blob:),
+ *   所以只限时等、不挡;日志里记等了多久,下一次真跑就知道会不会变。
+ */
+const PER_IMAGE_UPLOAD_MS = 20_000;
+const UPLOAD_WAIT_MS = 30_000;
 
 export async function fillArticle(wcId: number, a: ArticleFill): Promise<ArticleFillOutcome> {
   const ports = webviewPorts(wcId);
@@ -77,7 +83,9 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
         const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.articleMediaInput, files: [s.file], check: { kind: 'none' } });
         if (fed.status === 'failed') { r = { state: 'feed-failed', why: fed.reason }; break; }
         images += 1;
-        r = await act('mediaWait', { want: images });
+        r = await act('mediaWait', { want: images, uploadMs: PER_IMAGE_UPLOAD_MS });
+        if (r?.state === 'ok' && Number(r.uploading) > 0) console.warn(`[x.post] X 文章第 ${images} 张图等了 ${PER_IMAGE_UPLOAD_MS / 1000} 秒还是 blob:(没传完,或 X 不换地址)—— 接着往下`);
+        else if (r?.state === 'ok') console.log(`[x.post] X 文章第 ${images} 张图传完(等了 ${(Number(r.waited) / 1000).toFixed(1)} 秒)`);
         break;
       }
     }

@@ -64,6 +64,10 @@ const LIB = String.raw`
   var uploading = function () {
     return Array.prototype.slice.call(document.querySelectorAll('img')).filter(function (i) { return /^blob:/.test(i.src); }).length;
   };
+  /** 现场(没成时带回去,日志里看得到正文成了什么样) */
+  var outline = function () {
+    return blocks().map(function (b) { return b.tagName.charAt(0) + (b.querySelector('img') ? '[img' + (/^blob:/.test(b.querySelector('img').src) ? ' 传' : '') + ']' : '') + (b.querySelector('table') ? '[表]' : '') + ':' + clean(b.innerText).slice(0, 8); }).join(' / ');
+  };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
     if (!trig) return 'no-insert-button';
@@ -123,7 +127,8 @@ const SRC = String.raw`(async function (P) {
         b.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
         var want = clean(P.text).replace(/\s+/g, '').slice(-12);
         var ok = await waitFor(function () { return clean(b.innerText).replace(/\s+/g, '').indexOf(want) !== -1; }, 4000);
-        return { state: ok ? 'ok' : 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html };
+        return ok ? { state: 'ok', before: before, after: counts().blocks, prefixed: html !== P.html }
+          : { state: 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html, uploading: uploading(), outline: outline() };
       }
       case 'divider': {
         var n0 = counts().sections;
@@ -209,7 +214,14 @@ const SRC = String.raw`(async function (P) {
       }
       case 'mediaWait': {
         var ok5 = await waitFor(function () { return !sheet() && counts().img >= P.want; }, 20000);
-        return { state: ok5 ? 'ok' : 'timeout', img: counts().img, dialog: !!sheet() };
+        if (!ok5) return { state: 'timeout', img: counts().img, dialog: !!sheet(), outline: outline() };
+        /**
+         * ⚠️ 等这张图传完再往下(10-30 真机:分栏图插进去后接着粘,到第 14 步正文从 31 块掉到 28 块、粘的字没了 ——
+         * 推断是图传完 X 回写编辑器时用的是旧内容,把这期间粘的冲掉了;没能复现,先排开:传完再动)
+         */
+        var t3 = Date.now();
+        while (uploading() > 0 && Date.now() - t3 < P.uploadMs) await sleep(500);
+        return { state: 'ok', img: counts().img, uploading: uploading(), waited: Date.now() - t3 };
       }
       case 'coverApply': {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
