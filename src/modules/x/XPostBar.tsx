@@ -44,9 +44,9 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
   const end = snap.ended;
   const showEnd = !draft && end && dismissed !== end.draftId && (end.why === 'published' || !end.cleared);
   if (showEnd) {
-    const url = end.tweetId && end.handle ? `https://x.com/${end.handle}/status/${end.tweetId}` : null;
+    const url = end.url ?? (end.tweetId && end.handle ? `https://x.com/${end.handle}/status/${end.tweetId}` : null);
     const [color, text] = end.why !== 'published'
-      ? ['#d97706', '⚠️ 撤回了,但发推框里的字没清掉 —— 请在下面 X 的发推框里手动删掉(没发出去)。']
+      ? ['#d97706', `⚠️ 撤回了,但没清干净(${end.detail ?? '发推框里的字还在'})—— 请在下面 X 上手动删掉(没发出去)。`]
       : end.outcome === 'sent' ? ['#16a34a', `✅ 已发到 X(@${end.handle ?? '?'}),${(end.count ?? 1) > 1 ? `推串 ${end.count} 条都` : ''}核对过了。`]
         : end.outcome === 'unseen' ? ['#d97706', `⚠️ 点了发布,但没核对上:${end.detail ?? ''}`]
           : ['#e5484d', `❌ 没发出去:${end.detail ?? ''}`];
@@ -87,8 +87,9 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
     <div style={{ ...bar, flexWrap: 'wrap' }}>
       <b style={{ flex: 'none' }}>KRIG</b>
       <span style={{ flex: 1, minWidth: 200 }}>
-        已填进下面的发推框{[draft.posts.length > 1 ? `推串 ${draft.posts.length} 条` : '', draft.media.length > 0 ? `带 ${draft.media.length} 张图` : ''].filter(Boolean).map((x, i, a) => (i === 0 ? '(' : '') + x + (i === a.length - 1 ? ')' : '、')).join('')} —— 这就是发出去的样子,核对一下。
-        <span style={{ color: 'var(--text-muted)' }}> {mmss(draft.expiresAt - now)} 后没确认自动撤回</span>
+        {draft.form === 'article' ? <>已填进下面的 X 文章编辑器 —— 在 X 里往下看一遍,X 编辑器里也能直接改;「取消」会删掉这份草稿。</> : <>
+        已填进下面的发推框{[draft.posts.length > 1 ? `推串 ${draft.posts.length} 条` : '', draft.media.length > 0 ? `带 ${draft.media.length} 张图` : ''].filter(Boolean).map((x, i, a) => (i === 0 ? '(' : '') + x + (i === a.length - 1 ? ')' : '、')).join('')} —— 这就是发出去的样子,核对一下。</>}
+        <span style={{ color: 'var(--text-muted)' }}> {mmss(draft.expiresAt - now)} 后没确认自动撤回{draft.form === 'article' ? '(文章草稿留在 X 的草稿箱里,不删)' : ''}</span>
         {note && <div style={{ fontSize: 12, color: note.startsWith('❌') ? '#e5484d' : '#d97706', marginTop: 2 }}>{note}</div>}
       </span>
       <button type="button" style={{ ...btn, background: '#1d9bf0', borderColor: 'transparent', color: '#fff' }} disabled={busy}

@@ -44,6 +44,11 @@ const SELECTORS: Readonly<Record<string, string>> = {
   [X_ANCHORS.composeFileInput]: '[role="dialog"] input[data-testid="fileInput"]',
   /** 推串的「+」—— 2026-10-28 真机:testid addButton,只在当前这条有字 / 有图时出现;⚠️ 只认真点击 */
   [X_ANCHORS.composeAddButton]: '[role="dialog"] [data-testid="addButton"]',
+  /** X 文章(10-30 真机量过):正文 composer 里的块;新文章只有一块(空的)*/
+  [X_ANCHORS.articleFirstLine]: '[data-testid="composer"] [data-block="true"]',
+  [X_ANCHORS.articleMediaInput]: '[role="dialog"] input[data-testid="fileInput"]',
+  /** 封面那个不收多张(Media 弹窗里那个 multiple)*/
+  [X_ANCHORS.articleCoverInput]: 'input[data-testid="fileInput"]:not([multiple])',
   /** 推串第 2…25 条的正文框(X 按 tweetTextarea_1、_2… 编号;2026-10-28 按 X 现行结构写,待真机) */
   ...Object.fromEntries(Array.from({ length: X_THREAD_MAX - 1 }, (_, i) =>
     [composeBoxAnchor(i + 1), `[role="dialog"] [data-testid="tweetTextarea_${i + 1}"]`])),

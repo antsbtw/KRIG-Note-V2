@@ -40,6 +40,8 @@ export type PendingPost = {
   readonly token: string;
   readonly noteId?: string;
   readonly form: PostForm;
+  /** X 文章:编辑器里那份草稿的 id(/compose/articles/edit/<id>;取消时核对再删) */
+  readonly articleId?: string;
   /** 每一条(推串 2026-10-28);下面的 text / media 是它们合起来的(显示、记录用) */
   readonly posts: readonly DraftPost[];
   readonly text: string;
@@ -57,6 +59,8 @@ export type DraftEnded = {
   /** 发布的结局(why = published 才有):sent 核对上了 / unseen 点了发布没核对上 / failed 没发出去 */
   readonly outcome?: 'sent' | 'unseen' | 'failed';
   readonly tweetId?: string;
+  /** 发出去的那条 / 那篇的地址(X 文章不是推文地址) */
+  readonly url?: string;
   /** 推串:几条 */
   readonly count?: number;
   readonly handle?: string;
@@ -85,7 +89,7 @@ export function pendingPost(wsId: string): PendingPost | null {
 
 export function viewOf(p: PendingPost): PendingView {
   return {
-    draftId: p.draftId, wsId: p.wsId, noteId: p.noteId, form: p.form, posts: p.posts, text: p.text, media: p.media, handle: p.handle,
+    draftId: p.draftId, wsId: p.wsId, noteId: p.noteId, form: p.form, articleId: p.articleId, posts: p.posts, text: p.text, media: p.media, handle: p.handle,
     filledAt: p.filledAt, expiresAt: p.expiresAt,
   };
 }
@@ -103,9 +107,9 @@ export function addPending(p: PendingPost, onTimeout: (p: PendingPost) => void):
   timers.set(p.wsId, t);
 }
 
-export function endPending(p: PendingPost, why: CancelWhy, cleared: boolean): void {
+export function endPending(p: PendingPost, why: CancelWhy, cleared: boolean, detail?: string): void {
   dropPending(p.wsId);
-  ended.set(p.wsId, { draftId: p.draftId, why, at: Date.now(), cleared });
+  ended.set(p.wsId, { draftId: p.draftId, why, at: Date.now(), cleared, detail });
 }
 
 /** 发布结束(不论成没成,草稿都没了:发出去了 / 状态说不清,都不能再撤回) */
@@ -113,7 +117,7 @@ export function endPublished(p: PendingPost, o: PublishOutcome): void {
   dropPending(p.wsId);
   ended.set(p.wsId, {
     draftId: p.draftId, why: 'published', at: Date.now(), cleared: true,
-    outcome: o.outcome, tweetId: o.tweetId, count: o.tweetIds.length, handle: p.handle, detail: o.detail,
+    outcome: o.outcome, tweetId: o.tweetId, url: o.url, count: o.tweetIds.length, handle: p.handle, detail: o.detail,
   });
 }
 
@@ -331,6 +335,8 @@ export type PublishOutcome = {
   readonly tweetId?: string;
   /** 推串每条的 id,按顺序;没核对上的是 ''(单条推 1 个) */
   readonly tweetIds: readonly string[];
+  /** X 文章发出去后的地址 */
+  readonly url?: string;
   /** 发出去的字(以点发布前框里的为准 —— 人可能在 X 上又改过);推串各条用空行连起来 */
   readonly sentText: string;
   /** 点发布前框里挂着几张图 */

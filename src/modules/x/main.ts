@@ -46,6 +46,7 @@ import {
 import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
+import { X_ARTICLE_SCRIPTS } from './x-article-scripts';
 import { registerXDataIpc } from './x-data-ipc';
 import { bgRunnerHealth, startBgRunner, stopBgRunner } from './x-bg-runner';
 import { startDevInbox, stopDevInbox } from './x-dev-inbox';
@@ -83,7 +84,7 @@ export function registerXModule(): void {
    * ⚠️ 底座在 `runtime.ts` 里写死注册了三组自己的脚本,
    * 业务的脚本**由业务 push** —— 底座不认识 X,这条不能破。
    */
-  for (const sc of X_DOM_SCRIPTS) scriptRegistry.register(sc);
+  for (const sc of [...X_DOM_SCRIPTS, ...X_ARTICLE_SCRIPTS]) scriptRegistry.register(sc);
 
   /**
    * ⭐⭐ 配方 CRUD 的 IPC —— **X 自带**(通道名也在 X 这边)。

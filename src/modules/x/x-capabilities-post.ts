@@ -23,6 +23,8 @@ import {
 import { findNotePosts, findPosted, recordEnded, recordFilled } from './x-post-repo';
 import { webviewPorts } from './x-collect-ports';
 import { X_PAGE_NAME } from './x-pages';
+import { deleteArticle, fillArticle, publishArticle, type ArticleFillStep } from './x-post-article-fill';
+import type { ArticleDraft } from './x-post-article';
 
 const isPmNode = (v: unknown): v is PmNode => !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';
 
@@ -98,6 +100,41 @@ function cancelOnTimeout(p: PendingPost): void {
   });
 }
 
+/**
+ * X 文章(第⑥期,10-30):图(note 里的 / 转成的)和封面解成磁盘文件 → 一步步填进 X 文章编辑器 → 记一份待发草稿。
+ * 封面:人选的(以后预览里选)没有就用默认(note 里第一张普通图片);X 自己按 5:2 居中裁。
+ */
+async function fillArticleDraft(
+  i: FillIn, a: ArticleDraft, acc: { handle: string; restId: string }, page: { wcId: number; token: string }, caller: string,
+): Promise<ReturnType<typeof viewOf>> {
+  const media = a.steps.flatMap((s) => (s.k === 'media' ? [s.m] : []));
+  const { srcs, files } = await mediaFiles(media);
+  const cover = a.coverDefault ? (await mediaFiles([{ kind: 'image', src: a.coverDefault, alt: '封面' }])).files[0] : null;
+  let k = 0;
+  const steps: ArticleFillStep[] = a.steps.map((s) => (s.k === 'media' ? { k: 'image', file: files[k++] } : s));
+  const r = await fillArticle(page.wcId, { title: a.title, cover, steps });
+  if (!r.ok) throw capFailed(r.why);
+  for (const w of r.warnings) console.warn(`[x.post] X 文章 ${r.editId}:${w}`);
+  const now = Date.now();
+  const text = [a.title, ...a.steps.flatMap((s) => (s.k === 'html' || s.k === 'heading' ? [s.text] : []))].join('\n\n');
+  const p: PendingPost = {
+    draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId, form: 'article', articleId: r.editId,
+    posts: [{ text: a.title, media: srcs }], text: a.title, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
+  };
+  try {
+    await recordFilled({
+      draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: 'article',
+      text, hashText: text, posts: 1, media: srcs, caller,
+    });
+  } catch (e) {
+    const d = await deleteArticle(page.wcId, r.editId);
+    throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${d.deleted ? '文章草稿已删' : `文章草稿没删掉:${d.detail}`}`);
+  }
+  addPending(p, cancelOnTimeout);
+  console.log(`[x.post] 已填进 X 文章编辑器(@${acc.handle},${a.steps.length} 步、${srcs.length} 张图${cover ? '、有封面' : ''})草稿 ${p.draftId} / 文章 ${r.editId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
+  return viewOf(p);
+}
+
 export function registerXPostCapabilities(): void {
   xCap<PrepareIn>('input', {
     id: 'x.post.prepare',
@@ -150,6 +187,7 @@ export function registerXPostCapabilities(): void {
       if (!opt) throw capRefused(`没有这种发法(${i.form})`);
       const why = fillBlock(opt);
       if (why) throw capRefused(why);
+      if (i.form === 'article') return fillArticleDraft(i, opt.article as ArticleDraft, acc, page, caller);
       const resolved: Array<{ srcs: string[]; files: string[] }> = [];
       for (const post of opt.posts) resolved.push(await mediaFiles(post.media));
       const fills: FillPost[] = opt.posts.map((post, k) => ({ text: post.text, files: resolved[k].files }));
@@ -197,8 +235,11 @@ export function registerXPostCapabilities(): void {
     reuse: (i) => pendingPost(i.wsId)?.token,
     run: async (i, _a, page) => {
       const p = pendingPost(i.wsId) as PendingPost;
-      const c = await clearCompose(page.wcId);
-      endPending(p, i.why, c.cleared);
+      const c = p.form !== 'article' ? await clearCompose(page.wcId)
+        /** X 文章:人点取消 / 回 note 改 → 删掉草稿(用户 10-30 同意);超时 → 不删(人可能正在 X 里改,删了就没了),留在 X 的草稿箱 */
+        : i.why === 'timeout' ? { cleared: true, detail: `超时没确认,文章草稿 ${p.articleId ?? '?'} 留在 X 的草稿箱里` }
+          : await deleteArticle(page.wcId, p.articleId).then((d) => ({ cleared: d.deleted, detail: d.detail }));
+      endPending(p, i.why, c.cleared, c.detail);
       releasePage(page.token);
       await recordEnded(p.draftId, { status: 'cancelled', detail: `${i.why}:${c.detail}` }).catch((e) => logRecordError(p.draftId, e));
       console.log(`[x.post] 撤回草稿 ${p.draftId}(${i.why}):${c.detail}`);
@@ -219,7 +260,7 @@ export function registerXPostCapabilities(): void {
     subject: (i) => `draft:${i.draftId}`,
     run: async (i, _a, page) => {
       const p = pendingPost(i.wsId) as PendingPost;
-      const o = await publishCompose(page.wcId, p);
+      const o = p.form === 'article' ? await publishArticle(page.wcId, p) : await publishCompose(page.wcId, p);
       endPublished(p, o);
       releasePage(page.token);
       await recordEnded(p.draftId, {
@@ -227,7 +268,7 @@ export function registerXPostCapabilities(): void {
         sentText: o.sentText, sentMedia: o.sentMedia, editedOnX: o.editedOnX,
       })
         .catch((e) => logRecordError(p.draftId, e));
-      const url = o.tweetId ? `https://x.com/${p.handle}/status/${o.tweetId}` : undefined;
+      const url = o.url ?? (o.tweetId ? `https://x.com/${p.handle}/status/${o.tweetId}` : undefined);
       console.log(`[x.post] 发布 ${p.draftId}(@${p.handle},${o.tweetIds.length > 1 ? `推串 ${o.tweetIds.length} 条、` : ''}${o.sentMedia} 张图):${o.outcome} —— ${o.detail}${url ? ` ${url}` : ''}${o.editedOnX ? '(在 X 上改过字)' : ''}`);
       if (o.outcome !== 'sent') throw capFailed(o.detail);
       return { draftId: p.draftId, tweetId: o.tweetId, tweetIds: o.tweetIds, url, handle: p.handle, editedOnX: o.editedOnX };

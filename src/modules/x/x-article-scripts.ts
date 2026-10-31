@@ -1,0 +1,284 @@
+/**
+ * ⭐ X 文章编辑器里的页面脚本(发推第⑥期,2026-10-30)—— 一个脚本、按 op 分动作,主进程 x-post-article-fill 一步步调
+ *
+ * 全部 2026-10-30 在 @antsBTW 的真机上用收件箱 probe 一个个量过(记忆 project-x-articles-impl):
+ *   - 新文章:列表页右上「create」→ 地址变成 /compose/articles/edit/<id>,X 立刻存成草稿
+ *   - 标题:textarea[placeholder="Add a title"],原生 value setter + input
+ *   - 正文:[data-testid=composer](DraftJS),合成 paste 带 text/html —— 段落 / 粗斜删 / 链接 / 列表 / 引用 / h1 h2 都保留
+ *     ⚠️ 粘贴的第一块会并进光标所在的那行(标题就丢了)→ 前面垫一个零宽空格段落;光标那行是空的、第一块又是段落就不垫(免得多一个空行)
+ *     ⚠️ X 只认它自己的光标(DraftJS),脚本设的 DOM 选区它不理 —— 开头由主进程真点击一下空的第一行,之后每步插入光标都跟在最后
+ *   - Insert(button[aria-label="Add Media"])→ 菜单 Media / GIF / Posts / Link preview / Divider / Code / LaTeX / Table
+ *     LaTeX:弹窗里一个 textarea → 「Insert」;Code:programming-language-input 打字 → 点出来的那个语言 → textarea → 「Insert」
+ *     Table:网格 aria-label「Insert a {行} by {列} table」(要完整鼠标序列)→ 插空表 → 点那张表 → 它的「Edit block」→ markdown textarea → 「Update」
+ *     Divider:直接插;Media:弹窗里的 fileInput(喂文件由输入引擎做),图直接进正文(没有裁剪框),每块最多 4 张
+ *   - 封面:页面上不在弹窗里的 fileInput(只收图)→ 「Edit media」裁剪框 →「Apply」(applyButton)
+ *   - 删草稿:「Publish」旁边的 More → 「Delete Article」→ 确认框 confirmationSheetConfirm「Yes, delete」
+ *   ⚠️ X 网页宽度是 0(没显示在屏幕上)时 Insert 的弹窗是空的 —— 驱动前先确认页面有宽度
+ * ⚠️ 只有 op=publish 点「Publish」(由 x.post.publish 调,人点了确认发布);别的 op 都不碰它。
+ */
+import type { RegisteredScript, ScriptId } from '@platform/main/web-capability/dom/types';
+
+export const X_ARTICLE_SCRIPT = 'x.articleAct' as ScriptId;
+
+/** 页面里的小工具(每个 op 都要) */
+const LIB = String.raw`
+  var sleep = function (ms) { return new Promise(function (r) { setTimeout(r, ms); }); };
+  var vis = function (el) { var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  var body = function () { return document.querySelector('[data-testid="composer"]'); };
+  var blocks = function () { var b = body(); return b ? Array.prototype.slice.call(b.querySelectorAll('[data-block="true"]')) : []; };
+  var clean = function (s) { return (s || '').replace(/​/g, '').trim(); };
+  var waitFor = async function (fn, ms) { var t0 = Date.now(); while (Date.now() - t0 < (ms || 5000)) { var v = fn(); if (v) return v; await sleep(150); } return null; };
+  var byText = function (sel, label) { var want = label.toLowerCase(); return Array.prototype.slice.call(document.querySelectorAll(sel)).filter(vis).find(function (e) { return (e.innerText || '').trim().toLowerCase() === want; }); };
+  var sheet = function () { return document.querySelector('[data-testid="sheetDialog"]'); };
+  var dlgBtn = function (label) { return byText('[role="dialog"] button, [role="dialog"] [role="button"]', label); };
+  var setVal = function (el, v) {
+    el.focus();
+    var p = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(p, 'value').set.call(el, v);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return el.value === v;
+  };
+  /** 完整鼠标序列(表格网格只认这个,光 .click() 不行 —— 06-14 实机) */
+  var mclick = function (el) {
+    var r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    ['pointerover', 'mouseover', 'mouseenter', 'mousemove', 'pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(function (t) {
+      el.dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, button: 0 }));
+    });
+  };
+  var dialogTextarea = function () { return Array.prototype.slice.call(document.querySelectorAll('[role="dialog"] textarea')).filter(vis)[0] || null; };
+  var counts = function () {
+    var b = body();
+    if (!b) return null;
+    var sections = Array.prototype.slice.call(b.querySelectorAll('section[data-block="true"]'));
+    return {
+      blocks: blocks().length,
+      h1: b.querySelectorAll('.longform-header-one').length,
+      h2: b.querySelectorAll('.longform-header-two').length,
+      img: b.querySelectorAll('section img').length,
+      table: b.querySelectorAll('table').length,
+      code: sections.filter(function (s) { return !!s.querySelector('pre, code'); }).length,
+      sections: sections.length,
+    };
+  };
+  var uploading = function () {
+    return Array.prototype.slice.call(document.querySelectorAll('img')).filter(function (i) { return /^blob:/.test(i.src); }).length;
+  };
+  var openInsert = async function (label) {
+    var trig = document.querySelector('button[aria-label="Add Media"]');
+    if (!trig) return 'no-insert-button';
+    trig.click();
+    var it = await waitFor(function () { return byText('[role="menuitem"]', label); }, 4000);
+    if (!it) return 'no-menu-item';
+    it.click();
+    return 'ok';
+  };
+`;
+
+const SRC = String.raw`(async function (P) {
+  ${LIB}
+  try {
+    if (!(innerWidth > 0)) return { state: 'hidden', why: 'X 网页宽度是 0(没显示在屏幕上),X 文章的弹窗不会画出来' };
+    var m = /\/compose\/articles\/edit\/(\d+)/.exec(location.pathname);
+    var editId = m ? m[1] : null;
+    switch (P.op) {
+      case 'state': {
+        var t = document.querySelector('textarea[placeholder="Add a title"]');
+        return {
+          state: 'ok', url: location.href, editId: editId, title: t ? t.value : null, counts: counts(), uploading: uploading(),
+          text: body() ? clean(body().innerText) : null, dialog: !!document.querySelector('[role="dialog"]'),
+          cover: !!document.querySelector('button[aria-label="Remove photo"]'),
+          create: !!document.querySelector('button[aria-label="create"]'),
+          loggedOut: !!document.querySelector('[data-testid="loginButton"]'),
+        };
+      }
+      case 'create': {
+        if (editId) return { state: 'already-editing', editId: editId };
+        var c = await waitFor(function () { return document.querySelector('button[aria-label="create"]'); }, 8000);
+        if (!c) return { state: 'no-create', why: 'X 文章列表页上找不到「create」—— 这个号可能没有 X 文章(要 Premium)' };
+        c.click();
+        var got = await waitFor(function () { var x = /\/compose\/articles\/edit\/(\d+)/.exec(location.pathname); return x && body() ? x[1] : null; }, 10000);
+        if (!got) return { state: 'timeout', why: '点了 create 10 秒没进编辑器', url: location.href };
+        await sleep(800);
+        return { state: 'ok', editId: got, blocks: blocks().length, empty: clean(body().innerText) === '' };
+      }
+      case 'title': {
+        var ti = document.querySelector('textarea[placeholder="Add a title"]');
+        if (!ti) return { state: 'no-title-box' };
+        setVal(ti, P.text);
+        await sleep(300);
+        return { state: ti.value === P.text ? 'ok' : 'not-landed', got: ti.value };
+      }
+      case 'paste': {
+        var b = body();
+        if (!b) return { state: 'no-body' };
+        var last = blocks()[blocks().length - 1];
+        var lastEmpty = !last || (!last.querySelector('img, svg, table, pre') && clean(last.innerText) === '');
+        var html = P.html;
+        if (!lastEmpty || !/^<p[ >]/.test(html)) html = '<p>​</p>' + html;
+        var before = counts().blocks;
+        var dt = new DataTransfer();
+        dt.setData('text/plain', P.text);
+        dt.setData('text/html', html);
+        b.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+        var want = clean(P.text).replace(/\s+/g, '').slice(-12);
+        var ok = await waitFor(function () { return clean(b.innerText).replace(/\s+/g, '').indexOf(want) !== -1; }, 4000);
+        return { state: ok ? 'ok' : 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html };
+      }
+      case 'divider': {
+        var n0 = counts().sections;
+        var o = await openInsert('Divider');
+        if (o !== 'ok') return { state: o };
+        var ok2 = await waitFor(function () { return counts().sections > n0; }, 4000);
+        return { state: ok2 ? 'ok' : 'not-landed' };
+      }
+      case 'latex': {
+        var s0 = counts().sections;
+        var o2 = await openInsert('LaTeX');
+        if (o2 !== 'ok') return { state: o2 };
+        var ta = await waitFor(dialogTextarea, 5000);
+        if (!ta) return { state: 'no-input', why: 'LaTeX 弹窗里没有输入框' };
+        setVal(ta, P.latex);
+        await sleep(300);
+        var ins = dlgBtn('Insert');
+        if (!ins) return { state: 'no-confirm' };
+        ins.click();
+        if (!(await waitFor(function () { return !sheet(); }, 5000))) return { state: 'dialog-stuck', why: '点了 Insert 弹窗没关(公式写错了?)' };
+        var ok3 = await waitFor(function () { return counts().sections > s0; }, 4000);
+        return { state: ok3 ? 'ok' : 'not-landed' };
+      }
+      case 'code': {
+        var s1 = counts().code;
+        var o3 = await openInsert('Code');
+        if (o3 !== 'ok') return { state: o3 };
+        var cta = await waitFor(dialogTextarea, 5000);
+        if (!cta) return { state: 'no-input', why: 'Code 弹窗里没有代码框' };
+        var lang = '';
+        var li = document.querySelector('[data-testid="programming-language-input"]');
+        if (li && P.language) {
+          setVal(li, P.language);
+          await sleep(700);
+          /** 打字后下面列出来的语言按钮,和要的名字一样(不分大小写)才点;没有就清掉,当没语言 */
+          var pick = dlgBtn(P.language);
+          if (pick) { pick.click(); await sleep(300); lang = li.value; } else setVal(li, '');
+        }
+        setVal(cta, P.code);
+        await sleep(300);
+        var ins2 = dlgBtn('Insert');
+        if (!ins2) return { state: 'no-confirm' };
+        ins2.click();
+        if (!(await waitFor(function () { return !sheet(); }, 5000))) return { state: 'dialog-stuck' };
+        var ok4 = await waitFor(function () { return counts().code > s1; }, 4000);
+        return { state: ok4 ? 'ok' : 'not-landed', language: lang };
+      }
+      case 'table': {
+        var t0 = document.querySelectorAll('table').length;
+        var o4 = await openInsert('Table');
+        if (o4 !== 'ok') return { state: o4 };
+        var r = Math.min(10, Math.max(1, P.rows)), cc = Math.min(10, Math.max(1, P.cols));
+        var g = await waitFor(function () { return document.querySelector('[aria-label="Insert a ' + r + ' by ' + cc + ' table"]'); }, 5000);
+        if (!g) return { state: 'no-grid', why: '表格弹窗里没有 ' + r + '×' + cc + ' 的格子' };
+        mclick(g);
+        if (!(await waitFor(function () { return document.querySelectorAll('table').length > t0; }, 5000))) return { state: 'not-landed', why: '点了格子没插出表格' };
+        await sleep(500);
+        var tb = Array.prototype.slice.call(document.querySelectorAll('table')).pop();
+        var sec = tb.closest('section') || tb.closest('[data-block="true"]');
+        mclick(tb);
+        await sleep(400);
+        var pen = sec && sec.querySelector('[aria-label="Edit block"]');
+        if (!pen) return { state: 'no-pencil', why: '新表格上找不到「Edit block」' };
+        mclick(pen);
+        var mta = await waitFor(dialogTextarea, 5000);
+        if (!mta) return { state: 'no-input', why: '点了铅笔没出 markdown 框' };
+        setVal(mta, P.markdown);
+        await sleep(300);
+        var up = dlgBtn('Update') || dlgBtn('Insert');
+        if (!up) return { state: 'no-confirm' };
+        up.click();
+        if (!(await waitFor(function () { return !sheet(); }, 5000))) return { state: 'dialog-stuck', why: '点了 Update 弹窗没关(markdown 不对?)' };
+        await sleep(500);
+        var cells = Array.prototype.slice.call(document.querySelectorAll('table')).pop().querySelectorAll('th, td');
+        var filled = Array.prototype.filter.call(cells, function (x) { return clean(x.innerText) !== ''; }).length;
+        return { state: filled > 0 ? 'ok' : 'empty-table', cells: cells.length, filled: filled };
+      }
+      case 'mediaOpen': {
+        var o5 = await openInsert('Media');
+        if (o5 !== 'ok') return { state: o5 };
+        var inp = await waitFor(function () { return document.querySelector('[role="dialog"] input[data-testid="fileInput"]'); }, 5000);
+        return { state: inp ? 'ok' : 'no-input', img: counts().img };
+      }
+      case 'mediaWait': {
+        var ok5 = await waitFor(function () { return !sheet() && counts().img >= P.want; }, 20000);
+        return { state: ok5 ? 'ok' : 'timeout', img: counts().img, dialog: !!sheet() };
+      }
+      case 'coverApply': {
+        var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
+        if (!ap) return { state: 'no-apply', why: '喂了封面没出裁剪框' };
+        ap.click();
+        var ok6 = await waitFor(function () { return !document.querySelector('[data-testid="applyButton"]') && document.querySelector('button[aria-label="Remove photo"]'); }, 10000);
+        return { state: ok6 ? 'ok' : 'not-landed' };
+      }
+      case 'uploads': {
+        var t1 = Date.now();
+        while (uploading() > 0 && Date.now() - t1 < P.ms) await sleep(500);
+        return { state: uploading() === 0 ? 'ok' : 'timeout', busy: uploading() };
+      }
+      case 'delete': {
+        if (!editId) return { state: 'not-editing', url: location.href };
+        var pub = byText('button, [role="button"]', 'Publish');
+        if (!pub) return { state: 'no-publish-row' };
+        var pr = pub.getBoundingClientRect();
+        var more = Array.prototype.slice.call(document.querySelectorAll('button[aria-label="More"]')).filter(vis)
+          .sort(function (a, b2) { var ra = a.getBoundingClientRect(), rb = b2.getBoundingClientRect(); return (Math.abs(ra.top - pr.top) + Math.abs(ra.left - pr.right)) - (Math.abs(rb.top - pr.top) + Math.abs(rb.left - pr.right)); })[0];
+        if (!more) return { state: 'no-more' };
+        more.click();
+        var del = await waitFor(function () { return byText('[role="menuitem"]', 'Delete Article'); }, 4000);
+        if (!del) return { state: 'no-delete-item' };
+        del.click();
+        /** 确认框「Delete Article? … Yes, delete / Cancel」(10-30 真机) */
+        var conf = await waitFor(function () { return document.querySelector('[data-testid="confirmationSheetConfirm"]'); }, 4000);
+        if (!conf) return { state: 'no-confirm', why: '点了 Delete Article 没出确认框' };
+        conf.click();
+        var gone = await waitFor(function () { return location.pathname.indexOf('/edit/' + editId) === -1; }, 8000);
+        return { state: gone ? 'ok' : 'still-here', confirmed: !!conf, url: location.href };
+      }
+      /**
+       * ⚠️⚠️ 真的发出去 —— 只由 x.post.publish(人点了确认发布)调。点一次 Publish;
+       * 弹出确认框且里面有「Publish」就再点那一下(还没在真机上见过它长什么样,10-30);之后等离开编辑页。
+       * 不重试(重试 = 可能发两篇)。
+       */
+      case 'publish': {
+        if (!editId || editId !== P.editId) return { state: 'not-editing', url: location.href, why: '编辑器不在这份文章上 —— 没点发布' };
+        if (uploading() > 0) return { state: 'uploading', busy: uploading(), why: '还有图在上传 —— 没点发布' };
+        var pb = byText('button, [role="button"]', 'Publish');
+        if (!pb) return { state: 'no-publish', why: '找不到 Publish 按钮' };
+        if (pb.disabled || pb.getAttribute('aria-disabled') === 'true') return { state: 'disabled', why: 'Publish 按钮是灰的(缺标题?)—— 没点' };
+        pb.click();
+        var seen = [];
+        var t2 = Date.now();
+        var confirmed = false;
+        while (Date.now() - t2 < 30000) {
+          await sleep(500);
+          if (location.pathname.indexOf('/compose/articles/edit/' + editId) === -1) return { state: 'left', url: location.href, confirmed: confirmed };
+          var d = document.querySelector('[role="dialog"], [role="alertdialog"]');
+          if (d && !confirmed) {
+            seen.push(clean(d.innerText).slice(0, 200));
+            var cb = byText('[role="dialog"] button, [role="alertdialog"] button, [role="dialog"] [role="button"]', 'Publish');
+            if (cb) { cb.click(); confirmed = true; }
+          }
+        }
+        var dl = document.querySelector('[role="dialog"], [role="alertdialog"]');
+        return { state: 'stuck', url: location.href, confirmed: confirmed, dialogs: seen, dialogNow: dl ? clean(dl.innerText).slice(0, 300) : null };
+      }
+      default: return { state: 'bad-op', op: P.op };
+    }
+  } catch (e) { return { state: 'error', why: String(e) }; }
+})(__PARAMS__);`;
+
+export const X_ARTICLE_SCRIPTS: readonly RegisteredScript[] = [
+  {
+    id: X_ARTICLE_SCRIPT,
+    purpose: 'X 文章编辑器:新建 / 填标题 / 粘正文 / 插公式代码表格分隔线 / 开图片框 / 放封面 / 读回 / 删草稿 / 发布(op 分动作;只有 publish 真的发出去)',
+    build: (params) => SRC.replace('__PARAMS__', () => JSON.stringify(params ?? {})),
+  },
+];
