@@ -29,8 +29,13 @@ export type ArticleDraft = {
   /** 文章标题(note 的标题块;没有就是空的,X 发布前要人补) */
   readonly title: string;
   readonly steps: readonly ArticleStep[];
-  /** 默认封面:note 里第一张普通图片(用户 10-30:封面要;没选过就用它) */
+  /**
+   * 默认封面:标题下面紧挨着的那张图(它就是封面,正文里不再放 —— 用户 10-30「这样不是有两张封面图了吗?」);
+   * 没有的话用正文里第一张普通图片(正文里照样放)
+   */
   readonly coverDefault: string | null;
+  /** 封面是不是标题下面那张(是的话正文里没放它) */
+  readonly coverFromLead: boolean;
   readonly warnings: readonly string[];
 };
 
@@ -265,12 +270,16 @@ function topHeading(nodes: readonly PmNode[]): number {
 export function articleDraft(nodes: readonly PmNode[]): ArticleDraft {
   const first = nodes[0];
   const hasTitle = first?.type === 'paragraph' && first.attrs?.isTitle === true && textOf(first).trim() !== '';
-  const body = hasTitle ? nodes.slice(1) : nodes;
-  const ctx: Ctx = { steps: [], warn: new Set(), topLevel: topHeading(body), html: [], text: [], cover: null };
+  const afterTitle = hasTitle ? nodes.slice(1) : nodes;
+  const lead = afterTitle[0];
+  const leadSrc = lead?.type === 'image' ? ((lead.attrs?.src as string) || '') : '';
+  const coverFromLead = leadSrc.startsWith('media://') && needsImage(lead as PmNode) === null;
+  const body = coverFromLead ? afterTitle.slice(1) : afterTitle;
+  const ctx: Ctx = { steps: [], warn: new Set(), topLevel: topHeading(body), html: [], text: [], cover: coverFromLead ? leadSrc : null };
   for (const n of body) block(n, ctx);
   flushHtml(ctx);
   if (!hasTitle) ctx.warn.add('note 没有标题:X 文章要标题,填进去后在 X 里补一个');
-  return { title: hasTitle ? textOf(first).trim() : '', steps: ctx.steps, coverDefault: ctx.cover, warnings: [...ctx.warn] };
+  return { title: hasTitle ? textOf(first).trim() : '', steps: ctx.steps, coverDefault: ctx.cover, coverFromLead, warnings: [...ctx.warn] };
 }
 
 /** 这篇文章现在能不能填进 X —— 不能的话为什么(预览按钮和 x.post.fill 同一句) */

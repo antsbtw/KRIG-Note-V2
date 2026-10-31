@@ -226,6 +226,11 @@ function ArticleView({ a }: { a: ArticleDraft }) {
       <div style={{ ...box, aspectRatio: '5 / 2', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
         {a.coverDefault ? <img src={a.coverDefault} alt="封面" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '没有封面(note 里没有图片)'}
       </div>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: -6 }}>
+        {a.coverFromLead ? '封面:标题下面那张图(正文里不再放它)'
+          : a.coverDefault ? '封面:借用正文第一张图(正文里也有它)—— 想要专门的封面,在 note 标题下面放一张图'
+            : '想要封面,在 note 标题下面放一张图'}
+      </div>
       <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.3 }}>{a.title || <span style={{ color: '#d97706' }}>(没有标题)</span>}</div>
       {a.steps.map((s, i) => <ArticleStepView key={i} s={s} />)}
     </div>

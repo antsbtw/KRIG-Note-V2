@@ -79,6 +79,15 @@ describe('X 文章:note → 步骤', () => {
     expect(a.coverDefault).toBe('media://images/ant.png');
   });
 
+  it('⭐ 标题下面紧挨着的图 = 封面,正文里不再放(用户 10-30:「这样不是有两张封面图了吗?」)', () => {
+    const b = articleDraft([note[0], img('banner'), ...note.slice(1)]);
+    expect(b.coverDefault).toBe('media://images/banner.png');
+    expect(b.coverFromLead).toBe(true);
+    expect(JSON.stringify(b.steps)).not.toContain('banner');
+    expect(b.steps.length).toBe(a.steps.length);
+    expect(a.coverFromLead).toBe(false);
+  });
+
   it('分栏还没拼好图 → 占位,不能填;拼好了就能填', () => {
     expect(articleProblem(a)).toContain('分栏还没转成图');
     const done = articleDraft(note.map((n) => (n.type === 'columnList' ? { ...n, attrs: { xImage: 'media://images/c.png' } } : n)));
