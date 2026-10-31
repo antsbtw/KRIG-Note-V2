@@ -227,8 +227,9 @@ const SRC = String.raw`(async function (P) {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
         if (!ap) return { state: 'no-apply', why: '喂了封面没出裁剪框' };
         ap.click();
-        var ok6 = await waitFor(function () { return !document.querySelector('[data-testid="applyButton"]') && document.querySelector('button[aria-label="Remove photo"]'); }, 10000);
-        return { state: ok6 ? 'ok' : 'not-landed' };
+        /** 10-30 真机:第一次 10 秒没等到(封面图上传慢),第二次成了 → 放宽到 30 秒;没等到带回看到了什么 */
+        var ok6 = await waitFor(function () { return !document.querySelector('[data-testid="applyButton"]') && document.querySelector('button[aria-label="Remove photo"]'); }, 30000);
+        return ok6 ? { state: 'ok' } : { state: 'not-landed', apply: !!document.querySelector('[data-testid="applyButton"]'), dialog: !!document.querySelector('[role="dialog"]') };
       }
       case 'uploads': {
         var t1 = Date.now();

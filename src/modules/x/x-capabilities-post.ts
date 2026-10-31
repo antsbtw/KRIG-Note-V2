@@ -243,7 +243,11 @@ export function registerXPostCapabilities(): void {
       releasePage(page.token);
       await recordEnded(p.draftId, { status: 'cancelled', detail: `${i.why}:${c.detail}` }).catch((e) => logRecordError(p.draftId, e));
       console.log(`[x.post] 撤回草稿 ${p.draftId}(${i.why}):${c.detail}`);
-      if (!c.cleared) throw capFailed(`框里的字没清掉:${c.detail} —— 请在左边 X 上手动删掉;网页已放开`);
+      if (!c.cleared) {
+        throw capFailed(p.form === 'article'
+          ? `文章草稿没删:${c.detail}(你可能已经在 X 上自己发了 / 去了别处)—— 要删就到 X 的文章草稿箱里删;网页已放开`
+          : `框里的字没清掉:${c.detail} —— 请在左边 X 上手动删掉;网页已放开`);
+      }
       return { draftId: p.draftId, detail: c.detail };
     },
   });
