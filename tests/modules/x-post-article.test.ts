@@ -88,6 +88,27 @@ describe('X 文章:note → 步骤', () => {
     expect(a.coverFromLead).toBe(false);
   });
 
+  it('⭐ 封面图下面紧挨着的引用块 = 发布导语,正文里不放(用户 10-31 同意)', () => {
+    const quote: PmNode = { type: 'blockquote', content: [p(t('订阅链接失效。')), p(t('🐜 蚂蚁带你找到应对之道!'))] };
+    const b = articleDraft([note[0], img('banner'), quote, ...note.slice(1)]);
+    expect(b.caption).toBe('订阅链接失效。\n\n🐜 蚂蚁带你找到应对之道!');
+    expect(b.captionWeight).toBeGreaterThan(0);
+    expect(JSON.stringify(b.steps)).not.toContain('订阅链接失效');
+    expect(b.steps.length).toBe(a.steps.length);
+    /** 没有封面图时,标题下面的引用就是普通正文 */
+    const c = articleDraft([note[0], quote, ...note.slice(1)]);
+    expect(c.caption).toBe('');
+    expect(JSON.stringify(c.steps)).toContain('订阅链接失效');
+  });
+
+  it('导语超过 256(加权)→ 挡住,说怎么改', () => {
+    const long: PmNode = { type: 'blockquote', content: [p(t('长'.repeat(200)))] };
+    const done = note.map((n) => (n.type === 'columnList' ? { ...n, attrs: { xImage: 'media://images/c.png' } } : n));
+    const b = articleDraft([done[0], img('banner'), long, ...done.slice(1)]);
+    expect(b.captionWeight).toBe(400);
+    expect(articleProblem(b)).toContain('导语超了');
+  });
+
   it('分栏还没拼好图 → 占位,不能填;拼好了就能填', () => {
     expect(articleProblem(a)).toContain('分栏还没转成图');
     const done = articleDraft(note.map((n) => (n.type === 'columnList' ? { ...n, attrs: { xImage: 'media://images/c.png' } } : n)));

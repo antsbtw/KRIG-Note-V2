@@ -143,7 +143,7 @@ export async function deleteArticle(wcId: number, editId?: string): Promise<{ de
  */
 export async function publishArticle(wcId: number, p: PendingPost): Promise<PublishOutcome> {
   const base = { tweetIds: [] as string[], sentText: p.text, sentMedia: p.media.length, editedOnX: false };
-  const r = (await webviewPorts(wcId).runScript(X_ARTICLE_SCRIPT, { op: 'publish', editId: p.articleId })) as Act;
+  const r = (await webviewPorts(wcId).runScript(X_ARTICLE_SCRIPT, { op: 'publish', editId: p.articleId, caption: p.caption ?? '' })) as Act;
   console.log(`[x.post] X 文章 ${p.articleId ?? '?'} 点发布:${JSON.stringify(r)}`);
   if (r?.state === 'left') {
     const url = String(r.url ?? '');
@@ -151,6 +151,7 @@ export async function publishArticle(wcId: number, p: PendingPost): Promise<Publ
     if (id) return { ...base, outcome: 'sent', detail: `发出去了,到了文章页 ${url}`, tweetId: id, tweetIds: [id], url };
     return { ...base, outcome: 'unseen', detail: `点了发布、离开了编辑页,但停在 ${url},认不出是不是文章页 —— 请在 X 上看一眼` };
   }
+  if (r?.state === 'caption-failed') return { ...base, outcome: 'failed', detail: `导语没填进 X 的发布弹窗(${String(r.why ?? '')})—— 没点发布;在 X 上自己填了点 Publish,或取消` };
   if (r?.state === 'stuck') {
     return { ...base, outcome: 'unseen', detail: `点了发布 30 秒还在编辑页${r.dialogNow ? `,弹窗里写着「${String(r.dialogNow).slice(0, 80)}」` : ''} —— 请在 X 上看一眼` };
   }

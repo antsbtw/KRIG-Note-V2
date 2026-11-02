@@ -42,6 +42,8 @@ export type PendingPost = {
   readonly form: PostForm;
   /** X 文章:编辑器里那份草稿的 id(/compose/articles/edit/<id>;取消时核对再删) */
   readonly articleId?: string;
+  /** X 文章:发布弹窗里填的导语(空 = 不填) */
+  readonly caption?: string;
   /** 每一条(推串 2026-10-28);下面的 text / media 是它们合起来的(显示、记录用) */
   readonly posts: readonly DraftPost[];
   readonly text: string;

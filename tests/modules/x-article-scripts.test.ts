@@ -75,6 +75,25 @@ describe('X 文章脚本', () => {
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });
   });
 
+  it('⭐ 发布:导语框找不到 → 不点弹窗里的 Publish(宁可停下,不发没导语的)', async () => {
+    editor(['字']);
+    history.replaceState(null, '', '/compose/articles/edit/777');
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
+    const top = Object.assign(document.createElement('button'), { textContent: 'Publish' });
+    top.addEventListener('click', () => {
+      const d = document.createElement('div');
+      d.setAttribute('role', 'dialog');
+      d.innerHTML = '<button>Publish</button>';
+      d.querySelector('button')!.addEventListener('click', () => { (window as unknown as { sent: boolean }).sent = true; });
+      document.body.append(d);
+    });
+    document.body.append(top);
+    expect(await run({ op: 'publish', editId: '777', caption: '导语' })).toMatchObject({ state: 'caption-failed' });
+    expect((window as unknown as { sent?: boolean }).sent).toBeUndefined();
+    history.replaceState(null, '', '/');
+    delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  }, 15_000);
+
   it('⭐ 发布:编辑器不在这份文章上 → 不点(不发错一篇)', async () => {
     editor(['字']);
     const pub = Object.assign(document.createElement('button'), { textContent: 'Publish' });

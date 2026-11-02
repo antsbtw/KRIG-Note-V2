@@ -118,7 +118,7 @@ async function fillArticleDraft(
   const now = Date.now();
   const text = [a.title, ...a.steps.flatMap((s) => (s.k === 'html' || s.k === 'heading' ? [s.text] : []))].join('\n\n');
   const p: PendingPost = {
-    draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId, form: 'article', articleId: r.editId,
+    draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId, form: 'article', articleId: r.editId, caption: a.caption,
     posts: [{ text: a.title, media: srcs }], text: a.title, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
   };
   try {

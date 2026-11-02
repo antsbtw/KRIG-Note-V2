@@ -276,6 +276,17 @@ const SRC = String.raw`(async function (P) {
           var d = document.querySelector('[role="dialog"], [role="alertdialog"]');
           if (d && !confirmed) {
             seen.push(clean(d.innerText).slice(0, 200));
+            /**
+             * 发布弹窗(10-30 真机截图):Choose your audience / Who can reply / 「Add a caption to your article」(≤256)/ 右上 Publish。
+             * 导语:弹窗里的 textarea;填不进去就不点(宁可停下让人自己填,不发出一篇没导语的)
+             */
+            if (P.caption) {
+              var cap = await waitFor(function () { return Array.prototype.slice.call(document.querySelectorAll('[role="dialog"] textarea')).filter(vis)[0]; }, 5000);
+              if (!cap) return { state: 'caption-failed', why: '发布弹窗里找不到导语框', dialog: clean(d.innerText).slice(0, 300) };
+              setVal(cap, P.caption);
+              await sleep(400);
+              if (cap.value !== P.caption) return { state: 'caption-failed', why: '导语框里的字对不上', got: cap.value.slice(0, 60) };
+            }
             var cb = byText('[role="dialog"] button, [role="alertdialog"] button, [role="dialog"] [role="button"]', 'Publish');
             if (cb) { cb.click(); confirmed = true; }
           }

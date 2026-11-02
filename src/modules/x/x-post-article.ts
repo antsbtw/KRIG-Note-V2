@@ -12,6 +12,7 @@
  * ⚠️ 不静默丢东西:X 文章没有的格式(下划线 / 高亮 / 缩进…)、略过的块,都进 warnings。
  */
 import { needsImage, fillProblem, RENDER_LABEL, type PmNode, type PostMedia, type RenderWhat } from './x-post-compose';
+import { xWeightedLength } from './x-post-length';
 
 export type ArticleStep =
   /** 一段连续的字 / 列表 / 引用 → 一次富文本粘贴;text 是纯文字(预览、核对用) */
@@ -36,8 +37,23 @@ export type ArticleDraft = {
   readonly coverDefault: string | null;
   /** 封面是不是标题下面那张(是的话正文里没放它) */
   readonly coverFromLead: boolean;
+  /**
+   * 发布时的导语(X 的 Publish 弹窗「Add a caption」,时间线上那条推文的正文;X 自动附文章链接)——
+   * 封面图下面紧挨着的引用块,正文里不再放(用户 10-31 同意);没有就空着
+   */
+  readonly caption: string;
+  /** 导语的加权字数(X 上限 ARTICLE_CAPTION_MAX) */
+  readonly captionWeight: number;
   readonly warnings: readonly string[];
 };
+
+/** X 文章发布弹窗的导语上限(10-30 真机截图「172 / 256」,按加权字数算) */
+export const ARTICLE_CAPTION_MAX = 256;
+
+/** 引用块 → 导语的纯文字:每段一行,段之间空一行(和人在 X 弹窗里写的样子一样) */
+function quoteText(n: PmNode): string {
+  return (n.content ?? []).map((c) => textOf(c).trim()).filter((t) => t !== '').join('\n\n');
+}
 
 /** X 文章表格的网格最大 10 × 10(06-14 实机) */
 export const ARTICLE_TABLE_MAX = 10;
@@ -274,17 +290,24 @@ export function articleDraft(nodes: readonly PmNode[]): ArticleDraft {
   const lead = afterTitle[0];
   const leadSrc = lead?.type === 'image' ? ((lead.attrs?.src as string) || '') : '';
   const coverFromLead = leadSrc.startsWith('media://') && needsImage(lead as PmNode) === null;
-  const body = coverFromLead ? afterTitle.slice(1) : afterTitle;
+  const afterCover = coverFromLead ? afterTitle.slice(1) : afterTitle;
+  const capNode = coverFromLead && afterCover[0]?.type === 'blockquote' ? afterCover[0] : null;
+  const caption = capNode ? quoteText(capNode) : '';
+  const body = capNode ? afterCover.slice(1) : afterCover;
   const ctx: Ctx = { steps: [], warn: new Set(), topLevel: topHeading(body), html: [], text: [], cover: coverFromLead ? leadSrc : null };
   for (const n of body) block(n, ctx);
   flushHtml(ctx);
   if (!hasTitle) ctx.warn.add('note 没有标题:X 文章要标题,填进去后在 X 里补一个');
-  return { title: hasTitle ? textOf(first).trim() : '', steps: ctx.steps, coverDefault: ctx.cover, coverFromLead, warnings: [...ctx.warn] };
+  return {
+    title: hasTitle ? textOf(first).trim() : '', steps: ctx.steps, coverDefault: ctx.cover, coverFromLead,
+    caption, captionWeight: xWeightedLength(caption), warnings: [...ctx.warn],
+  };
 }
 
 /** 这篇文章现在能不能填进 X —— 不能的话为什么(预览按钮和 x.post.fill 同一句) */
 export function articleProblem(a: ArticleDraft): string | null {
   if (a.steps.length === 0) return '正文是空的';
+  if (a.captionWeight > ARTICLE_CAPTION_MAX) return `导语超了(${a.captionWeight} / ${ARTICLE_CAPTION_MAX})—— X 发布时放不下,在 note 里删短封面图下面那段引用`;
   for (const s of a.steps) {
     if (s.k !== 'media') continue;
     if (s.m.kind === 'video') return '视频还不能放进 X 文章(还没做)—— 现在先把它去掉再发';

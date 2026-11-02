@@ -10,7 +10,7 @@
 import { useEffect, useState } from 'react';
 import { fillBlock, formNotFillable, type PostDraft, type PostForm, type PostMedia, type PostPlan, type ThreadEdit, type ThreadLayout } from './x-post-compose';
 import { mergeNext, moveMedia, splitBefore } from './x-post-layout';
-import type { ArticleDraft, ArticleStep } from './x-post-article';
+import { ARTICLE_CAPTION_MAX, type ArticleDraft, type ArticleStep } from './x-post-article';
 import { X_POST_LIMIT } from './x-post-length';
 import type { PendingSnap } from './x-post-pending-store';
 import type { PostedBefore } from './x-post-repo';
@@ -223,6 +223,16 @@ function ArticleView({ a }: { a: ArticleDraft }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <style>{'.x-article-html p{margin:0 0 8px}.x-article-html blockquote{margin:0 0 8px;padding-left:12px;border-left:3px solid var(--border-popup);color:var(--text)}.x-article-html ul,.x-article-html ol{margin:0 0 8px;padding-left:22px}.x-article-html a{color:#1d9bf0}'}</style>
+      {/** 导语 = 时间线上那条推文的正文(X 自动附文章链接) */}
+      <div style={{ ...box, padding: 10 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 4 }}>
+          发布时的导语(时间线上那条推文的字,X 会自动附上文章链接)
+          <span style={{ float: 'right', color: a.captionWeight > ARTICLE_CAPTION_MAX ? '#e5484d' : 'var(--text-muted)' }}>{a.captionWeight} / {ARTICLE_CAPTION_MAX}</span>
+        </div>
+        {a.caption
+          ? <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.5 }}>{a.caption}</div>
+          : <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>没写 —— 想要导语,在 note 封面图下面紧挨着放一段引用</div>}
+      </div>
       <div style={{ ...box, aspectRatio: '5 / 2', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', fontSize: 12 }}>
         {a.coverDefault ? <img src={a.coverDefault} alt="封面" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : '没有封面(note 里没有图片)'}
       </div>
