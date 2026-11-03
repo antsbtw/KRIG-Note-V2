@@ -66,7 +66,11 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
     setNote(`ⓘ 正在点 X 的${draft.posts.length > 1 ? '「全部发布」,再逐条' : '发布,再去'}核对…(别动左边网页)`);
     const r = await xDataCall({ op: 'postPublish', wsId, draftId: draft.draftId });
     setBusy(false);
-    if (r.status !== 'ok') console.warn(`[x-post] 发布没核对上:${r.reason}`);
+    if (r.status !== 'ok') {
+      console.warn(`[x-post] 发布没核对上:${r.reason}`);
+      /** 没点成、草稿还在(pending 还在)→ 条还显示,把原因写在条上;草稿没了的由 ended 显示 */
+      setNote(`❌ ${r.reason}`);
+    }
     /** 结局由 pending store 的 ended 显示(主进程记的那份),这里不另存一份 */
     await refreshPending(wsId);
   };

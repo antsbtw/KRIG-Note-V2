@@ -158,11 +158,12 @@ export async function publishArticle(wcId: number, p: PendingPost): Promise<Publ
     const o = leftTo(p, String(r.url ?? ''));
     return r.captionKept ? { ...o, detail: `${o.detail}(导语用的是 X 框里已有的字)` } : o;
   }
-  if (r?.state === 'caption-failed') return { ...base, outcome: 'failed', detail: `导语没填进 X 的发布弹窗(${String(r.why ?? '')})—— 没点发布;在 X 上自己填了点 Publish,或取消` };
+  if (r?.state === 'caption-failed') return { ...base, outcome: 'failed', untouched: true, detail: `导语没填进 X 的发布弹窗(${String(r.why ?? '')})—— 没点发布;在 X 上自己填了点 Publish,或取消` };
   if (r?.state === 'stuck') {
     return { ...base, outcome: 'unseen', detail: `点了发布 30 秒还在编辑页${r.dialogNow ? `,弹窗里写着「${String(r.dialogNow).slice(0, 80)}」` : ''} —— 请在 X 上看一眼` };
   }
-  return { ...base, outcome: 'failed', detail: `没点成发布:${r?.why ?? r?.state ?? '脚本没回话'}` };
+  /** 走到这里的都是脚本在点 Publish 之前就停了(不在编辑页 / 找不到按钮 / 按钮灰 / 脚本没回话)—— 草稿没动 */
+  return { ...base, outcome: 'failed', untouched: true, detail: `没点成发布:${r?.why ?? r?.state ?? '脚本没回话'}` };
 }
 
 /** 离开编辑页落到了哪:推文 / 文章页 → 发出去了;别处 → 说不清 */

@@ -333,6 +333,8 @@ export async function clearCompose(wcId: number): Promise<ClearOutcome> {
 export type PublishOutcome = {
   readonly outcome: 'sent' | 'unseen' | 'failed';
   readonly detail: string;
+  /** failed 且一下都没点(草稿原样在 X 上)→ 草稿留着,人可以再点确认发布 / 取消(用户 11-02:「关闭后也没有取消按钮了」) */
+  readonly untouched?: boolean;
   /** 第一条的 id(单条推就是那条) */
   readonly tweetId?: string;
   /** 推串每条的 id,按顺序;没核对上的是 ''(单条推 1 个) */

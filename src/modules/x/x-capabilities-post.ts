@@ -132,14 +132,18 @@ async function fillArticleDraft(
     throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${d.deleted ? '文章草稿已删' : `文章草稿没删掉:${d.detail}`}`);
   }
   addPending(p, cancelOnTimeout);
-  /** 人直接点 X 网页的 Publish 也要有导语、也要收尾(用户 11-02) */
+  watchOnX(p);
+  console.log(`[x.post] 已填进 X 文章编辑器(@${acc.handle},${a.steps.length} 步、${srcs.length} 张图${cover ? '、有封面' : ''})草稿 ${p.draftId} / 文章 ${r.editId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
+  return viewOf(p);
+}
+
+/** 人直接点 X 网页的 Publish 也要有导语、也要收尾(用户 11-02) */
+function watchOnX(p: PendingPost): void {
   watchArticle(p, (q, url) => {
     void execute('x.post.publish', { wsId: q.wsId, draftId: q.draftId, seenUrl: url }, { caller: 'timer' }).then((x) => {
       if (!x.ok) console.warn(`[x.post] 在 X 上发出去的文章 ${q.articleId ?? '?'} 收尾没成:${x.why}`);
     });
   });
-  console.log(`[x.post] 已填进 X 文章编辑器(@${acc.handle},${a.steps.length} 步、${srcs.length} 张图${cover ? '、有封面' : ''})草稿 ${p.draftId} / 文章 ${r.editId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
-  return viewOf(p);
 }
 
 export function registerXPostCapabilities(): void {
@@ -280,6 +284,12 @@ export function registerXPostCapabilities(): void {
       if (i.seenUrl && p.form !== 'article') throw capFailed('seenUrl 只用于 X 文章');
       const o = p.form !== 'article' ? await publishCompose(page.wcId, p)
         : i.seenUrl ? seenPublished(p, i.seenUrl) : await publishArticle(page.wcId, p);
+      /** 一下都没点 → 草稿原样留着(锁不放、接着盯),人可以再点确认发布 / 取消 */
+      if (o.outcome === 'failed' && o.untouched) {
+        if (p.form === 'article') watchOnX(p);
+        console.log(`[x.post] 发布 ${p.draftId} 没点成(草稿还在,可再试 / 取消):${o.detail}`);
+        throw capFailed(o.detail);
+      }
       endPublished(p, o);
       releasePage(page.token);
       await recordEnded(p.draftId, {
