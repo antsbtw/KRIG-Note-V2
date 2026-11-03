@@ -237,6 +237,16 @@ describe('X 文章脚本', () => {
     expect(await run({ op: 'tail' })).toMatchObject({ state: 'no-empty-tail' });
   });
 
+  it('⭐ newLine:插图前最后一块不是空行 → 另起一个空行(11-03:光标在小标题末尾时插图把小标题换掉了);已经是空行 → 不动', async () => {
+    editor(['二、创建VPS']);
+    expect(await run({ op: 'newLine' })).toMatchObject({ state: 'ok', added: true });
+    expect(pasted?.html).toBe('<p>\u200b</p><p>\u200b</p>');
+    pasted = null;
+    editor(['二、创建VPS', '']);
+    expect(await run({ op: 'newLine' })).toMatchObject({ state: 'ok', added: false });
+    expect(pasted).toBeNull();
+  });
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

@@ -28,6 +28,9 @@ type Act = { state?: string; why?: string; editId?: string; [k: string]: unknown
  */
 const IMAGE_SAVE_MS = 60_000;
 
+/** 没填完的草稿留着不删(用户 11-03:「调试期间,失败可以不要删除,方便你观察问题」)—— 填稳了改回 false */
+const KEEP_FAILED_DRAFT = true;
+
 export async function fillArticle(
   wcId: number, a: ArticleFill, progress: (step: number, total: number, what: string) => void = () => undefined,
 ): Promise<ArticleFillOutcome> {
@@ -46,6 +49,10 @@ export async function fillArticle(
   console.log(`[x.post] X 文章新建了草稿 ${editId}`);
   /** 从这里起,没成就删掉这份草稿 */
   const fail = async (why: string): Promise<ArticleFillOutcome> => {
+    if (KEEP_FAILED_DRAFT) {
+      console.warn(`[x.post] X 文章 ${editId} 没填完,草稿留在 X 上(调试期间不删):${why}`);
+      return { ok: false, why: `${why} —— 草稿留在 X 上没删(调试期间,方便看出错时的样子);看完到 X 的文章草稿箱里删` };
+    }
     const d = await deleteArticle(wcId, editId);
     return { ok: false, why: `${why} —— ${d.deleted ? '这份草稿已删掉' : `草稿没删掉(${d.detail}),在 X 的文章草稿箱里手动删`}` };
   };
@@ -85,6 +92,15 @@ export async function fillArticle(
       case 'table': r = await act('table', { rows: s.rows, cols: s.cols, markdown: s.markdown }); break;
       case 'divider': r = await act('divider'); break;
       case 'image': {
+        /** 插图前:光标放到一个空行上(否则 X 把光标所在那块整个换成图 —— 11-03 第 4 步小标题被第 5 步的图吃掉) */
+        r = await act('newLine');
+        if (r?.state !== 'ok') break;
+        {
+          const tl = await act('tail');
+          if (tl?.state !== 'ok') { r = { state: 'no-empty-line', why: `插图前没找到空行(${String(tl?.outline ?? '')})` }; break; }
+          const tp = await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.articleTail, trusted: true });
+          if (tp.status === 'failed') { r = { state: 'tap-failed', why: `插图前点不进空行:${tp.reason}` }; break; }
+        }
         r = await act('mediaOpen');
         if (r?.state !== 'ok') break;
         const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.articleMediaInput, files: [s.file], check: { kind: 'none' } });

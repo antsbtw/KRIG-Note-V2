@@ -182,6 +182,24 @@ const SRC = String.raw`(async function (P) {
         return ok ? { state: 'ok', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited }
           : { state: 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited, processingNow: processing(), outline: outline() };
       }
+      /**
+       * 插图前保证光标在一个空行上(11-03 真机:光标在刚粘的小标题末尾时,插图把小标题那一块整个换掉了)。
+       * 最后一块已经是空行 → 什么都不做;不是 → 合成粘贴两个零宽段落:第一个并进当前行(看不见),第二个成新的空行。
+       * 之后由 tail + 真点击把光标放进去
+       */
+      case 'newLine': {
+        var bl = body();
+        if (!bl) return { state: 'no-body' };
+        var lb = blocks()[blocks().length - 1];
+        if (lb && !lb.querySelector('img, svg, table, pre') && clean(lb.innerText) === '') return { state: 'ok', added: false };
+        var n9 = counts().blocks;
+        var dt9 = new DataTransfer();
+        dt9.setData('text/plain', '\n');
+        dt9.setData('text/html', '<p>\u200b</p><p>\u200b</p>');
+        bl.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt9, bubbles: true, cancelable: true }));
+        var ok9 = await waitFor(function () { return counts().blocks > n9; }, 4000);
+        return ok9 ? { state: 'ok', added: true, before: n9, after: counts().blocks } : { state: 'not-landed', before: n9, outline: outline() };
+      }
       case 'divider': {
         var n0 = counts().sections;
         var o = await openInsert('Divider');
