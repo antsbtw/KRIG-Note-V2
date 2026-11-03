@@ -176,11 +176,18 @@ const SRC = String.raw`(async function (P) {
         var dt = new DataTransfer();
         dt.setData('text/plain', P.text);
         dt.setData('text/html', html);
-        b.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+        var pev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+        b.dispatchEvent(pev);
         var want = clean(P.text).replace(/\s+/g, '').slice(-12);
         var ok = await waitFor(function () { return clean(b.innerText).replace(/\s+/g, '').indexOf(want) !== -1; }, 4000);
+        /**
+         * 没进去时带回现场(11-03:同一位置同一段,出错那刻 X 不接、过会儿 probe 再粘就进去了)——
+         * handled = X(DraftJS)接没接这个 paste 事件(编辑器暂时只读时不接);selBlock = 光标在第几块;status = 顶上状态
+         */
+        var selB = (function () { var sl = getSelection(); var an = sl && sl.anchorNode; var bs2 = blocks(); for (var x = an; x; x = x.parentElement || x.parentNode) { if (x.getAttribute && x.getAttribute('data-block') === 'true') return bs2.indexOf(x); } return -1; })();
         return ok ? { state: 'ok', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited }
-          : { state: 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited, processingNow: processing(), outline: outline() };
+          : { state: 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited, processingNow: processing(),
+            handled: pev.defaultPrevented, selBlock: selB, blocksNow: blocks().length, status: statusLine(), outline: outline() };
       }
       /**
        * 插图前保证光标在一个空行上(11-03 真机:光标在刚粘的小标题末尾时,插图把小标题那一块整个换掉了)。

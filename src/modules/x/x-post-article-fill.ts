@@ -28,6 +28,8 @@ type Act = { state?: string; why?: string; editId?: string; [k: string]: unknown
  */
 const IMAGE_SAVE_MS = 60_000;
 
+const PASTE_TRIES = 3;
+
 /** 没填完的草稿留着不删(用户 11-03:「调试期间,失败可以不要删除,方便你观察问题」)—— 填稳了改回 false */
 const KEEP_FAILED_DRAFT = true;
 
@@ -76,14 +78,37 @@ export async function fillArticle(
   const tap = await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.articleFirstLine, trusted: true });
   if (tap.status === 'failed') return fail(`点不进正文:${tap.reason}`);
 
+  /**
+   * 粘贴,没进去就再试(最多 PASTE_TRIES 次)。11-03 真机:插图后有一阵 X 不接粘贴(顶上不一定是 Processing),过会儿同样的粘就进去了。
+   * ⚠️ 只在确认这次一点没进去(块数没变、字没出现)时才再试 —— 再多等 2 秒确认没迟到,免得粘出两份;再试前把光标点回末尾空行
+   */
+  const pasteRetry = async (html: string, text: string): Promise<Act> => {
+    let r: Act = null;
+    for (let k = 1; k <= PASTE_TRIES; k += 1) {
+      r = await act('paste', { html, text });
+      if (r?.state !== 'not-landed') return r;
+      console.warn(`[x.post] X 文章粘贴第 ${k} 次没进去:${JSON.stringify(r)}`);
+      await new Promise((ok) => setTimeout(ok, 2000));
+      const late = await act('state');
+      if (Number((late?.counts as { blocks?: number } | undefined)?.blocks) !== Number(r.before) || String(late?.text ?? '').replace(/\s+/g, '').includes(text.replace(/\s+/g, '').slice(-12))) {
+        console.warn(`[x.post] X 文章粘贴第 ${k} 次迟到了才进去 —— 不再粘`);
+        return { state: 'ok', late: true };
+      }
+      if (k === PASTE_TRIES) break;
+      const tl = await act('tail');
+      if (tl?.state === 'ok') await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.articleTail, trusted: true });
+    }
+    return r;
+  };
+
   let images = 0;
   for (const [i, s] of a.steps.entries()) {
     const at = `第 ${i + 1} / ${a.steps.length} 步`;
     progress(i + 1, total, STEP_NAME[s.k]);
     let r: Act;
     switch (s.k) {
-      case 'html': r = await act('paste', { html: s.html, text: s.text }); break;
-      case 'heading': r = await act('paste', { html: `<h${s.level}>${esc(s.text)}</h${s.level}>`, text: s.text }); break;
+      case 'html': r = await pasteRetry(s.html, s.text); break;
+      case 'heading': r = await pasteRetry(`<h${s.level}>${esc(s.text)}</h${s.level}>`, s.text); break;
       case 'latex': r = await act('latex', { latex: s.latex }); break;
       case 'code':
         r = await act('code', { language: s.language, code: s.code });
