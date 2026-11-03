@@ -56,9 +56,20 @@ export function columnCollapsePlugin(): Plugin {
         const { node: columnList, pos: clPos } = topNodes[i];
         const oldStates = oldColumnStates.get(clPos);
 
+        // 光标所在的栏被删空 → 不收缩,留着空栏;再按一次 Backspace 才由 column-list keymap 删栏
+        // (用户 2026-11-03:「删除完毕首字符后再来一次 del 键才会删除 column」)。
+        // 光标不在里面的(如把块拖出栏)照旧立刻收缩。
+        const selFrom = newState.selection.from;
         const newlyEmptyIndices: number[] = [];
+        let cursorIndex = -1;
+        let colPos = clPos + 1;
         for (let c = 0; c < columnList.childCount; c++) {
-          if (!isEmptyColumn(columnList.child(c))) continue;
+          const col = columnList.child(c);
+          const colEnd = colPos + col.nodeSize;
+          const hasCursor = selFrom > colPos && selFrom < colEnd;
+          colPos = colEnd;
+          if (hasCursor) cursorIndex = c;
+          if (!isEmptyColumn(col) || hasCursor) continue;
           const wasEmpty = oldStates && c < oldStates.length ? oldStates[c] : true;
           if (!wasEmpty) newlyEmptyIndices.push(c);
         }
@@ -67,7 +78,7 @@ export function columnCollapsePlugin(): Plugin {
 
         const nonEmptyColumns: { col: PMNode; index: number }[] = [];
         for (let c = 0; c < columnList.childCount; c++) {
-          if (!isEmptyColumn(columnList.child(c))) {
+          if (!isEmptyColumn(columnList.child(c)) || c === cursorIndex) {
             nonEmptyColumns.push({ col: columnList.child(c), index: c });
           }
         }
