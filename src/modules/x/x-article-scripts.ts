@@ -86,6 +86,15 @@ const LIB = String.raw`
       return (q ? q[1] : e.name.replace(/^https?:\/\//, '').slice(0, 40)) + ':' + (e.responseStatus || '?') + '@' + Math.round(e.startTime / 1000) + 's/' + Math.round(e.duration) + 'ms';
     });
   };
+  /**
+   * X 文章的发布弹窗里的导语框(10-30 真机截图:Choose your audience / Who can reply / 「Add a caption to your article」)。
+   * ⚠️ 只认这个弹窗 —— LaTeX / Code / 表格的弹窗里也有 textarea,认错了导语就填进公式里了
+   */
+  var captionBox = function () {
+    var d = Array.prototype.slice.call(document.querySelectorAll('[role="dialog"]')).filter(function (x) { return vis(x) && /Choose your audience|Publish Article/i.test(x.innerText || ''); })[0];
+    if (!d) return null;
+    return Array.prototype.slice.call(d.querySelectorAll('textarea')).filter(vis)[0] || null;
+  };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
     if (!trig) return 'no-insert-button';
@@ -293,6 +302,21 @@ const SRC = String.raw`(async function (P) {
        * 弹出确认框且里面有「Publish」就再点那一下(还没在真机上见过它长什么样,10-30);之后等离开编辑页。
        * 不重试(重试 = 可能发两篇)。
        */
+      /**
+       * 待发期间主进程隔一会儿看一眼(用户 11-02:点 X 网页自己的 Publish 也要有导语):
+       * 发布弹窗开着、导语框空的 → 填一次(每个框只填一次,人删了不再填);离开了这份文章的编辑页 → 报 left(主进程看是不是发出去了)
+       */
+      case 'watch': {
+        if (!editId || editId !== P.editId) return { state: 'left', url: location.href };
+        var wb = captionBox();
+        if (!wb) return { state: 'editing', dialog: false };
+        if (wb.getAttribute('data-krig-caption')) return { state: 'editing', dialog: true, filled: false };
+        wb.setAttribute('data-krig-caption', '1');
+        if (wb.value || !P.caption) return { state: 'editing', dialog: true, filled: false, kept: !!wb.value };
+        setVal(wb, P.caption);
+        await sleep(300);
+        return { state: 'editing', dialog: true, filled: wb.value === P.caption };
+      }
       case 'publish': {
         if (!editId || editId !== P.editId) return { state: 'not-editing', url: location.href, why: '编辑器不在这份文章上 —— 没点发布' };
         if (uploading() > 0) return { state: 'uploading', busy: uploading(), why: '还有图在上传 —— 没点发布' };
@@ -305,7 +329,7 @@ const SRC = String.raw`(async function (P) {
         var confirmed = false;
         while (Date.now() - t2 < 30000) {
           await sleep(500);
-          if (location.pathname.indexOf('/compose/articles/edit/' + editId) === -1) return { state: 'left', url: location.href, confirmed: confirmed };
+          if (location.pathname.indexOf('/compose/articles/edit/' + editId) === -1) return { state: 'left', url: location.href, confirmed: confirmed, captionKept: capKept || undefined };
           var d = document.querySelector('[role="dialog"], [role="alertdialog"]');
           if (d && !confirmed) {
             seen.push(clean(d.innerText).slice(0, 200));
@@ -313,12 +337,17 @@ const SRC = String.raw`(async function (P) {
              * 发布弹窗(10-30 真机截图):Choose your audience / Who can reply / 「Add a caption to your article」(≤256)/ 右上 Publish。
              * 导语:弹窗里的 textarea;填不进去就不点(宁可停下让人自己填,不发出一篇没导语的)
              */
+            var capKept = '';
             if (P.caption) {
-              var cap = await waitFor(function () { return Array.prototype.slice.call(document.querySelectorAll('[role="dialog"] textarea')).filter(vis)[0]; }, 5000);
+              var cap = await waitFor(captionBox, 5000);
               if (!cap) return { state: 'caption-failed', why: '发布弹窗里找不到导语框', dialog: clean(d.innerText).slice(0, 300) };
-              setVal(cap, P.caption);
-              await sleep(400);
-              if (cap.value !== P.caption) return { state: 'caption-failed', why: '导语框里的字对不上', got: cap.value.slice(0, 60) };
+              /** 框里已经有字(盯着的那边先填了 / 人在 X 上改过)→ 不覆盖,人改的算数 */
+              if (cap.value) capKept = cap.value;
+              else {
+                setVal(cap, P.caption);
+                await sleep(400);
+                if (cap.value !== P.caption) return { state: 'caption-failed', why: '导语框里的字对不上', got: cap.value.slice(0, 60) };
+              }
             }
             var cb = byText('[role="dialog"] button, [role="alertdialog"] button, [role="dialog"] [role="button"]', 'Publish');
             if (cb) { cb.click(); confirmed = true; }

@@ -23,7 +23,8 @@ import {
 import { findNotePosts, findPosted, recordEnded, recordFilled } from './x-post-repo';
 import { webviewPorts } from './x-collect-ports';
 import { X_PAGE_NAME } from './x-pages';
-import { deleteArticle, fillArticle, publishArticle, type ArticleFillStep } from './x-post-article-fill';
+import { deleteArticle, fillArticle, publishArticle, seenPublished, type ArticleFillStep } from './x-post-article-fill';
+import { publishedUrl, stopArticleWatch, watchArticle } from './x-post-article-watch';
 import type { ArticleDraft } from './x-post-article';
 
 const isPmNode = (v: unknown): v is PmNode => !!v && typeof v === 'object' && typeof (v as { type?: unknown }).type === 'string';
@@ -131,6 +132,12 @@ async function fillArticleDraft(
     throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${d.deleted ? '文章草稿已删' : `文章草稿没删掉:${d.detail}`}`);
   }
   addPending(p, cancelOnTimeout);
+  /** 人直接点 X 网页的 Publish 也要有导语、也要收尾(用户 11-02) */
+  watchArticle(p, (q, url) => {
+    void execute('x.post.publish', { wsId: q.wsId, draftId: q.draftId, seenUrl: url }, { caller: 'timer' }).then((x) => {
+      if (!x.ok) console.warn(`[x.post] 在 X 上发出去的文章 ${q.articleId ?? '?'} 收尾没成:${x.why}`);
+    });
+  });
   console.log(`[x.post] 已填进 X 文章编辑器(@${acc.handle},${a.steps.length} 步、${srcs.length} 张图${cover ? '、有封面' : ''})草稿 ${p.draftId} / 文章 ${r.editId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
   return viewOf(p);
 }
@@ -235,6 +242,7 @@ export function registerXPostCapabilities(): void {
     reuse: (i) => pendingPost(i.wsId)?.token,
     run: async (i, _a, page) => {
       const p = pendingPost(i.wsId) as PendingPost;
+      stopArticleWatch(p.draftId);
       const c = p.form !== 'article' ? await clearCompose(page.wcId)
         /** X 文章:人点取消 / 回 note 改 → 删掉草稿(用户 10-30 同意);超时 → 不删(人可能正在 X 里改,删了就没了),留在 X 的草稿箱 */
         : i.why === 'timeout' ? { cleared: true, detail: `超时没确认,文章草稿 ${p.articleId ?? '?'} 留在 X 的草稿箱里` }
@@ -252,11 +260,15 @@ export function registerXPostCapabilities(): void {
     },
   });
 
-  xCap<DraftIn>('output', {
+  xCap<DraftIn & { readonly seenUrl?: string }>('output', {
     id: 'x.post.publish',
     describe: '发出去:人在 X 上看过待发草稿、点了确认 → 点 X 的「发布」(推串是「全部发布」)→ 逐条核对推文真的出现了(作者是我、正文对得上、图数够)。只点一次,核对不上不重发',
-    inputDoc: { wsId: '哪个 workspace 的号', draftId: '草稿 id(fill 返回的)' },
-    parse: (o) => ({ wsId: str(o, 'wsId'), draftId: str(o, 'draftId') }),
+    inputDoc: { wsId: '哪个 workspace 的号', draftId: '草稿 id(fill 返回的)', seenUrl: '可选:X 文章人已在 X 网页上点了发布、落到的推文页(只收尾,不点)' },
+    parse: (o) => {
+      const seenUrl = o.seenUrl === undefined ? undefined : str(o, 'seenUrl');
+      if (seenUrl !== undefined && !publishedUrl(seenUrl)) throw new Bad('seenUrl 要是推文 / 文章页');
+      return { wsId: str(o, 'wsId'), draftId: str(o, 'draftId'), seenUrl };
+    },
     preflight: noDraft,
     page: () => '发推:点发布并核对',
     /** 带 fill 留下的锁进来;发完这里放 */
@@ -264,7 +276,10 @@ export function registerXPostCapabilities(): void {
     subject: (i) => `draft:${i.draftId}`,
     run: async (i, _a, page) => {
       const p = pendingPost(i.wsId) as PendingPost;
-      const o = p.form === 'article' ? await publishArticle(page.wcId, p) : await publishCompose(page.wcId, p);
+      stopArticleWatch(p.draftId);
+      if (i.seenUrl && p.form !== 'article') throw capFailed('seenUrl 只用于 X 文章');
+      const o = p.form !== 'article' ? await publishCompose(page.wcId, p)
+        : i.seenUrl ? seenPublished(p, i.seenUrl) : await publishArticle(page.wcId, p);
       endPublished(p, o);
       releasePage(page.token);
       await recordEnded(p.draftId, {

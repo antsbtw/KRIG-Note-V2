@@ -113,6 +113,57 @@ describe('X 文章脚本', () => {
     globalThis.MouseEvent = Real;
   }, 20_000);
 
+  describe('⭐ 盯着(用户 11-02:点 X 网页自己的 Publish 也要有导语)', () => {
+    const dialog = (title: string, value = ''): HTMLTextAreaElement => {
+      const d = document.createElement('div');
+      d.setAttribute('role', 'dialog');
+      d.innerHTML = `<h2>${title}</h2><textarea></textarea>`;
+      document.body.append(d);
+      const ta = d.querySelector('textarea')!;
+      ta.value = value;
+      return ta;
+    };
+    beforeEach(() => {
+      editor(['字']);
+      history.replaceState(null, '', '/compose/articles/edit/777');
+      Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
+    });
+    const done = (): void => {
+      history.replaceState(null, '', '/');
+      delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+    };
+
+    it('发布弹窗开着、导语框空 → 填一次;人删了不再填', async () => {
+      const ta = dialog('Publish Article');
+      expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ state: 'editing', dialog: true, filled: true });
+      expect(ta.value).toBe('导语');
+      ta.value = '';
+      expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ filled: false });
+      expect(ta.value).toBe('');
+      done();
+    });
+
+    it('LaTeX 之类别的弹窗里的框 → 不碰', async () => {
+      const ta = dialog('LaTeX');
+      expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ state: 'editing', dialog: false });
+      expect(ta.value).toBe('');
+      done();
+    });
+
+    it('人在框里先写了字 → 不覆盖', async () => {
+      const ta = dialog('Publish Article', '我自己写的');
+      expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ filled: false, kept: true });
+      expect(ta.value).toBe('我自己写的');
+      done();
+    });
+
+    it('离开了这份文章的编辑页 → left 带地址', async () => {
+      history.replaceState(null, '', '/antsBTW/status/123');
+      expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ state: 'left' });
+      done();
+    });
+  });
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

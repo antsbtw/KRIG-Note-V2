@@ -155,14 +155,26 @@ export async function publishArticle(wcId: number, p: PendingPost): Promise<Publ
   const r = (await webviewPorts(wcId).runScript(X_ARTICLE_SCRIPT, { op: 'publish', editId: p.articleId, caption: p.caption ?? '' })) as Act;
   console.log(`[x.post] X 文章 ${p.articleId ?? '?'} 点发布:${JSON.stringify(r)}`);
   if (r?.state === 'left') {
-    const url = String(r.url ?? '');
-    const id = /\/article\/(\d+)/.exec(url)?.[1] ?? /\/status\/(\d+)/.exec(url)?.[1];
-    if (id) return { ...base, outcome: 'sent', detail: `发出去了,到了文章页 ${url}`, tweetId: id, tweetIds: [id], url };
-    return { ...base, outcome: 'unseen', detail: `点了发布、离开了编辑页,但停在 ${url},认不出是不是文章页 —— 请在 X 上看一眼` };
+    const o = leftTo(p, String(r.url ?? ''));
+    return r.captionKept ? { ...o, detail: `${o.detail}(导语用的是 X 框里已有的字)` } : o;
   }
   if (r?.state === 'caption-failed') return { ...base, outcome: 'failed', detail: `导语没填进 X 的发布弹窗(${String(r.why ?? '')})—— 没点发布;在 X 上自己填了点 Publish,或取消` };
   if (r?.state === 'stuck') {
     return { ...base, outcome: 'unseen', detail: `点了发布 30 秒还在编辑页${r.dialogNow ? `,弹窗里写着「${String(r.dialogNow).slice(0, 80)}」` : ''} —— 请在 X 上看一眼` };
   }
   return { ...base, outcome: 'failed', detail: `没点成发布:${r?.why ?? r?.state ?? '脚本没回话'}` };
+}
+
+/** 离开编辑页落到了哪:推文 / 文章页 → 发出去了;别处 → 说不清 */
+function leftTo(p: PendingPost, url: string): PublishOutcome {
+  const base = { tweetIds: [] as string[], sentText: p.text, sentMedia: p.media.length, editedOnX: false };
+  const id = /\/article\/(\d+)/.exec(url)?.[1] ?? /\/status\/(\d+)/.exec(url)?.[1];
+  if (id) return { ...base, outcome: 'sent', detail: `发出去了,到了文章页 ${url}`, tweetId: id, tweetIds: [id], url };
+  return { ...base, outcome: 'unseen', detail: `点了发布、离开了编辑页,但停在 ${url},认不出是不是文章页 —— 请在 X 上看一眼` };
+}
+
+/** 人在 X 网页上自己点的 Publish(x-post-article-watch 看见离开编辑页到了推文页)—— 不点任何东西,只按落到的页定结果 */
+export function seenPublished(p: PendingPost, url: string): PublishOutcome {
+  const o = leftTo(p, url);
+  return { ...o, editedOnX: true, detail: `在 X 网页上点的发布 —— ${o.detail}` };
 }
