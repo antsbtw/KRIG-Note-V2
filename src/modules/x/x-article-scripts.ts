@@ -244,10 +244,25 @@ const SRC = String.raw`(async function (P) {
       case 'coverApply': {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
         if (!ap) return { state: 'no-apply', why: '喂了封面没出裁剪框' };
-        ap.click();
-        /** 10-30 真机:第一次 10 秒没等到(封面图上传慢),第二次成了 → 放宽到 30 秒;没等到带回看到了什么 */
-        var ok6 = await waitFor(function () { return !document.querySelector('[data-testid="applyButton"]') && document.querySelector('button[aria-label="Remove photo"]'); }, 30000);
-        return ok6 ? { state: 'ok', ups: ups() } : { state: 'not-landed', apply: !!document.querySelector('[data-testid="applyButton"]'), dialog: !!document.querySelector('[role="dialog"]'), scene: scene(), ups: ups() };
+        /**
+         * ⚠️ 11-02 真机(带现场):点了 Apply 30 秒后裁剪框还开着、Apply 还在、一条上传请求都没有 —— 那一下 X 没认,不是传得慢
+         *   (10-30「第一次 10 秒没等到」多半也是这个,当时误判成上传慢放宽了时间)。
+         *   → 等按钮能点再点(完整鼠标序列);每 5 秒框还在就再点一次,最多 6 次;每次点时按钮什么状态记下来
+         */
+        var landed = function () { return !document.querySelector('[data-testid="applyButton"]') && document.querySelector('button[aria-label="Remove photo"]'); };
+        var clicks = [];
+        var ok6 = null;
+        for (var k = 0; k < 6 && !ok6; k++) {
+          var b6 = document.querySelector('[data-testid="applyButton"]');
+          if (b6) {
+            var off = function (el) { return el.disabled || el.getAttribute('aria-disabled') === 'true'; };
+            await waitFor(function () { var x = document.querySelector('[data-testid="applyButton"]'); return x && !off(x); }, 5000);
+            b6 = document.querySelector('[data-testid="applyButton"]');
+            if (b6) { clicks.push(off(b6) ? '灰' : '可点'); mclick(b6); }
+          }
+          ok6 = await waitFor(landed, 5000);
+        }
+        return ok6 ? { state: 'ok', clicks: clicks, ups: ups() } : { state: 'not-landed', clicks: clicks, apply: !!document.querySelector('[data-testid="applyButton"]'), dialog: !!document.querySelector('[role="dialog"]'), scene: scene(), ups: ups() };
       }
       case 'uploads': {
         var t1 = Date.now();

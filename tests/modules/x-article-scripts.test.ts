@@ -89,6 +89,30 @@ describe('X 文章脚本', () => {
     delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
   }, 15_000);
 
+  it('⭐ 封面 Apply 第一下 X 没认 → 框还在就再点,第二下成了算成(11-02 真机:点一下就干等 30 秒)', async () => {
+    editor(['']);
+    const dlg = document.createElement('div');
+    dlg.setAttribute('role', 'dialog');
+    const ap = Object.assign(document.createElement('button'), { textContent: 'Apply' });
+    ap.setAttribute('data-testid', 'applyButton');
+    let n = 0;
+    ap.addEventListener('click', () => {
+      n += 1;
+      if (n < 2) return;
+      dlg.remove();
+      const rm = document.createElement('button');
+      rm.setAttribute('aria-label', 'Remove photo');
+      document.body.append(rm);
+    });
+    dlg.append(ap);
+    document.body.append(dlg);
+    /** jsdom 的 MouseEvent 不认 eval 里的 view: window(真 Chrome 认;表格那步 10-30 真机用的就是它)*/
+    const Real = globalThis.MouseEvent;
+    globalThis.MouseEvent = class extends Real { constructor(t: string, i: MouseEventInit = {}) { const { view: _v, ...rest } = i; super(t, rest); } } as typeof MouseEvent;
+    expect(await run({ op: 'coverApply' })).toMatchObject({ state: 'ok', clicks: ['可点', '可点'] });
+    globalThis.MouseEvent = Real;
+  }, 20_000);
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });
