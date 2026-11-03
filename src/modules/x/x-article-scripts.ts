@@ -219,6 +219,26 @@ const SRC = String.raw`(async function (P) {
         }
         return { state: 'not-ready', why: why, waited: Date.now() - ti, status: statusLine(), outline: outline() };
       }
+      /**
+       * 把光标所在那行(先由 tail 标好、真点击进去的空行)设成 Heading / Subheading —— 用 X 工具栏的「Body ▾」下拉(11-03 真机量的:
+       * 按钮字是当前样式 Body / Heading / Subheading,菜单项 role=menuitem 同名)。
+       * 为什么:小标题以前靠前面垫零宽段落保住(粘进空行会丢标题),那个段落留成了每个小标题前的空行(用户 11-03)
+       */
+      case 'blockType': {
+        var tb = Array.prototype.slice.call(document.querySelectorAll('button, [role="button"]')).filter(vis).find(function (x) { return /^(Body|Heading|Subheading)$/.test(clean(x.innerText)); });
+        if (!tb) return { state: 'no-style-button', why: '工具栏上找不到 Body / Heading 下拉' };
+        mclick(tb);
+        var mi = await waitFor(function () { return byText('[role="menuitem"]', P.type); }, 3000);
+        if (!mi) return { state: 'no-menu-item', why: '下拉里没有「' + P.type + '」' };
+        mclick(mi);
+        await waitFor(function () { return !document.querySelector('[role="menuitem"]'); }, 3000);
+        if (document.querySelector('[role="menuitem"]')) return { state: 'menu-stuck', why: '下拉菜单没关' };
+        /** 看正文最后一块(就是刚点进去的那个空行)变没变 —— X 改样式会重画这块,tail 的标记可能跟着没了 */
+        var cls = P.type === 'Heading' ? 'longform-header-one' : 'longform-header-two';
+        var lastB = function () { var bs3 = blocks(); return bs3[bs3.length - 1]; };
+        var okT = await waitFor(function () { var x = lastB(); return x && String(x.className || '').indexOf(cls) !== -1; }, 2000);
+        return okT ? { state: 'ok' } : { state: 'not-set', why: '那一行没变成 ' + P.type, cls: lastB() ? String(lastB().className).slice(0, 60) : null, outline: outline() };
+      }
       case 'newLine': {
         var bl = body();
         if (!bl) return { state: 'no-body' };

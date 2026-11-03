@@ -273,6 +273,32 @@ describe('X 文章脚本', () => {
     }, 10_000);
   });
 
+  it('⭐ blockType:工具栏「Body ▾」→ Heading,最后那行变成标题(11-03:小标题不再垫零宽段落,免得每个前面一个空行)', async () => {
+    editor(['一', '']);
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
+    const Real = globalThis.MouseEvent;
+    globalThis.MouseEvent = class extends Real { constructor(t: string, i: MouseEventInit = {}) { const { view: _v, ...rest } = i; super(t, rest); } } as typeof MouseEvent;
+    const tb = Object.assign(document.createElement('button'), { textContent: 'Body' });
+    tb.addEventListener('click', () => {
+      for (const label of ['Heading', 'Subheading', 'Body']) {
+        const it = Object.assign(document.createElement('div'), { textContent: label });
+        it.setAttribute('role', 'menuitem');
+        it.addEventListener('click', () => {
+          const bs = document.querySelectorAll('[data-testid="composer"] [data-block="true"]');
+          if (label === 'Heading') bs[bs.length - 1].className = 'longform-header-one';
+          document.querySelectorAll('[role="menuitem"]').forEach((x) => x.remove());
+        });
+        document.body.append(it);
+      }
+    });
+    document.body.append(tb);
+    expect(await run({ op: 'blockType', type: 'Heading' })).toMatchObject({ state: 'ok' });
+    editor(['一', '']);
+    expect(await run({ op: 'blockType', type: 'Heading' })).toMatchObject({ state: 'no-style-button' });
+    globalThis.MouseEvent = Real;
+    delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  }, 15_000);
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

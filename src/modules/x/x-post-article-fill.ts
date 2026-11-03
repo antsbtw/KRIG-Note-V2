@@ -104,6 +104,17 @@ export async function fillArticle(
     return r;
   };
 
+  /** 光标放到正文末尾的一个空行上:最后一块不是空行就另起一行(newLine),再标出来真点击进去 */
+  const onEmptyLine = async (): Promise<Act> => {
+    const nl = await act('newLine');
+    if (nl?.state !== 'ok') return nl;
+    const tl = await act('tail');
+    if (tl?.state !== 'ok') return { state: 'no-empty-line', why: `没找到空行(${String(tl?.outline ?? '')})` };
+    const tp = await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.articleTail, trusted: true });
+    if (tp.status === 'failed') return { state: 'tap-failed', why: `点不进空行:${tp.reason}` };
+    return { state: 'ok' };
+  };
+
   let images = 0;
   for (const [i, s] of a.steps.entries()) {
     const at = `第 ${i + 1} / ${a.steps.length} 步`;
@@ -118,7 +129,23 @@ export async function fillArticle(
     let r: Act;
     switch (s.k) {
       case 'html': r = await pasteRetry(s.html, s.text); break;
-      case 'heading': r = await pasteRetry(`<h${s.level}>${esc(s.text)}</h${s.level}>`, s.text); break;
+      case 'heading': {
+        /**
+         * 小标题:先在一个空行上用工具栏设成 Heading / Subheading,再把字粘进去(粘进来的第一块并进当前行、沿用它的样式)。
+         * 以前前面垫零宽段落保标题,留成了每个小标题前的空行(用户 11-03:「第一个标题前有一个空行。每一个大标题前都留后空行」)
+         */
+        const h0 = (await act('state'))?.counts as { h1?: number; h2?: number } | undefined;
+        r = await onEmptyLine();
+        if (r?.state !== 'ok') break;
+        r = await act('blockType', { type: s.level === 1 ? 'Heading' : 'Subheading' });
+        if (r?.state !== 'ok') break;
+        r = await pasteRetry(`<p>${esc(s.text)}</p>`, s.text);
+        if (r?.state !== 'ok') break;
+        const h1 = (await act('state'))?.counts as { h1?: number; h2?: number } | undefined;
+        const key = s.level === 1 ? 'h1' : 'h2';
+        if ((h1?.[key] ?? 0) <= (h0?.[key] ?? 0)) r = { state: 'not-heading', why: `字进去了但不是${s.level === 1 ? 'Heading' : 'Subheading'}(${key} ${h0?.[key] ?? 0}→${h1?.[key] ?? 0})` };
+        break;
+      }
       case 'latex': r = await act('latex', { latex: s.latex }); break;
       case 'code':
         r = await act('code', { language: s.language, code: s.code });
@@ -128,14 +155,8 @@ export async function fillArticle(
       case 'divider': r = await act('divider'); break;
       case 'image': {
         /** 插图前:光标放到一个空行上(否则 X 把光标所在那块整个换成图 —— 11-03 第 4 步小标题被第 5 步的图吃掉) */
-        r = await act('newLine');
+        r = await onEmptyLine();
         if (r?.state !== 'ok') break;
-        {
-          const tl = await act('tail');
-          if (tl?.state !== 'ok') { r = { state: 'no-empty-line', why: `插图前没找到空行(${String(tl?.outline ?? '')})` }; break; }
-          const tp = await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.articleTail, trusted: true });
-          if (tp.status === 'failed') { r = { state: 'tap-failed', why: `插图前点不进空行:${tp.reason}` }; break; }
-        }
         r = await act('mediaOpen');
         if (r?.state !== 'ok') break;
         const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.articleMediaInput, files: [s.file], check: { kind: 'none' } });
