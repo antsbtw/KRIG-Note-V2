@@ -190,6 +190,26 @@ describe('X 文章脚本', () => {
     delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
   }, 15_000);
 
+  it('⭐ X 顶上「Processing media...」→ 等它没了再粘(11-03 真机:图后面紧接着粘小标题,X 不接)', async () => {
+    editor(['']);
+    const st = document.createElement('div');
+    st.innerHTML = '<span>Processing media...</span>';
+    document.body.append(st);
+    setTimeout(() => { st.innerHTML = '<span>Last saved just now</span>'; }, 1200);
+    const r = await run({ op: 'paste', html: '<p>下一段</p>', text: '下一段' });
+    expect(r).toMatchObject({ state: 'ok' });
+    expect(Number(r.procWaited)).toBeGreaterThanOrEqual(1000);
+  }, 15_000);
+
+  it('处理一直不完 → still-processing,不粘', async () => {
+    editor(['']);
+    const st = document.createElement('div');
+    st.innerHTML = '<span>Processing media...</span>';
+    document.body.append(st);
+    expect(await run({ op: 'paste', html: '<p>x</p>', text: 'x', processMs: 600 })).toMatchObject({ state: 'still-processing' });
+    expect(pasted).toBeNull();
+  }, 15_000);
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

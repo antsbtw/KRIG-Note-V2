@@ -99,6 +99,13 @@ const LIB = String.raw`
     var hit = Array.prototype.slice.call(document.querySelectorAll('span, div')).filter(function (e) { return e.children.length === 0 && /^(Saving|Saved|Last saved)/i.test(clean(e.innerText)); })[0];
     return hit ? clean(hit.parentElement ? hit.parentElement.innerText : hit.innerText).slice(0, 60) : null;
   };
+  /**
+   * ⭐ X 在处理图片(11-03 真机截图:顶上那行变成「Processing media...」、工具栏发灰)—— 这期间往编辑器里放东西 X 不接
+   *   (存好了「Last saved just now」之后照样会进这个状态:两次都是图后面紧接着粘小标题 not-landed)
+   */
+  var processing = function () {
+    return Array.prototype.slice.call(document.querySelectorAll('span, div')).some(function (e) { return e.children.length === 0 && /^Processing media/i.test(clean(e.innerText)); });
+  };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
     if (!trig) return 'no-insert-button';
@@ -116,6 +123,14 @@ const SRC = String.raw`(async function (P) {
     if (!(innerWidth > 0)) return { state: 'hidden', why: 'X 网页宽度是 0(没显示在屏幕上),X 文章的弹窗不会画出来' };
     var m = /\/compose\/articles\/edit\/(\d+)/.exec(location.pathname);
     var editId = m ? m[1] : null;
+    /** 往正文里放东西的动作:先等 X 处理完图片(主动看,不干等;最多 P.processMs,默认 60 秒)*/
+    var procWaited = 0;
+    if (/^(paste|divider|latex|code|table|mediaOpen)$/.test(P.op) && processing()) {
+      var tp = Date.now();
+      await waitFor(function () { return !processing(); }, P.processMs || 60000);
+      procWaited = Date.now() - tp;
+      if (processing()) return { state: 'still-processing', why: 'X 处理图片 ' + Math.round(procWaited / 1000) + ' 秒还没完(顶上一直是 Processing media)', procWaited: procWaited };
+    }
     switch (P.op) {
       case 'state': {
         var t = document.querySelector('textarea[placeholder="Add a title"]');
@@ -158,8 +173,8 @@ const SRC = String.raw`(async function (P) {
         b.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
         var want = clean(P.text).replace(/\s+/g, '').slice(-12);
         var ok = await waitFor(function () { return clean(b.innerText).replace(/\s+/g, '').indexOf(want) !== -1; }, 4000);
-        return ok ? { state: 'ok', before: before, after: counts().blocks, prefixed: html !== P.html }
-          : { state: 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html, uploading: uploading(), outline: outline() };
+        return ok ? { state: 'ok', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited }
+          : { state: 'not-landed', before: before, after: counts().blocks, prefixed: html !== P.html, procWaited: procWaited, processingNow: processing(), outline: outline() };
       }
       case 'divider': {
         var n0 = counts().sections;

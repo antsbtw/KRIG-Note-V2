@@ -96,6 +96,7 @@ export async function fillArticle(
         break;
       }
     }
+    if (Number(r?.procWaited) > 0) console.log(`[x.post] X 文章${at}(${s.k})前等 X 处理图片 ${(Number(r?.procWaited) / 1000).toFixed(1)} 秒`);
     if (r?.state !== 'ok') {
       console.warn(`[x.post] X 文章${at}(${s.k})没成:${JSON.stringify(r)}`);
       return fail(`${at}(${STEP_NAME[s.k]})没填进去:${r?.why ?? r?.state ?? '脚本没回话'}`);
