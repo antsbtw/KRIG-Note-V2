@@ -117,7 +117,8 @@ describe('X 文章脚本', () => {
     const dialog = (title: string, value = ''): HTMLTextAreaElement => {
       const d = document.createElement('div');
       d.setAttribute('role', 'dialog');
-      d.innerHTML = `<h2>${title}</h2><textarea></textarea>`;
+      /** 11-02 真机:导语框 textarea[data-testid=articleTweetTextInput];别的弹窗(LaTeX)的框没这个 testid */
+      d.innerHTML = `<h2>${title}</h2><textarea${title === 'Publish Article' ? ' data-testid="articleTweetTextInput"' : ''}></textarea>`;
       document.body.append(d);
       const ta = d.querySelector('textarea')!;
       ta.value = value;
@@ -140,6 +141,17 @@ describe('X 文章脚本', () => {
       ta.value = '';
       expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ filled: false });
       expect(ta.value).toBe('');
+      done();
+    });
+
+    it('⭐ 外层 [role=dialog] 高度 0(11-02 真机就是这样)→ 照样找得到导语框', async () => {
+      Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+        configurable: true,
+        value(this: HTMLElement) { return this.getAttribute('role') === 'dialog' ? { width: 838, height: 0, top: 0, left: 0, right: 838, bottom: 0 } : { width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }; },
+      });
+      const ta = dialog('Publish Article');
+      expect(await run({ op: 'watch', editId: '777', caption: '导语' })).toMatchObject({ filled: true });
+      expect(ta.value).toBe('导语');
       done();
     });
 

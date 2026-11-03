@@ -87,13 +87,12 @@ const LIB = String.raw`
     });
   };
   /**
-   * X 文章的发布弹窗里的导语框(10-30 真机截图:Choose your audience / Who can reply / 「Add a caption to your article」)。
-   * ⚠️ 只认这个弹窗 —— LaTeX / Code / 表格的弹窗里也有 textarea,认错了导语就填进公式里了
+   * X 文章的发布弹窗里的导语框 —— 11-02 真机量的:textarea[data-testid=articleTweetTextInput](aria-label「Add a caption to your article」),
+   * 在 sheetDialog 里;外面那层 [role=dialog] 高度是 0(按「弹窗可见」找会恒找不到 —— 第一版就栽在这)。
+   * 认它自己的 testid,LaTeX / Code / 表格弹窗里的 textarea 自然不会认错
    */
   var captionBox = function () {
-    var d = Array.prototype.slice.call(document.querySelectorAll('[role="dialog"]')).filter(function (x) { return vis(x) && /Choose your audience|Publish Article/i.test(x.innerText || ''); })[0];
-    if (!d) return null;
-    return Array.prototype.slice.call(d.querySelectorAll('textarea')).filter(vis)[0] || null;
+    return Array.prototype.slice.call(document.querySelectorAll('textarea[data-testid="articleTweetTextInput"]')).filter(vis)[0] || null;
   };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
