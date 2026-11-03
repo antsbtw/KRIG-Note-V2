@@ -22,12 +22,11 @@ export type ArticleFillOutcome = { readonly ok: true; readonly editId: string; r
 type Act = { state?: string; why?: string; editId?: string; [k: string]: unknown } | null;
 
 /**
- * 图插进去之后只等它出现在正文里,再稳 IMAGE_SETTLE_MS 就往下。
- * ⚠️ 11-02 删掉了「等图从 blob: 变成 X 的地址」(每张 20 秒 + 最后 30 秒):X 从来不换 blob:(10-30 / 11-02 多次真机),
- *   那两段每次都等满 —— 7 张图的文章 189 秒里 170 秒是白等;期间页面和 netBus 都没见到任何上传请求。
- *   10-30 第 14 步粘的字被冲掉那次,靠下面的读回核对兜住(对不上就删草稿、如实说),不靠干等。
+ * 图插进去之后:等它出现在正文里 → 等 X 顶上变成「Last saved just now」(存好了)再往下,最多 IMAGE_SAVE_MS。
+ * ⚠️ 11-02 删掉了「等图从 blob: 变成 X 的地址」(X 从不换,每张死等 20 秒);
+ *   11-03 只稳 1.5 秒又太快(第 5 张图后粘小标题 X 没接住)→ 改成主动看保存状态(用户:「应该主动检查而不是等待」)。
  */
-const IMAGE_SETTLE_MS = 1500;
+const IMAGE_SAVE_MS = 20_000;
 
 export async function fillArticle(
   wcId: number, a: ArticleFill, progress: (step: number, total: number, what: string) => void = () => undefined,
@@ -91,10 +90,9 @@ export async function fillArticle(
         const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.articleMediaInput, files: [s.file], check: { kind: 'none' } });
         if (fed.status === 'failed') { r = { state: 'feed-failed', why: fed.reason }; break; }
         images += 1;
-        r = await act('mediaWait', { want: images, uploadMs: 0 });
-        await new Promise((ok) => setTimeout(ok, IMAGE_SETTLE_MS));
-        /** 11-03 诊断:插完那一刻 / 稳 1.5 秒后,顶上的保存状态各是什么 —— 定下来能不能拿它当「存好了」再收掉 */
-        console.log(`[x.post] X 文章第 ${images} 张图 保存状态:插完「${String(r?.saved ?? '?')}」→ 1.5 秒后「${String((await act('state'))?.saved ?? '?')}」`);
+        r = await act('mediaWait', { want: images, saveMs: IMAGE_SAVE_MS });
+        if (r?.state === 'ok' && !r.savedOk) console.warn(`[x.post] X 文章第 ${images} 张图等了 ${IMAGE_SAVE_MS / 1000} 秒顶上还不是「Last saved just now」(是「${String(r.saved ?? '?')}」)—— 接着往下,读回核对兜着`);
+        else if (r?.state === 'ok') console.log(`[x.post] X 文章第 ${images} 张图存好了(${(Number(r.waited) / 1000).toFixed(1)} 秒)`);
         break;
       }
     }

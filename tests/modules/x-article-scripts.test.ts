@@ -176,6 +176,20 @@ describe('X 文章脚本', () => {
     });
   });
 
+  it('⭐ 图插完等 X 顶上变「Last saved just now」再往下(11-03 真机:只稳 1.5 秒,下一步粘贴 X 没接住)', async () => {
+    editor(['字']);
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
+    document.querySelector('[data-testid="composer"]')!.insertAdjacentHTML('beforeend', '<section data-block="true"><img src="blob:x"></section>');
+    const st = document.createElement('div');
+    st.innerHTML = '<span>Saving</span>';
+    document.body.append(st);
+    setTimeout(() => { st.innerHTML = '<span>Last saved just now</span>'; }, 1200);
+    const r = await run({ op: 'mediaWait', want: 1, saveMs: 5000 });
+    expect(r).toMatchObject({ state: 'ok', savedOk: true });
+    expect(Number(r.waited)).toBeGreaterThanOrEqual(1000);
+    delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  }, 15_000);
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

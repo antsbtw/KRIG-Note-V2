@@ -247,12 +247,17 @@ const SRC = String.raw`(async function (P) {
         var ok5 = await waitFor(function () { return !sheet() && counts().img >= P.want; }, 20000);
         if (!ok5) return { state: 'timeout', img: counts().img, dialog: !!sheet(), outline: outline() };
         /**
-         * ⚠️ 等这张图传完再往下(10-30 真机:分栏图插进去后接着粘,到第 14 步正文从 31 块掉到 28 块、粘的字没了 ——
-         * 推断是图传完 X 回写编辑器时用的是旧内容,把这期间粘的冲掉了;没能复现,先排开:传完再动)
+         * ⭐ 等 X 把这张图存好再往下 —— 主动看顶上的保存状态,不干等(用户 11-03:「应该采用主动检查的方式而不是等待」)。
+         * 11-03 真机:图刚插完顶上读不到「Last saved」(在存),1~2 秒后变「Last saved just now」;
+         *   只稳 1.5 秒那版,第 5 张图后紧接着粘小标题 → X 没接住(not-landed,块数 10→10)。
+         *   10-30 第 14 步粘的字被冲掉,多半也是这个(当时每张死等 20 秒,碰巧盖过去了)。
+         * 先等它离开「Last saved …」(开始存,最多 3 秒,可能已经存完了没看见)→ 再等「Last saved just now」(最多 P.saveMs)
          */
         var t3 = Date.now();
-        while (uploading() > 0 && Date.now() - t3 < P.uploadMs) await sleep(500);
-        return { state: 'ok', img: counts().img, waited: Date.now() - t3, saved: saveText() };
+        var savedNow = function () { return /Last saved just now/i.test(saveText() || ''); };
+        await waitFor(function () { return !/Last saved/i.test(saveText() || ''); }, 3000);
+        var ok7 = await waitFor(savedNow, P.saveMs || 20000);
+        return { state: 'ok', img: counts().img, waited: Date.now() - t3, saved: saveText(), savedOk: !!ok7 };
       }
       case 'coverApply': {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
