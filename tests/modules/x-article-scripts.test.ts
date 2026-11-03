@@ -169,8 +169,9 @@ describe('X 文章脚本', () => {
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });
   });
 
-  it('⭐ 发布:导语框找不到 → 不点弹窗里的 Publish(宁可停下,不发没导语的)', async () => {
+  it('⭐ 发布:导语框找不到 → 不点弹窗里的 Publish(宁可停下,不发没导语的);正文图是 blob: 不拦(11-02:X 从不换 blob:,那条检查恒拦)', async () => {
     editor(['字']);
+    document.querySelector('[data-testid="composer"]')!.insertAdjacentHTML('beforeend', '<section data-block="true"><img src="blob:https://x.com/1"></section>');
     history.replaceState(null, '', '/compose/articles/edit/777');
     Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
     const top = Object.assign(document.createElement('button'), { textContent: 'Publish' });

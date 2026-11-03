@@ -319,7 +319,10 @@ const SRC = String.raw`(async function (P) {
       }
       case 'publish': {
         if (!editId || editId !== P.editId) return { state: 'not-editing', url: location.href, why: '编辑器不在这份文章上 —— 没点发布' };
-        if (uploading() > 0) return { state: 'uploading', busy: uploading(), why: '还有图在上传 —— 没点发布' };
+        /**
+         * ⚠️ 11-02 删掉了「还有图在上传(正文图是 blob:)就不点」:X 从来不把 blob: 换掉(10-30 已知),这条恒成立 ——
+         * 用户第一次点 KRIG 的确认发布就被它拦下(busy 7)。图传没传完 X 自己管(Publish 按钮灰 / 弹窗报错),下面都如实带回
+         */
         var pb = byText('button, [role="button"]', 'Publish');
         if (!pb) return { state: 'no-publish', why: '找不到 Publish 按钮' };
         if (pb.disabled || pb.getAttribute('aria-disabled') === 'true') return { state: 'disabled', why: 'Publish 按钮是灰的(缺标题?)—— 没点' };
