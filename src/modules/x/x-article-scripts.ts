@@ -104,7 +104,13 @@ const LIB = String.raw`
    *   (存好了「Last saved just now」之后照样会进这个状态:两次都是图后面紧接着粘小标题 not-landed)
    */
   var processing = function () {
-    return Array.prototype.slice.call(document.querySelectorAll('span, div')).some(function (e) { return e.children.length === 0 && /^Processing media/i.test(clean(e.innerText)); });
+    /** 按整页的字找(11-03 第一版按「叶子元素以它开头」找,真机上一次都没命中,procWaited 恒 0)*/
+    return /Processing media/i.test(document.body.innerText || '');
+  };
+  /** 顶上状态的那几个字(Processing / Saving / Last saved …),时间线诊断用 */
+  var statusLine = function () {
+    var m = /(Processing media[^\n]*|Saving[^\n]*|Last saved[^\n]*|Uploading[^\n]*)/i.exec(document.body.innerText || '');
+    return m ? m[1].slice(0, 40) : '-';
   };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
@@ -268,11 +274,26 @@ const SRC = String.raw`(async function (P) {
          *   10-30 第 14 步粘的字被冲掉,多半也是这个(当时每张死等 20 秒,碰巧盖过去了)。
          * 先等它离开「Last saved …」(开始存,最多 3 秒,可能已经存完了没看见)→ 再等「Last saved just now」(最多 P.saveMs)
          */
+        /**
+         * 11-03 第二次:等到 Last saved just now 也不够 —— 之后插的小标题先报成功、过后被冲掉(正文里没了)。
+         * 这里记一条时间线(顶上状态每变一次记一笔 + 当时正文几块),并且:Processing media 出现过就等它没了;
+         * 5 秒内一直没出现就往下(也记下来)。下一次真机看时间线定规则。
+         */
         var t3 = Date.now();
-        var savedNow = function () { return /Last saved just now/i.test(saveText() || ''); };
-        await waitFor(function () { return !/Last saved/i.test(saveText() || ''); }, 3000);
-        var ok7 = await waitFor(savedNow, P.saveMs || 20000);
-        return { state: 'ok', img: counts().img, waited: Date.now() - t3, saved: saveText(), savedOk: !!ok7 };
+        var line = [];
+        var last = '';
+        var blocks0 = counts().blocks;
+        var seenProc = false;
+        var procDone = false;
+        while (Date.now() - t3 < (P.saveMs || 60000)) {
+          var st = statusLine();
+          if (st !== last) { line.push(Math.round((Date.now() - t3) / 100) / 10 + 's ' + st + ' #' + counts().blocks); last = st; }
+          if (processing()) seenProc = true;
+          else if (seenProc) { procDone = true; break; }
+          else if (Date.now() - t3 > 5000 && /Last saved/i.test(st)) break;
+          await sleep(200);
+        }
+        return { state: 'ok', img: counts().img, waited: Date.now() - t3, saved: saveText(), savedOk: !seenProc || procDone, seenProc: seenProc, blocks0: blocks0, blocks: counts().blocks, line: line };
       }
       case 'coverApply': {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);

@@ -26,7 +26,7 @@ type Act = { state?: string; why?: string; editId?: string; [k: string]: unknown
  * ⚠️ 11-02 删掉了「等图从 blob: 变成 X 的地址」(X 从不换,每张死等 20 秒);
  *   11-03 只稳 1.5 秒又太快(第 5 张图后粘小标题 X 没接住)→ 改成主动看保存状态(用户:「应该主动检查而不是等待」)。
  */
-const IMAGE_SAVE_MS = 20_000;
+const IMAGE_SAVE_MS = 60_000;
 
 export async function fillArticle(
   wcId: number, a: ArticleFill, progress: (step: number, total: number, what: string) => void = () => undefined,
@@ -91,8 +91,7 @@ export async function fillArticle(
         if (fed.status === 'failed') { r = { state: 'feed-failed', why: fed.reason }; break; }
         images += 1;
         r = await act('mediaWait', { want: images, saveMs: IMAGE_SAVE_MS });
-        if (r?.state === 'ok' && !r.savedOk) console.warn(`[x.post] X 文章第 ${images} 张图等了 ${IMAGE_SAVE_MS / 1000} 秒顶上还不是「Last saved just now」(是「${String(r.saved ?? '?')}」)—— 接着往下,读回核对兜着`);
-        else if (r?.state === 'ok') console.log(`[x.post] X 文章第 ${images} 张图存好了(${(Number(r.waited) / 1000).toFixed(1)} 秒)`);
+        if (r?.state === 'ok') console[r.savedOk ? 'log' : 'warn'](`[x.post] X 文章第 ${images} 张图 ${(Number(r.waited) / 1000).toFixed(1)} 秒 ${r.seenProc ? (r.savedOk ? '处理完了' : '处理没等完') : '没见到 Processing'} 块 ${String(r.blocks0)}→${String(r.blocks)} 时间线:${JSON.stringify(r.line)}`);
         break;
       }
     }

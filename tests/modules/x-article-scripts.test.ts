@@ -201,6 +201,22 @@ describe('X 文章脚本', () => {
     expect(Number(r.procWaited)).toBeGreaterThanOrEqual(1000);
   }, 15_000);
 
+  it('⭐ 图插完:存好 → Processing media 出现 → 没了,才往下;时间线记下来', async () => {
+    editor(['字']);
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
+    document.querySelector('[data-testid="composer"]')!.insertAdjacentHTML('beforeend', '<section data-block="true"><img src="blob:x"></section>');
+    const st = document.createElement('div');
+    st.innerHTML = '<span>Last saved just now</span>';
+    document.body.append(st);
+    setTimeout(() => { st.innerHTML = '<div><span>Processing media...</span></div>'; }, 800);
+    setTimeout(() => { st.innerHTML = '<span>Last saved just now</span>'; }, 2000);
+    const r = await run({ op: 'mediaWait', want: 1, saveMs: 8000 });
+    expect(r).toMatchObject({ state: 'ok', seenProc: true, savedOk: true });
+    expect(Number(r.waited)).toBeGreaterThanOrEqual(1900);
+    expect(JSON.stringify(r.line)).toContain('Processing media');
+    delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  }, 15_000);
+
   it('处理一直不完 → still-processing,不粘', async () => {
     editor(['']);
     const st = document.createElement('div');
