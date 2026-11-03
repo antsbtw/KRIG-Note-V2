@@ -6,6 +6,8 @@ interface SlashMenuState {
   y: number;
   viewId: string;
   query: string;
+  /** 下方放不下往上翻时,菜单底边贴的位置(= `/` 所在行顶边上方);不传则贴 y */
+  flipY?: number;
   /** 光标外层的块类型(由内到外,如 ['column','columnList']);菜单按 SlashItem.hiddenInside 过滤 */
   inside: readonly string[];
 }
@@ -18,8 +20,8 @@ class SlashMenuController {
   private state: SlashMenuState = initialState;
   private listeners: Set<() => void> = new Set();
 
-  show(x: number, y: number, viewId: string, query: string = '', inside: readonly string[] = []): void {
-    this.state = { visible: true, x, y, viewId, query, inside };
+  show(x: number, y: number, viewId: string, query: string = '', inside: readonly string[] = [], flipY?: number): void {
+    this.state = { visible: true, x, y, viewId, query, inside, flipY };
     this.notify();
   }
 

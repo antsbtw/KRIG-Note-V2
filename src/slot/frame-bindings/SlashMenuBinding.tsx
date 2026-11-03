@@ -169,7 +169,7 @@ export function SlashMenuBinding() {
   useSlashVersion();
   const [state, setState] = useState(slashMenuController.getState());
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const { x, y } = useCollisionPosition(menuRef, state.x, state.y);
+  const { x, y } = useCollisionPosition(menuRef, state.x, state.y, 8, state.flipY);
 
   // 选中 idx(指向 flatItems,跳过 title)
   const [selectedIdx, setSelectedIdx] = useState(0);

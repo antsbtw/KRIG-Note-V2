@@ -24,6 +24,33 @@ interface CollisionResult {
   y: number;
 }
 
+/** 纯计算(便于单测):右溢左翻、下溢上翻;上翻时浮层底边贴 flipAnchorY */
+export function computeCollisionPosition(
+  size: { width: number; height: number },
+  viewport: { width: number; height: number },
+  anchorX: number,
+  anchorY: number,
+  margin: number,
+  flipAnchorY: number,
+): CollisionResult {
+  let x = anchorX;
+  let y = anchorY;
+
+  // X 方向:右溢则翻转(浮层 right edge 贴近 anchor)
+  if (anchorX + size.width + margin > viewport.width) {
+    x = anchorX - size.width;
+    if (x < margin) x = margin; // 翻后还溢左 → clamp
+  }
+
+  // Y 方向:下溢则翻转
+  if (anchorY + size.height + margin > viewport.height) {
+    y = flipAnchorY - size.height;
+    if (y < margin) y = margin;
+  }
+
+  return { x, y };
+}
+
 /**
  * 边界外溢时翻转浮层位置。
  *
@@ -31,12 +58,15 @@ interface CollisionResult {
  * @param anchorX   光标 / 选区给的 x(默认 right 展开,即浮层 left = anchorX)
  * @param anchorY   光标 / 选区给的 y(默认 down 展开,即浮层 top = anchorY)
  * @param margin    浮层与 viewport 边的最小留白(默认 8px)
+ * @param flipAnchorY 下溢上翻时浮层底边贴的 y(默认 = anchorY)。anchorY 是锚点行**下方**时
+ *                  (slash 菜单),必须传该行顶边,否则上翻后浮层盖住锚点那一行
  */
 export function useCollisionPosition(
   ref: RefObject<HTMLElement | null>,
   anchorX: number,
   anchorY: number,
   margin = 8,
+  flipAnchorY: number = anchorY,
 ): CollisionResult {
   // 初值 = anchor;effect 测量后必要时再改
   const [pos, setPos] = useState<CollisionResult>({ x: anchorX, y: anchorY });
@@ -52,25 +82,11 @@ export function useCollisionPosition(
     // 计算位置(根据当前 popup rect 与 viewport 碰撞决定 anchor / flip)
     const compute = () => {
       const rect = el.getBoundingClientRect();
-      const vw = window.innerWidth;
-      const vh = window.innerHeight;
-
-      let nextX = anchorX;
-      let nextY = anchorY;
-
-      // X 方向:右溢则翻转(浮层 right edge 贴近 anchor)
-      if (anchorX + rect.width + margin > vw) {
-        nextX = anchorX - rect.width;
-        if (nextX < margin) nextX = margin; // 翻后还溢左 → clamp
-      }
-
-      // Y 方向:下溢则翻转
-      if (anchorY + rect.height + margin > vh) {
-        nextY = anchorY - rect.height;
-        if (nextY < margin) nextY = margin;
-      }
-
-      setPos({ x: nextX, y: nextY });
+      setPos(computeCollisionPosition(
+        { width: rect.width, height: rect.height },
+        { width: window.innerWidth, height: window.innerHeight },
+        anchorX, anchorY, margin, flipAnchorY,
+      ));
     };
 
     compute();
@@ -81,7 +97,7 @@ export function useCollisionPosition(
     const observer = new ResizeObserver(compute);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [ref, anchorX, anchorY, margin]);
+  }, [ref, anchorX, anchorY, margin, flipAnchorY]);
 
   return pos;
 }

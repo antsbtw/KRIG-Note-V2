@@ -85,7 +85,8 @@ export function buildSlashPlugin(viewId: string): Plugin {
             const $p = view.state.doc.resolve(state.triggerPos);
             const inside: string[] = [];
             for (let d = $p.depth - 1; d > 0; d--) inside.push($p.node(d).type.name);
-            slashMenuController.show(coords.left, coords.bottom + 4, viewId, state.query, inside);
+            // 下方放不下往上翻时贴 coords.top,不贴 bottom —— 否则菜单盖住 `/` 和正在输入的字
+            slashMenuController.show(coords.left, coords.bottom + 4, viewId, state.query, inside, coords.top - 4);
           } catch {
             slashMenuController.hide();
           }
