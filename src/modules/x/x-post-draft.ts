@@ -101,6 +101,17 @@ export function lastEnded(wsId: string): DraftEnded | null {
 }
 
 /** 记一份;超时就调 onTimeout(由能力层传:走执行器的 x.post.cancel,caller timer,留痕一样) */
+/**
+ * 正在填进 X(用户 11-03:「先冻结一下界面,免得误操作」)—— X 网页顶上的条显示进度,网页上盖一层挡住点击。
+ * 填完 / 没成都要清(调用方 finally)。
+ */
+export type FillingView = { readonly form: string; readonly step: number; readonly total: number; readonly what: string; readonly startedAt: number };
+const filling = new Map<string, FillingView>();
+export function setFilling(wsId: string, v: FillingView | null): void {
+  if (v) filling.set(wsId, v); else filling.delete(wsId);
+}
+export function fillingOf(wsId: string): FillingView | null { return filling.get(wsId) ?? null; }
+
 export function addPending(p: PendingPost, onTimeout: (p: PendingPost) => void): void {
   dropPending(p.wsId);
   pending.set(p.wsId, p);

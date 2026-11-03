@@ -36,7 +36,7 @@ import type { HostHandle, HostProps } from '@capabilities/web-rendering';
 import { setXHostState, clearXHostState } from './x-host-registry';
 import { setSpot, type SpotReq } from './x-spot-store';
 import { xDataCall } from './x-data-types';
-import { XPostBar } from './XPostBar';
+import { XFillShield, XPostBar } from './XPostBar';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -253,6 +253,7 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
       <XPostBar wsId={workspaceId} onOpen={(u) => hostRef.current?.loadURL(u)} />
 
       {/* ⭐ 真 webview —— 与同 ws 的内置浏览器同 partition(登录态共享) */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', minHeight: 0 }}>
       <Host
         ref={hostRef}
         workspaceId={workspaceId}
@@ -268,6 +269,9 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         /** ⚠️ 这一路只为补「wcId 晚于首次导航才可取」—— URL 一律读 ref */
         onLoadingChanged={registerHost}
       />
+      {/** 正在填进 X 时盖一层,挡住鼠标(用户 11-03:「先冻结一下界面,免得误操作」);KRIG 的真点击走 CDP,不经过这层 */}
+      <XFillShield wsId={workspaceId} />
+      </div>
 
       {/* ⚠️ slot 只用于调试显示;真要关栏时由框架给的 slot 决定,不自己推导 */}
       <div style={{ display: 'none' }} data-slot={slot ?? 'unknown'} />

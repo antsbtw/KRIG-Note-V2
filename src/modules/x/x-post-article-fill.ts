@@ -29,7 +29,9 @@ type Act = { state?: string; why?: string; editId?: string; [k: string]: unknown
  */
 const IMAGE_SETTLE_MS = 1500;
 
-export async function fillArticle(wcId: number, a: ArticleFill): Promise<ArticleFillOutcome> {
+export async function fillArticle(
+  wcId: number, a: ArticleFill, progress: (step: number, total: number, what: string) => void = () => undefined,
+): Promise<ArticleFillOutcome> {
   const ports = webviewPorts(wcId);
   const act = (op: string, p: Record<string, unknown> = {}): Promise<Act> => ports.runScript(X_ARTICLE_SCRIPT, { op, ...p }) as Promise<Act>;
   const page = resolvePage({ wcId });
@@ -50,7 +52,10 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
   };
   const warnings: string[] = [];
 
+  const total = a.steps.length;
+  progress(0, total, '新建文章');
   if (a.cover) {
+    progress(0, total, '封面');
     const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.articleCoverInput, files: [a.cover], check: { kind: 'none' } });
     if (fed.status === 'failed') return fail(`封面没放进去:${fed.reason}`);
     const ap = await act('coverApply');
@@ -68,6 +73,7 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
   let images = 0;
   for (const [i, s] of a.steps.entries()) {
     const at = `第 ${i + 1} / ${a.steps.length} 步`;
+    progress(i + 1, total, STEP_NAME[s.k]);
     let r: Act;
     switch (s.k) {
       case 'html': r = await act('paste', { html: s.html, text: s.text }); break;
@@ -87,6 +93,8 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
         images += 1;
         r = await act('mediaWait', { want: images, uploadMs: 0 });
         await new Promise((ok) => setTimeout(ok, IMAGE_SETTLE_MS));
+        /** 11-03 诊断:插完那一刻 / 稳 1.5 秒后,顶上的保存状态各是什么 —— 定下来能不能拿它当「存好了」再收掉 */
+        console.log(`[x.post] X 文章第 ${images} 张图 保存状态:插完「${String(r?.saved ?? '?')}」→ 1.5 秒后「${String((await act('state'))?.saved ?? '?')}」`);
         break;
       }
     }
@@ -96,6 +104,7 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
     }
   }
 
+  progress(total, total, '读回核对');
   /** 读回核对:标题、几张图 / 几张表 / 几段代码,字都在 */
   const st = await act('state');
   const c = (st?.counts ?? {}) as { img?: number; table?: number; code?: number };

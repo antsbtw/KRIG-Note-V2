@@ -17,7 +17,7 @@ import { Bad, str, xCap, type O } from './x-capabilities-common';
 import { FILLABLE, composePost, fillBlock, formNotFillable, type PmNode, type PostForm, type PostMedia, type PostPlan, type ThreadLayout } from './x-post-compose';
 import { releasePage } from './x-page-lock';
 import {
-  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, type DraftPost, type FillPost, clearCompose, endPending, endPublished, fillCompose, lastEnded, newDraftId, pendingPost,
+  DRAFT_LOCK_TTL_MS, DRAFT_TTL_MS, addPending, type DraftPost, type FillPost, clearCompose, endPending, endPublished, fillCompose, fillingOf, lastEnded, newDraftId, pendingPost, setFilling,
   publishCompose, viewOf, type CancelWhy, type PendingPost,
 } from './x-post-draft';
 import { findNotePosts, findPosted, recordEnded, recordFilled } from './x-post-repo';
@@ -107,13 +107,14 @@ function cancelOnTimeout(p: PendingPost): void {
  */
 async function fillArticleDraft(
   i: FillIn, a: ArticleDraft, acc: { handle: string; restId: string }, page: { wcId: number; token: string }, caller: string,
+  progress: (step: number, total: number, what: string) => void,
 ): Promise<ReturnType<typeof viewOf>> {
   const media = a.steps.flatMap((s) => (s.k === 'media' ? [s.m] : []));
   const { srcs, files } = await mediaFiles(media);
   const cover = a.coverDefault ? (await mediaFiles([{ kind: 'image', src: a.coverDefault, alt: '封面' }])).files[0] : null;
   let k = 0;
   const steps: ArticleFillStep[] = a.steps.map((s) => (s.k === 'media' ? { k: 'image', file: files[k++] } : s));
-  const r = await fillArticle(page.wcId, { title: a.title, cover, steps });
+  const r = await fillArticle(page.wcId, { title: a.title, cover, steps }, progress);
   if (!r.ok) throw capFailed(r.why);
   for (const w of r.warnings) console.warn(`[x.post] X 文章 ${r.editId}:${w}`);
   const now = Date.now();
@@ -192,42 +193,52 @@ export function registerXPostCapabilities(): void {
     keepPage: { ttlMs: DRAFT_LOCK_TTL_MS },
     subject: (i) => (i.noteId ? `note:${i.noteId}` : undefined),
     run: async (i, acc, page, caller) => {
-      const plan = await planOf(i);
-      if (plan.empty) throw capRefused('内容是空的,没有可发的');
-      const opt = plan.options.find((o) => o.form === i.form);
-      if (!opt) throw capRefused(`没有这种发法(${i.form})`);
-      const why = fillBlock(opt);
-      if (why) throw capRefused(why);
-      if (i.form === 'article') return fillArticleDraft(i, opt.article as ArticleDraft, acc, page, caller);
-      const resolved: Array<{ srcs: string[]; files: string[] }> = [];
-      for (const post of opt.posts) resolved.push(await mediaFiles(post.media));
-      const fills: FillPost[] = opt.posts.map((post, k) => ({ text: post.text, files: resolved[k].files }));
-      const posts: DraftPost[] = opt.posts.map((post, k) => ({ text: post.text, media: resolved[k].srcs }));
-      const r = await fillCompose(page.wcId, fills);
-      if (!r.ok) throw capFailed(r.why);
-      const now = Date.now();
-      const text = posts.map((x) => x.text).join('\n\n');
-      const srcs = posts.flatMap((x) => x.media);
-      const p: PendingPost = {
-        draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId,
-        form: i.form, posts, text, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
-      };
-      /** 「发过没」按整段字认(预览窗拿单条推那份整段查):推串每条末尾的 1/N 不算进去 */
-      const whole = plan.options.find((o) => o.form === 'single')?.posts[0]?.text ?? text;
+      /** 填的这段时间 X 网页顶上显示进度、网页上盖一层挡点击(用户 11-03:「先冻结一下界面,免得误操作」);填完 / 没成都清 */
+      const startedAt = Date.now();
+      setFilling(i.wsId, { form: i.form, step: 0, total: 0, what: '准备', startedAt });
       try {
-        await recordFilled({
-          draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form,
-          text, hashText: whole, posts: posts.length, media: srcs, caller,
-        });
-      } catch (e) {
-        /** 记不下来就不留这份草稿:发出去了却查不到「发过」比填不进去更糟 */
-        const c = await clearCompose(page.wcId);
-        throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${c.cleared ? '框已清掉' : `框没清掉:${c.detail}`}`);
+        const plan = await planOf(i);
+        if (plan.empty) throw capRefused('内容是空的,没有可发的');
+        const opt = plan.options.find((o) => o.form === i.form);
+        if (!opt) throw capRefused(`没有这种发法(${i.form})`);
+        const why = fillBlock(opt);
+        if (why) throw capRefused(why);
+        if (i.form === 'article') {
+          return await fillArticleDraft(i, opt.article as ArticleDraft, acc, page, caller,
+            (step, total, what) => setFilling(i.wsId, { form: i.form, step, total, what, startedAt }));
+        }
+        const resolved: Array<{ srcs: string[]; files: string[] }> = [];
+        for (const post of opt.posts) resolved.push(await mediaFiles(post.media));
+        const fills: FillPost[] = opt.posts.map((post, k) => ({ text: post.text, files: resolved[k].files }));
+        const posts: DraftPost[] = opt.posts.map((post, k) => ({ text: post.text, media: resolved[k].srcs }));
+        const r = await fillCompose(page.wcId, fills);
+        if (!r.ok) throw capFailed(r.why);
+        const now = Date.now();
+        const text = posts.map((x) => x.text).join('\n\n');
+        const srcs = posts.flatMap((x) => x.media);
+        const p: PendingPost = {
+          draftId: newDraftId(now), wsId: i.wsId, wcId: page.wcId, token: page.token, noteId: i.noteId,
+          form: i.form, posts, text, media: srcs, handle: acc.handle, filledAt: now, expiresAt: now + DRAFT_TTL_MS,
+        };
+        /** 「发过没」按整段字认(预览窗拿单条推那份整段查):推串每条末尾的 1/N 不算进去 */
+        const whole = plan.options.find((o) => o.form === 'single')?.posts[0]?.text ?? text;
+        try {
+          await recordFilled({
+            draftId: p.draftId, account: acc.restId, handle: acc.handle, wsId: i.wsId, noteId: i.noteId, form: i.form,
+            text, hashText: whole, posts: posts.length, media: srcs, caller,
+          });
+        } catch (e) {
+          /** 记不下来就不留这份草稿:发出去了却查不到「发过」比填不进去更糟 */
+          const c = await clearCompose(page.wcId);
+          throw capFailed(`发推记录写不上,没留这份草稿(${e instanceof Error ? e.message : String(e)})—— ${c.cleared ? '框已清掉' : `框没清掉:${c.detail}`}`);
+        }
+        addPending(p, cancelOnTimeout);
+        const weight = opt.posts.reduce((n, x) => n + x.weight, 0);
+        console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${posts.length > 1 ? `推串 ${posts.length} 条、` : ''}${weight} 字${srcs.length > 0 ? `、${srcs.length} 张图` : ''})草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
+        return viewOf(p);
+      } finally {
+        setFilling(i.wsId, null);
       }
-      addPending(p, cancelOnTimeout);
-      const weight = opt.posts.reduce((n, x) => n + x.weight, 0);
-      console.log(`[x.post] 已填进 X 发推框(@${acc.handle},${posts.length > 1 ? `推串 ${posts.length} 条、` : ''}${weight} 字${srcs.length > 0 ? `、${srcs.length} 张图` : ''})草稿 ${p.draftId},${DRAFT_TTL_MS / 60_000} 分钟内等确认`);
-      return viewOf(p);
     },
   });
 
@@ -350,7 +361,7 @@ export function registerXPostCapabilities(): void {
     probe: true,
     run: (i) => {
       const p = pendingPost(i.wsId);
-      return { pending: p ? viewOf(p) : null, ended: lastEnded(i.wsId) };
+      return { pending: p ? viewOf(p) : null, ended: lastEnded(i.wsId), filling: fillingOf(i.wsId) };
     },
   });
 }

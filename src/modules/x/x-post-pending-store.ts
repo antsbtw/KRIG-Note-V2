@@ -6,9 +6,9 @@
  * 超时撤回是主进程自己做的,界面只是看见它没了、读到上一份怎么结束的。
  */
 import { xDataCall } from './x-data-types';
-import type { DraftEnded, PendingView } from './x-post-draft';
+import type { DraftEnded, FillingView, PendingView } from './x-post-draft';
 
-export type PendingSnap = { readonly pending: PendingView | null; readonly ended: DraftEnded | null };
+export type PendingSnap = { readonly pending: PendingView | null; readonly ended: DraftEnded | null; readonly filling?: FillingView | null };
 
 const POLL_MS = 1000;
 const EMPTY: PendingSnap = { pending: null, ended: null };

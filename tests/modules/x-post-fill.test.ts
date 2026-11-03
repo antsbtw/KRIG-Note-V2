@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
   rows: [] as Array<Record<string, unknown>>,
+  /** 填的半路看一眼(读 x.post.pending 的 filling) */
+  peek: null as null | (() => void),
   /** X 发推框里现在的字;null = 弹窗不在 */
   box: '' as string | null,
   /** 贴进去时 X 实际显示成什么(模拟对不上);null = 照原样 */
@@ -145,6 +147,7 @@ vi.mock('@modules/x/x-collect-ports', () => ({
     runScript: async (id: string, params: Record<string, unknown>) => {
       if (id === 'x.composeBoxState' && h.missesLeft > 0) { h.missesLeft -= 1; return { found: false, dialogs: 0, boxesAnywhere: 0, ready: 'loading' }; }
       if (id === 'x.composeBoxState') {
+        h.peek?.();
         if (h.box === null) return { found: false };
         const texts = [h.box, ...h.extra];
         /** 单条:那条那块就是整个弹窗(真脚本的 itemOf 同理) */
@@ -216,7 +219,7 @@ beforeEach(() => {
   h.box = ''; h.landsAs = null; h.clearFails = false; h.missesLeft = 0;
   h.posts.clear(); h.dbDown = false; h.sendAs = 'closed'; h.profileHas = true; h.sends = 0; h.toast = true; h.staleLooks = 0;
   h.media = 0; h.fed.length = 0; h.attachAs = null; h.photosOnProfile = null; h.order.length = 0; h.sentMedia = 0;
-  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0; h.wipes = 0; h.addResult = null;
+  h.extra = []; h.perBox = []; h.active = 0; h.addFails = false; h.published = []; h.visibleCount = null; h.busy = 0; h.wipes = 0; h.addResult = null; h.peek = null;
   lock._resetLocks();
   for (const m of ['log', 'warn', 'error'] as const) vi.spyOn(console, m).mockImplementation(() => undefined);
 });
@@ -251,6 +254,19 @@ describe('x.post.fill 填进 X(不发)', () => {
     const r = await execute('x.post.fill', fillIn('再来'), { caller: 'ui' });
     expect(r).toMatchObject({ ok: false, kind: 'failed' });
     expect(!r.ok && r.why).toContain('加载 loading');
+  });
+
+  it('⭐ 填的时候 x.post.pending 带着进度(X 网页顶上显示、网页上盖一层);填完 / 没成都清掉(用户 11-03:「先冻结一下界面」)', async () => {
+    const seen: unknown[] = [];
+    h.peek = () => { void pending().then((v) => seen.push((v as { filling?: unknown }).filling)); };
+    expect(await execute('x.post.fill', fillIn(), { caller: 'ui' })).toMatchObject({ ok: true });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen[0]).toMatchObject({ form: 'single' });
+    expect((await pending() as { filling?: unknown }).filling).toBeNull();
+    lock._resetLocks(); stopPostDraftTimers(); h.peek = null;
+    h.box = 'X 留着的上一次';
+    expect(await execute('x.post.fill', fillIn('再来'), { caller: 'ui' })).toMatchObject({ ok: false });
+    expect((await pending() as { filling?: unknown }).filling).toBeNull();
   });
 
   it('框里已经有字 → 不往里贴,不留锁', async () => {

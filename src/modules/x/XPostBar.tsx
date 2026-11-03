@@ -31,16 +31,27 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const filling = snap.filling ?? null;
   useEffect(() => {
-    if (!draft) return undefined;
+    if (!draft && !filling) return undefined;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [draft]);
+  }, [draft, filling]);
   useEffect(() => { setNote(null); }, [draft?.draftId]);
   /**
    * 草稿结束后条不跟着消失的两种:撤回了但框没清掉(「请手动删」要有人看见,10-27 真机)/ 发布的结局。
    * 撤回清干净了就直接收起。
    */
+  /** 正在填(用户 11-03:「先冻结一下界面,免得误操作」)—— 只显示进度,不给按钮;网页上的遮罩在 XWebView */
+  if (filling) {
+    const of = filling.total > 0 ? `第 ${filling.step}/${filling.total} 步(${filling.what})` : filling.what;
+    return (
+      <div style={bar}>
+        <b style={{ flex: 'none' }}>KRIG</b>
+        <span style={{ flex: 1 }}>⏳ 正在把{filling.form === 'article' ? '文章' : '推文'}填进下面的 X —— {of},已 {mmss(now - filling.startedAt)} · 请别动下面的网页</span>
+      </div>
+    );
+  }
   const end = snap.ended;
   const showEnd = !draft && end && dismissed !== end.draftId && (end.why === 'published' || !end.cleared);
   if (showEnd) {
@@ -108,5 +119,19 @@ export function XPostBar({ wsId, onOpen }: { wsId: string; onOpen: (url: string)
         取消
       </button>
     </div>
+  );
+}
+
+/** 正在填进 X 时盖在网页上的一层:点不进去、滚不动(X 只认它自己的光标,人一点就会让后面的块插错位置) */
+export function XFillShield({ wsId }: { wsId: string }) {
+  const snap = useSyncExternalStore((cb) => subscribePending(wsId, cb), () => pendingSnap(wsId));
+  if (!snap.filling) return null;
+  return (
+    <div
+      title="KRIG 正在往这里填,填完自动放开"
+      onMouseDown={(e) => e.preventDefault()}
+      onWheel={(e) => e.preventDefault()}
+      style={{ position: 'absolute', inset: 0, zIndex: 5, background: 'rgba(0,0,0,0.25)', cursor: 'progress' }}
+    />
   );
 }

@@ -94,6 +94,11 @@ const LIB = String.raw`
   var captionBox = function () {
     return Array.prototype.slice.call(document.querySelectorAll('textarea[data-testid="articleTweetTextInput"]')).filter(vis)[0] || null;
   };
+  /** 顶上那行保存状态(「Draft · Last saved 28 seconds ago」/ 存的时候大概是 Saving…)—— 11-03 诊断:看它能不能当「这张图存好了」的信号 */
+  var saveText = function () {
+    var hit = Array.prototype.slice.call(document.querySelectorAll('span, div')).filter(function (e) { return e.children.length === 0 && /^(Saving|Saved|Last saved)/i.test(clean(e.innerText)); })[0];
+    return hit ? clean(hit.parentElement ? hit.parentElement.innerText : hit.innerText).slice(0, 60) : null;
+  };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
     if (!trig) return 'no-insert-button';
@@ -115,7 +120,7 @@ const SRC = String.raw`(async function (P) {
       case 'state': {
         var t = document.querySelector('textarea[placeholder="Add a title"]');
         return {
-          state: 'ok', url: location.href, editId: editId, title: t ? t.value : null, counts: counts(), uploading: uploading(),
+          state: 'ok', url: location.href, editId: editId, title: t ? t.value : null, counts: counts(), uploading: uploading(), saved: saveText(),
           text: body() ? clean(body().innerText) : null, dialog: !!document.querySelector('[role="dialog"]'),
           cover: !!document.querySelector('button[aria-label="Remove photo"]'),
           create: !!document.querySelector('button[aria-label="create"]'),
@@ -247,7 +252,7 @@ const SRC = String.raw`(async function (P) {
          */
         var t3 = Date.now();
         while (uploading() > 0 && Date.now() - t3 < P.uploadMs) await sleep(500);
-        return { state: 'ok', img: counts().img, uploading: uploading(), waited: Date.now() - t3, ups: ups() };
+        return { state: 'ok', img: counts().img, waited: Date.now() - t3, saved: saveText() };
       }
       case 'coverApply': {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
