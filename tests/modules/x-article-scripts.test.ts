@@ -226,6 +226,17 @@ describe('X 文章脚本', () => {
     expect(pasted).toBeNull();
   }, 15_000);
 
+  it('⭐ tail:标出正文最后那个空行(主进程真点它,把光标放回末尾);最后是图 → 如实说没有', async () => {
+    editor(['一、选择订阅', '']);
+    expect(await run({ op: 'tail' })).toMatchObject({ state: 'ok' });
+    const marked = document.querySelectorAll('[data-krig-tail="1"]');
+    expect(marked.length).toBe(1);
+    expect(marked[0].textContent).toBe('');
+    editor(['字']);
+    document.querySelector('[data-testid="composer"]')!.insertAdjacentHTML('beforeend', '<section data-block="true"><img src="blob:x"></section>');
+    expect(await run({ op: 'tail' })).toMatchObject({ state: 'no-empty-tail' });
+  });
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

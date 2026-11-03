@@ -426,6 +426,7 @@ export const X_ANCHORS = {
   composeAddButton: 'x.composeAddButton' as AnchorName,
   /** X 文章编辑器正文的第一行(新文章只有这一行,空的)—— 真点击它让 X 的光标落到正文里(第⑥期,10-30) */
   articleFirstLine: 'x.articleFirstLine' as AnchorName,
+  articleTail: 'x.articleTail' as AnchorName,
   /** X 文章 Insert → Media 弹窗里的选图控件 */
   articleMediaInput: 'x.articleMediaInput' as AnchorName,
   /** X 文章的封面选图控件(页面上、不在弹窗里那个,只收图) */

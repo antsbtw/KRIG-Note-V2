@@ -141,7 +141,7 @@ const SRC = String.raw`(async function (P) {
       case 'state': {
         var t = document.querySelector('textarea[placeholder="Add a title"]');
         return {
-          state: 'ok', url: location.href, editId: editId, title: t ? t.value : null, counts: counts(), uploading: uploading(), saved: saveText(),
+          state: 'ok', url: location.href, editId: editId, title: t ? t.value : null, counts: counts(), uploading: uploading(), saved: saveText(), outline: outline(),
           text: body() ? clean(body().innerText) : null, dialog: !!document.querySelector('[role="dialog"]'),
           cover: !!document.querySelector('button[aria-label="Remove photo"]'),
           create: !!document.querySelector('button[aria-label="create"]'),
@@ -263,6 +263,21 @@ const SRC = String.raw`(async function (P) {
         if (o5 !== 'ok') return { state: o5 };
         var inp = await waitFor(function () { return document.querySelector('[role="dialog"] input[data-testid="fileInput"]'); }, 5000);
         return inp ? { state: 'ok', img: counts().img } : { state: 'no-input', why: '点了 Media 没出选文件的弹窗', img: counts().img, scene: scene(), ups: ups() };
+      }
+      /**
+       * 标出正文最后那个空行(主进程接着真点击它,把光标放回正文末尾)。
+       * 11-03 真机:图插完之后接着粘的小标题,一次被后面插的图吃掉、一次干脆粘不进去 —— 推断 X 的光标停在了图上 / 图的说明框里;
+       * 顺带带回点之前焦点在哪(active),验证这个推断
+       */
+      case 'tail': {
+        var bs = blocks();
+        Array.prototype.forEach.call(document.querySelectorAll('[data-krig-tail]'), function (x) { x.removeAttribute('data-krig-tail'); });
+        var tl = bs[bs.length - 1];
+        var ae = document.activeElement;
+        var active = ae ? ae.tagName + (ae.getAttribute('data-testid') ? '#' + ae.getAttribute('data-testid') : '') + (ae.getAttribute('aria-label') ? '[' + ae.getAttribute('aria-label').slice(0, 30) + ']' : '') : null;
+        if (!tl || tl.querySelector('img') || clean(tl.innerText) !== '') return { state: 'no-empty-tail', active: active, outline: outline() };
+        tl.setAttribute('data-krig-tail', '1');
+        return { state: 'ok', active: active };
       }
       case 'mediaWait': {
         var ok5 = await waitFor(function () { return !sheet() && counts().img >= P.want; }, 20000);

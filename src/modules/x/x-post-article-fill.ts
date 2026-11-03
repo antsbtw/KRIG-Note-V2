@@ -92,6 +92,16 @@ export async function fillArticle(
         images += 1;
         r = await act('mediaWait', { want: images, saveMs: IMAGE_SAVE_MS });
         if (r?.state === 'ok') console[r.savedOk ? 'log' : 'warn'](`[x.post] X 文章第 ${images} 张图 ${(Number(r.waited) / 1000).toFixed(1)} 秒 ${r.seenProc ? (r.savedOk ? '处理完了' : '处理没等完') : '没见到 Processing'} 块 ${String(r.blocks0)}→${String(r.blocks)} 时间线:${JSON.stringify(r.line)}`);
+        if (r?.state !== 'ok') break;
+        /** 把光标放回正文末尾的空行(11-03:图后面接着粘的字被吃掉 / 粘不进去)—— 同开头那一下,X 只认真点击 */
+        {
+          const tl = await act('tail');
+          console.log(`[x.post] X 文章第 ${images} 张图后 光标原在 ${String(tl?.active ?? '?')} → ${tl?.state === 'ok' ? '点回末尾空行' : `没找到末尾空行(${String(tl?.outline ?? '')})`}`);
+          if (tl?.state === 'ok') {
+            const tp = await inputEngine.tap(page.pageId, { anchor: X_ANCHORS.articleTail, trusted: true });
+            if (tp.status === 'failed') { r = { state: 'tap-failed', why: `图后点不回正文末尾:${tp.reason}` }; break; }
+          }
+        }
         break;
       }
     }
@@ -100,25 +110,40 @@ export async function fillArticle(
       console.warn(`[x.post] X 文章${at}(${s.k})没成:${JSON.stringify(r)}`);
       return fail(`${at}(${STEP_NAME[s.k]})没填进去:${r?.why ?? r?.state ?? '脚本没回话'}`);
     }
+    /**
+     * ⭐ 每一步做完都核对「到这一步为止该有的都还在」—— 不只看这一步放进去没有(用户 11-03:「每一步执行完毕必须有一个好的检查方法」)。
+     * 11-03 真机:第 4 步小标题报成功、后来被插的图吃掉,一直到第 8 步才露出来、还报成别的错
+     */
+    const so = await act('state');
+    const broke = mismatch(so, a.title, a.steps.slice(0, i + 1), images);
+    if (broke.length > 0) {
+      console.warn(`[x.post] X 文章${at}(${s.k})之后前面的东西不对了:${broke.join(';')} 正文:${String(so?.outline ?? '')}`);
+      return fail(`${at}(${STEP_NAME[s.k]})之后正文不对了:${broke.join(';')}`);
+    }
   }
 
   progress(total, total, '读回核对');
   /** 读回核对:标题、几张图 / 几张表 / 几段代码,字都在 */
-  const st = await act('state');
+  const bad = mismatch(await act('state'), a.title, a.steps, images);
+  if (bad.length > 0) return fail(`填完读回对不上:${bad.join(';')}`);
+  console.log(`[x.post] X 文章 ${editId} 填好了(${((Date.now() - t0) / 1000).toFixed(0)} 秒):${a.steps.length} 步,${images} 张图${a.cover ? ',有封面' : ''}`);
+  return { ok: true, editId, warnings };
+}
+
+/** 编辑器现在的样子 vs 到某一步为止该有的:标题、图 / 表 / 代码几个、每段字(取前 20 字找)都在 */
+export function mismatch(st: Act, title: string, steps: readonly ArticleFillStep[], images: number): string[] {
   const c = (st?.counts ?? {}) as { img?: number; table?: number; code?: number };
-  const want = { img: images, table: a.steps.filter((s) => s.k === 'table').length, code: a.steps.filter((s) => s.k === 'code').length };
+  const want = { img: images, table: steps.filter((s) => s.k === 'table').length, code: steps.filter((s) => s.k === 'code').length };
   const bad: string[] = [];
-  if (a.title && st?.title !== a.title) bad.push(`标题是「${String(st?.title ?? '')}」`);
+  if (title && st?.title !== title) bad.push(`标题是「${String(st?.title ?? '')}」`);
   if ((c.img ?? 0) !== want.img) bad.push(`图 ${c.img ?? 0} / ${want.img}`);
   if ((c.table ?? 0) !== want.table) bad.push(`表格 ${c.table ?? 0} / ${want.table}`);
   if ((c.code ?? 0) !== want.code) bad.push(`代码 ${c.code ?? 0} / ${want.code}`);
   const text = String(st?.text ?? '').replace(/\s+/g, '');
-  const lost = a.steps.flatMap((s) => (s.k === 'html' || s.k === 'heading' ? [s.text] : []))
+  const lost = steps.flatMap((s) => (s.k === 'html' || s.k === 'heading' ? [s.text] : []))
     .filter((t) => !text.includes(t.replace(/\s+/g, '').slice(0, 20)));
-  if (lost.length > 0) bad.push(`有 ${lost.length} 段字没找到(「${lost[0].slice(0, 20)}」…)`);
-  if (bad.length > 0) return fail(`填完读回对不上:${bad.join(';')}`);
-  console.log(`[x.post] X 文章 ${editId} 填好了(${((Date.now() - t0) / 1000).toFixed(0)} 秒):${a.steps.length} 步,${images} 张图${a.cover ? ',有封面' : ''}`);
-  return { ok: true, editId, warnings };
+  if (lost.length > 0) bad.push(`有 ${lost.length} 段字没了(「${lost[0].slice(0, 20)}」…)`);
+  return bad;
 }
 
 const STEP_NAME: Record<ArticleFillStep['k'], string> = {

@@ -46,6 +46,8 @@ const SELECTORS: Readonly<Record<string, string>> = {
   [X_ANCHORS.composeAddButton]: '[role="dialog"] [data-testid="addButton"]',
   /** X 文章(10-30 真机量过):正文 composer 里的块;新文章只有一块(空的)*/
   [X_ANCHORS.articleFirstLine]: '[data-testid="composer"] [data-block="true"]',
+  /** 正文最后那个空行(脚本 op=tail 现标的;11-03:插图后把光标放回去)*/
+  [X_ANCHORS.articleTail]: '[data-testid="composer"] [data-krig-tail="1"]',
   [X_ANCHORS.articleMediaInput]: '[role="dialog"] input[data-testid="fileInput"]',
   /** 封面那个不收多张(Media 弹窗里那个 multiple)*/
   [X_ANCHORS.articleCoverInput]: 'input[data-testid="fileInput"]:not([multiple])',
