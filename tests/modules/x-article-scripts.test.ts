@@ -247,6 +247,32 @@ describe('X 文章脚本', () => {
     expect(pasted).toBeNull();
   });
 
+  describe('⭐ 就绪(用户 11-03:「确保每一步都完成后才能走下一步」)', () => {
+    const status = (t: string): HTMLElement => { const d = document.createElement('div'); d.innerHTML = `<span>${t}</span>`; document.body.append(d); return d; };
+
+    it('正文还在变 → 等它连续稳住才算就绪', async () => {
+      editor(['一']);
+      status('Last saved just now');
+      const c = document.querySelector('[data-testid="composer"]')!;
+      setTimeout(() => c.insertAdjacentHTML('beforeend', '<div data-block="true">二</div>'), 400);
+      const r = await run({ op: 'idle', stableMs: 600, maxMs: 5000 });
+      expect(r).toMatchObject({ state: 'ok' });
+      expect(Number(r.waited)).toBeGreaterThanOrEqual(900);
+    }, 10_000);
+
+    it('X 一直在处理图片 → not-ready,说差在哪', async () => {
+      editor(['一']);
+      status('Processing media...');
+      expect(await run({ op: 'idle', stableMs: 200, maxMs: 800 })).toMatchObject({ state: 'not-ready', why: 'X 在处理图片' });
+    }, 10_000);
+
+    it('顶上还没存好 → 不算就绪', async () => {
+      editor(['一']);
+      status('Saving…');
+      expect(await run({ op: 'idle', stableMs: 200, maxMs: 800 })).toMatchObject({ state: 'not-ready' });
+    }, 10_000);
+  });
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });

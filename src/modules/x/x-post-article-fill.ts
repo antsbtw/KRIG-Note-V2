@@ -30,6 +30,9 @@ const IMAGE_SAVE_MS = 60_000;
 
 const PASTE_TRIES = 3;
 
+/** 每一步前后的「就绪」:正文结构连续 800ms 不变算稳;最多等 30 秒(用户 11-03:「确保每一步都完成后才能走下一步…取平衡点」)*/
+const IDLE = { stableMs: 800, maxMs: 30_000 };
+
 /** 没填完的草稿留着不删(用户 11-03:「调试期间,失败可以不要删除,方便你观察问题」)—— 填稳了改回 false */
 const KEEP_FAILED_DRAFT = true;
 
@@ -105,6 +108,13 @@ export async function fillArticle(
   for (const [i, s] of a.steps.entries()) {
     const at = `第 ${i + 1} / ${a.steps.length} 步`;
     progress(i + 1, total, STEP_NAME[s.k]);
+    /** ① 就绪:X 闲下来了(不在处理图片、已存、正文不再变、没有弹窗)才动手 */
+    const pre = await act('idle', IDLE);
+    if (pre?.state !== 'ok') {
+      console.warn(`[x.post] X 文章${at}(${s.k})动手前 X 一直没闲下来:${JSON.stringify(pre)}`);
+      return fail(`${at}(${STEP_NAME[s.k]})动手前 X 一直没闲下来:${String(pre?.why ?? pre?.state ?? '脚本没回话')}`);
+    }
+    if (Number(pre.waited) > 2000) console.log(`[x.post] X 文章${at}(${s.k})动手前等 X 闲下来 ${(Number(pre.waited) / 1000).toFixed(1)} 秒`);
     let r: Act;
     switch (s.k) {
       case 'html': r = await pasteRetry(s.html, s.text); break;
@@ -155,6 +165,9 @@ export async function fillArticle(
      * ⭐ 每一步做完都核对「到这一步为止该有的都还在」—— 不只看这一步放进去没有(用户 11-03:「每一步执行完毕必须有一个好的检查方法」)。
      * 11-03 真机:第 4 步小标题报成功、后来被插的图吃掉,一直到第 8 步才露出来、还报成别的错
      */
+    /** ③ 落地后再等 X 闲下来(它可能还在重画 / 存),④ 再全量核对 */
+    const post = await act('idle', IDLE);
+    if (post?.state !== 'ok') console.warn(`[x.post] X 文章${at}(${s.k})做完后 X 没闲下来(${String(post?.why ?? '?')})—— 照样核对`);
     const so = await act('state');
     const broke = mismatch(so, a.title, a.steps.slice(0, i + 1), images);
     if (broke.length > 0) {

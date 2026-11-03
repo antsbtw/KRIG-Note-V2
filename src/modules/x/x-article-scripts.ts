@@ -194,6 +194,31 @@ const SRC = String.raw`(async function (P) {
        * 最后一块已经是空行 → 什么都不做;不是 → 合成粘贴两个零宽段落:第一个并进当前行(看不见),第二个成新的空行。
        * 之后由 tail + 真点击把光标放进去
        */
+      /**
+       * ⭐ 就绪(用户 11-03:「要有健壮的检查机制,确保每一步都完成后才能走下一步…取平衡点」)——
+       * 每一步动手前、做完后都过这道:X 不在处理图片 + 顶上是 Last saved + 正文结构连续 P.stableMs 没变(X 没在重画)+ 焦点在正文。
+       * 最多等 P.maxMs;等不到如实返回差在哪(not-ready),由主进程停下
+       */
+      case 'idle': {
+        var ti = Date.now();
+        var stableMs = P.stableMs || 1000;
+        var snap = '';
+        var since = Date.now();
+        var why = '';
+        while (Date.now() - ti < (P.maxMs || 30000)) {
+          var o9 = outline();
+          if (o9 !== snap) { snap = o9; since = Date.now(); }
+          var st9 = statusLine();
+          var ae9 = document.activeElement;
+          why = processing() ? 'X 在处理图片' : !/Last saved/i.test(st9) ? '顶上不是 Last saved(' + st9 + ')'
+            : sheet() || document.querySelector('[role="dialog"] textarea, [role="dialog"] input[data-testid="fileInput"]') ? '还有弹窗开着'
+            : P.focus && !(ae9 && ae9.closest && ae9.closest('[data-testid="composer"]')) ? '焦点不在正文'
+            : Date.now() - since < stableMs ? '正文还在变' : '';
+          if (!why) return { state: 'ok', waited: Date.now() - ti };
+          await sleep(150);
+        }
+        return { state: 'not-ready', why: why, waited: Date.now() - ti, status: statusLine(), outline: outline() };
+      }
       case 'newLine': {
         var bl = body();
         if (!bl) return { state: 'no-body' };
