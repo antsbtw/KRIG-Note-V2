@@ -68,6 +68,24 @@ const LIB = String.raw`
   var outline = function () {
     return blocks().map(function (b) { return b.tagName.charAt(0) + (b.querySelector('img') ? '[img' + (/^blob:/.test(b.querySelector('img').src) ? ' 传' : '') + ']' : '') + (b.querySelector('table') ? '[表]' : '') + ':' + clean(b.innerText).slice(0, 8); }).join(' / ');
   };
+  /**
+   * 诊断(11-02 真机:取消后再填,一次封面 30 秒没放上、一次第 5 张图点了 Media 没出选文件的弹窗 —— 日志里看不出 X 当时说了什么)
+   * scene:屏幕上的提示 / 弹窗字 / Insert 菜单项状态;ups:这页里发往上传接口的请求(页面自己的资源记录,带状态码)
+   */
+  var scene = function () {
+    var texts = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)).filter(vis).map(function (e) { return clean(e.innerText).slice(0, 120); }).filter(Boolean); };
+    return {
+      alerts: texts('[role="alert"], [data-testid="toast"]'),
+      dialogs: texts('[role="dialog"]').map(function (s) { return s.slice(0, 80); }),
+      menu: Array.prototype.slice.call(document.querySelectorAll('[role="menuitem"]')).filter(vis).map(function (e) { return clean(e.innerText) + (e.getAttribute('aria-disabled') === 'true' ? '(灰)' : ''); }),
+    };
+  };
+  var ups = function () {
+    return performance.getEntriesByType('resource').filter(function (e) { return /upload/i.test(e.name); }).slice(-12).map(function (e) {
+      var q = /command=([A-Z]+)/.exec(e.name);
+      return (q ? q[1] : e.name.replace(/^https?:\/\//, '').slice(0, 40)) + ':' + (e.responseStatus || '?') + '@' + Math.round(e.startTime / 1000) + 's/' + Math.round(e.duration) + 'ms';
+    });
+  };
   var openInsert = async function (label) {
     var trig = document.querySelector('button[aria-label="Add Media"]');
     if (!trig) return 'no-insert-button';
@@ -210,7 +228,7 @@ const SRC = String.raw`(async function (P) {
         var o5 = await openInsert('Media');
         if (o5 !== 'ok') return { state: o5 };
         var inp = await waitFor(function () { return document.querySelector('[role="dialog"] input[data-testid="fileInput"]'); }, 5000);
-        return { state: inp ? 'ok' : 'no-input', img: counts().img };
+        return inp ? { state: 'ok', img: counts().img } : { state: 'no-input', why: '点了 Media 没出选文件的弹窗', img: counts().img, scene: scene(), ups: ups() };
       }
       case 'mediaWait': {
         var ok5 = await waitFor(function () { return !sheet() && counts().img >= P.want; }, 20000);
@@ -221,7 +239,7 @@ const SRC = String.raw`(async function (P) {
          */
         var t3 = Date.now();
         while (uploading() > 0 && Date.now() - t3 < P.uploadMs) await sleep(500);
-        return { state: 'ok', img: counts().img, uploading: uploading(), waited: Date.now() - t3 };
+        return { state: 'ok', img: counts().img, uploading: uploading(), waited: Date.now() - t3, ups: ups() };
       }
       case 'coverApply': {
         var ap = await waitFor(function () { return document.querySelector('[data-testid="applyButton"]'); }, 10000);
@@ -229,7 +247,7 @@ const SRC = String.raw`(async function (P) {
         ap.click();
         /** 10-30 真机:第一次 10 秒没等到(封面图上传慢),第二次成了 → 放宽到 30 秒;没等到带回看到了什么 */
         var ok6 = await waitFor(function () { return !document.querySelector('[data-testid="applyButton"]') && document.querySelector('button[aria-label="Remove photo"]'); }, 30000);
-        return ok6 ? { state: 'ok' } : { state: 'not-landed', apply: !!document.querySelector('[data-testid="applyButton"]'), dialog: !!document.querySelector('[role="dialog"]') };
+        return ok6 ? { state: 'ok', ups: ups() } : { state: 'not-landed', apply: !!document.querySelector('[data-testid="applyButton"]'), dialog: !!document.querySelector('[role="dialog"]'), scene: scene(), ups: ups() };
       }
       case 'uploads': {
         var t1 = Date.now();

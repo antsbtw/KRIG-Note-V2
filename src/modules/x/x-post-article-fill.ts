@@ -6,7 +6,7 @@
  * 填到一半没成 → 删掉这份草稿(X 文章一新建就存成草稿,不删会留在 X 的草稿箱里)。
  * ⚠️ 调之前网页必须已被执行器占着。⚠️ 这里不点发布。
  */
-import { inputEngine } from '@platform/main/web-capability/wiring/runtime';
+import { inputEngine, netBus } from '@platform/main/web-capability/wiring/runtime';
 import { resolve as resolvePage } from '@platform/main/web-capability/wiring/web-collect-engine';
 import { webviewPorts } from './x-collect-ports';
 import { X_ARTICLE_SCRIPT } from './x-article-scripts';
@@ -53,6 +53,7 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
     const fed = await inputEngine.feed(page.pageId, { anchor: X_ANCHORS.articleCoverInput, files: [a.cover], check: { kind: 'none' } });
     if (fed.status === 'failed') return fail(`封面没放进去:${fed.reason}`);
     const ap = await act('coverApply');
+    console.log(`[x.post] X 文章封面:${JSON.stringify(ap)} | netBus 上传:${upNet(page.pageId)}`);
     if (ap?.state !== 'ok') return fail(`封面没放上:${ap?.why ?? ap?.state ?? '脚本没回话'}`);
   }
   if (a.title) {
@@ -86,6 +87,7 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
         r = await act('mediaWait', { want: images, uploadMs: PER_IMAGE_UPLOAD_MS });
         if (r?.state === 'ok' && Number(r.uploading) > 0) console.warn(`[x.post] X 文章第 ${images} 张图等了 ${PER_IMAGE_UPLOAD_MS / 1000} 秒还是 blob:(没传完,或 X 不换地址)—— 接着往下`);
         else if (r?.state === 'ok') console.log(`[x.post] X 文章第 ${images} 张图传完(等了 ${(Number(r.waited) / 1000).toFixed(1)} 秒)`);
+        console.log(`[x.post] X 文章第 ${images} 张图 上传请求 页面记的:${JSON.stringify(r?.ups ?? null)} | netBus:${upNet(page.pageId)}`);
         break;
       }
     }
@@ -119,6 +121,13 @@ export async function fillArticle(wcId: number, a: ArticleFill): Promise<Article
 const STEP_NAME: Record<ArticleFillStep['k'], string> = {
   html: '文字', heading: '小标题', latex: '公式', code: '代码', table: '表格', divider: '分隔线', image: '图片',
 };
+
+/**
+ * 诊断(11-02):netBus 里这页发往上传接口的请求 —— 和页面自己记的(ups)对照,看哪边看得见 X 的上传、状态码是什么;
+ * 定下「图传完了」靠哪个信号之后,这两行日志收掉
+ */
+const upNet = (pageId: Parameters<typeof netBus.list>[0]): string =>
+  JSON.stringify(netBus.list(pageId, { urlIncludes: 'upload' }).slice(-8).map((r) => `${/command=([A-Z]+)/.exec(r.url)?.[1] ?? r.url.slice(8, 48)}:${r.method}:${r.status ?? (r.finishedAt ? '?' : '…')}`));
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 

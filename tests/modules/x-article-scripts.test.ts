@@ -70,6 +70,25 @@ describe('X 文章脚本', () => {
     expect(await run({ op: 'paste', html: '<p>x</p>', text: '不会出现' })).toMatchObject({ state: 'not-landed' });
   }, 8000);
 
+  it('点了 Media 没出选文件的弹窗 → no-input,带回屏幕上的提示和菜单(11-02 真机:日志里看不出 X 说了什么)', async () => {
+    editor(['字']);
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => ({ width: 10, height: 10, top: 0, left: 0, right: 10, bottom: 10 }) });
+    const trig = document.createElement('button');
+    trig.setAttribute('aria-label', 'Add Media');
+    trig.addEventListener('click', () => {
+      const it = Object.assign(document.createElement('div'), { textContent: 'Media' });
+      it.setAttribute('role', 'menuitem');
+      document.body.append(it);
+    });
+    const toast = Object.assign(document.createElement('div'), { textContent: '上传太多了' });
+    toast.setAttribute('role', 'alert');
+    document.body.append(trig, toast);
+    const r = await run({ op: 'mediaOpen' });
+    expect(r).toMatchObject({ state: 'no-input', scene: { alerts: ['上传太多了'], menu: ['Media'] } });
+    expect(Array.isArray(r.ups)).toBe(true);
+    delete (HTMLElement.prototype as unknown as { getBoundingClientRect?: unknown }).getBoundingClientRect;
+  }, 15_000);
+
   it('不认的 op → bad-op', async () => {
     editor(['']);
     expect(await run({ op: 'nope' })).toMatchObject({ state: 'bad-op' });
