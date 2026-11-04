@@ -167,13 +167,21 @@ describe('⭐⭐ 运营 view', () => {
     s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   const OPS = stripComments(readFileSync(join(process.cwd(), 'src/modules/x/XOpsView.tsx'), 'utf-8'));
 
-  it('⭐ 与 X 网页同级:上 navSide(能开在左栏),SlotPicker 自动列出(能开在右栏)', () => {
+  it('⭐ 运营 / 任务只从 X 网页打开:不上左侧栏、不进 SlotPicker(用户 2026-11-03「只有x才能调用」)', () => {
     const v = byId('x-ops-view');
     expect(v, 'x-ops-view 没注册').toBeDefined();
-    /** SlotPickerPopup 列的是 navSideTab ∪ slotPickerEntry —— 有 navSideTab 就能进右栏 */
     expect(v!.navSideTab?.label).toBe('运营');
     expect(v!.component, '与别的 view 共用了组件').not.toBe(byId('x-web-view')!.component);
-    expect(v!.component).not.toBe(byId('x-web-view')!.component);
+    for (const id of ['x-ops-view', 'x-task-view']) {
+      const navIds = viewTypeRegistry.getAllForNavSide().map((x) => x.id);
+      const pickerIds = viewTypeRegistry.getAllForSlotPicker().map((x) => x.id);
+      expect(navIds, `${id} 又出现在左侧栏`).not.toContain(id);
+      expect(pickerIds, `${id} 又出现在 SlotPicker`).not.toContain(id);
+      // 隐藏不等于丢掉 navSideDisabled —— 否则开着它时会多出一栏空 NavSide、把 X 网页挤窄
+      expect(byId(id)!.navSideTab?.navSideDisabled, `${id} 丢了 navSideDisabled`).toBe(true);
+    }
+    // X 网页本身仍在左侧栏(隐藏只针对它的延伸 view)
+    expect(viewTypeRegistry.getAllForNavSide().map((x) => x.id)).toContain('x-web-view');
   });
 
   it('⭐ navSide 顺位不与别人撞', () => {
