@@ -210,16 +210,23 @@ export function mismatch(st: Act, title: string, steps: readonly ArticleFillStep
   const c = (st?.counts ?? {}) as { img?: number; table?: number; code?: number };
   const want = { img: images, table: steps.filter((s) => s.k === 'table').length, code: steps.filter((s) => s.k === 'code').length };
   const bad: string[] = [];
-  if (title && st?.title !== title) bad.push(`标题是「${String(st?.title ?? '')}」`);
+  if (title && squash(String(st?.title ?? '')) !== squash(title)) bad.push(`标题是「${String(st?.title ?? '')}」`);
   if ((c.img ?? 0) !== want.img) bad.push(`图 ${c.img ?? 0} / ${want.img}`);
   if ((c.table ?? 0) !== want.table) bad.push(`表格 ${c.table ?? 0} / ${want.table}`);
   if ((c.code ?? 0) !== want.code) bad.push(`代码 ${c.code ?? 0} / ${want.code}`);
-  const text = String(st?.text ?? '').replace(/\s+/g, '');
+  const text = squash(String(st?.text ?? ''));
   const lost = steps.flatMap((s) => (s.k === 'html' || s.k === 'heading' ? [s.text] : []))
-    .filter((t) => !text.includes(t.replace(/\s+/g, '').slice(0, 20)));
+    .filter((t) => !text.includes(squash(t).slice(0, 20)));
   if (lost.length > 0) bad.push(`有 ${lost.length} 段字没了(「${lost[0].slice(0, 20)}」…)`);
   return bad;
 }
+
+/**
+ * 比对前两边都去掉空白和零宽字符。11-03 真机:note 里小标题末尾带一个看不见的 U+200B,X 编辑器读回时
+ * 被脚本去掉了(x-article-scripts 的 clean),只有「该有的」这边还带着 → 字明明在却报「有 1 段字没了」。
+ * `\s` 不含 U+200B,所以要单列。
+ */
+const squash = (s: string): string => s.replace(/[\s\u200b-\u200d\u2060\ufeff]+/g, '');
 
 const STEP_NAME: Record<ArticleFillStep['k'], string> = {
   html: '文字', heading: '小标题', latex: '公式', code: '代码', table: '表格', divider: '分隔线', image: '图片',

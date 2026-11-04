@@ -29,4 +29,12 @@ describe('X 文章:每步之后核对前面的都还在', () => {
     expect(bad).toContain('图 1 / 2');
     expect(bad).toContain('标题');
   });
+  it('⭐ note 里带零宽字符(U+200B)、X 读回没有 → 不算字没了(11-03 真机误报「六、配置住宅IP」)', () => {
+    const z = [{ k: 'heading', level: 1, text: '六、配置住宅IP\u200b' }, { k: 'html', text: '\u200b为了更简单' }] as const;
+    expect(mismatch({ title: 'T\u200b', counts: {}, text: '六、配置住宅IP 为了更简单' }, 'T', z, 0)).toEqual([]);
+  });
+  it('零宽字符去掉后真没有的字 → 照样查出来', () => {
+    const z = [{ k: 'heading', level: 1, text: '六、配置住宅IP\u200b' }] as const;
+    expect(mismatch({ title: 'T', counts: {}, text: '五、创建' }, 'T', z, 0).join()).toContain('六、配置住宅IP');
+  });
 });
