@@ -12,8 +12,10 @@ const strip = (s: string): string => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(
 
 describe('任务 view', () => {
   it('注册:navSide「任务」order 6.6(紧挨运营);X 网页顶条按钮开的是同一个 id', () => {
+    /** id 定义在 x-view-id.ts(10-27 发推预览也要用,不 import renderer.ts 免得循环),renderer.ts 从那里拿 */
+    expect(read('src/modules/x/x-view-id.ts')).toMatch(/export const X_TASK_VIEW_ID = 'x-task-view';/);
     const R = read('src/modules/x/renderer.ts');
-    expect(R).toMatch(/export const X_TASK_VIEW_ID = 'x-task-view';/);
+    expect(R).toMatch(/import \{[^}]*X_TASK_VIEW_ID[^}]*\} from '\.\/x-view-id';/);
     expect(R).toMatch(/id: X_TASK_VIEW_ID,[\s\S]{0,80}component: XTaskView,[\s\S]{0,60}label: '任务'/);
     const W = strip(read('src/modules/x/XWebView.tsx'));
     expect(W).toContain("const X_TASK_VIEW_ID = 'x-task-view';");

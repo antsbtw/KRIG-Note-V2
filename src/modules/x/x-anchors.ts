@@ -10,7 +10,8 @@
  */
 
 import type { AnchorResolver } from '@platform/main/web-capability/page/control';
-import { X_ANCHORS } from './x-pages';
+import { X_ANCHORS, composeBoxAnchor } from './x-pages';
+import { X_THREAD_MAX } from './x-post-compose';
 
 /**
  * ⚠️⚠️ **这张表当前是坏的,而且我知道它坏** ——
@@ -31,6 +32,28 @@ const SELECTORS: Readonly<Record<string, string>> = {
   [X_ANCHORS.tweetArticle]: 'article[data-testid="tweet"]',
   /** ⚠️ 登录态才有 testid(求关只在登录态跑);单篇页只有一个回复框,命中多个 = 页面不是预期的样子,由调用方先查 */
   [X_ANCHORS.replyBox]: '[data-testid="tweetTextarea_0"]',
+  /**
+   * ⚠️ /compose/post 是盖在首页上的弹窗,首页时间线顶上还有一个同样 testid 的内嵌框 —— 只认 role=dialog 里的。
+   * 待真机:弹窗是不是 role="dialog"(发推第②期 10-27 按 X 现行结构写的,没在真机上量过)。
+   */
+  [X_ANCHORS.composeBox]: '[role="dialog"] [data-testid="tweetTextarea_0"]',
+  /**
+   * ⭐ fileInput 这个 testid 2026-06 真机量过(X 文章编辑器里有,阶段 2.5-b 发图也用过)。
+   * ⚠️ 首页内嵌框也有一个 —— 只认弹窗里的;弹窗里有没有,第④期真机第一次跑时确认。
+   */
+  [X_ANCHORS.composeFileInput]: '[role="dialog"] input[data-testid="fileInput"]',
+  /** 推串的「+」—— 2026-10-28 真机:testid addButton,只在当前这条有字 / 有图时出现;⚠️ 只认真点击 */
+  [X_ANCHORS.composeAddButton]: '[role="dialog"] [data-testid="addButton"]',
+  /** X 文章(10-30 真机量过):正文 composer 里的块;新文章只有一块(空的)*/
+  [X_ANCHORS.articleFirstLine]: '[data-testid="composer"] [data-block="true"]',
+  /** 正文最后那个空行(脚本 op=tail 现标的;11-03:插图后把光标放回去)*/
+  [X_ANCHORS.articleTail]: '[data-testid="composer"] [data-krig-tail="1"]',
+  [X_ANCHORS.articleMediaInput]: '[role="dialog"] input[data-testid="fileInput"]',
+  /** 封面那个不收多张(Media 弹窗里那个 multiple)*/
+  [X_ANCHORS.articleCoverInput]: 'input[data-testid="fileInput"]:not([multiple])',
+  /** 推串第 2…25 条的正文框(X 按 tweetTextarea_1、_2… 编号;2026-10-28 按 X 现行结构写,待真机) */
+  ...Object.fromEntries(Array.from({ length: X_THREAD_MAX - 1 }, (_, i) =>
+    [composeBoxAnchor(i + 1), `[role="dialog"] [data-testid="tweetTextarea_${i + 1}"]`])),
 };
 
 /** ⭐ 本模块的锚点表 —— 启动时 **push** 给底座 */

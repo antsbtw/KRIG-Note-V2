@@ -107,6 +107,8 @@ export function Host(props: TextEditingHostProps) {
             onChangeRef.current?.(serialized);
           }
         }
+        // 盯着某段内容的(发推预览等):doc 变了推新内容
+        if (tr.docChanged) instanceRegistry.notifyDocChanged(config.instanceId, tr, v.state.doc);
         // selection 变化:emit 到 selection capability(带实例 source)
         // L5-B2:Snapshot diff 真变才 emit
         emitSelectionChanged(v, config.instanceId);

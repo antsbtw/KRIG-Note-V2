@@ -20,6 +20,7 @@ import { registerXActCapabilities } from './x-capabilities-act';
 import { registerXFlows } from './x-flows';
 import { registerCardQueueCapabilities } from './x-card-queue';
 import { registerXTimerCapabilities } from './x-capabilities-timer';
+import { registerXPostCapabilities } from './x-capabilities-post';
 import { pageNeed, wsAccount } from './x-capabilities-common';
 import { searchBudget } from './x-search-budget';
 import { prepareEngageOn } from './x-engage-prepare';
@@ -62,6 +63,8 @@ export function registerXCapabilities(): void {
   registerCardQueueCapabilities();
   /** 收尾(10-26):定时器调的两个(后台采一段 / 关注一个人)—— 占锁、记录归执行器 */
   registerXTimerCapabilities();
+  /** 发推(10-27 起,x-capabilities-post.ts):本期只有排版 x.post.prepare */
+  registerXPostCapabilities();
 
   defineCapability<{ wsId: string; restId: string; handle: string; hisTweetId?: string }, unknown, { wcId: number; acc: Acc }>({
     id: X_CAP.engagePrepare,

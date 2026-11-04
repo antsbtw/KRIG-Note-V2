@@ -49,6 +49,11 @@ export interface NavSideTab {
    */
   navSideDisabled?: boolean;
   /**
+   * 不出现在左侧切换条和 SlotPicker 里,只由所属模块的代码打开(如 X 网页顶条按钮 openRight)。
+   * 其余字段(navSideOnSwitch / navSideDisabled)照常生效。
+   */
+  hidden?: boolean;
+  /**
    * SlotPicker 展开子项（可选）。
    * 填写后 SlotPicker 不显示 view 本身，而是展开为这些子项。
    * 子项点击时打开 right slot 并通过 payload 传递 subId。

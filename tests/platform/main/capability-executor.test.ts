@@ -220,6 +220,44 @@ describe('⭐ 带着锁进来(界面已经占住网页,再请主进程干活 —
   });
 });
 
+describe('⭐ keep:成功后锁不放,交给下一次调用(发推:填进 X 框后占着网页等人确认,2026-10-27)', () => {
+  const fail = { on: false };
+  const fill = cap.defineCapability<Record<string, never>, string>({
+    id: 'demo.keep', kind: 'input', describe: '占住不放(测试用)', inputDoc: {},
+    parse: () => ({}),
+    prepare: async () => ({ needs: [{ resource: 'page:7', purpose: '待发草稿', label: '测试网页', keep: true, ttlMs: 60_000 }], ctx: undefined }),
+    run: async (_i, ctx) => { if (fail.on) throw cap.capFailed('没填进去'); return ctx.held.get('page:7') as string; },
+  });
+  const reuse = cap.defineCapability<{ token: string }, null>({
+    id: 'demo.keep.release', kind: 'input', describe: '带锁进来再放(测试用)', inputDoc: {},
+    parse: (raw) => ({ token: (raw as { token: string }).token }),
+    prepare: async (i) => ({ needs: [{ resource: 'page:7', purpose: '取消', reuse: i.token }], ctx: undefined }),
+    run: async (i) => { lock.releaseLock(i.token); return null; },
+  });
+  it('成功 → 锁还占着,token 交出去;下一次带它进来能用、能放', async () => {
+    fail.on = false;
+    const r = await cap.execute(fill.id, {}, { caller: 'ui' });
+    if (!r.ok) throw new Error(r.why);
+    const token = r.value as string;
+    expect(lock.lockHolder('page:7')?.purpose).toBe('待发草稿');
+    expect(await cap.execute('demo.keep', {}, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'refused' });
+    expect(await cap.execute(reuse.id, { token }, { caller: 'ui' })).toMatchObject({ ok: true });
+    expect(lock.lockHolder('page:7')).toBeNull();
+  });
+  it('没成 → 照样放(不留一把没人管的锁)', async () => {
+    fail.on = true;
+    expect(await cap.execute(fill.id, {}, { caller: 'ui' })).toMatchObject({ ok: false, kind: 'failed' });
+    expect(lock.lockHolder('page:7')).toBeNull();
+  });
+  it('ttlMs 带到锁上:过了时间被收回(兜底,要响)', async () => {
+    fail.on = false;
+    const r = await cap.execute(fill.id, {}, { caller: 'ui' });
+    if (!r.ok) throw new Error(r.why);
+    expect(lock.lockHolder('page:7', Date.now() + 59_000)).not.toBeNull();
+    expect(lock.lockHolder('page:7', Date.now() + 61_000)).toBeNull();
+  });
+});
+
 describe('⭐⭐ 对外动作(kind output)只接受人点的 / 定时器;AI、收件箱要人批复(Module5-04 §5;批复入口在 P3)', () => {
   let ran = 0;
   const post = cap.defineCapability<Record<string, never>, string>({

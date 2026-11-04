@@ -27,4 +27,6 @@ export interface SlashItem {
   icon?: string;
   /** 右侧 markdown hint(如 '#' / '###' / '```' / '-' / '1.' / '[]' / '>' / '"' / '---') */
   hint?: string;
+  /** 光标在这些块类型里时不显示(如分栏里不出「2 Columns」—— 分栏不能嵌套) */
+  hiddenInside?: readonly string[];
 }

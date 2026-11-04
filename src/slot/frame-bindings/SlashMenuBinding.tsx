@@ -120,6 +120,11 @@ function resolveCodeLangByToken(token: string): { id: string; label: string } | 
   return hit ? { id: hit.id, label: hit.label } : null;
 }
 
+/** 去掉光标所在块里不该出现的项(SlashItem.hiddenInside) */
+export function visibleInside(items: SlashItem[], inside: readonly string[]): SlashItem[] {
+  return items.filter((it) => !it.hiddenInside?.some((t) => inside.includes(t)));
+}
+
 function buildGrouped(items: SlashItem[], query: string): GroupedView {
   const q = query.trim().toLowerCase();
   const rows: RenderRow[] = [];
@@ -164,7 +169,7 @@ export function SlashMenuBinding() {
   useSlashVersion();
   const [state, setState] = useState(slashMenuController.getState());
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const { x, y } = useCollisionPosition(menuRef, state.x, state.y);
+  const { x, y } = useCollisionPosition(menuRef, state.x, state.y, 8, state.flipY);
 
   // 选中 idx(指向 flatItems,跳过 title)
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -177,9 +182,9 @@ export function SlashMenuBinding() {
   const grouped = useMemo<GroupedView>(() => {
     if (!state.visible) return { rows: [], flatItems: [] };
     // registry.getItemsForView 已做 view 过滤;query 走我们自己的打分,故这里传空 query 拿全集
-    const all = slashRegistry.getItemsForView(state.viewId, '');
+    const all = visibleInside(slashRegistry.getItemsForView(state.viewId, ''), state.inside);
     return buildGrouped(all, state.query);
-  }, [state.visible, state.viewId, state.query]);
+  }, [state.visible, state.viewId, state.query, state.inside]);
 
   // query/view 变化 → reset selectedIdx
   useEffect(() => {

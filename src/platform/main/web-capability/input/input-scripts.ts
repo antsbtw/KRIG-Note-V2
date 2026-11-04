@@ -274,6 +274,18 @@ export function buildTapScript(anchorSelector: string, containerSelector = ''): 
   `);
 }
 
+/** 真点击前:滚到可见,返回元素中心的页面坐标 {x, y};找不到返回 null */
+export function buildCenterScript(anchorSelector: string, containerSelector = ''): string {
+  return withScope(containerSelector, `
+      var el = __pick(__root, ${JSON.stringify(anchorSelector)});
+      if (!el) return null;
+      try { el.scrollIntoView({ block: 'center' }); } catch (e) {}
+      var r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return null;
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+  `);
+}
+
 /**
  * hover 一个元素 —— 完整鼠标进入序列。
  *

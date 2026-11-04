@@ -46,6 +46,14 @@ export type Need = {
    * 执行器只核对它真是现在的持有者(不是就 refused),不再申请,跑完也不替它放。
    */
   readonly reuse?: string;
+  /**
+   * 成功后不放,交给后面的调用(带 reuse 进来)继续用、由它放 —— 一件事要跨两次调用占着资源时用
+   * (发推:填进 X 框之后一直占着网页,等人确认发布 / 取消;不然采集会把页面导航走,框里的字就丢了)。
+   * ⚠️ 没成(refused / failed)照样放;忘了放有锁的超时收回兜底(要响),所以要配 ttlMs。
+   */
+  readonly keep?: boolean;
+  /** 这把锁的超时(不给 = 锁的默认 1 小时) */
+  readonly ttlMs?: number;
 };
 
 export type Prepared<C> = { readonly refused: string } | { readonly needs?: readonly Need[]; readonly ctx: C };
@@ -138,9 +146,11 @@ export async function execute(
   const held = new Map<string, string>();
   /** 带进来的锁:用,但不放 */
   const reused = new Set<string>();
+  /** keep 的锁:成功就不放(交给下一次调用) */
+  const kept = new Set<string>();
 
   const finish = async (r: CapResult<unknown>, output?: Record<string, unknown>): Promise<CapResult<unknown>> => {
-    for (const token of [...held.values()].reverse()) if (!reused.has(token)) releaseLock(token);
+    for (const token of [...held.values()].reverse()) if (!reused.has(token) && !(r.ok && kept.has(token))) releaseLock(token);
     held.clear();
     const durationMs = Date.now() - t0;
     const tail = r.ok ? '' : ` —— ${r.why}`;
@@ -186,12 +196,13 @@ export async function execute(
       reused.add(n.reuse);
       continue;
     }
-    const a = acquireLock(n.resource, n.purpose, opts.caller);
+    const a = acquireLock(n.resource, n.purpose, opts.caller, n.ttlMs !== undefined ? { ttlMs: n.ttlMs } : undefined);
     if (!a.ok) {
       const why = `${n.label ?? `${n.resource} `}正忙:${a.why}`;
       return finish({ ok: false, kind: 'refused', why, callId });
     }
     held.set(n.resource, a.token);
+    if (n.keep) kept.add(a.token);
   }
 
   try {

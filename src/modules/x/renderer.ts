@@ -37,11 +37,13 @@ import { XOpsView } from './XOpsView';
 import { XTaskView } from './XTaskView';
 import { registerXCommands } from './x-commands';
 import { startXHostSync } from './x-host-sync';
+import { registerXNoteContextMenu } from './x-note-context-menu';
+import { XNotePosted } from './XNotePosted';
+import { viewNoticeRegistry } from '@slot/interaction-registries/view-notice-registry/view-notice-registry';
+import { X_WEB_VIEW_ID, X_OPS_VIEW_ID, X_TASK_VIEW_ID } from './x-view-id';
 
-/** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份 */
-export const X_WEB_VIEW_ID = 'x-web-view';
-export const X_OPS_VIEW_ID = 'x-ops-view';
-export const X_TASK_VIEW_ID = 'x-task-view';
+/** ⭐ view id —— 与 slot 绑定共用同一组常量,不各写一份(定义在 x-view-id.ts) */
+export { X_WEB_VIEW_ID, X_OPS_VIEW_ID, X_TASK_VIEW_ID };
 
 /** ① 左栏:X 的网页 */
 registerView({
@@ -91,8 +93,8 @@ registerView({
  * ③ 运营 —— ⭐ X 的**业务平台**(2026-10-07)
  *
  * 用户原话:「这个view，是一个和x view是同级别的，也可以放大做到全屏，可以放在左边右边的。」
- * ⭐ 所以与 X 网页一样上 navSide(能开在左栏),也自动进 SlotPicker(能开在右栏);
- * 最常用的入口是 X 网页顶条上的「📊 运营」按钮(开/关右栏)。
+ * ⭐ 原先与 X 网页一样上 navSide + 进 SlotPicker;2026-11-03 起 hidden(只有 X 能调用),
+ * 入口只剩 X 网页顶条上的「📊 运营」按钮(开/关右栏)。
  * ⚠️ 与操作台区分:操作台是测试后台、将来隐藏;业务功能只进运营。
  */
 registerView({
@@ -104,6 +106,8 @@ registerView({
     icon: '📊',
     /** ⭐ 6.5 —— 紧挨 X 网页(6);1–7 与 99 已被占用 */
     order: 6.5,
+    /** 用户 2026-11-03:「它是x模块的功能延伸…建议只有x才能调用」→ 不上左侧栏/SlotPicker,只从 X 网页顶条打开 */
+    hidden: true,
     /**
      * ⚠️ 运营没有自己的 navSide 面板内容 —— 切过来收起 navSide,
      * 且禁止点已激活 tab 展开一栏空的(与 X 网页同款)。
@@ -116,7 +120,7 @@ registerView({
 /**
  * ④ 任务 —— 编排好的业务流程(2026-10-16),与运营同级
  * 用户:「操作台是后台,应该把编排好的流程放在主页面了。是否增加一个和运营同级的task(任务),这个任务就是蓝V互关」
- * ⭐ 同运营:上 navSide(能开左栏)+ 自动进 SlotPicker(能开右栏);X 网页顶条「📋 任务」开/关右栏。
+ * ⭐ 同运营:2026-11-03 起 hidden,入口只剩 X 网页顶条「📋 任务」(开/关右栏)。
  */
 registerView({
   id: X_TASK_VIEW_ID,
@@ -127,6 +131,8 @@ registerView({
     icon: '📋',
     /** ⭐ 6.6 —— 紧挨运营(6.5) */
     order: 6.6,
+    /** 同运营:只从 X 网页顶条打开(用户 2026-11-03) */
+    hidden: true,
     navSideOnSwitch: 'collapse',
     navSideDisabled: true,
   },
@@ -137,3 +143,9 @@ registerView({
  * ⚠️ 登记表每进程一份;去掉这行 runner 恒「没开 X 网页」静默空转(2026-10-14 发现)。
  */
 startXHostSync();
+
+/** note 右键菜单里 X 的两项 —— X 自己挂,删 X 跟着走 */
+registerXNoteContextMenu();
+
+/** note 顶上「这篇发过」那行 —— 挂在 note 的顶部提示挂点上,删 X 跟着走(发推第③b期) */
+viewNoticeRegistry.register({ id: 'x.note-view.posted', view: 'note-view', Component: XNotePosted });

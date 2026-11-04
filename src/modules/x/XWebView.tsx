@@ -36,6 +36,7 @@ import type { HostHandle, HostProps } from '@capabilities/web-rendering';
 import { setXHostState, clearXHostState } from './x-host-registry';
 import { setSpot, type SpotReq } from './x-spot-store';
 import { xDataCall } from './x-data-types';
+import { XFillShield, XPostBar } from './XPostBar';
 
 /** ⭐ 起始页 —— 与语义页面表的 `x.home` 同一个地址,不另写一份 */
 const X_HOME = 'https://x.com/home';
@@ -164,6 +165,14 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
     else bus.slot.openRight(X_TASK_VIEW_ID);
   }, [workspaceId]);
 
+  /** ✕ 关掉本栏 —— 用框架给的 slot(见文件头「handleClose 用 slot prop,不推导」),与 note / 运营同一手法 */
+  const handleClose = useCallback(() => {
+    const bus = workspaceManager.getBus(workspaceId);
+    if (!bus) return;
+    if (slot === 'right') bus.slot.closeRight();
+    else bus.slot.closeLeft();
+  }, [workspaceId, slot]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 顶条:地址显示 + 召出右栏 */}
@@ -227,9 +236,24 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         >
           ⊞
         </button>
+        <button
+          type="button"
+          onClick={handleClose}
+          title="关闭 X"
+          style={{
+            background: 'transparent', border: 'none', color: 'var(--text-secondary, #aaa)',
+            cursor: 'pointer', fontSize: 14, padding: '3px 6px', flex: '0 0 auto',
+          }}
+        >
+          ✕
+        </button>
       </div>
 
+      {/* ⭐ 发推第②期:note 填进 X 发推框后,在这里确认 / 取消(没有待发草稿时不占地方) */}
+      <XPostBar wsId={workspaceId} onOpen={(u) => hostRef.current?.loadURL(u)} />
+
       {/* ⭐ 真 webview —— 与同 ws 的内置浏览器同 partition(登录态共享) */}
+      <div style={{ flex: 1, position: 'relative', display: 'flex', minHeight: 0 }}>
       <Host
         ref={hostRef}
         workspaceId={workspaceId}
@@ -245,6 +269,9 @@ export function XWebView({ workspaceId, slot }: ViewComponentProps): ReactElemen
         /** ⚠️ 这一路只为补「wcId 晚于首次导航才可取」—— URL 一律读 ref */
         onLoadingChanged={registerHost}
       />
+      {/** 正在填进 X 时盖一层,挡住鼠标(用户 11-03:「先冻结一下界面,免得误操作」);KRIG 的真点击走 CDP,不经过这层 */}
+      <XFillShield wsId={workspaceId} />
+      </div>
 
       {/* ⚠️ slot 只用于调试显示;真要关栏时由框架给的 slot 决定,不自己推导 */}
       <div style={{ display: 'none' }} data-slot={slot ?? 'unknown'} />

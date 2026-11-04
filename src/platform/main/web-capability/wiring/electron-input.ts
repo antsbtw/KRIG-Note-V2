@@ -73,6 +73,29 @@ export class ElectronInputHost implements InputHost {
     }
   }
 
+  /** 「真」鼠标点一下(CDP Input.dispatchMouseEvent)。debugger 复用规则同下面喂文件 */
+  async trustedClick(pageId: PageId, x: number, y: number): Promise<void> {
+    const wc = this.require(pageId);
+    let weAttached = false;
+    if (!wc.debugger.isAttached()) {
+      wc.debugger.attach('1.3');
+      weAttached = true;
+    }
+    try {
+      await wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+      await wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
+      await wc.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
+    } finally {
+      if (weAttached) {
+        try {
+          wc.debugger.detach();
+        } catch {
+          /* 同下 */
+        }
+      }
+    }
+  }
+
   /**
    * 把磁盘文件喂进 `<input type=file>`(搬自 `feedToInputInternal`)。
    *

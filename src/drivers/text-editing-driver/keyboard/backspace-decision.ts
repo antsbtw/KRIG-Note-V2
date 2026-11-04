@@ -4,13 +4,15 @@
  * **只在「块首 / 空块」介入**;非块首一律放行(return false → baseKeymap 删字符)。
  *
  * 优先级链(每按一次只走一步,命中即停):
+ *   0. column 内光标前是空白字符 → 自己删这一个字符(不交给浏览器原生删除,见下)
  *   1. isTitle 文档标题 → noop(保护)
  *   2. 媒体 caption 内、已空 → 光标移出到块上方(不删块);非空只删字符(放行)
  *   3. 当前块 textIndent → 清首行缩进(2026-07-06 用户拍板:先清格式再合并)
  *   4. 当前块 indent>0 → indent−1(减缩进)
  *   5. 当前块是标题 → 降级为正文段(保留文字)
  *   6. 当前块是列表项 → 退出列表(liftListItem)
- *   7. 在容器内、已到该层顶级首块 → 退出容器(lift);tableCell → noop(硬墙)
+ *   7. 在容器内、已到该层顶级首块 → 退出容器(lift);tableCell → noop(硬墙);
+ *      非空 column 首段 → 第 1 次 noop,紧接着第 2 次解散分栏、当前行接到上一栏末尾
  *   7.5 上一块是 def 块 → 删掉整个 def 块(它折叠态不可交互,这是它的删除入口)
  *   8. 否则放行 → baseKeymap joinBackward(与上一块合并)
  *
@@ -19,7 +21,7 @@
  * 注:实现保守——只接管能明确判定的脱壳步骤;判不定一律放行,绝不破坏「删字符」。
  */
 
-import { TextSelection, type Command, type EditorState } from 'prosemirror-state';
+import { EditorState, TextSelection, type Command } from 'prosemirror-state';
 import { setBlockType, lift, joinTextblockBackward } from 'prosemirror-commands';
 import { liftListItem } from 'prosemirror-schema-list';
 import type { KeyboardMetaLookup } from './resolve-context';
@@ -35,12 +37,56 @@ function ancestorDepthOfType(state: EditorState, typeName: string): number {
   return -1;
 }
 
+/** 栏首第 1 次退格记下的位置;第 2 次退格时 doc 与光标都没变才解散分栏 */
+let armedColumnBackspace: { doc: EditorState['doc']; pos: number } | null = null;
+
+/** 解散光标所在 columnList:各栏内容按顺序平铺到原位,当前行接到上一栏末尾 */
+function dissolveColumnList(state: EditorState, columnListDepth: number) {
+  const { $from } = state.selection;
+  const columnList = $from.node(columnListDepth);
+  const columnListPos = $from.before(columnListDepth);
+  const columnIndex = $from.index(columnListDepth);
+  const blocks: import('prosemirror-model').Node[] = [];
+  let cursor = columnListPos;
+  for (let i = 0; i < columnList.childCount; i++) {
+    const col = columnList.child(i);
+    if (i === columnIndex) cursor = columnListPos + blocks.reduce((s, b) => s + b.nodeSize, 0) + 1;
+    col.content.forEach((b) => blocks.push(b));
+  }
+  const tr = state.tr.replaceWith(columnListPos, columnListPos + columnList.nodeSize, blocks);
+  tr.setSelection(TextSelection.create(tr.doc, cursor));
+  // 按删除顺序:当前行接到上一栏最后一行末尾,光标停在接缝处(用户 2026-11-03:「另外一个
+  // column 末尾,这才是删除的顺序」)。本来就在第一栏则不合并,留在原段段首。
+  if (columnIndex > 0) {
+    // 临时 state 不带插件:只借 joinTextblockBackward 算合并步骤,再并回同一个 tr(一次撤销)
+    const flat = EditorState.create({ doc: tr.doc, selection: tr.selection });
+    joinTextblockBackward(flat, (joinTr) => {
+      joinTr.steps.forEach((step) => tr.step(step));
+      tr.setSelection(TextSelection.create(tr.doc, joinTr.selection.from));
+    });
+  }
+  return tr;
+}
+
 export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
   return (state, dispatch, _view) => {
     const sel = state.selection;
     if (!sel.empty) return false; // 有选区 → 放行(deleteSelection / 删原子块)
 
     const { $from } = sel;
+
+    // —— 0. column 内、光标前是空白字符 → 自己删这一个字符,不交给浏览器 ——
+    //   用户 2026-11-03 报:「前面是空格时,也当作是首位字符」—— 一退格分栏就没了。
+    //   放行时走的是浏览器原生删除;推断(未真机抓到)是 Chrome 删行首空白时连带越过块边界、
+    //   把两栏 DOM 并掉,PM 重新解析后 column-collapse 解散分栏。空白只占一个字符,自己删最稳。
+    if ($from.parentOffset > 0 && ancestorDepthOfType(state, 'column') >= 0) {
+      const charBefore = state.doc.textBetween($from.pos - 1, $from.pos);
+      if (/^\s$/.test(charBefore)) {
+        if (dispatch) dispatch(state.tr.delete($from.pos - 1, $from.pos).scrollIntoView());
+        return true;
+      }
+    }
+
     // **只在块首介入**:光标不在当前 textblock 行首 → 放行删字符
     if ($from.parentOffset !== 0) return false;
 
@@ -118,9 +164,27 @@ export function buildBackspaceCommand(metaLookup: KeyboardMetaLookup): Command {
         return true;
       }
       if (nodeMeta?.isContainer) {
-        // column / columnList:Backspace 暂由现有 column-list keymap 处理(删空列 / 解散),
-        // 本链不接管,放行(Phase 2 不动 column 退格,避免与 column-collapse 冲突;后续统一)。
-        if (name === 'column' || name === 'columnList') break;
+        // column:栏内首段行首(栏里有字)→ 第 1 次没反应,紧接着第 2 次解散分栏,当前行接到上一栏末尾(内容全留)。
+        //   (用户 2026-11-03 选定此效果。)
+        //   以前这里直接放行:column 是 isolating,joinBackward 合不了,column-list keymap 只管空栏,
+        //   于是全部返回 false → 浏览器原生退格把两栏 DOM 并掉 → 一下就解散了(探针实测)。
+        //   只剩一个空段的栏仍放行,交给 column-list keymap 删掉该栏(原有删除入口)。
+        if (name === 'column') {
+          if ($from.index(d) !== 0 || blockType !== 'paragraph') break;
+          const isEmptyColumn = node.childCount === 1 && node.child(0).content.size === 0;
+          if (isEmptyColumn) return false;
+          if (!dispatch) return true; // 只问能不能处理,不动记号
+          // 「紧接着」= 文档没变、光标没动(doc 不可变,同一对象即未改)
+          const armed = armedColumnBackspace;
+          if (!armed || armed.doc !== state.doc || armed.pos !== $from.pos) {
+            armedColumnBackspace = { doc: state.doc, pos: $from.pos };
+            return true;
+          }
+          armedColumnBackspace = null;
+          dispatch(dissolveColumnList(state, d - 1).scrollIntoView());
+          return true;
+        }
+        if (name === 'columnList') break;
         // 必须是该容器的首个直接子块(光标块沿路径在该层 index 0)才退出
         const indexInContainer = $from.index(d);
         if (indexInContainer === 0) {

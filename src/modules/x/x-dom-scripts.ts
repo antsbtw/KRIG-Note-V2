@@ -85,6 +85,32 @@ export const X_SCRIPTS = {
    * 用户:「在左边x的原图增加关联方法,增加一个右键菜单,由用户抽查」
    */
   spotTarget: 'x.spotTarget' as ScriptId,
+  /**
+   * ⭐ 发推第②期(2026-10-27):发推弹窗里的正文框在不在、几个、里面是什么(只读)。
+   * 字按「图片表情读 alt」拼回去 —— X 可能把表情画成图片,textContent 里没有。
+   */
+  composeBoxState: 'x.composeBoxState' as ScriptId,
+  /** ⭐ 发推第②期:清空发推弹窗里的正文框(取消 / 超时撤回 / 填错了),回读清没清掉 */
+  composeClear: 'x.composeClear' as ScriptId,
+  /**
+   * ⭐⭐ 发推第③期(2026-10-27):点发推弹窗里的「发布」—— 真的对外发。
+   * 等弹窗关掉才算点成;顺手读 X 的「已发送」提示条里的链接(有就带回 tweetId,没有也不算失败 —— 由主页核对定)。
+   */
+  composeSend: 'x.composeSend' as ScriptId,
+  /**
+   * ⭐ 发推第④a期(2026-10-28):喂完图后等 X 传完 —— 挂上的图够数、「发布」按钮亮了(X 上传中按钮是灰的)。
+   * 等不到就带回弹窗里有哪些 testid,真机第一次跑时据此对准。
+   */
+  composeMediaReady: 'x.composeMediaReady' as ScriptId,
+  /** ⭐⭐ 发推第③期:在我的主页上找我刚发的那条(作者是我、正文对得上、时间不早于点发布)→ 推文 id */
+  findMyPost: 'x.findMyPost' as ScriptId,
+  /**
+   * ⭐ 推串(2026-10-28):点发推弹窗里的「+」加一条,等第 __INDEX__ 个正文框出来。
+   * 找不到按钮就带回弹窗里有哪些 testid —— X 的推串编辑没在真机上量过,第一次跑据此对准。
+   */
+  composeAddPost: 'x.composeAddPost' as ScriptId,
+  /** ⭐ 推串:点一下第 __INDEX__ 条让它成为「当前这条」—— X 的工具栏(放图)只对当前这条 */
+  composeFocus: 'x.composeFocus' as ScriptId,
 } as const;
 
 /**
@@ -431,6 +457,292 @@ const REPLY_BOX_SRC = String.raw`(function () {
 })();`;
 
 /**
+ * 弹窗里挂了几张图(发推第④期,2026-10-28)—— 几个脚本共用的一段。
+ * ⚠️ X 的附件预览没有在真机上量过:三种信号取大的 —— 不同的 blob: 图(img 和背景图同一个 URL 只算一次)/
+ * removeMedia 按钮 / attachments 里的 img。都带回去,真机第一次跑时看哪个准。
+ */
+const ATTACHED_JS = String.raw`
+    var attachedIn = function (dlg) {
+      if (!dlg) return { n: 0, blobs: 0, removes: 0, inGroup: 0 };
+      var urls = {};
+      var nodes = dlg.querySelectorAll('img, [style*="blob:"]');
+      for (var i = 0; i < nodes.length; i++) {
+        var u = nodes[i].tagName === 'IMG' ? (nodes[i].getAttribute('src') || '')
+          : ((/url\(["']?(blob:[^"')]+)/.exec(nodes[i].getAttribute('style') || '') || [])[1] || '');
+        if (u.indexOf('blob:') === 0) urls[u] = 1;
+      }
+      var blobs = Object.keys(urls).length;
+      var removes = dlg.querySelectorAll('[data-testid="removeMedia"]').length;
+      var inGroup = dlg.querySelectorAll('[data-testid="attachments"] img').length;
+      /**
+       * 还在上传的图:缩略图上的进度圈(role=progressbar)—— 往上找到第一个含 blob: 图的那层,那层里没有正文框才算。
+       * ⚠️ 字数圈也是 progressbar:它往上找到含图的那层是整条 / 整个弹窗,里面有正文框 → 不算。
+       * 10-28 真机:第 1 条 4 张图显示着就点了「+」/ 发布,发出去只剩 2 张 —— 疑似没传完就走了(没真机数据证实,这个数据就是为了证实)。
+       */
+      var busy = 0;
+      dlg.querySelectorAll('[role="progressbar"]').forEach(function (p) {
+        var el = p.parentElement;
+        while (el && el !== dlg.parentElement && !el.querySelector('img[src^="blob:"], [style*="blob:"]')) el = el.parentElement;
+        if (el && el !== dlg.parentElement && !el.querySelector('[data-testid^="tweetTextarea_"]')) busy += 1;
+      });
+      return { n: Math.max(blobs, removes, inGroup), blobs: blobs, removes: removes, inGroup: inGroup, busy: busy };
+    };`;
+
+/**
+ * 弹窗里的正文框(推串有几条就几个:tweetTextarea_0、_1…,按序号排)和每条自己那块(只含它一个框的最大祖先)。
+ * ⚠️ X 还有 tweetTextarea_0_label 之类,只认「tweetTextarea_数字」。
+ */
+const BOXES_JS = String.raw`
+    var boxesIn = function (root) {
+      var out = [];
+      root.querySelectorAll('[data-testid^="tweetTextarea_"]').forEach(function (el) {
+        var m = /^tweetTextarea_(\d+)$/.exec(el.getAttribute('data-testid') || '');
+        if (m) out.push({ i: Number(m[1]), el: el });
+      });
+      out.sort(function (a, b) { return a.i - b.i; });
+      return out.map(function (x) { return x.el; });
+    };
+    var itemOf = function (box, dlg) {
+      var el = box;
+      while (el.parentElement && el.parentElement !== dlg && boxesIn(el.parentElement).length === 1) el = el.parentElement;
+      return el;
+    };
+    var dialogOf = function () {
+      var b = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
+      return b ? b.closest('[role="dialog"]') : null;
+    };`;
+
+/**
+ * ⭐ 发推弹窗里的正文框(发推第②期,2026-10-27)。⚠️ 只认 role=dialog 里的 —— 首页时间线顶上还有一个同 testid 的内嵌框。
+ * 最多等 8 秒(弹窗是导航后才画出来的)。返回 { found, count, text, media:挂了几张图 }。
+ */
+const COMPOSE_BOX_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    var textOf = function (el) {
+      var out = '';
+      el.childNodes.forEach(function (n) {
+        if (n.nodeType === 3) out += n.nodeValue;
+        else if (n.nodeType === 1) out += n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : textOf(n);
+      });
+      return out;
+    };
+    ${ATTACHED_JS}
+    ${BOXES_JS}
+    var t0 = Date.now();
+    var tick = function () {
+      var boxes = document.querySelectorAll('[role="dialog"] [data-testid="tweetTextarea_0"]');
+      if (boxes.length > 0) {
+        var dlg = boxes[0].closest('[role="dialog"]');
+        /** 推串:每条的字和它自己那块里挂的图 */
+        var all = boxesIn(dlg).map(function (b) { return { text: textOf(b).trim(), media: attachedIn(itemOf(b, dlg)).n }; });
+        var whole = attachedIn(dlg);
+        resolve({ found: true, count: boxes.length, text: textOf(boxes[0]).trim(), media: whole.n, busy: whole.busy, boxes: all });
+        return;
+      }
+      if (Date.now() - t0 > 8000) {
+        /** 找不到时带回页面实况,好分清:弹窗没出来 / 框换了名字 / 没登录 / 页面还在加载 */
+        resolve({
+          found: false,
+          dialogs: document.querySelectorAll('[role="dialog"]').length,
+          boxesAnywhere: document.querySelectorAll('[data-testid="tweetTextarea_0"]').length,
+          loggedOut: !!document.querySelector('[data-testid="loginButton"], [data-testid="login"]'),
+          ready: document.readyState,
+          width: window.innerWidth,
+        });
+        return;
+      }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+})();`;
+
+/**
+ * 清空发推弹窗。两条路:
+ *  · 推串(不止一条)或挂着图 → 关弹窗、在 X 问「存不存草稿」时点「放弃」(Discard),X 自己把所有条和图一起扔掉。
+ *    ⚠️ 10-28 真机:X 只在「当前这条」上给移除图的按钮,脚本点别的条切不过去 → 第 1 条的 4 张图点不掉。
+ *    按钮按文字认(Discard / 放弃 / 舍弃 / 不保存);**绝不点 Save / 保存**(会在 X 上留一份草稿)。认不出就如实报,带按钮文字。
+ *  · 单条、只有字 → 一个一个按 Backspace 删(10-27 真机验过):X 的编辑器(Draft.js)不认页面设的全选,
+ *    一次只删一个字;Backspace 删不动(光标在中间)就换 Delete 往后删。上限 = 字数×2+10 次。
+ * state:empty / cleared(via:discard / close / keys)/ not-cleared(left:剩下什么 / 卡在哪)/ no-box(弹窗已经不在了)
+ */
+const COMPOSE_CLEAR_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    if (!document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]')) { resolve({ state: 'no-box' }); return; }
+    ${ATTACHED_JS}
+    ${BOXES_JS}
+    var dlg = dialogOf();
+    var boxes = function () { return boxesIn(dlg); };
+    var textIn = function (b) { return (b.textContent || '').trim(); };
+    var sizeOf = function (b) { return textIn(b).length + b.querySelectorAll('img').length; };
+    var size = function () { return boxes().reduce(function (n, b) { return n + sizeOf(b); }, 0); };
+    if (size() === 0 && attachedIn(dlg).n === 0 && boxes().length < 2) { resolve({ state: 'empty' }); return; }
+    var waitFor = function (get, ms, then) {
+      var t0 = Date.now();
+      var tick = function () { var v = get(); if (v) { then(v); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 150); };
+      tick();
+    };
+    var labelOf = function (b) { return ((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')).trim(); };
+
+    if (boxes().length > 1 || attachedIn(dlg).n > 0) {
+      var close = dlg.querySelector('[data-testid="app-bar-close"]');
+      if (!close) {
+        var cs = dlg.querySelectorAll('button[aria-label], [role="button"][aria-label]');
+        for (var i = 0; i < cs.length; i++) if (/^(close|关闭)$/i.test((cs[i].getAttribute('aria-label') || '').trim())) { close = cs[i]; break; }
+      }
+      if (!close) { resolve({ state: 'not-cleared', left: '找不到弹窗的关闭按钮' }); return; }
+      close.click();
+      var closed = function () { return document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]') ? null : true; };
+      /** X 问「存不存草稿」的那一页:按文字认「放弃」,不认按钮位置 */
+      var discardBtn = function () {
+        var bs = document.querySelectorAll('[data-testid="confirmationSheetDialog"] button, [data-testid="confirmationSheetDialog"] [role="button"], [role="alertdialog"] button, [role="alertdialog"] [role="button"], [role="dialog"] [data-testid^="confirmationSheet"]');
+        for (var k = 0; k < bs.length; k++) if (/discard|放弃|舍弃|不保存/i.test(labelOf(bs[k]))) return bs[k];
+        return null;
+      };
+      waitFor(function () { return closed() || discardBtn(); }, 4000, function (v) {
+        if (v === true) { resolve({ state: 'cleared', via: 'close' }); return; }
+        if (!v) {
+          var seen = [];
+          document.querySelectorAll('[data-testid^="confirmationSheet"], [role="alertdialog"] button').forEach(function (b) { seen.push(labelOf(b).slice(0, 20)); });
+          resolve({ state: 'not-cleared', left: '点了关闭,没看到「放弃」按钮(看到:' + (seen.join(' / ') || '没有确认页') + ')' });
+          return;
+        }
+        v.click();
+        waitFor(closed, 5000, function (ok) {
+          resolve(ok ? { state: 'cleared', via: 'discard' } : { state: 'not-cleared', left: '点了放弃,弹窗还在' });
+        });
+      });
+      return;
+    }
+
+    var box = boxes()[0];
+    box.focus();
+    var key = function (k, code) {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: k, code: k, keyCode: code, which: code, bubbles: true, cancelable: true }));
+    };
+    var budget = sizeOf(box) * 2 + 10;
+    var stuck = 0;
+    var forward = false;
+    var presses = 0;
+    var step = function () {
+      var before = sizeOf(box);
+      if (before === 0) { resolve({ state: 'cleared', via: 'keys', presses: presses }); return; }
+      if (budget-- <= 0) { resolve({ state: 'not-cleared', left: textIn(box).slice(0, 40) }); return; }
+      if (forward) key('Delete', 46); else key('Backspace', 8);
+      presses += 1;
+      setTimeout(function () {
+        if (sizeOf(box) < before) stuck = 0;
+        else if (++stuck >= 3) { if (forward) { resolve({ state: 'not-cleared', left: textIn(box).slice(0, 40) }); return; } forward = true; stuck = 0; }
+        step();
+      }, 30);
+    };
+    step();
+  });
+})();`;
+
+/**
+ * 推串加一条,分两半(中间由输入引擎用「真」鼠标点「+」):
+ * - __MODE__ = 'check':点之前看能不能点 —— ready / wrong-count(框数不是 __INDEX__ 个)/ no-button(带 testids)/ disabled / no-dialog
+ * - __MODE__ = 'wait':点之后等第 __INDEX__+1 个框出来 —— added / timeout(带现场)
+ * ⚠️ 不在脚本里 .click():X 不认脚本点击,点了会把当前这条清空、也不加新条(2026-10-28 真机实测;CDP 真点击才行)。
+ */
+const COMPOSE_ADD_POST_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    ${BOXES_JS}
+    var idx = __INDEX__;
+    var mode = __MODE__;
+    var dlg = dialogOf();
+    if (!dlg) { resolve({ state: 'no-dialog' }); return; }
+    if (mode === 'check') {
+      var have = boxesIn(dlg).length;
+      if (have !== idx) { resolve({ state: 'wrong-count', have: have }); return; }
+      var btn = dlg.querySelector('[data-testid="addButton"]');
+      if (!btn) {
+        var ids = {};
+        dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
+        resolve({ state: 'no-button', testids: Object.keys(ids).slice(0, 40) });
+        return;
+      }
+      if (btn.getAttribute('aria-disabled') === 'true' || btn.disabled) { resolve({ state: 'disabled' }); return; }
+      resolve({ state: 'ready' });
+      return;
+    }
+    var t0 = Date.now();
+    var tick = function () {
+      /** 每次重新找弹窗:X 可能重画弹窗,手里那个旧节点就不长了 */
+      var d = dialogOf() || dlg;
+      var n = boxesIn(d).length;
+      if (n > idx) { resolve({ state: 'added', have: n }); return; }
+      if (Date.now() - t0 > 5000) {
+        /** 没加出来:带回现场(第一条 X 里几个字 / 弹窗里有什么 / 有几个弹层) */
+        var ids2 = {};
+        d.querySelectorAll('[data-testid]').forEach(function (el) { ids2[el.getAttribute('data-testid')] = 1; });
+        var first = boxesIn(d)[0];
+        resolve({
+          state: 'timeout', have: n,
+          firstLen: first ? (first.textContent || '').length : -1,
+          dialogs: document.querySelectorAll('[role="dialog"], [role="alertdialog"]').length,
+          testids: Object.keys(ids2).slice(0, 40),
+        });
+        return;
+      }
+      setTimeout(tick, 200);
+    };
+    tick();
+  });
+})();`;
+
+/** 推串:点第 __INDEX__ 条,让它成为当前这条(放图前);state:ok / no-box */
+const COMPOSE_FOCUS_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    ${BOXES_JS}
+    var dlg = dialogOf();
+    var box = dlg ? boxesIn(dlg)[__INDEX__] : null;
+    if (!box) { resolve({ state: 'no-box', have: dlg ? boxesIn(dlg).length : 0 }); return; }
+    box.click();
+    box.focus();
+    setTimeout(function () { resolve({ state: 'ok' }); }, 300);
+  });
+})();`;
+
+/**
+ * 喂完图后等 X 传完。__WANT__ = 该挂几张。挂够了、「发布」按钮亮着、稳住 0.8 秒 → ready。
+ * state:ready / too-many(比要的多 —— 框里本来就有图?)/ timeout(带各信号 + 弹窗里的 testid)/ no-dialog
+ */
+const COMPOSE_MEDIA_READY_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    ${ATTACHED_JS}
+    var want = __WANT__;
+    var dlgOf = function () {
+      var b = document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]');
+      return b ? b.closest('[role="dialog"]') : null;
+    };
+    var t0 = Date.now();
+    var since = 0;
+    var tick = function () {
+      var dlg = dlgOf();
+      if (!dlg) { resolve({ state: 'no-dialog' }); return; }
+      var a = attachedIn(dlg);
+      var btn = dlg.querySelector('[data-testid="tweetButton"]');
+      var enabled = !!btn && btn.getAttribute('aria-disabled') !== 'true' && !btn.disabled;
+      if (a.n > want) { resolve({ state: 'too-many', attached: a.n }); return; }
+      if (a.n === want && enabled && a.busy === 0) {
+        if (!since) since = Date.now();
+        else if (Date.now() - since >= 1500) { resolve({ state: 'ready', attached: a.n, waited: Date.now() - t0 }); return; }
+      } else since = 0;
+      if (Date.now() - t0 > 60000) {
+        var ids = {};
+        dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
+        resolve({ state: 'timeout', attached: a.n, blobs: a.blobs, removes: a.removes, inGroup: a.inGroup, busy: a.busy, buttonEnabled: enabled, testids: Object.keys(ids).slice(0, 40) });
+        return;
+      }
+      setTimeout(tick, 300);
+    };
+    tick();
+  });
+})();`;
+
+/**
  * ⭐ 发送回复脚本正文。__NEEDLE__ = 回复正文里的字和表情(只留字母 / 汉字 / 数字 / 表情,前 16 个);__ME__ = 我的 handle(小写)。
  * ⚠️ X 把表情渲染成 <img alt="👍">,textContent 里没有 —— 页面这边用 textOf 把图片的 alt 按原位拼回去再比
  * (用户 10-21:只回一个 👍 也是允许的,不能因为核对不了就禁掉)。
@@ -483,6 +795,111 @@ const SEND_REPLY_SRC = String.raw`(function () {
         });
       });
     } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/**
+ * 点发推弹窗的「发布」。state:closed(弹窗关了,带 toastId 如果读到)/ not-sent(15 秒弹窗还在、框里还有字)/
+ * no-dialog / no-button / disabled / error
+ * ⚠️ 只认弹窗里的按钮(tweetButton);首页内嵌框的是 tweetButtonInline,不碰。
+ */
+const COMPOSE_SEND_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var dlg = function () { return document.querySelector('[role="dialog"] [data-testid="tweetTextarea_0"]'); };
+      var waitFor = function (get, ms, then) {
+        var t0 = Date.now();
+        var tick = function () { var v = get(); if (v) { then(v); return; } if (Date.now() - t0 > ms) { then(null); return; } setTimeout(tick, 250); };
+        tick();
+      };
+      var toastId = function () {
+        var a = document.querySelector('[data-testid="toast"] a[href*="/status/"]');
+        var m = a ? /\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+        return m ? m[1] : null;
+      };
+      if (!dlg()) { resolve({ state: 'no-dialog' }); return; }
+      waitFor(function () {
+        var b = document.querySelector('[role="dialog"] [data-testid="tweetButton"]');
+        return b && b.getAttribute('aria-disabled') !== 'true' && !b.disabled ? b : null;
+      }, 5000, function (btn) {
+        if (!btn) { resolve({ state: document.querySelector('[role="dialog"] [data-testid="tweetButton"]') ? 'disabled' : 'no-button' }); return; }
+        btn.click();
+        waitFor(function () { return dlg() ? null : true; }, 15000, function (closed) {
+          if (!closed) { resolve({ state: 'not-sent' }); return; }
+          waitFor(toastId, 4000, function (id) { resolve(id ? { state: 'closed', toastId: id } : { state: 'closed' }); });
+        });
+      });
+    } catch (e) { resolve({ state: 'error', why: String(e) }); }
+  });
+})();`;
+
+/**
+ * 在我的主页上找我刚发的那条。__NEEDLE__ 同 replyNeedle;__ME__ 我的 handle(小写);__SINCE__ 点发布的时刻(ms,留 2 分钟钟差);
+ * __PHOTOS__ 该带几张图(第④a期:图数也要对上;纯图推 needle 为空,只靠作者 + 时间 + 图数)。
+ * 返回 { tweetId, photos } / { why: 'no-photos', tweetId, photos:字对上了但图不够 } / { why: 'not-found', seen: 页面上我的推文数 }
+ */
+const FIND_MY_POST_SRC = String.raw`(function () {
+  return new Promise(function (resolve) {
+    try {
+      var needle = __NEEDLE__, me = __ME__, since = __SINCE__ - 120000, photos = __PHOTOS__, exclude = __EXCLUDE__;
+      var norm = function (t) { return (t || '').replace(/[^\p{L}\p{N}\p{Extended_Pictographic}]/gu, ''); };
+      var textOf = function (el) {
+        var out = '';
+        el.childNodes.forEach(function (n) {
+          if (n.nodeType === 3) out += n.nodeValue;
+          else if (n.nodeType === 1) out += n.tagName === 'IMG' ? (n.getAttribute('alt') || '') : textOf(n);
+        });
+        return out;
+      };
+      var seen = 0;
+      var short = null;
+      var look = function () {
+        seen = 0;
+        short = null;
+        var arts = document.querySelectorAll('article[data-testid="tweet"]');
+        for (var i = 0; i < arts.length; i++) {
+          var ts = arts[i].querySelectorAll('a[href*="/status/"] time');
+          for (var j = 0; j < ts.length; j++) {
+            var a = ts[j].closest('a');
+            var m = a ? /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/.exec(a.getAttribute('href') || '') : null;
+            if (!m || m[1].toLowerCase() !== me) continue;
+            seen += 1;
+            /** 推串:前几条已经认领过的 id 不再认(两条字很像时别认成同一条) */
+            if (exclude.indexOf(m[2]) !== -1) continue;
+            var at = Date.parse(ts[j].getAttribute('datetime') || '');
+            var tx = arts[i].querySelector('[data-testid="tweetText"]');
+            var textOk = needle === '' ? !tx || norm(textOf(tx)) === '' : !!tx && norm(textOf(tx)).indexOf(needle) !== -1;
+            if (!textOk || !isFinite(at) || at < since) continue;
+            /**
+             * 图数 = tweetPhoto 里不同的图片地址(去掉 ?format=… 参数)。
+             * ⚠️ 10-28 真机:第 1 条实际 2 张图,按 tweetPhoto 个数数却 ≥4 判成「对上了」—— 同一张图被数了两次。
+             * 图还没加载出来(没有地址)就不算 —— 不退回按个数数(那正是数错的来源);没够数会接着等,最多 10 秒。
+             */
+            var srcs = {};
+            var tiles = arts[i].querySelectorAll('[data-testid="tweetPhoto"]');
+            tiles.forEach(function (tp) {
+              tp.querySelectorAll('img[src]').forEach(function (im) { srcs[(im.getAttribute('src') || '').split('?')[0]] = 1; });
+            });
+            var got = Object.keys(srcs).filter(function (k) { return k !== ''; }).length;
+            if (got >= photos) return { id: m[2], photos: got, tiles: tiles.length };
+            if (!short) short = { id: m[2], photos: got };
+          }
+        }
+        return null;
+      };
+      if ((!needle && !photos) || !me) { resolve({ why: 'no-needle-or-me' }); return; }
+      var t0 = Date.now();
+      var tick = function () {
+        var hit = look();
+        if (hit) { resolve({ tweetId: hit.id, photos: hit.photos, tiles: hit.tiles }); return; }
+        if (Date.now() - t0 > 10000) {
+          resolve(short ? { why: 'no-photos', tweetId: short.id, photos: short.photos } : { why: 'not-found', seen: seen });
+          return;
+        }
+        setTimeout(tick, 300);
+      };
+      tick();
+    } catch (e) { resolve({ why: 'error: ' + String(e) }); }
   });
 })();`;
 
@@ -678,5 +1095,48 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
      * 走 `JSON.stringify` 绑定 —— 绝不拼进脚本文本。
      */
     build: FETCH_NEXT_PAGE_SCRIPT,
+  },
+  {
+    id: X_SCRIPTS.composeBoxState,
+    purpose: 'X:发推弹窗里的正文框在不在、里面是什么(只读;表情图片按 alt 拼回)',
+    /** ⚠️ 无参数 */
+    build: () => COMPOSE_BOX_SRC,
+  },
+  {
+    id: X_SCRIPTS.composeClear,
+    purpose: 'X:清空发推弹窗里的正文框(取消 / 撤回),回读清没清掉 —— 不点发布',
+    build: () => COMPOSE_CLEAR_SRC,
+  },
+  {
+    id: X_SCRIPTS.composeSend,
+    purpose: 'X:点发推弹窗里的「发布」(真的对外发),等弹窗关掉;读「已发送」提示条里的链接',
+    build: () => COMPOSE_SEND_SRC,
+  },
+  {
+    id: X_SCRIPTS.findMyPost,
+    purpose: 'X:在我的主页上找我刚发的那条(作者是我、正文对得上、时间不早于点发布)',
+    build: (params) => FIND_MY_POST_SRC
+      .replace('__NEEDLE__', () => JSON.stringify(String(params.needle ?? '')))
+      .replace('__ME__', () => JSON.stringify(String(params.me ?? '').toLowerCase()))
+      .replace('__SINCE__', () => String(Number(params.since) || 0))
+      .replace('__PHOTOS__', () => String(Math.max(0, Math.floor(Number(params.photos) || 0))))
+      .replace('__EXCLUDE__', () => JSON.stringify(Array.isArray(params.exclude) ? params.exclude.map(String) : [])),
+  },
+  {
+    id: X_SCRIPTS.composeAddPost,
+    purpose: 'X:推串加一条 —— 点「+」前看能不能点 / 点后等新框出来(点由输入引擎真点击;不发)',
+    build: (params) => COMPOSE_ADD_POST_SRC
+      .replace('__INDEX__', () => String(Math.max(1, Math.floor(Number(params.index) || 0))))
+      .replace('__MODE__', () => JSON.stringify(params.mode === 'wait' ? 'wait' : 'check')),
+  },
+  {
+    id: X_SCRIPTS.composeFocus,
+    purpose: 'X:推串 —— 点第几条让它成为当前这条(放图前,不发)',
+    build: (params) => COMPOSE_FOCUS_SRC.replace('__INDEX__', () => String(Math.max(0, Math.floor(Number(params.index) || 0)))),
+  },
+  {
+    id: X_SCRIPTS.composeMediaReady,
+    purpose: 'X:喂完图后等 X 传完(图挂够了、「发布」按钮亮了)—— 只读',
+    build: (params) => COMPOSE_MEDIA_READY_SRC.replace('__WANT__', () => String(Math.max(0, Math.floor(Number(params.want) || 0)))),
   },
 ];

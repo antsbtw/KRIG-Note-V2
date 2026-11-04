@@ -62,6 +62,27 @@ const FIXTURES: Record<string, PmPayload> = {
       para('tail', '尾段'),
     ],
   },
+  /** 10-28 用户实测:三行两栏存完再打开 → 6 栏挤进一行(分栏壳不存,连续的栏被并成一组) */
+  相邻两个分栏: {
+    type: 'doc',
+    content: [
+      { type: 'columnList', attrs: { columns: 2 }, content: [
+        { type: 'column', attrs: { id: 'k1' }, content: [para('k1p', '1')] },
+        { type: 'column', attrs: { id: 'k2' }, content: [para('k2p', '2')] },
+      ] },
+      { type: 'columnList', attrs: { columns: 2 }, content: [
+        { type: 'column', attrs: { id: 'k3' }, content: [para('k3p', '3')] },
+        { type: 'column', attrs: { id: 'k4' }, content: [para('k4p', '4')] },
+      ] },
+    ],
+  },
+  无序列表紧跟有序列表: {
+    type: 'doc',
+    content: [
+      { type: 'bulletList', content: [{ type: 'listItem', attrs: { id: 'b1' }, content: [para('b1p', '点')] }] },
+      { type: 'orderedList', content: [{ type: 'listItem', attrs: { id: 'o1' }, content: [para('o1p', '一')] }] },
+    ],
+  },
   表格: {
     type: 'doc',
     content: [

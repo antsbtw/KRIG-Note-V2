@@ -253,6 +253,12 @@ export const X_PAGE_NAME = {
   reposts: 'x.reposts',
   /** ⭐ 单篇推文 —— 求关:去这条推文点赞 / 留言(2026-10-17) */
   status: 'x.status',
+  /** ⭐ 发推弹窗 —— 发推第②期:note 排好的内容填进这里,人在 X 上看过再确认(2026-10-27) */
+  compose: 'x.compose',
+  /** X 文章:列表页(右上 create 新建)/ 编辑器(第⑥期,10-30) */
+  composeArticles: 'x.composeArticles',
+  /** 首页 —— 发推取消后回这里(弹窗关掉) */
+  home: 'x.home',
   /**
    * ── ⭐ 人流名单三页(2026-10-05 补)──
    * 面板的「采人」按钮要按当前页判是哪个名单,
@@ -412,7 +418,24 @@ export const X_ANCHORS = {
   tweetArticle: 'x.tweetArticle' as AnchorName,
   /** 单篇推文页上的回复框(求关留言往这里贴,2026-10-17) */
   replyBox: 'x.replyBox' as AnchorName,
+  /** 发推弹窗里的正文框(发推第②期,2026-10-27)—— 首页底下还有一个内嵌发推框,只认弹窗里的 */
+  composeBox: 'x.composeBox' as AnchorName,
+  /** 发推弹窗里的选图控件(发推第④期,2026-10-28)—— 喂磁盘文件给它,X 自己上传 */
+  composeFileInput: 'x.composeFileInput' as AnchorName,
+  /** 推串的「+」(加一条) */
+  composeAddButton: 'x.composeAddButton' as AnchorName,
+  /** X 文章编辑器正文的第一行(新文章只有这一行,空的)—— 真点击它让 X 的光标落到正文里(第⑥期,10-30) */
+  articleFirstLine: 'x.articleFirstLine' as AnchorName,
+  articleTail: 'x.articleTail' as AnchorName,
+  /** X 文章 Insert → Media 弹窗里的选图控件 */
+  articleMediaInput: 'x.articleMediaInput' as AnchorName,
+  /** X 文章的封面选图控件(页面上、不在弹窗里那个,只收图) */
+  articleCoverInput: 'x.articleCoverInput' as AnchorName,
 } as const;
+
+/** 推串第 k 条的正文框(2026-10-28);第 0 条就是 composeBox */
+export const composeBoxAnchor = (k: number): AnchorName =>
+  (k === 0 ? X_ANCHORS.composeBox : (`x.composeBox.${k}` as AnchorName));
 
 /**
  * ⭐⭐ **每个语义页面要哪些参数** —— 面板问它要,**不许自己抄一份**。

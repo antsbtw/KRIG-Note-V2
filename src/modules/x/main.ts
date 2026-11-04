@@ -46,6 +46,7 @@ import {
 import { xPageResolver } from './x-pages';
 import { xAnchorResolver } from './x-anchors';
 import { X_DOM_SCRIPTS } from './x-dom-scripts';
+import { X_ARTICLE_SCRIPTS } from './x-article-scripts';
 import { registerXDataIpc } from './x-data-ipc';
 import { bgRunnerHealth, startBgRunner, stopBgRunner } from './x-bg-runner';
 import { startDevInbox, stopDevInbox } from './x-dev-inbox';
@@ -55,6 +56,7 @@ import { startFollowQueue, stopFollowQueue } from './x-follow-queue';
 import { registerHealthProbe } from '@platform/main/diagnostics/health/health-monitor';
 import { listLocks } from '@platform/main/flow/resource-lock';
 import { registerXCapabilities } from './x-capabilities';
+import { stopPostDraftTimers } from './x-post-draft';
 
 /** ⭐ owner 名 —— 底座按 owner 分派,两张表用同一个名字 */
 const OWNER = 'x';
@@ -82,7 +84,7 @@ export function registerXModule(): void {
    * ⚠️ 底座在 `runtime.ts` 里写死注册了三组自己的脚本,
    * 业务的脚本**由业务 push** —— 底座不认识 X,这条不能破。
    */
-  for (const sc of X_DOM_SCRIPTS) scriptRegistry.register(sc);
+  for (const sc of [...X_DOM_SCRIPTS, ...X_ARTICLE_SCRIPTS]) scriptRegistry.register(sc);
 
   /**
    * ⭐⭐ 配方 CRUD 的 IPC —— **X 自带**(通道名也在 X 这边)。
@@ -120,6 +122,8 @@ export function registerXModule(): void {
   /** ⭐ 关注队列(2026-10-16,蓝V互关 M4)—— 自启、before-quit 自停,timer unref */
   startFollowQueue();
   app.on('before-quit', stopFollowQueue);
+  /** ⭐ 发推待发草稿的「10 分钟没确认自动撤回」定时器(发推第②期,2026-10-27)—— before-quit 停 */
+  app.on('before-quit', stopPostDraftTimers);
   /** ⭐ 后台采集状态进运行体检(黑匣子)—— X 自己登记,宿主不认识 X 内部 */
   registerHealthProbe('x.bg', bgRunnerHealth);
   /** ⭐⭐ X 的能力登记进平台能力目录(Module5-04 第 2 步)—— 删 X 目录这一行就没了 */

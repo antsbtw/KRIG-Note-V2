@@ -1827,6 +1827,84 @@ DEFINE FIELD IF NOT EXISTS state      ON x_card_queue TYPE string ASSERT $value 
 DEFINE FIELD IF NOT EXISTS updated_at ON x_card_queue TYPE datetime;
 `;
 
+/**
+ * ⭐ 1.2.42 —— 发推记录 x_post(2026-10-27,发推第③期;设计 x-posting-design.md §4)
+ * 一份草稿一行(id = 草稿 id):填进去 → 撤回 / 发出去 / 点了发布没核对上 / 没成。
+ * note 不存 X 的东西,「这篇 note 发过没」来这里按 note_id / 内容哈希查。
+ */
+const X_SCHEMA_1_2_42 = `
+DEFINE TABLE IF NOT EXISTS x_post SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS account      ON x_post TYPE string ASSERT $value != '';
+DEFINE FIELD IF NOT EXISTS handle       ON x_post TYPE string;
+DEFINE FIELD IF NOT EXISTS ws_id        ON x_post TYPE string;
+DEFINE FIELD IF NOT EXISTS note_id      ON x_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS form         ON x_post TYPE string;
+DEFINE FIELD IF NOT EXISTS text         ON x_post TYPE string;
+DEFINE FIELD IF NOT EXISTS content_hash ON x_post TYPE string;
+-- filled 填进去等确认 / cancelled 撤回 / sent 发出去且核对上 / unseen 点了发布但没核对上 / failed 没发出去
+DEFINE FIELD IF NOT EXISTS status       ON x_post TYPE string ASSERT $value INSIDE ['filled', 'cancelled', 'sent', 'unseen', 'failed'];
+DEFINE FIELD IF NOT EXISTS detail       ON x_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS tweet_id     ON x_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS sent_text    ON x_post TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS edited_on_x  ON x_post TYPE option<bool>;
+DEFINE FIELD IF NOT EXISTS caller       ON x_post TYPE string;
+DEFINE FIELD IF NOT EXISTS filled_at    ON x_post TYPE datetime;
+DEFINE FIELD IF NOT EXISTS ended_at     ON x_post TYPE option<datetime>;
+DEFINE INDEX IF NOT EXISTS idx_post_hash ON x_post FIELDS account, content_hash;
+DEFINE INDEX IF NOT EXISTS idx_post_note ON x_post FIELDS note_id;
+`;
+
+/**
+ * ⭐ 1.2.43 —— 发推记录带图(2026-10-28,发推第④期)
+ * media = 填进去的图(note 里的 media:// 地址,按顺序);sent_media = 点发布那一刻框里挂着几张(人可能在 X 上删了一张)。
+ */
+const X_SCHEMA_1_2_43 = `
+DEFINE FIELD IF NOT EXISTS media      ON x_post TYPE option<array<string>>;
+DEFINE FIELD IF NOT EXISTS sent_media ON x_post TYPE option<int>;
+`;
+
+/**
+ * ⭐ 1.2.44 —— 发推记录带推串(2026-10-28)
+ * post_count = 推串几条(单条推不写);tweet_ids = 每条的推文 id,按顺序,没核对上的是 ''(tweet_id 仍是第一条)。
+ */
+const X_SCHEMA_1_2_44 = `
+DEFINE FIELD IF NOT EXISTS post_count ON x_post TYPE option<int>;
+DEFINE FIELD IF NOT EXISTS tweet_ids  ON x_post TYPE option<array<string>>;
+`;
+
+export async function x_migration_1_2_44(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_44);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');
+  if (!('post_count' in (t?.fields ?? {})) || !('tweet_ids' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.44] x_post 没加上 post_count / tweet_ids —— 推串记不住每条');
+  console.log('[x-schema 1.2.44] 发推记录带推串 x_post.post_count / tweet_ids');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.44', appliedAt = $now, description = '发推记录带推串'`,
+    { rid: new RecordId('schema_version', '1.2.44'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_43(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_43);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');
+  if (!('media' in (t?.fields ?? {})) || !('sent_media' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.43] x_post 没加上 media / sent_media —— 发推带的图记不住');
+  console.log('[x-schema 1.2.43] 发推记录带图 x_post.media / sent_media');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.43', appliedAt = $now, description = '发推记录带图'`,
+    { rid: new RecordId('schema_version', '1.2.43'), now: Date.now() },
+  );
+}
+
+export async function x_migration_1_2_42(db: Surreal): Promise<void> {
+  await db.query(X_SCHEMA_1_2_42);
+  const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_post');
+  if (!('content_hash' in (t?.fields ?? {})) || !('status' in (t?.fields ?? {}))) throw new Error('[x-schema 1.2.42] x_post 没建起来 —— 发推记录存不住');
+  console.log('[x-schema 1.2.42] 发推记录 x_post');
+  await db.query(
+    `UPSERT $rid SET version = '1.2.42', appliedAt = $now, description = '发推记录 x_post'`,
+    { rid: new RecordId('schema_version', '1.2.42'), now: Date.now() },
+  );
+}
+
 export async function x_migration_1_2_41(db: Surreal): Promise<void> {
   await db.query(X_SCHEMA_1_2_41);
   const [t] = await db.query<[{ fields?: Record<string, string> }]>('INFO FOR TABLE x_card_queue');

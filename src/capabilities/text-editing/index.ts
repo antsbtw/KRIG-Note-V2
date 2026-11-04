@@ -51,6 +51,7 @@ import * as slashMenuFactory from './ui/slash-menu/items';
 import * as handleMenuFactory from './ui/handle-menu/items';
 import * as contextMenuFactory from './ui/context-menu/items';
 import type { TextEditingApi } from './types';
+import { renderBlockImage, renderBlocksImage } from './render/render-block-image';
 
 /**
  * 组装 capability api(对齐 TextEditingApi 类型)。
@@ -66,6 +67,8 @@ const api: TextEditingApi = {
   getNoteLinkActiveView,
   createEmptyDoc,
   extractFirstParagraphText,
+  renderBlockImage,
+  renderBlocksImage,
   instanceRegistry,
   ui: {
     floatingToolbar: floatingToolbarFactory,

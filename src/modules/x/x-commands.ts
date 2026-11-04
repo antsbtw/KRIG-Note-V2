@@ -13,6 +13,7 @@
 
 import { registerWsCommand } from '@slot/command-registry/register-ws-command';
 import { workspaceManager } from '@workspace/workspace-state/workspace-manager';
+import { registerXNoteCommands } from './x-note-context-menu';
 
 export function registerXCommands(wsId: string): void {
   /**
@@ -41,4 +42,7 @@ export function registerXCommands(wsId: string): void {
     if (!bus) return;
     bus.slot.closeRight();
   });
+
+  /** note 右键「𝕏 发到 X」「𝕏 发布为 X 文章」(菜单项在 x-note-context-menu.ts 挂) */
+  registerXNoteCommands(wsId);
 }

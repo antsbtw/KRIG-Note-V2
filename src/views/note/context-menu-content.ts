@@ -26,13 +26,28 @@
  */
 
 import { contextMenuRegistry } from '@slot/interaction-registries/context-menu-registry/context-menu-registry';
+import { contextInfoProviderRegistry } from '@slot/interaction-registries/context-info-provider-registry';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type { TextEditingApi } from '@capabilities/text-editing/types';
 import type { LearningApi } from '@capabilities/learning/types';
 
 const VIEW = 'note-view';
 
+/**
+ * 右键时告诉大家「右键的是哪篇 note」(custom.noteId,2026-10-28)—— 读 NoteView 外框上的 data-note-id。
+ * 别的模块挂的右键命令(如 X「𝕏 发到 X」)要知道是哪篇,不用自己去翻 note 的状态。
+ */
+export function noteContextInfo(target: HTMLElement): Record<string, unknown> {
+  const noteId = target.closest('[data-note-id]')?.getAttribute('data-note-id');
+  return noteId ? { noteId } : {};
+}
+
+function registerNoteContextInfo(): void {
+  contextInfoProviderRegistry.register({ id: 'note-view', provider: noteContextInfo });
+}
+
 export function registerContextMenu(): void {
+  registerNoteContextInfo();
   const te = requireCapabilityApi<TextEditingApi>('text-editing').ui.contextMenu;
   const lr = requireCapabilityApi<LearningApi>('learning').ui.contextMenu;
   contextMenuRegistry.register([
@@ -63,26 +78,7 @@ export function registerContextMenu(): void {
       group: 'thought',
       order: 191,
     },
-    {
-      // X 集成 阶段 2(写方向):选区/整篇 → 注入 X compose 框(或 pending 回复目标的 reply 框);
-      // always 可见(命令内部三态:无选区取整篇 / 有 pending 走回复 / 否则发普通推)。
-      id: 'note-view.send-to-x',
-      label: '𝕏 发到 X',
-      command: 'x-view.send-to-x',
-      view: VIEW,
-      group: 'thought',
-      order: 192,
-    },
-    {
-      // X Articles 终态发布(2026-06-13):整篇 note → 驱动 X 原生 Insert 发长文
-      // (LaTeX/Table/Code/Posts/Media 走原生)。⚠️ 只插内容,用户在 X 手动点 Publish。
-      id: 'note-view.publish-x-article',
-      label: '𝕏 发布为 X 文章',
-      command: 'x-view.publish-article',
-      view: VIEW,
-      group: 'thought',
-      order: 193,
-    },
+    // 𝕏 发到 X / 发布为 X 文章:X 模块自己挂进来(src/modules/x/x-note-context-menu.ts),删 X 菜单项跟着走
     {
       id: 'note-view.delete-thought-at-cursor',
       label: '💭 删除 Thought',

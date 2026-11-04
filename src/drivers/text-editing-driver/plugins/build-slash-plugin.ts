@@ -82,7 +82,11 @@ export function buildSlashPlugin(viewId: string): Plugin {
           // 计算屏幕坐标(/ 字符上方,弹层在 / 下方一行)
           try {
             const coords = view.coordsAtPos(state.triggerPos);
-            slashMenuController.show(coords.left, coords.bottom + 4, viewId, state.query);
+            const $p = view.state.doc.resolve(state.triggerPos);
+            const inside: string[] = [];
+            for (let d = $p.depth - 1; d > 0; d--) inside.push($p.node(d).type.name);
+            // 下方放不下往上翻时贴 coords.top,不贴 bottom —— 否则菜单盖住 `/` 和正在输入的字
+            slashMenuController.show(coords.left, coords.bottom + 4, viewId, state.query, inside, coords.top - 4);
           } catch {
             slashMenuController.hide();
           }
@@ -101,6 +105,13 @@ export function buildSlashPlugin(viewId: string): Plugin {
 }
 
 /**
+ * 打在「删 / 跟 query」那次事务上:这段删除只是插入前的清场,紧接着命令就会填进新内容。
+ * ⚠️ 后处理插件(如空栏塌缩)见到它要跳过 —— 否则空栏里「/图片」一删,那栏「有字→空」被当成用户删光而删栏
+ * (2026-10-28 用户实测:2 Columns 里插图片 → 回到单栏)。
+ */
+export const SLASH_CLEAR_META = 'text-editing-driver:slash-clear';
+
+/**
  * 命令 helper:slash 选中后清除 / 跟 query
  *
  * commandRegistry 中的 slash 命令(setHeading 等)调用前先调此清除文本。
@@ -108,7 +119,7 @@ export function buildSlashPlugin(viewId: string): Plugin {
 export function clearSlashTrigger(view: EditorView): boolean {
   const state = slashPluginKey.getState(view.state);
   if (!state?.active) return false;
-  const tr = view.state.tr.delete(state.triggerPos, view.state.selection.from);
+  const tr = view.state.tr.delete(state.triggerPos, view.state.selection.from).setMeta(SLASH_CLEAR_META, true);
   view.dispatch(tr);
   return true;
 }

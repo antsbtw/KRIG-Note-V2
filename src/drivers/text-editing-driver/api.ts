@@ -25,7 +25,7 @@ import {
   type ArticlePlan,
 } from './serializers/note-to-article-plan';
 import { blockMediaKey, type ArticleMediaMap } from './serializers/doc-to-article-doc';
-import { instanceRegistry } from './instance-registry';
+import { instanceRegistry, contentOf } from './instance-registry';
 import {
   applyNodeStyleCommand,
   type NodeStyleCommand,
@@ -1268,6 +1268,9 @@ export const textEditingDriverApi = {
       const paragraphType = schema.nodes.paragraph;
       if (!hr || !paragraphType) return;
       const tr = view.state.tr.replaceWith(pos, pos + node.nodeSize, [hr.create(), paragraphType.create()]);
+      // 光标进 hr 后的新段落(pos + hr 1 + p开1)—— 不设的话映射到被替换段落之后,
+      // 跳过新段落;在分栏/callout 里还会跳出容器(2026-10-28 分栏 slash 全量测试抓到)
+      tr.setSelection(TextSelection.create(tr.doc, pos + 2));
       view.dispatch(tr);
       view.focus();
       return;
@@ -2001,6 +2004,29 @@ export const textEditingDriverApi = {
   },
 
   /**
+   * 取当前选区(空 = 整篇)的内容 JSON,并盯着它:文档一变就把同一段(位置随编辑映射)的新内容推给 onChange。
+   * onChange(null) = 实例没了。用途:发推预览窗边改边看(通用,不认识业务)。实例不存在返回 null。
+   */
+  watchSelectionContent(
+    instanceId: string,
+    onChange: (content: unknown[] | null) => void,
+  ): { content: unknown[]; wholeDoc: boolean; stop: () => void } | null {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst) return null;
+    const { state } = inst.view;
+    const w = { from: state.selection.from, to: state.selection.to, whole: state.selection.empty, onChange };
+    return { content: contentOf(state.doc, w), wholeDoc: w.whole, stop: instanceRegistry.watch(instanceId, w) };
+  },
+
+  /** 让这个编辑器拿到焦点(预览窗「回 note 改」) */
+  focusInstance(instanceId: string): boolean {
+    const inst = instanceRegistry.get(instanceId);
+    if (!inst || inst.view.isDestroyed) return false;
+    inst.view.focus();
+    return true;
+  },
+
+  /**
    * 取整篇文档的 Markdown 序列化结果(X 集成 阶段 2「发整篇推到 X」用)。
    *
    * 与 getSelectionMarkdown 同源,只是序列化整个 doc 而非选区 slice。
@@ -2483,7 +2509,12 @@ function insertAtomBlock(
     } else {
       tr = tr.insert(blockEnd, node);
     }
-    tr = tr.scrollIntoView();
+    // 光标落在块后面、同一容器里:后面紧挨可打字的段落就进去,没有就补一个空段落。
+    // 不设的话光标映射到「最近能打字处」—— 在分栏/callout 里会跳出容器(2026-10-28 分栏 slash 全量测试抓到)
+    const after = (isEmptyParagraph ? blockStart : blockEnd) + node.nodeSize;
+    const next = tr.doc.resolve(after).nodeAfter;
+    if (!next?.isTextblock) tr = tr.insert(after, state.schema.nodes.paragraph.create());
+    tr = tr.setSelection(TextSelection.create(tr.doc, after + 1)).scrollIntoView();
     dispatch(tr);
   }
   view.focus();

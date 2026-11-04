@@ -82,6 +82,8 @@ function createNoteBusinessInsertItems(): SlashItem[] {
       group: 'advanced',
       icon: 'columns-2',
       order: 165,
+      // 分栏不能嵌套(insertColumnListCommand 在栏里是 no-op)—— 栏里就不出这项
+      hiddenInside: ['column'],
     },
     // L5-B3.14:fileBlock / externalRef(fileLink 不在 slash — 仅 paste/drag 路径产生)
     {

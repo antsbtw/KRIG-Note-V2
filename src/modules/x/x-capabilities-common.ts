@@ -64,6 +64,8 @@ export function xCap<I extends O>(kind: CapabilityKind, def: {
   readonly pageWc?: (i: I) => number;
   /** 调用方已经占着网页(界面先占住再请主进程干活):它的 token;执行器只核对、不放 */
   readonly reuse?: (i: I) => string | undefined;
+  /** 成功后网页不放,交给后面的调用带 reuse 进来接着用、由它放(发推:填进框后占着等人确认);ttlMs = 兜底超时 */
+  readonly keepPage?: { readonly ttlMs: number };
   /** 额外的前提(如「关注队列正在动作」);返回原因 = refused */
   readonly preflight?: (i: I) => Promise<string | null> | string | null;
   readonly probe?: boolean;
@@ -104,7 +106,8 @@ export function xCap<I extends O>(kind: CapabilityKind, def: {
         const p = def.pageWc ? pageNeedWc(def.pageWc(i), def.page(i)) : pageNeed(i.wsId as string, def.page(i));
         if ('refused' in p) return p;
         const reuse = def.reuse?.(i);
-        return { needs: [reuse === undefined ? p.need : { ...p.need, reuse }], ctx: { acc, wcId: p.wcId } };
+        const need = reuse !== undefined ? { ...p.need, reuse } : def.keepPage ? { ...p.need, keep: true, ttlMs: def.keepPage.ttlMs } : p.need;
+        return { needs: [need], ctx: { acc, wcId: p.wcId } };
       }
       : undefined,
     run: async (i, ctx) => {

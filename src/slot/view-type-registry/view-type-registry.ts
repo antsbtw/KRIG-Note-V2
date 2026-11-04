@@ -91,7 +91,7 @@ class ViewTypeRegistry {
   getAllForNavSide(): ViewDefinition[] {
     if (this.cachedNavSideTabs === null) {
       this.cachedNavSideTabs = Array.from(this.views.values())
-        .filter((v) => v.navSideTab !== undefined)
+        .filter((v) => v.navSideTab !== undefined && v.navSideTab.hidden !== true)
         .sort((a, b) => (a.navSideTab!.order - b.navSideTab!.order));
     }
     return this.cachedNavSideTabs;
@@ -107,6 +107,7 @@ class ViewTypeRegistry {
   getAllForSlotPicker(): ViewDefinition[] {
     if (this.cachedSlotPicker === null) {
       this.cachedSlotPicker = Array.from(this.views.values())
+        .filter((v) => v.navSideTab?.hidden !== true)
         .filter((v) => v.navSideTab !== undefined || v.slotPickerEntry !== undefined)
         .sort(
           (a, b) =>

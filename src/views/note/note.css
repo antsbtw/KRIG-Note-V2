@@ -11,7 +11,9 @@
 }
 
 .krig-note-view {
-  height: 100%;
+  /* flex:1 + min-height:0 —— 顶上有提示挂点(ViewNotices)时让出高度,自己仍是滚动容器 */
+  flex: 1;
+  min-height: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
@@ -19,6 +21,19 @@
   /* 禁滚动锚定 — html-block iframe resize 时浏览器默认锁定锚点 viewport 位置,
      导致 handle 在屏幕上完全不动。NoteView 是 html-block 的实际滚动容器。*/
   overflow-anchor: none;
+}
+
+/* 顶部提示挂点(view-notice-registry):不随正文滚动,和正文同宽 */
+.krig-view-notices {
+  flex: 0 0 auto;
+  max-width: 900px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 8px 24px 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 /* 编辑区限宽居中(对齐 V1 视觉:maxWidth 900 + margin 0 auto)*/
