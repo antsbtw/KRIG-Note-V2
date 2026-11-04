@@ -62,7 +62,7 @@ export type PostPlan = {
   readonly warnings: readonly string[];
 };
 
-const LONG_POST_LIMIT = 25000;
+export const LONG_POST_LIMIT = 25000;
 const MAX_IMAGES = 4;
 /** 推串每条末尾留给「 12/34」的位置 */
 const THREAD_SUFFIX_RESERVE = 6;
@@ -329,12 +329,12 @@ export function fillProblem(ms: readonly PostMedia[]): string | null {
 /** X 一个推串最多几条 */
 export const X_THREAD_MAX = 25;
 /** 现在能填进 X 的发法(推串 2026-10-28 用户「先把推文的各种形式搞完善」从第⑤期提前) */
-export const FILLABLE: readonly PostForm[] = ['single', 'thread', 'image', 'article'];
-const LATER: Partial<Record<PostForm, string>> = { longPost: '第⑤期' };
+export const FILLABLE: readonly PostForm[] = ['single', 'thread', 'longPost', 'image', 'article'];
+const LATER: Partial<Record<PostForm, string>> = {};
 
 /** 这种发法现在还不能填进 X 的话,为什么(x.post.fill 的 preflight 先挡,不碰网页) */
 export function formNotFillable(form: PostForm): string | null {
-  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推、推串、整篇转图、X 文章`;
+  return FILLABLE.includes(form) ? null : `这种发法还不能填进 X(${LATER[form] ?? '以后'}做)—— 现在能发单条推、推串、长推、整篇转图、X 文章`;
 }
 
 /**
@@ -348,13 +348,14 @@ export function fillBlock(opt: PostOption): string | null {
   if (opt.form === 'article') return opt.article ? articleProblem(opt.article) : '没排出文章';
   const n = opt.posts.length;
   if (n === 0) return '正文是空的';
-  if (opt.form === 'single' && n !== 1) return `排出来是 ${n} 条,单条推只能 1 条`;
+  if ((opt.form === 'single' || opt.form === 'longPost') && n !== 1) return `排出来是 ${n} 条,${opt.form === 'single' ? '单条推' : '长推'}只能 1 条`;
+  const limit = opt.form === 'longPost' ? LONG_POST_LIMIT : X_POST_LIMIT;
   if (n > X_THREAD_MAX) return `排出来是 ${n} 条,X 一个推串最多 ${X_THREAD_MAX} 条 —— 删短一点,或改发 X 文章`;
   for (const [k, p] of opt.posts.entries()) {
     const why = fillProblem(p.media)
       ?? mediaProblem(p.media)
       ?? (p.text.trim() === '' && p.media.length === 0 ? '是空的' : null)
-      ?? (p.weight > X_POST_LIMIT ? `超过字数了(${p.weight} / ${X_POST_LIMIT})` : null);
+      ?? (p.weight > limit ? `超过字数了(${p.weight} / ${limit})` : null);
     if (why) return n > 1 ? `第 ${k + 1} 条:${why}` : why === '是空的' ? '正文是空的' : why;
   }
   return null;
@@ -632,7 +633,11 @@ function buildSections(nodes: readonly PmNode[]): PostDraft[] {
 
 // ── 合起来 ──
 
-export function composePost(nodes: readonly PmNode[], layout?: ThreadLayout): PostPlan {
+/**
+ * premium:这个号是不是 Premium(蓝V)—— true 是 / false 不是 / undefined 认不出。
+ * 由调用方查好传进来(x_author.is_blue_verified),这里仍是纯函数。
+ */
+export function composePost(nodes: readonly PmNode[], layout?: ThreadLayout, premium?: boolean): PostPlan {
   const ctx = unitsOf(nodes);
 
   const texts = ctx.units.filter((u): u is TextUnit => u.k === 'text');
@@ -658,11 +663,20 @@ export function composePost(nodes: readonly PmNode[], layout?: ThreadLayout): Po
   const sections = offered ? buildSections(nodes) : [];
   const sectionsOk = sections.length > 0 && sections.length <= X_THREAD_MAX;
 
+  /**
+   * ⭐ Premium 号、没有要转图的块、一条长推装得下 → 建议长推(用户 2026-11-03:「对于premium的客户,
+   * 是允许长推文字的吧?除非不行才转图片+文字吧?」)。普通图片照样带(一条最多 4 张,mediaWhy 管)。
+   */
+  const longPostFits = premium === true && imageBlocks === 0 && whole.weight <= LONG_POST_LIMIT && mediaWhy === null;
+
   let suggested: PostForm;
   let reason: string;
   if (!offered && singleWhy === null) {
     suggested = 'single';
     reason = `${whole.weight} / ${X_POST_LIMIT},一条发得下`;
+  } else if (longPostFits) {
+    suggested = 'longPost';
+    reason = `${whole.weight} 字,你的号是 Premium(蓝V),一条长推发得下`;
   } else if (!offered) {
     suggested = 'thread';
     reason = `${singleWhy},按段落拆成 ${thread.length} 条`;
@@ -695,7 +709,10 @@ export function composePost(nodes: readonly PmNode[], layout?: ThreadLayout): Po
       {
         form: 'longPost', label: '长推', available: whole.weight <= LONG_POST_LIMIT && mediaWhy === null,
         why: whole.weight > LONG_POST_LIMIT ? `长推最多 ${LONG_POST_LIMIT} 字` : mediaWhy ?? undefined,
-        note: '要 Premium(还认不出你的号是不是 Premium)', posts: [whole],
+        note: premium === true ? '你的号是 Premium(蓝V),能发长推'
+          : premium === false ? '⚠️ 你的号不是蓝V —— X 只让 Premium 发超过 280 字,填进去发布按钮多半是灰的'
+            : '要 Premium(还认不出你的号是不是 Premium)',
+        posts: [whole],
       },
       { form: 'article', label: 'X 文章', available: true, note: 'X 文章要 Premium;公式 / 表格 / 代码用 X 自己的,流程图 / 分栏转成图', posts: [article], article: articleDraft(nodes) },
       {

@@ -135,7 +135,10 @@ vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
 vi.mock('@platform/main/media/media-store-impl', () => ({ resolveMediaPath: (src: string) => h.disk.get(src) ?? null }));
 vi.mock('@platform/main/web-capability/wiring/web-collect-engine', () => ({ resolve: () => ({ pageId: 'p7' }) }));
 vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7, url: '' }), listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
-vi.mock('@modules/x/x-account-repo', () => ({ readWsAccount: async () => ({ wsId: 'ws-1', handle: 'me', restId: 'ME' }) }));
+vi.mock('@modules/x/x-account-repo', () => ({
+  readWsAccount: async () => ({ wsId: 'ws-1', handle: 'me', restId: 'ME' }),
+  readWsPremium: async () => true,
+}));
 vi.mock('@modules/x/x-collect-ports', () => ({
   webviewPorts: () => ({
     /** 打开发推页 = X 弹出一个新的空弹窗(上一次发完弹窗关了) */
@@ -290,10 +293,15 @@ describe('x.post.fill 填进 X(不发)', () => {
     expect(lock.lockHolder('page:7')).toBeNull();
   }, 10_000);
 
+  it('⭐ 长推(用户 11-03:Premium 允许长推文字):超过 280 字照样一条填进去,不拆、不转图', async () => {
+    const text = '长推正文'.repeat(150);
+    const r = await execute('x.post.fill', fillIn(text, { form: 'longPost' }), { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { form: 'longPost', text } });
+    expect(h.box).toBe(text);
+    expect(h.typed).toHaveLength(1);
+  });
+
   it('本期不能填的发法 / 要转图的块 / 视频 / 不在本机的图 / SVG → refused,网页一下没碰', async () => {
-    const long = await execute('x.post.fill', fillIn('x', { form: 'longPost' }), { caller: 'ui' });
-    expect(long).toMatchObject({ ok: false, kind: 'refused' });
-    expect(!long.ok && long.why).toContain('第⑤期');
     const cases: Array<[unknown, string]> = [
       [{ type: 'mathBlock', attrs: { latex: 'E=mc^2' } }, '公式还没转成图'],
       [{ type: 'videoBlock', attrs: { src: 'media://videos/v.mp4' } }, '视频还不能填进 X'],

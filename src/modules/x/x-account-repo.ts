@@ -28,6 +28,21 @@ export async function readWsAccount(wsId: string): Promise<WsAccount | null> {
   return r ? { wsId: r.ws_id, handle: r.handle, restId: r.rest_id ?? undefined, detectedAt: r.detected_at ?? undefined } : null;
 }
 
+/**
+ * 这个 ws 的号是不是 Premium(蓝V)—— 发推排版用(长推只有 Premium 能发)。
+ * 读 x_author.is_blue_verified(按数字 id;采集 / 认号读主页时写进去的);号没认出数字 id、人表里没有这一行、
+ * 或字段没值 → undefined(认不出),不猜。
+ */
+export async function readWsPremium(wsId: string): Promise<boolean | undefined> {
+  const acc = await readWsAccount(wsId);
+  if (!acc?.restId) return undefined;
+  const [rows] = await getXDB().query<[Array<boolean | null>]>(
+    'SELECT VALUE is_blue_verified FROM x_author WHERE rest_id = $id LIMIT 1', { id: acc.restId },
+  );
+  const v = rows?.[0];
+  return typeof v === 'boolean' ? v : undefined;
+}
+
 /** ⚠️ restId 不给 = 不知道(NONE),**不保留旧值** —— 换了号还留着旧 id 就是写错号 */
 async function writeWsAccount(wsId: string, handle: string, restId: string | undefined): Promise<void> {
   const [rows] = await getXDB().query<[Array<{ ws_id: string }>]>(

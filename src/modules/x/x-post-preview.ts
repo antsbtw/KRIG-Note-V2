@@ -154,7 +154,7 @@ export function openPostPreview(wsId: string, instanceId: string, initialForm?: 
     latest = content;
     const my = ++seq;
     if (pending.length > 0) void Promise.all(pending).then(() => { if (my === seq && open === me) void prepare(raw); });
-    const r = await xDataCall({ op: 'postPrepare', content, layout: layout ?? undefined });
+    const r = await xDataCall({ op: 'postPrepare', content, layout: layout ?? undefined, wsId });
     if (my !== seq || open !== me) return;
     if (r.status === 'ok' && layout && !(r.value as PostPlan).threadEdit.manual) layout = null;
     state = r.status === 'ok' ? { kind: 'ok', plan: r.value as PostPlan } : { kind: 'failed', why: r.reason };

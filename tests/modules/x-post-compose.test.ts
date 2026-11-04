@@ -266,12 +266,52 @@ describe('推串:能不能填进 X(10-28)', () => {
     expect(posts.map((x) => x.media.length)).toEqual([4, 2]);
     expect(posts.map((x) => x.text)).toEqual(['什么是VPS? 1/2', '2/2']);
   });
-  it('⭐ fillBlock:推串现在能填;某条要转图 → 说是第几条;长推还不能填', async () => {
+  it('⭐ fillBlock:推串现在能填;某条要转图 → 说是第几条;长推能填(11-03)', async () => {
     const { fillBlock } = await import('../../src/modules/x/x-post-compose');
     const opt = (nodes: PmNode[], form: string) => composePost(nodes).options.find((o) => o.form === form)!;
     expect(fillBlock(opt([p('甲'.repeat(200)), p('乙'.repeat(200))], 'thread'))).toBeNull();
     expect(fillBlock(opt([p('甲'.repeat(100)), hr, p('乙'), { type: 'mathBlock', content: [t('E=mc^2')] }], 'thread'))).toContain('第 2 条');
-    expect(fillBlock(opt([p('短')], 'longPost'))).toContain('第⑤期');
+    expect(fillBlock(opt([p('短')], 'longPost'))).toBeNull();
+    // 长推按 25000 字算,不按 280
+    expect(fillBlock(opt([p('甲'.repeat(2000))], 'longPost'))).toBeNull();
+  });
+});
+
+describe('⭐ 11-03 Premium 号的长纯文字 → 建议长推(用户:「对于premium的客户,是允许长推文字的吧?除非不行才转图片+文字吧?」)', () => {
+  /** 这篇推串要 >3 条:原规则会建议整篇转图 */
+  const longText = (): PmNode[] => Array.from({ length: 8 }, (_, i) => p(`第${i}段`.padEnd(200, '字')));
+
+  it('⭐ Premium + 纯文字很长 → 建议长推,不转图', () => {
+    const r = composePost(longText(), undefined, true);
+    expect(r.suggested).toBe('longPost');
+    expect(r.reason).toContain('Premium');
+    expect(r.options.find((o) => o.form === 'longPost')!.note).toContain('能发长推');
+  });
+
+  it('⭐ Premium + 推串 2~3 条的长度 → 也建议一条长推(不拆)', () => {
+    const r = composePost([p('甲'.repeat(200)), p('乙'.repeat(200))], undefined, true);
+    expect(r.suggested).toBe('longPost');
+  });
+
+  it('不许误伤:Premium 但有公式等要转图的块 → 照旧整篇转图', () => {
+    const r = composePost([...longText(), { type: 'mathBlock', attrs: { latex: 'E=mc^2' } }], undefined, true);
+    expect(r.suggested).toBe('image');
+  });
+
+  it('不许误伤:认不出是不是 Premium → 照旧(太长建议整篇转图)', () => {
+    expect(composePost(longText()).suggested).toBe('image');
+  });
+
+  it('不是蓝V → 不建议长推;选长推时只提醒(不拦)', () => {
+    const r = composePost(longText(), undefined, false);
+    expect(r.suggested).toBe('image');
+    const long = r.options.find((o) => o.form === 'longPost')!;
+    expect(long.available).toBe(true);
+    expect(long.note).toContain('不是蓝V');
+  });
+
+  it('不许误伤:Premium 短文一条发得下 → 还是单条推', () => {
+    expect(composePost([p('短短一句')], undefined, true).suggested).toBe('single');
   });
 });
 
