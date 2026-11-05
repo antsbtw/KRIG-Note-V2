@@ -81,7 +81,7 @@ import { fetchTranscript } from 'youtube-transcript';
  * - 打包后:  /<app>/Contents/Resources/app.asar.unpacked/node_modules/ffmpeg-static/ffmpeg
  *           (forge.config asar.unpack 已配)
  */
-function getFfmpegPath(): string | null {
+export function getFfmpegPath(): string | null {
   const appPath = app.getAppPath();
   // Windows 版二进制名为 ffmpeg.exe,其余平台为 ffmpeg
   const binName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
@@ -150,6 +150,8 @@ function timestampTextToSrt(text: string): string {
             : parseInt(nextM[1]) * 60 + parseInt(nextM[2]);
       }
     }
+    // 同一秒开始的两句(如两条 [00:01])→ 前一句结束=开始,成 0 秒字幕播放器上看不见;至少给 1 秒
+    endSec = Math.max(endSec, startSec + 1);
     const start = formatSrtTime(startSec * 1000);
     const end = formatSrtTime(endSec * 1000);
     entries.push(`${entries.length + 1}\n${start} --> ${end}\n${m[4]}\n`);

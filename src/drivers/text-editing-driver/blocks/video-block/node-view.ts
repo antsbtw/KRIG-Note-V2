@@ -38,6 +38,7 @@ import { createVocabPanel, type VocabPanel } from './components/vocab-panel';
 import { createDownloadButton, type DownloadButton } from './actions/download-button';
 import { createProgressBar, type ProgressBar } from './components/progress-bar';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { saveSubtitle } from '@capabilities/ytdlp';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
@@ -273,6 +274,14 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         // 翻译完成回调:更新 translations map + 创建/更新对应 Tab + 同步 attrs + cc dropdown
         if (!framework) return;
         upsertTranslation(langCode, translatedText);
+        // 2026-11-05:视频已下载到本地 → 立刻在旁边写 <视频名>.<lang>.srt(播放器自动加载)。
+        // 原先只在点 ⬇ 那一刻写,「先下载后翻译」就永远没有中文字幕文件。
+        const localPath = node.attrs.localFilePath as string | null;
+        if (localPath) {
+          void saveSubtitle(localPath, langCode, translatedText).then((p) => {
+            if (!p) console.warn('[video-block] 翻译字幕文件没写成(main 拒收或写失败)', { localPath, langCode });
+          });
+        }
       },
     );
     const memoryBtn = createMemoryButton({
@@ -580,6 +589,9 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         framework.transcriptTab.setText(text);
         framework.cues = parseSubtitleCuesFromText(text);
         framework.vocabPanel.rebuild();
+        // 2026-11-05:NodeView 原地更新不重建 → 🌐 只在创建时判过「有没有字幕」,
+        // 📝 抓到字幕后一直灰着。字幕变了就让它重判。
+        framework.translateBtn.refresh();
       }
 
       // translationTexts 变(外部驱动,撤销 / 协作)→ 重建翻译 Tab 集合

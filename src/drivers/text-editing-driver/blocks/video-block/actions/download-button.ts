@@ -5,8 +5,9 @@
  *   idle → checking → installing? → downloading → done
  *   失败 → ❌ 2s 后回 idle
  *
- * 仅 YouTube 源启用 ytdlp 路径(Qe-7=A);direct/vimeo/generic 走 B3.16
- * 既有 mediaDownload(本组件不接管)。
+ * 可下载:YouTube + 网上的直链视频(https://….mp4 等)。2026-11-05 放宽:原先只开 YouTube(Qe-7=A),
+ * 网页剪藏的直链 mp4(如 6abc 新闻视频)顶栏 ⬇ 恒灰,只能用播放器自带下载,拿不到 localFilePath。
+ * 登录检查仍只对 YouTube。blob: / media://(已是本地)不开。
  *
  * Done 后:
  *   - 写 attrs.localFilePath(Q-e-1=A 不切 src)
@@ -76,9 +77,9 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
     // (mount 时 syncFromAttrs 已设 📁,checkStatus 几秒后 resolve 不能改回 ⬇)
     if (phase === 'done') return;
 
-    if (!isYouTubeSrc()) {
+    if (!canDownloadSrc()) {
       btn.disabled = true;
-      btn.title = '仅 YouTube 源支持 yt-dlp 下载(直链 mp4 走视频自带下载按钮)';
+      btn.title = '这个视频地址不能下载(只支持 YouTube 和网上的视频直链)';
       btn.textContent = '⬇';
       return;
     }
@@ -108,6 +109,14 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
   function isYouTubeSrc(): boolean {
     const src = deps.getSrc();
     return !!src && detectEmbedType(src) === 'youtube';
+  }
+
+  /** YouTube,或 http(s) 直链视频(yt-dlp generic 能下);blob: / media:// 不算 */
+  function canDownloadSrc(): boolean {
+    const src = deps.getSrc();
+    if (!src) return false;
+    const t = detectEmbedType(src);
+    return t === 'youtube' || (t === 'direct' && /^https?:\/\//i.test(src));
   }
 
   function syncFromAttrs(): void {
@@ -299,7 +308,7 @@ export function createDownloadButton(deps: DownloadButtonDeps): DownloadButton {
 
     const src = deps.getSrc();
     if (!src) return;
-    if (!isYouTubeSrc()) return;
+    if (!canDownloadSrc()) return;
 
     // idle → 启动 install(若需)+ download 一气呵成
     await runFlow();
