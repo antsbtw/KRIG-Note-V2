@@ -24,7 +24,12 @@ import { LOCATE_SCRIPTS } from '../../web-capability/dom';
 import type { PageId } from '../../web-capability/page/types';
 
 /** 定位结果:ordinal=-1 表示没点在任何目标容器内(或附近) */
-export type LocatedOrdinal = { ordinal: number; preview: string };
+export type LocatedOrdinal = {
+  ordinal: number;
+  preview: string;
+  /** 命中块上收集到的消息 id(仅调用方传了 idAttrs 才有;页面没带就是空数组)*/
+  ids: string[];
+};
 
 /**
  * 读 partition —— 与 `ai/interceptor.ts:350` 同款。
@@ -82,21 +87,28 @@ export async function locateOrdinalByPoint(
   x: number,
   y: number,
   selector: string,
+  idAttrs: readonly string[] = [],
 ): Promise<LocatedOrdinal> {
   const res = await domRunner.run(wc, pageIdFor(wc), LOCATE_SCRIPTS.ordinalByPoint, {
     x,
     y,
     selector,
+    idAttrs: [...idAttrs],
   });
   if (res.status === 'failed') {
     // 不静默:这句话是「脚本/注入出问题」与「没点在回复上」的唯一区分点
     console.warn(`[ai-extract] 坐标定位失败(不是"没点中"):${res.reason}`);
-    return { ordinal: -1, preview: '' };
+    return { ordinal: -1, preview: '', ids: [] };
   }
   const v = res.value as Partial<LocatedOrdinal> | null;
   if (!v || typeof v.ordinal !== 'number') {
     console.warn('[ai-extract] 坐标定位返回了预期外的形状', v);
-    return { ordinal: -1, preview: '' };
+    return { ordinal: -1, preview: '', ids: [] };
   }
-  return { ordinal: v.ordinal, preview: typeof v.preview === 'string' ? v.preview : '' };
+  if (v.ordinal === -1) {
+    // 没点中也留一行现场(脚本带回的 miss):页面改版时选择器命中数会是 0
+    console.warn('[ai-extract] 右键位置没对上任何回复', JSON.stringify((v as { miss?: unknown }).miss, null, 1));
+  }
+  const ids = Array.isArray(v.ids) ? v.ids.filter((i): i is string => typeof i === 'string') : [];
+  return { ordinal: v.ordinal, preview: typeof v.preview === 'string' ? v.preview : '', ids };
 }

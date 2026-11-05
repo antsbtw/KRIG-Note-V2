@@ -68,8 +68,15 @@ function buildOrdinalByPoint(params: ScriptParams): string {
   const x = requireNumber(params, 'x');
   const y = requireNumber(params, 'y');
   const selector = requireString(params, 'selector');
+  // 可选:命中块上「消息 id」所在的属性名(多个);给了就把命中块(含后代)上这些属性的值收集回去。
+  // 空格分隔的多值属性(如 ChatGPT 的 data-chatgpt-search-message-ids)会拆开。
+  const idAttrs = params.idAttrs === undefined ? [] : params.idAttrs;
+  if (!Array.isArray(idAttrs) || idAttrs.some((a) => typeof a !== 'string' || !/^[\w-]+$/.test(a))) {
+    throw new Error('[web.dom] 脚本参数 idAttrs 必须是属性名数组');
+  }
   return `(function() {
     var sel = ${JSON.stringify(selector)};
+    var ID_ATTRS = ${JSON.stringify(idAttrs)};
     var X = ${JSON.stringify(x)};
     var Y = ${JSON.stringify(y)};
     var BAND = ${JSON.stringify(BAND_PX)};
@@ -94,9 +101,9 @@ function buildOrdinalByPoint(params: ScriptParams): string {
         if (!inserted) list.push(extra[k]);
       }
     }
-    if (list.length === 0) return { ordinal: -1, preview: '' };
     var el = document.elementFromPoint(X, Y);
     var hit = null;
+    if (list.length === 0) el = null;
     for (var i = 0; i < parts.length && !hit; i++) {
       hit = el && el.closest ? el.closest(parts[i]) : null;
     }
@@ -114,9 +121,35 @@ function buildOrdinalByPoint(params: ScriptParams): string {
       }
       hit = best ? best.node : null;
     }
-    if (!hit) return { ordinal: -1, preview: '' };
+    if (!hit) {
+      // 没点中:把现场带回去(各选择器命中数 + 坐标处元素往上 8 层),否则「页面改版」和「点偏了」分不清
+      var counts = parts.map(function(s){ return s + '=' + document.querySelectorAll(s).length; });
+      var chain = [];
+      for (var c = document.elementFromPoint(X, Y), d = 0; c && c.nodeType === 1 && d < 14; c = c.parentElement, d++) {
+        var desc = c.tagName.toLowerCase();
+        if (c.id) desc += '#' + c.id;
+        var cls = typeof c.className === 'string' ? c.className.trim().split(/\\s+/).slice(0, 3).join('.') : '';
+        if (cls) desc += '.' + cls;
+        for (var a = 0; a < c.attributes.length; a++) {
+          var an = c.attributes[a].name;
+          if (an.indexOf('data-') === 0 || an === 'role') desc += '[' + an + '=' + String(c.attributes[a].value).slice(0, 40) + ']';
+        }
+        chain.push(desc);
+      }
+      return { ordinal: -1, preview: '', miss: { counts: counts, chain: chain, x: X, y: Y, vw: window.innerWidth, vh: window.innerHeight } };
+    }
     var text = (hit.innerText || hit.textContent || '').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    return { ordinal: list.indexOf(hit), preview: text };
+    var ids = [];
+    for (var ia = 0; ia < ID_ATTRS.length; ia++) {
+      var holders = [hit].concat(Array.prototype.slice.call(hit.querySelectorAll('[' + ID_ATTRS[ia] + ']')));
+      for (var h = 0; h < holders.length; h++) {
+        var raw = holders[h].getAttribute(ID_ATTRS[ia]);
+        if (!raw) continue;
+        var vs = raw.split(/\\s+/);
+        for (var q = 0; q < vs.length; q++) if (vs[q] && ids.indexOf(vs[q]) < 0) ids.push(vs[q]);
+      }
+    }
+    return { ordinal: list.indexOf(hit), preview: text, ids: ids };
   })()`;
 }
 

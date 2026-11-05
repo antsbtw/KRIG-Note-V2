@@ -37,6 +37,7 @@ import {
   normalizeMessage,
   type NormalizedMessage,
 } from '../parsers/chatgpt-payload';
+import { convertFenceArtifacts } from './fence-artifacts';
 
 interface CacheEntry {
   url: string;
@@ -281,7 +282,10 @@ export async function extractChatGPTFullConversation(
     artifactCount += built.artifactCount;
 
     if (built.body) {
-      turnBlocks.push(`${header}\n\n${built.body}`);
+      // ```svg / ```html 代码块 → 图 / 网页块(与单条提取一致)
+      const fence = await convertFenceArtifacts(built.body, 'chatgpt');
+      artifactCount += fence.count;
+      turnBlocks.push(`${header}\n\n${fence.markdown}`);
     }
   }
 
