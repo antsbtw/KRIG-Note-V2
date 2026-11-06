@@ -7,6 +7,7 @@
  *   界面不驱动网页 —— 填、清、占网页全在主进程能力里。「定时」第⑦期。
  * ⚠️ 字不能在这里改(用户 10-27 定 B:字只在 note 里改,note 是唯一原文)。
  */
+import { localFileUrl } from '@capabilities/media-storage';
 import { useEffect, useState } from 'react';
 import { fillBlock, formNotFillable, type PostDraft, type PostForm, type PostMedia, type PostPlan, type ThreadEdit, type ThreadLayout } from './x-post-compose';
 import { mergeNext, moveMedia, splitBefore } from './x-post-layout';
@@ -74,12 +75,11 @@ function MediaCell({ m }: { m: PostMedia }) {
   const cell = { background: 'var(--bg-card)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } as const;
   if (m.kind === 'image') return <div style={cell}><img src={m.src} alt={m.alt} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>;
   if (m.kind === 'video') {
-    /** 媒体库里的视频显示第一帧;下载下来的(绝对路径)渲染进程读不到,只写名字 */
+    /** 显示第一帧:媒体库里的走 media://,本机链接的(绝对路径)走 localfile:// */
+    const play = m.src.startsWith('/') ? localFileUrl(m.src) : m.src;
     return (
       <div style={{ ...cell, position: 'relative' }}>
-        {m.src.startsWith('media://')
-          ? <video src={m.src} preload="metadata" muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          : <span style={{ fontSize: 11, padding: 6 }}>{m.src.split('/').pop()}</span>}
+        <video src={play} preload="metadata" muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
         <span style={{ position: 'absolute', left: 6, bottom: 6, fontSize: 11, background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>🎬 视频</span>
       </div>
     );

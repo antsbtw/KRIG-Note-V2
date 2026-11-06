@@ -485,7 +485,15 @@ const ATTACHED_JS = String.raw`
         while (el && el !== dlg.parentElement && !el.querySelector('img[src^="blob:"], [style*="blob:"]')) el = el.parentElement;
         if (el && el !== dlg.parentElement && !el.querySelector('[data-testid^="tweetTextarea_"]')) busy += 1;
       });
-      return { n: Math.max(blobs, removes, inGroup), blobs: blobs, removes: removes, inGroup: inGroup, busy: busy };
+      /**
+       * 视频(11-05 真机 probe):挂在 attachments 里的是 <video>(poster 是 data: 图,没有 blob 图、没有 removeMedia testid),
+       * 进度不在进度圈上,而在弹窗的 role=status 里:「t.mp4: Processing」→「t.mp4: Ready」,没 Ready 前发布按钮灰着。
+       * ⚠️ 只认英文 Ready / 中文 就绪 —— 别的界面语言会一直算「还在传」、到点超时并带回原文(响,不静默)。
+       */
+      var videos = dlg.querySelectorAll('[data-testid="attachments"] video').length;
+      var status = [].slice.call(dlg.querySelectorAll('[role="status"]')).map(function (e) { return (e.innerText || '').trim(); }).filter(Boolean).join(' / ');
+      if (videos > 0 && !/:\s*(Ready|就绪)\b/i.test(status)) busy += videos;
+      return { n: Math.max(blobs, removes, inGroup) + videos, blobs: blobs, removes: removes, inGroup: inGroup, videos: videos, status: status, busy: busy };
     };`;
 
 /**
@@ -730,10 +738,10 @@ const COMPOSE_MEDIA_READY_SRC = String.raw`(function () {
         if (!since) since = Date.now();
         else if (Date.now() - since >= 1500) { resolve({ state: 'ready', attached: a.n, waited: Date.now() - t0 }); return; }
       } else since = 0;
-      if (Date.now() - t0 > 60000) {
+      if (Date.now() - t0 > __MAX_MS__) {
         var ids = {};
         dlg.querySelectorAll('[data-testid]').forEach(function (el) { ids[el.getAttribute('data-testid')] = 1; });
-        resolve({ state: 'timeout', attached: a.n, blobs: a.blobs, removes: a.removes, inGroup: a.inGroup, busy: a.busy, buttonEnabled: enabled, testids: Object.keys(ids).slice(0, 40) });
+        resolve({ state: 'timeout', attached: a.n, blobs: a.blobs, removes: a.removes, inGroup: a.inGroup, videos: a.videos, status: a.status, busy: a.busy, buttonEnabled: enabled, testids: Object.keys(ids).slice(0, 40) });
         return;
       }
       setTimeout(tick, 300);
@@ -880,7 +888,8 @@ const FIND_MY_POST_SRC = String.raw`(function () {
             tiles.forEach(function (tp) {
               tp.querySelectorAll('img[src]').forEach(function (im) { srcs[(im.getAttribute('src') || '').split('?')[0]] = 1; });
             });
-            var got = Object.keys(srcs).filter(function (k) { return k !== ''; }).length;
+            /** 视频推(11-05):推文里是 <video>,不在图数里 —— 一条推最多 1 个视频,有就算 1 件(⚠️ 发后核对还没在真机上量过) */
+            var got = Object.keys(srcs).filter(function (k) { return k !== ''; }).length + (arts[i].querySelector('video') ? 1 : 0);
             if (got >= photos) return { id: m[2], photos: got, tiles: tiles.length };
             if (!short) short = { id: m[2], photos: got };
           }
@@ -1137,6 +1146,9 @@ export const X_DOM_SCRIPTS: readonly RegisteredScript[] = [
   {
     id: X_SCRIPTS.composeMediaReady,
     purpose: 'X:喂完图后等 X 传完(图挂够了、「发布」按钮亮了)—— 只读',
-    build: (params) => COMPOSE_MEDIA_READY_SRC.replace('__WANT__', () => String(Math.max(0, Math.floor(Number(params.want) || 0)))),
+    build: (params) => COMPOSE_MEDIA_READY_SRC
+      .replace('__WANT__', () => String(Math.max(0, Math.floor(Number(params.want) || 0))))
+      /** 最多等多久:默认 60 秒;视频按大小放宽(调用方算,见 x-post-draft mediaWaitMs) */
+      .replace('__MAX_MS__', () => String(Math.max(60_000, Math.floor(Number(params.maxMs) || 60_000)))),
   },
 ];

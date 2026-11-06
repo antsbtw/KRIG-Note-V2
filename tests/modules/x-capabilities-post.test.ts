@@ -35,7 +35,7 @@ describe('x.post.prepare', () => {
     const c = listCapabilities().find((x) => x.id === 'x.post.prepare');
     expect(c?.kind).toBe('input');
     expect(c?.describe).toContain('不发');
-    expect(Object.keys(c!.inputDoc)).toEqual(['content', 'noteId', 'layout']);
+    expect(Object.keys(c!.inputDoc)).toEqual(['content', 'noteId', 'wsId', 'layout']);
   });
 
   it('界面给块数组:直接排,不读库', async () => {
