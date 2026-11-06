@@ -679,6 +679,8 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const entry = shapes.find((sh) => sh.id === id);
     const frame = getFrame();
     if (!entry || !frame) return;
+    // 菜单在事件里注册,不在渲染里(渲染中注册会让斜杠菜单 Binding 在别的组件渲染期间 setState)
+    ensureMathVisualCardMenus();
     const width = entry.noteWidth ?? 220;
     const toPx = (p: [number, number]) => dataToPx(p, frame) as [number, number];
     const spec = compiledShapes.specs.find((sp) => sp.id === id);
@@ -1073,17 +1075,20 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
         const nudge: Record<string, Vec2> = { ArrowLeft: [-sx, 0], ArrowRight: [sx, 0], ArrowUp: [0, sy], ArrowDown: [0, -sy] };
         if (nudge[e.key]) {
           e.preventDefault();
+          e.stopPropagation();
           nudgeSelected(nudge[e.key][0], nudge[e.key][1]);
           return;
         }
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
           e.preventDefault();
+          e.stopPropagation();
           duplicateSelected();
           return;
         }
         // 图层:⌘] 上移 / ⌘[ 下移,加 Shift = 置顶 / 置底(用 code,Shift 时 key 会变成 { })
         if ((e.metaKey || e.ctrlKey) && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
           e.preventDefault();
+          e.stopPropagation(); // ⌘[ 也是 note 的「后退」快捷键,别让它再往外传
           const up = e.code === 'BracketRight';
           reorderSelected(e.shiftKey ? (up ? 'front' : 'back') : (up ? 'forward' : 'backward'));
           return;
@@ -1313,7 +1318,6 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       </div>
 
       {cardEdit && (() => {
-        ensureMathVisualCardMenus();
         const CardEditor = noteCard.Editor;
         return (
           <CardEditor

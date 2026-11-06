@@ -15,6 +15,7 @@ import { commandRegistry } from '../command-registry/command-registry';
 import { getActiveWorkspaceIdSync } from '@workspace/workspace-instance/use-workspace';
 import { getActiveSlot, resolveActiveViewId } from '@workspace/workspace-state/active-slot';
 import { keymapRegistry, normalizeKey } from './keymap-registry';
+import { fullscreenOverlayController } from '../triggers/fullscreen-overlay-controller';
 import type { KeymapBinding, KeymapCondition } from './keymap-types';
 import type { WorkspaceState } from '@workspace/workspace-state/workspace-state';
 
@@ -98,10 +99,23 @@ function checkAllConditions(
   return binding.enabledWhen.every((c) => checkCondition(c, e, viewId));
 }
 
+/**
+ * 全屏覆盖层打开时,按键落在全屏层里 → 不退回到 workspace 的活跃 view。
+ * (2026-11-06)workspace 此时整层 display:none,它的快捷键不该响应;否则全屏里按 ⌘[
+ * 会执行 note 的「后退」、按 ⌘K 会对着不存在的焦点编辑器报「命令已跳过」。
+ * 全屏层里带 data-view-id 的元素(若有)仍按它自己的 view 匹配。
+ */
+function isInsideActiveFullscreen(target: EventTarget | null): boolean {
+  if (!fullscreenOverlayController.getState().visible) return false;
+  return target instanceof Element && target.closest('.krig-fullscreen-overlay') !== null;
+}
+
 function handler(e: KeyboardEvent): void {
   const key = eventToKey(e);
   if (!key) return;
-  const viewId = findTargetViewId(e.target) ?? fallbackActiveViewId();
+  const targetViewId = findTargetViewId(e.target);
+  if (!targetViewId && isInsideActiveFullscreen(e.target)) return;
+  const viewId = targetViewId ?? fallbackActiveViewId();
   if (!viewId) return;
   const binding = keymapRegistry.match(viewId, key);
   if (!binding) return;
