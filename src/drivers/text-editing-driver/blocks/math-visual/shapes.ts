@@ -201,3 +201,48 @@ export function relToData(relX: number, relY: number, view: View, pad = MAFS_VIE
   const y1 = view.y[1] + pad;
   return [x0 + relX * (x1 - x0), y1 - relY * (y1 - y0)];
 }
+
+// ─── 缩放 / 平移 / 显示全部(2026-11-06:用户「应该有放大和缩小的功能」) ────────
+
+/** 以 anchor(数据坐标)为中心缩放;factor > 1 = 看到更多(缩小),< 1 = 放大 */
+export function zoomView(view: View, factor: number, anchor: Vec2): View {
+  const f = Math.min(Math.max(factor, 0.05), 20);
+  const scale = (lo: number, hi: number, a: number): [number, number] => [a + (lo - a) * f, a + (hi - a) * f];
+  return { x: scale(view.x[0], view.x[1], anchor[0]), y: scale(view.y[0], view.y[1], anchor[1]) };
+}
+
+/** 平移 dx/dy 个数据单位 */
+export function panView(view: View, dx: number, dy: number): View {
+  return { x: [view.x[0] + dx, view.x[1] + dx], y: [view.y[0] + dy, view.y[1] + dy] };
+}
+
+/**
+ * 把所有几何对象框进来,四周留 15% 余量。没有对象 → null(调用方决定回默认视图)。
+ * 文字只按锚点算(不知道字宽),所以余量给大一点。
+ */
+export function boundsOfShapes(specs: ShapeSpec[]): View | null {
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const add = (p: Vec2) => { if (isFinite(p[0]) && isFinite(p[1])) { xs.push(p[0]); ys.push(p[1]); } };
+  for (const s of specs) {
+    switch (s.kind) {
+      case 'point':
+      case 'text': add(s.at); break;
+      case 'segment':
+      case 'arrow': add(s.from); add(s.to); break;
+      case 'circle':
+        add([s.center[0] - s.radius, s.center[1] - s.radius]);
+        add([s.center[0] + s.radius, s.center[1] + s.radius]);
+        break;
+    }
+  }
+  if (xs.length === 0) return null;
+  let [x0, x1] = [Math.min(...xs), Math.max(...xs)];
+  let [y0, y1] = [Math.min(...ys), Math.max(...ys)];
+  if (x1 - x0 < 1) { x0 -= 1; x1 += 1; }
+  if (y1 - y0 < 1) { y0 -= 1; y1 += 1; }
+  const mx = (x1 - x0) * 0.15;
+  const my = (y1 - y0) * 0.15;
+  const r = (n: number) => Math.round(n * 100) / 100;
+  return { x: [r(x0 - mx), r(x1 + mx)], y: [r(y0 - my), r(y1 + my)] };
+}

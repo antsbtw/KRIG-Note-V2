@@ -26,9 +26,9 @@ function CoordRow({ label, value, onChange }: { label: string; value: CoordExpr 
   return (
     <div className="mv-fr-prop-row">
       <span className="mv-fr-prop-label">{label}</span>
-      <input className="mv-fr-prop-input" style={{ width: 60 }} value={v[0]} placeholder="x"
+      <input className="mv-fr-prop-input" style={{ width: 0, minWidth: 0 }} value={v[0]} placeholder="x"
         onChange={(e) => onChange([e.target.value, v[1]])} onKeyDown={stop} />
-      <input className="mv-fr-prop-input" style={{ width: 60 }} value={v[1]} placeholder="y"
+      <input className="mv-fr-prop-input" style={{ width: 0, minWidth: 0 }} value={v[1]} placeholder="y"
         onChange={(e) => onChange([v[0], e.target.value])} onKeyDown={stop} />
     </div>
   );
@@ -94,6 +94,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
             <span className="mv-fr-prop-label">线</span>
             {(['solid', 'dashed'] as const).map((st) => (
               <button key={st}
+                style={{ whiteSpace: 'nowrap' }}
                 className={`mv-style-btn ${(s.style === 'dotted' ? 'dashed' : s.style) === st ? 'mv-style-btn--active' : ''}`}
                 onClick={() => up({ style: st })}>
                 {st === 'solid' ? '实线' : '虚线'}

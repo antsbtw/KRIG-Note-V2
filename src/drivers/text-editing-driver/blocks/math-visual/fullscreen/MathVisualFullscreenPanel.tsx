@@ -40,7 +40,8 @@ import { LegendOverlay } from './LegendOverlay';
 import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
 import {
   compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
-  type Vec2,
+  zoomView, panView, boundsOfShapes, MAFS_VIEWBOX_PADDING,
+  type Vec2, type View,
 } from '../shapes';
 import type { ShapeSpec } from '@capabilities/math-rendering/types';
 
@@ -323,10 +324,86 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }), [canvas, axis]);
 
   // ── 实际视口:等比例模式下按画布宽高放宽一个方向(题意图 P1) ──
-  const view = useMemo(() => {
+  const baseView = useMemo(() => {
     const base = { x: domain, y: range };
     return canvas.scaleMode === '1:1' ? fitEqualScale(base, canvasWidth, canvasHeight) : base;
   }, [domain, range, canvas.scaleMode, canvasWidth, canvasHeight]);
+
+  // ── 缩放 / 平移(2026-11-06 用户:「应该有放大和缩小的功能」)──
+  // 视口由我们自己管,不用 Mafs 内置 zoom/pan:内置的不落盘,且缩放后点击换算对不上。
+  // 拖动 / 滚轮过程中只改 liveView(不写 PM),停下来再一次性写回 domain/range。
+  const [liveView, setLiveView] = useState<View | null>(null);
+  const view: View = liveView ?? baseView;
+  const viewRef = useRef<View>(view);
+  viewRef.current = view;
+  const dataForViewRef = useRef(data);
+  dataForViewRef.current = data;
+
+  const commitView = useCallback((v: View) => {
+    const r = (n: number) => Math.round(n * 1000) / 1000;
+    const cur = dataForViewRef.current;
+    onChange({ ...cur, domain: [r(v.x[0]), r(v.x[1])], range: [r(v.y[0]), r(v.y[1])] });
+    setLiveView(null);
+  }, [onChange]);
+
+  // 滚轮缩放(以鼠标为中心);原生监听才能 preventDefault
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onWheel = (e: WheelEvent) => {
+      const svg = el.querySelector('svg');
+      if (!svg) return;
+      e.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const cur = viewRef.current;
+      const anchor = relToData((e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height, cur);
+      const next = zoomView(cur, Math.exp(e.deltaY * 0.0015), anchor);
+      viewRef.current = next;
+      setLiveView(next);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => commitView(viewRef.current), 300);
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      if (timer) clearTimeout(timer);
+    };
+  }, [commitView]);
+
+  // 移动模式下拖动画布平移
+  const startPan = useCallback((e: React.MouseEvent) => {
+    const svg = canvasRef.current?.querySelector('svg');
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    const start = viewRef.current;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const perPxX = (start.x[1] - start.x[0] + 2 * MAFS_VIEWBOX_PADDING) / rect.width;
+    const perPxY = (start.y[1] - start.y[0] + 2 * MAFS_VIEWBOX_PADDING) / rect.height;
+    let moved = false;
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - sx;
+      const dy = ev.clientY - sy;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < 3) return;
+      moved = true;
+      const next = panView(start, -dx * perPxX, dy * perPxY);
+      viewRef.current = next;
+      setLiveView(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (moved) commitView(viewRef.current);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [commitView]);
+
+  const zoomBy = useCallback((factor: number) => {
+    const v = viewRef.current;
+    commitView(zoomView(v, factor, [(v.x[0] + v.x[1]) / 2, (v.y[0] + v.y[1]) / 2]));
+  }, [commitView]);
 
   // ── 几何对象(题意图 P1) ──
   const shapes = useMemo(() => data.shapes ?? [], [data.shapes]);
@@ -338,6 +415,10 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     () => compileShapes(shapes, math.evalScalar, parameters),
     [shapes, parameters, math],
   );
+  const fitAll = useCallback(() => {
+    commitView(boundsOfShapes(compiledShapes.specs) ?? { x: [-5, 5], y: [-5, 5] });
+  }, [compiledShapes, commitView]);
+
   const shapeSpecs: ShapeSpec[] = useMemo(() => {
     if (pendingPoints.length === 0) return compiledShapes.specs;
     // 两点图形已点了第一点:画一个灰点提示
@@ -589,10 +670,17 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }, []);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (toolMode === 'move') {
+      const target = e.target as Element | null;
+      // 拖曲线 label / 可拖的点 / 点缩放按钮时不平移
+      if (target?.closest('[data-label-hit-area], .mafs-movable-point, [data-view-controls]')) return;
+      if (e.button === 0) startPan(e);
+      return;
+    }
     if (toolMode !== 'select') return;
     const pos = pageToSvgPx(e);
     if (pos) { setBoxSelectStart(pos); setBoxSelectEnd(pos); }
-  }, [toolMode, pageToSvgPx]);
+  }, [toolMode, pageToSvgPx, startPan]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
     if (toolMode !== 'select' || !boxSelectStart) return;
@@ -777,14 +865,39 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
             height={canvasHeight}
             curves={curves}
             axis={axisConfig}
-            zoom={toolMode === 'move' && canvas.zoom !== false}
-            pan={toolMode === 'move' && canvas.pan !== false}
+            zoom={false}
+            pan={false}
             preserveAspectRatio={false}
             overlays={overlays}
             overlayCallbacks={overlayCallbacks}
             onLabelMove={handleLabelMove}
             pointSize={canvas.pointSize || 6}
           />
+
+          <div
+            data-view-controls
+            style={{ position: 'absolute', top: 10, right: 10, display: 'flex', gap: 4, zIndex: 2 }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {([
+              ['＋', '放大', () => zoomBy(1 / 1.25)],
+              ['−', '缩小', () => zoomBy(1.25)],
+              ['⤢', '显示全部图形', fitAll],
+            ] as Array<[string, string, () => void]>).map(([icon, title, fn]) => (
+              <button
+                key={title}
+                title={title}
+                onClick={fn}
+                style={{
+                  width: 30, height: 30, borderRadius: 6, cursor: 'pointer',
+                  background: '#2a2a2a', border: '1px solid #4a4a4a', color: '#e0e0e0', fontSize: 16,
+                }}
+              >
+                {icon}
+              </button>
+            ))}
+          </div>
 
           {boxSelectStart && boxSelectEnd && (
             <div

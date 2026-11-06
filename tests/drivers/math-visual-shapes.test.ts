@@ -7,7 +7,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   compileShapes, createShape, snapStep, snap, fitEqualScale, relToData, fmtNum,
-  MAFS_VIEWBOX_PADDING,
+  MAFS_VIEWBOX_PADDING, zoomView, panView, boundsOfShapes,
 } from '@drivers/text-editing-driver/blocks/math-visual/shapes';
 import type { ShapeEntry } from '@drivers/text-editing-driver/blocks/math-visual/types';
 import { evalScalar } from '@capabilities/math-rendering/compute/evaluator';
@@ -124,5 +124,37 @@ describe('relToData', () => {
     expect(relToData(0, 0, v)).toEqual([-0.5, 10.5]);
     expect(relToData(1, 1, v)).toEqual([10.5, -0.5]);
     expect(relToData(0.5, 0.5, v)).toEqual([5, 5]);
+  });
+});
+
+describe('缩放 / 平移 / 显示全部', () => {
+  const v = { x: [0, 10] as [number, number], y: [0, 10] as [number, number] };
+
+  it('以锚点缩放:锚点不动,跨度按倍数变', () => {
+    const z = zoomView(v, 0.5, [2, 8]);
+    expect(z.x).toEqual([1, 6]);
+    expect(z.y).toEqual([4, 9]);
+    const out = zoomView(v, 2, [5, 5]);
+    expect(out.x).toEqual([-5, 15]);
+  });
+
+  it('倍数有上下限,滚轮猛甩不会缩成一个点', () => {
+    const z = zoomView(v, 0, [5, 5]);
+    expect(z.x[1] - z.x[0]).toBeCloseTo(0.5);
+  });
+
+  it('平移', () => {
+    expect(panView(v, 3, -2)).toEqual({ x: [3, 13], y: [-2, 8] });
+  });
+
+  it('显示全部:帧 3 样本框进来(含圆)并留余量;没有对象 → null', () => {
+    const { specs } = compileShapes(FRAME3, evalScalar, []);
+    const b = boundsOfShapes(specs);
+    expect(b).not.toBeNull();
+    expect(b!.x[0]).toBeLessThan(-24);
+    expect(b!.x[1]).toBeGreaterThan(24);
+    expect(b!.y[0]).toBeLessThan(-24);
+    expect(b!.y[1]).toBeGreaterThan(24);
+    expect(boundsOfShapes([])).toBeNull();
   });
 });

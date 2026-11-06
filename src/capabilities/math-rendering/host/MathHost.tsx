@@ -130,7 +130,7 @@ export const MathHost: React.FC<MathHostProps> = ({
         zoom={zoom}
         pan={pan}
       >
-        {renderAxis(axis)}
+        {renderAxis(axis, viewBox)}
         {curves.map((c) => renderCurve(c, viewBox))}
         {/* LaTeX label 渲染走 Mafs(SVG 内,被 mafs 接受);
             交互层(hit-area + 选中框)走 HTML overlay,见 Mafs 外的 LabelInteractionLayer */}
@@ -232,7 +232,22 @@ export const MathHost: React.FC<MathHostProps> = ({
 
 // ─── 坐标轴 / 网格 ─────────────────────────────────────
 
-function renderAxis(axis?: AxisDisplayConfig): React.ReactNode {
+/**
+ * 网格/数字间隔自动取值:约 10 格,取 1/2/5×10^k。
+ * (原先 xStep=null 时传 undefined → Mafs 按 1 一格;范围 0~30 时数字挤成一团)
+ */
+function autoAxisStep(span: number): number {
+  if (!(span > 0)) return 1;
+  const raw = span / 10;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const m = raw / p;
+  return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+
+function renderAxis(
+  axis: AxisDisplayConfig | undefined,
+  viewBox: { x: [number, number]; y: [number, number] },
+): React.ReactNode {
   if (!axis) {
     return <Coordinates.Cartesian />;
   }
@@ -241,26 +256,19 @@ function renderAxis(axis?: AxisDisplayConfig): React.ReactNode {
   const showNumbers = axis.showNumbers !== false;
   if (!showAxes && !showGrid) return null;
 
+  // 注意:Mafs 用 `{ ...defaults, ...overrides }` 合并,显式传 `labels: undefined` 会把默认的
+  // 出数字函数覆盖掉 → 「刻度数字」勾着也一个数都不显示(2026-11-06 用户截图发现)。
+  // 所以要显示数字时**不传** labels 这个键。
+  const axisOpts = (step: number) => ({
+    ...(showNumbers ? {} : { labels: () => '' }),
+    lines: step,
+    subdivisions: showGrid ? 2 : (false as const),
+  });
+
   return (
     <Coordinates.Cartesian
-      xAxis={
-        showAxes
-          ? {
-              labels: showNumbers ? undefined : () => '',
-              lines: axis.xStep ?? undefined,
-              subdivisions: showGrid ? 2 : false,
-            }
-          : false
-      }
-      yAxis={
-        showAxes
-          ? {
-              labels: showNumbers ? undefined : () => '',
-              lines: axis.yStep ?? undefined,
-              subdivisions: showGrid ? 2 : false,
-            }
-          : false
-      }
+      xAxis={showAxes ? axisOpts(axis.xStep ?? autoAxisStep(viewBox.x[1] - viewBox.x[0])) : false}
+      yAxis={showAxes ? axisOpts(axis.yStep ?? autoAxisStep(viewBox.y[1] - viewBox.y[0])) : false}
     />
   );
 }
