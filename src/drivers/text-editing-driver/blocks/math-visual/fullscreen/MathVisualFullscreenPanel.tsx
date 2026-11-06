@@ -549,7 +549,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   const shapeHint = (() => {
     if (toolMode !== 'shape') {
       if (selectedShapeIds.length > 1) return `已选 ${selectedShapeIds.length} 个:拖动一起移动;方向键微调,⌘D 复制,Backspace 删除;Shift+点击加选/去掉`;
-      if (selectedShapeId) return '拖动图形移动;拖白点改位置;方向键微调,⌘D 复制,Backspace 删除';
+      if (selectedShapeId) return '拖动图形移动;拖白点改位置;拖标签挪标签;方向键微调,⌘D 复制,Backspace 删除';
       return toolMode === 'select' ? '在空白处拖出方框,完全框住的图形会被选中;Shift 可追加' : null;
     }
     const label = shapeKindMeta(shapeKind).label;
@@ -587,6 +587,14 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const sy = e.clientY;
     const onMove = (ev: MouseEvent) => {
       if (!latest && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 3) return;
+      if (part === 'label') {
+        // 拖标签:只改标签相对默认位置的像素偏移,对象不动
+        const base = orig.labelOffset ?? [0, 0];
+        const off: [number, number] = [Math.round(base[0] + ev.clientX - sx), Math.round(base[1] + ev.clientY - sy)];
+        latest = all.map((sh) => (sh.id === id ? { ...sh, labelOffset: off } : sh));
+        setLiveShapes(latest);
+        return;
+      }
       const cur = toData(ev);
       if (part === null) {
         const dx = snap(cur[0] - start[0], stepX);
@@ -620,8 +628,9 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       [e.clientX - frame.rect.left, e.clientY - frame.rect.top],
       frame,
       selectedShapeId,
+      math.shapeLabelBox,
     );
-  }, [getFrame, compiledShapes, selectedShapeId]);
+  }, [getFrame, compiledShapes, selectedShapeId, math]);
 
   const [hoverShape, setHoverShape] = useState(false);
 
@@ -877,7 +886,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       // 点中图形:Shift → 加选/去掉;否则选中(已在多选里就保持多选)并可拖,拖的是整组
       const hit = hitAt(e);
       if (hit) {
-        if (e.shiftKey && hit.part === null) {
+        if (e.shiftKey && (hit.part === null || hit.part === 'label')) {
           toggleShapeSelected(hit.id);
           return;
         }

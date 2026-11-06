@@ -5,7 +5,6 @@
  */
 
 import React, { useState } from 'react';
-import { shapeSummary } from './ShapeSection';
 import type { ShapeEntry, CoordExpr } from '../../types';
 import { FUNCTION_COLORS } from '../../types';
 import { shapeKindMeta } from '../../shapes';
@@ -44,7 +43,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
   const hasStroke = isLine || s.kind === 'circle' || s.kind === 'polygon';
 
   return (
-    <div className="mv-fr-section">
+    <div className={hideTitle ? undefined : 'mv-fr-section'}>
       {!hideTitle && <div className="mv-fr-section-title">{meta.label}</div>}
       {error && (
         <div className="mv-fr-hint" style={{ color: '#ef4444' }}>画不出来:{error}</div>
@@ -90,6 +89,13 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
             placeholder={s.kind === 'text' ? '' : '可不填'}
             onChange={(e) => up({ text: e.target.value })} onKeyDown={stop} />
         </div>
+        {s.labelOffset && s.kind !== 'text' && (
+          <div className="mv-fr-prop-row">
+            <span className="mv-fr-prop-label">标签位置</span>
+            <span className="mv-fr-hint" style={{ margin: 0 }}>已拖动</span>
+            <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => up({ labelOffset: undefined })}>复位</button>
+          </div>
+        )}
 
         <div className="mv-fr-prop-row" style={{ flexWrap: 'wrap', gap: 4 }}>
           <span className="mv-fr-prop-label">颜色</span>
@@ -117,7 +123,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
                 {st === 'solid' ? '实线' : '虚线'}
               </button>
             ))}
-            <input className="mv-fr-prop-input" style={{ width: 44 }} type="number" min={1} max={10} step={0.5}
+            <input className="mv-fr-prop-input" style={{ width: 0, minWidth: 40 }} type="number" min={1} max={10} step={0.5}
               value={s.lineWidth} title="线宽"
               onChange={(e) => { const n = Number(e.target.value); if (n > 0) up({ lineWidth: n }); }}
               onKeyDown={stop} />
@@ -164,7 +170,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </>
         )}
 
-        <div className="mv-fr-hint">右键图形:复制 / 删除 / 调图层</div>
+        <div className="mv-fr-hint">右键图形:复制 / 删除 / 调图层;画布上拖标签可挪位置</div>
       </div>
     </div>
   );
@@ -211,62 +217,28 @@ export const MultiShapeEditor: React.FC<{
 };
 
 /**
- * 多选时右栏下半部分:逐个列出选中的元素,点一行就地展开它的完整编辑项
- * (2026-11-06 用户:「既然选了两个图形,那就在右边的框框列表这些选定的元素…用户就可以直接编辑了」)
+ * 多选时:选中的元素从上到下直接排开,每个都是完整的编辑区(不折叠、不点选)
+ * (2026-11-06 用户:「直接元素列表就好了,不要用户点击选择 tab 了…从上至下排列展开,方便用户直接修改」)
+ * 不放进 .mv-fr-ann-list:那个容器限高 300px 内部滚动,第二个元素会被挤到框外。
  */
 export const SelectedShapeList: React.FC<{
   shapes: ShapeEntry[];
   errors: Record<string, string>;
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemove: (id: string) => void;
-}> = ({ shapes, errors, onUpdate, onRemove }) => {
-  // 默认全部展开(用户:「应该直接弹开」);记的是收起了哪些
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggle = (id: string) => setCollapsed((prev) => {
-    const next = new Set(prev);
-    if (next.has(id)) next.delete(id); else next.add(id);
-    return next;
-  });
-  return (
-    <div className="mv-fr-section">
-      <div className="mv-fr-section-title">已选 {shapes.length} 个图形</div>
-      <div className="mv-fr-ann-list">
-        {shapes.map((s) => {
-          const open = !collapsed.has(s.id);
-          const err = errors[s.id];
-          return (
-            <div key={s.id}>
-              <div
-                className={`mv-fr-ann-item ${open ? 'mv-fr-ann-item--selected' : ''}`}
-                onClick={() => toggle(s.id)}
-                title={open ? '点一下收起' : '点一下展开编辑'}
-              >
-                <span className="mv-fr-ann-label" style={{ color: s.color }}>
-                  {open ? '▾' : '▸'} {shapeKindMeta(s.kind).icon}
-                </span>
-                <span
-                  className="mv-fr-ann-coord"
-                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: err ? '#ef4444' : undefined }}
-                >
-                  {err ? `⚠ ${shapeSummary(s)}` : shapeSummary(s)}
-                </span>
-                <button
-                  className="mv-fr-ann-del"
-                  onClick={(e) => { e.stopPropagation(); onRemove(s.id); }}
-                  title="只删这一个"
-                >
-                  ×
-                </button>
-              </div>
-              {open && (
-                <div style={{ paddingLeft: 8, borderLeft: `2px solid ${s.color}`, marginBottom: 6 }}>
-                  <ShapeEditor shape={s} error={err} onUpdate={onUpdate} hideTitle />
-                </div>
-              )}
-            </div>
-          );
-        })}
+}> = ({ shapes, errors, onUpdate, onRemove }) => (
+  <>
+    {shapes.map((s) => (
+      <div key={s.id} className="mv-fr-section" style={{ borderLeft: `3px solid ${s.color}` }}>
+        <div className="mv-fr-section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ color: s.color }}>{shapeKindMeta(s.kind).icon}</span>
+          <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {shapeKindMeta(s.kind).label}{s.text ? ` · ${s.text}` : ''}
+          </span>
+          <button className="mv-fr-ann-del" onClick={() => onRemove(s.id)} title="删掉这一个">×</button>
+        </div>
+        <ShapeEditor shape={s} error={errors[s.id]} onUpdate={onUpdate} hideTitle />
       </div>
-    </div>
-  );
-};
+    ))}
+  </>
+);

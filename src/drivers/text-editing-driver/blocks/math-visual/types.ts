@@ -177,6 +177,8 @@ export interface ShapeEntry {
   points?: CoordExpr[];
   /** polygon 是否半透明填充;缺省 = 填充 */
   fill?: boolean;
+  /** 标签被拖开的偏移(屏幕像素,相对默认位置);缺省 = 默认位置 */
+  labelOffset?: [number, number];
   /** text 的内容;point/segment/arrow/circle 的标签 */
   text?: string;
   color: string;

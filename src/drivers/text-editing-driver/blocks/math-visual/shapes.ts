@@ -120,7 +120,7 @@ export function compileShapes(
     const vec = (c: CoordExpr | undefined, name: string): Vec2 =>
       [num(c?.[0], `${name} x`), num(c?.[1], `${name} y`)];
 
-    const common = { id: s.id, color: s.color, opacity: s.opacity };
+    const common = { id: s.id, color: s.color, opacity: s.opacity, labelOffset: s.labelOffset };
     let spec: ShapeSpec | null = null;
 
     switch (s.kind) {
@@ -271,7 +271,7 @@ export function boundsOfShapes(specs: ShapeSpec[]): View | null {
 
 // ─── 画布上选中 / 拖动 / 手柄(2026-11-06 用户:「还有选定对象和操作的能力吧?」) ───────
 
-/** 手柄名:'at' | 'from' | 'to' | 'center' | 'radius' | 'v0'、'v1'… */
+/** 手柄名:'at' | 'from' | 'to' | 'center' | 'radius' | 'v0'、'v1'… | 'label'(拖标签) */
 export type HandlePart = string;
 
 /** 选中对象显示的手柄(数据坐标) */
@@ -334,11 +334,15 @@ const LINE_HIT_PX = 6;
  * 鼠标(像素,画布左上为原点)命中哪个对象。
  * 先看选中对象的手柄(part 非 null),再按「后画的在上面」从后往前看对象本体(part = null)。
  */
+/** 标签屏幕框(由 capability 的 shapeLabelBox 提供,与渲染同一套布局) */
+export type LabelBoxFn = (spec: ShapeSpec, toPx: (p: Vec2) => Vec2) => { x0: number; y0: number; x1: number; y1: number } | null;
+
 export function hitTest(
   specs: ShapeSpec[],
   mousePx: Vec2,
   frame: PxFrame,
   selectedId: string | null,
+  labelBox?: LabelBoxFn,
 ): { id: string; part: HandlePart | null } | null {
   const px = (p: Vec2) => dataToPx(p, frame);
   const d = (p: Vec2) => Math.hypot(mousePx[0] - p[0], mousePx[1] - p[1]);
@@ -352,19 +356,16 @@ export function hitTest(
 
   for (let i = specs.length - 1; i >= 0; i--) {
     const s = specs[i];
+    // 标签:part = 'label'(拖它只挪标签,不挪对象)
+    const box = labelBox?.(s, px);
+    if (box && mousePx[0] >= box.x0 && mousePx[0] <= box.x1 && mousePx[1] >= box.y0 && mousePx[1] <= box.y1) {
+      return { id: s.id, part: 'label' };
+    }
     let hit = false;
     switch (s.kind) {
-      case 'point': {
-        // 点本身 12px 内,或点右上方那行标签(ShapeLayer 用 attach="ne" attachDistance=12 size=15 画)
-        const c = px(s.at);
-        hit = d(c) <= POINT_HIT_PX;
-        if (!hit && s.label) {
-          const w = textHalfWidth(s.label, 15) * 2;
-          hit = mousePx[0] >= c[0] + 2 && mousePx[0] <= c[0] + 14 + w
-            && mousePx[1] >= c[1] - 30 && mousePx[1] <= c[1] - 2;
-        }
+      case 'point':
+        hit = d(px(s.at)) <= POINT_HIT_PX;
         break;
-      }
       case 'text': {
         const c = px(s.at);
         const size = s.size ?? 16;

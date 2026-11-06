@@ -1,26 +1,79 @@
 /**
  * host/ShapeLayer — 几何对象渲染(题意图 P1,2026-11-06)
  *
- * 点 / 线段 / 箭头 / 圆 / 文字,全部用 Mafs 原生元件画在同一张 SVG 里,
+ * 点 / 线段 / 箭头 / 圆 / 文字 / 面,全部用 Mafs 原生元件画在同一张 SVG 里,
  * 所以全屏退出时的 SVG 缩略图自动带上它们。
  *
  * 文字只用 Mafs <Text>(SVG text),不用 <LaTeX>:
  * MathHost 的 LabelInteractionLayer 按 DOM 顺序把 .katex 节点对到曲线 label,
  * 这里再出 .katex 会把对应关系打乱。
+ *
+ * 标签位置走 compute/shape-geometry 的 labelLayout —— 与命中测试(shapeLabelBox)同一套。
+ * 不用 Mafs Text 的 attachDistance:它的上下方向是反的(见 shape-geometry 注释)。
  */
 
 import React from 'react';
 import { Point, Line, Vector, Circle, Text, Polygon } from 'mafs';
 import type { ShapeSpec, LineShapeSpec } from '../types';
-import { cardinalOf, tickPositions, leftNormal, formatTickValue } from '../compute/shape-geometry';
+import {
+  cardinalOf, tickPositions, leftNormal, formatTickValue,
+  labelLayout, labelShiftPx, type Cardinal, type Vec2,
+} from '../compute/shape-geometry';
 
 /** Mafs 的 style 仅 solid/dashed;dotted 降级为 dashed(与曲线一致) */
 function strokeStyle(s?: 'solid' | 'dashed' | 'dotted'): 'solid' | 'dashed' {
   return s === 'dashed' || s === 'dotted' ? 'dashed' : 'solid';
 }
 
-const LABEL_SIZE = 15;
 const STRUCK_COLOR = '#ef4444';
+
+/** 在锚点(数据坐标)旁按方位放一段字。Mafs 只负责对齐(attach),偏移用 transform 自己做。 */
+function PlacedText({
+  at, dir, distance, offset, size, color, children, svgTextProps,
+}: {
+  at: Vec2;
+  dir: Cardinal | null;
+  distance: number;
+  offset?: Vec2;
+  size: number;
+  color: string;
+  children: React.ReactNode;
+  svgTextProps?: React.SVGAttributes<SVGTextElement>;
+}) {
+  const [dx, dy] = labelShiftPx({ at, dir, distance, size, text: '' }, offset);
+  return (
+    <Text
+      x={at[0]}
+      y={at[1]}
+      attach={dir ?? undefined}
+      attachDistance={0}
+      size={size}
+      color={color}
+      svgTextProps={{ ...svgTextProps, transform: `translate(${dx} ${dy})` }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+/** 对象的标签(点 / 线 / 箭头 / 圆 / 面);位置 = 默认布局 + 用户拖动偏移 */
+function ShapeLabel({ s }: { s: ShapeSpec }) {
+  const layout = labelLayout(s);
+  if (!layout) return null;
+  return (
+    <PlacedText
+      at={layout.at}
+      dir={layout.dir}
+      distance={layout.distance}
+      offset={s.labelOffset}
+      size={layout.size}
+      color={s.color}
+      svgTextProps={{ opacity: s.opacity }}
+    >
+      {layout.text}
+    </PlacedText>
+  );
+}
 
 interface ShapeLayerProps {
   shapes: ShapeSpec[];
@@ -50,18 +103,13 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   opacity={s.opacity}
                   svgCircleProps={{ r: (s.size ?? 6) + (selected ? 3 : 0) }}
                 />
-                {s.label && (
-                  <Text x={s.at[0]} y={s.at[1]} attach="ne" attachDistance={12} size={LABEL_SIZE} color={s.color}>
-                    {s.label}
-                  </Text>
-                )}
+                <ShapeLabel s={s} />
               </React.Fragment>
             );
           case 'segment':
           case 'arrow':
             return <LineShape key={s.id} s={s} selected={selected} tickHalf={tickHalf} />;
-          case 'circle': {
-            const d = s.radius / Math.SQRT2;
+          case 'circle':
             return (
               <React.Fragment key={s.id}>
                 <Circle
@@ -73,18 +121,10 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   strokeOpacity={s.opacity ?? 1}
                   fillOpacity={0}
                 />
-                {s.label && (
-                  <Text x={s.center[0] + d} y={s.center[1] + d} attach="ne" attachDistance={6} size={LABEL_SIZE} color={s.color}>
-                    {s.label}
-                  </Text>
-                )}
+                <ShapeLabel s={s} />
               </React.Fragment>
             );
-          }
-          case 'polygon': {
-            const n = s.points.length;
-            const cx = s.points.reduce((a, p) => a + p[0], 0) / n;
-            const cy = s.points.reduce((a, p) => a + p[1], 0) / n;
+          case 'polygon':
             return (
               <React.Fragment key={s.id}>
                 <Polygon
@@ -95,14 +135,9 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   strokeOpacity={s.opacity ?? 1}
                   fillOpacity={(s.fillOpacity ?? 0.15) * (s.opacity ?? 1)}
                 />
-                {s.label && (
-                  <Text x={cx} y={cy} size={LABEL_SIZE} color={s.color}>
-                    {s.label}
-                  </Text>
-                )}
+                <ShapeLabel s={s} />
               </React.Fragment>
             );
-          }
           case 'text':
             return (
               <Text
@@ -139,7 +174,7 @@ function LineShape({
   const opacity = s.opacity ?? 1;
   const [nx, ny] = leftNormal(s.from, s.to);
   const ticks = s.ticks ? tickPositions(s.from, s.to, s.ticks.step) ?? [] : [];
-  const tickLabelAttach = cardinalOf(nx, ny);
+  const tickLabelDir = cardinalOf(nx, ny);
   const mid: [number, number] = [(s.from[0] + s.to[0]) / 2, (s.from[1] + s.to[1]) / 2];
 
   return (
@@ -162,32 +197,15 @@ function LineShape({
               opacity={opacity}
             />
             {label !== '' && (
-              <Text x={p[0]} y={p[1]} attach={tickLabelAttach} attachDistance={10} size={13} color={s.color}>
+              <PlacedText at={p} dir={tickLabelDir} distance={10} size={13} color={s.color}>
                 {label}
-              </Text>
+              </PlacedText>
             )}
           </React.Fragment>
         );
       })}
 
-      {s.label && (
-        s.kind === 'arrow' ? (
-          <Text
-            x={s.to[0]}
-            y={s.to[1]}
-            attach={cardinalOf(s.to[0] - s.from[0], s.to[1] - s.from[1])}
-            attachDistance={22}
-            size={LABEL_SIZE}
-            color={s.color}
-          >
-            {s.label}
-          </Text>
-        ) : (
-          <Text x={mid[0]} y={mid[1]} attach={cardinalOf(-nx, -ny)} attachDistance={10} size={LABEL_SIZE} color={s.color}>
-            {s.label}
-          </Text>
-        )
-      )}
+      <ShapeLabel s={s} />
 
       {s.struck && (
         <Text x={mid[0]} y={mid[1]} size={22} color={STRUCK_COLOR} svgTextProps={{ fontWeight: 700 }}>

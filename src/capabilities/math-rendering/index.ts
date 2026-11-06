@@ -44,6 +44,7 @@ import { derivative, secondDerivative } from './compute/derivatives';
 import { integrate } from './compute/integrate';
 import { detectFeaturePoints } from './compute/features';
 import { exportSelfContainedSvg } from './host/export-svg';
+import { shapeLabelBox } from './compute/shape-geometry';
 
 export type {
   MathRenderingApi,
@@ -108,6 +109,7 @@ capabilityRegistry.register({
   id: 'math-rendering',
   api: {
     Host: MathHost,
+    shapeLabelBox,
     createEvalFn,
     evalScalar,
     extractParameters,

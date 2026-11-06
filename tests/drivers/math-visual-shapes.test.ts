@@ -13,6 +13,7 @@ import {
 } from '@drivers/text-editing-driver/blocks/math-visual/shapes';
 import type { ShapeEntry } from '@drivers/text-editing-driver/blocks/math-visual/types';
 import { evalScalar } from '@capabilities/math-rendering/compute/evaluator';
+import { shapeLabelBox } from '@capabilities/math-rendering/compute/shape-geometry';
 
 const base = { color: '#2D7FF9', style: 'solid' as const, lineWidth: 2.5 };
 
@@ -262,11 +263,20 @@ describe('框选 / 点更好点中', () => {
     expect(specExtent(specs[0])).toEqual({ x: [-1, 3], y: [-1, 3] });
   });
 
-  it('点的标签也算点中这个点;离点 12px 内算点中', () => {
+  it('离点 12px 内算点中;点标签返回 part=label(拖它只挪标签)', () => {
     const { specs } = compileShapes([{ ...base, id: 'o', kind: 'point', at: ['5', '5'], text: 'Mathville' }], evalScalar, []);
     const c = dataToPx([5, 5], frame);
-    expect(hitTest(specs, [c[0] + 11, c[1]], frame, null)).toEqual({ id: 'o', part: null });
-    expect(hitTest(specs, [c[0] + 40, c[1] - 15], frame, null)).toEqual({ id: 'o', part: null }); // 标签上
-    expect(hitTest(specs, [c[0] - 40, c[1] + 15], frame, null)).toBeNull(); // 左下空白
+    expect(hitTest(specs, [c[0] + 11, c[1]], frame, null, shapeLabelBox)).toEqual({ id: 'o', part: null });
+    // 标签默认在点的右上方(ne)
+    expect(hitTest(specs, [c[0] + 40, c[1] - 18], frame, null, shapeLabelBox)).toEqual({ id: 'o', part: 'label' });
+    expect(hitTest(specs, [c[0] - 40, c[1] + 15], frame, null, shapeLabelBox)).toBeNull();
+  });
+
+  it('标签拖开后,命中跟着新位置走', () => {
+    const moved: ShapeEntry = { ...base, id: 'o', kind: 'point', at: ['5', '5'], text: 'Mathville', labelOffset: [0, 60] };
+    const { specs } = compileShapes([moved], evalScalar, []);
+    const c = dataToPx([5, 5], frame);
+    expect(hitTest(specs, [c[0] + 40, c[1] - 18], frame, null, shapeLabelBox)).toBeNull();
+    expect(hitTest(specs, [c[0] + 40, c[1] + 42], frame, null, shapeLabelBox)).toEqual({ id: 'o', part: 'label' });
   });
 });

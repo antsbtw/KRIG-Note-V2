@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   cardinalOf, tickPositions, leftNormal, formatTickValue, MAX_TICKS,
+  screenUnit, labelShiftPx, labelLayout, shapeLabelBox,
 } from '@capabilities/math-rendering/compute/shape-geometry';
 import { evalScalar } from '@capabilities/math-rendering/compute/evaluator';
 
@@ -69,5 +70,35 @@ describe('evalScalar', () => {
     expect(evalScalar('', []).value).toBeNull();
     expect(evalScalar('1/0', []).value).toBeNull();
     expect(evalScalar('[1,2]', []).value).toBeNull();
+  });
+});
+
+describe('标签布局(渲染与命中共用)', () => {
+  // 用户截图:箭头朝北时标签压在箭头上 —— Mafs Text attach 的上下偏移是反的,改为自己算
+  it('屏幕方向:北是向上(y 减小),东北是右上', () => {
+    expect(screenUnit('n')).toEqual([0, -1]);
+    const ne = screenUnit('ne');
+    expect(ne[0]).toBeGreaterThan(0);
+    expect(ne[1]).toBeLessThan(0);
+    expect(screenUnit(null)).toEqual([0, 0]);
+  });
+
+  it('朝北箭头的标签整个在箭头尖上方,不压箭头', () => {
+    const spec = { kind: 'arrow' as const, id: 'a', color: '#000', from: [0, 0] as [number, number], to: [0, 24] as [number, number], label: 'Andy 8 mi/h' };
+    const toPx = (p: [number, number]): [number, number] => [100 + p[0] * 10, 400 - p[1] * 10];
+    const tip = toPx([0, 24]);
+    const box = shapeLabelBox(spec, toPx)!;
+    expect(box.y1).toBeLessThan(tip[1]);
+    expect(labelLayout(spec)?.dir).toBe('n');
+  });
+
+  it('用户拖动偏移叠加在默认偏移上', () => {
+    const layout = { at: [0, 0] as [number, number], dir: 'n' as const, distance: 16, size: 15, text: 'x' };
+    expect(labelShiftPx(layout)).toEqual([0, -16]);
+    expect(labelShiftPx(layout, [5, 30])).toEqual([5, 14]);
+  });
+
+  it('文字对象没有标签布局', () => {
+    expect(labelLayout({ kind: 'text', id: 't', color: '#000', at: [0, 0], text: 'hi' })).toBeNull();
   });
 });

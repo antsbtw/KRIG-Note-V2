@@ -265,6 +265,8 @@ interface ShapeSpecBase {
   color: string;
   /** 0~1;虚影用低不透明度表达 */
   opacity?: number;
+  /** 标签被用户拖开的偏移(屏幕像素,相对默认位置) */
+  labelOffset?: [number, number];
 }
 
 export interface PointShapeSpec extends ShapeSpecBase {
@@ -420,6 +422,14 @@ export interface MathRenderingApi {
     params: MathParameter[],
     sourceLatex?: string,
   ): EvalResult;
+  /**
+   * 几何对象标签在屏幕上的大致框(命中 / 拖动标签用);与 ShapeLayer 画标签共用同一套布局。
+   * toPx:数据坐标 → 画布像素。没有标签返回 null。
+   */
+  shapeLabelBox(
+    spec: ShapeSpec,
+    toPx: (p: [number, number]) => [number, number],
+  ): { x0: number; y0: number; x1: number; y1: number } | null;
   /** 常量表达式求值(可引用参数,如 "8*T");几何对象坐标用 */
   evalScalar(expression: string, params: MathParameter[]): ScalarResult;
   /** 提取表达式中的 free symbols(参数名;独立变量 x/t/theta 与内置函数排除) */
