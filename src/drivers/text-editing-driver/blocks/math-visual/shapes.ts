@@ -565,3 +565,19 @@ export function plainTextOfNote(doc: NoteDoc | undefined): string {
   (doc?.payload?.content ?? []).forEach(walk);
   return lines.join('\n').trim();
 }
+
+// ─── 列表摘要 ─────────────────────────────────────────
+
+/** 列表里一行的摘要(左栏列表 / 右栏多选列表共用) */
+export function shapeSummary(s: ShapeEntry): string {
+  const p = (c?: [string, string]) => (c ? `(${c[0]}, ${c[1]})` : '(?)');
+  switch (s.kind) {
+    case 'point': return `${s.text ? s.text + ' ' : ''}${p(s.at)}`;
+    case 'text': return `「${s.text ?? ''}」${p(s.at)}`;
+    case 'segment':
+    case 'arrow': return `${s.text ? s.text + ' ' : ''}${p(s.from)} → ${p(s.to)}`;
+    case 'circle': return `${s.text ? s.text + ' ' : ''}圆心 ${p(s.center)} r=${s.radius ?? '?'}`;
+    case 'polygon': return `${s.text ? s.text + ' ' : ''}${s.points?.length ?? 0} 个顶点`;
+  }
+}
+

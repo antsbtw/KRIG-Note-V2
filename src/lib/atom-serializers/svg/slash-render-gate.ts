@@ -121,3 +121,33 @@ export {
   SLASH_INSERT_COMMAND_TO_ATOM_TYPE,
   GRAPH_SLASH_DENY_ATOM_TYPES,
 };
+
+// ─── ⋮⋮ 手柄菜单「转换为…」同一道闸(2026-11-06,math-visual 说明卡片开了块手柄) ───
+// 手柄的 turn-into 命令与 slash 一一对应:text-editing.handle-turn-X ↔ text-editing.slash-turn-X,
+// 落地的块相同 → 复用上面的映射表,不另起一张(防两张表漂移)。
+
+const HANDLE_TURN_PREFIX = 'text-editing.handle-turn-';
+const SLASH_TURN_PREFIX = 'text-editing.slash-turn-';
+
+/** 手柄菜单项能不能放出:非 turn-into(复制 / 删除 / 颜色 / 容器…)放行;turn-into 按目标块判 */
+export function isHandleItemRenderable(
+  item: { command: string },
+  deny: ReadonlySet<string> = GRAPH_SLASH_DENY_ATOM_TYPES,
+): boolean {
+  if (!item.command.startsWith(HANDLE_TURN_PREFIX)) return true;
+  const slashCmd = SLASH_TURN_PREFIX + item.command.slice(HANDLE_TURN_PREFIX.length);
+  const atomType = SLASH_TURN_COMMAND_TO_ATOM_TYPE[slashCmd];
+  if (atomType === undefined) {
+    // fail loud:新加了手柄 turn-into 却没在映射表登记 → 不放行(宁可少一项,不放功能黑洞)
+    console.warn(`[slash-render-gate] 手柄命令 ${item.command} 没有对应的 slash 映射,已拦下`);
+    return false;
+  }
+  return RENDERABLE_ATOM_TYPES.has(atomType) && !deny.has(atomType);
+}
+
+export function filterHandleItemsToRenderable<T extends { command: string }>(
+  items: T[],
+  deny: ReadonlySet<string> = GRAPH_SLASH_DENY_ATOM_TYPES,
+): T[] {
+  return items.filter((it) => isHandleItemRenderable(it, deny));
+}

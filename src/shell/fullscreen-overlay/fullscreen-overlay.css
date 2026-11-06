@@ -31,3 +31,18 @@
   /* 字体栈对齐 V2 其他基础 UI */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
+
+/* 全屏期间交互浮层挂在本层里(InteractionOverlayBindings,2026-11-06)。
+ * 业务全屏面板自己常带 position:fixed + 高 z-index(如 math-visual 9999、其卡片编辑浮层 10000),
+ * 浮层原本 1000~2000 会被压在面板下面 —— 在全屏层里一律排到最上面。 */
+.krig-fullscreen-overlay .krig-context-menu,
+.krig-fullscreen-overlay .krig-slash-menu,
+.krig-fullscreen-overlay .krig-handle-menu,
+.krig-fullscreen-overlay .krig-floating-toolbar,
+.krig-fullscreen-overlay .krig-handle-submenu,
+.krig-fullscreen-overlay .krig-context-submenu,
+.krig-fullscreen-overlay .krig-overlay-backdrop,
+.krig-fullscreen-overlay .krig-toolbar-dropdown-menu,
+.krig-fullscreen-overlay .krig-popup {
+  z-index: 20000;
+}

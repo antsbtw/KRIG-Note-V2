@@ -20,6 +20,7 @@ import { useEffect, useState } from 'react';
 import { fullscreenOverlayController } from '@slot/triggers/fullscreen-overlay-controller';
 import { fullscreenOverlayRegistry } from '@slot/interaction-registries/fullscreen-overlay-registry/registry';
 import { useFullscreenOverlayVersion } from '@slot/frame-bindings/use-registry';
+import { InteractionOverlayBindings } from '@slot/frame-bindings/InteractionOverlayBindings';
 
 export function FullscreenOverlayBinding() {
   useFullscreenOverlayVersion();
@@ -56,6 +57,8 @@ export function FullscreenOverlayBinding() {
   return (
     <div className="krig-fullscreen-overlay" role="dialog" aria-modal="true">
       <Component onClose={handleClose} />
+      {/* 全屏期间交互浮层挂这里(workspace 层已 display:none);Workspace 那组此时不渲染 */}
+      <InteractionOverlayBindings />
     </div>
   );
 }

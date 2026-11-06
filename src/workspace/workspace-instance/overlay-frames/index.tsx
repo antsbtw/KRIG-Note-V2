@@ -11,6 +11,7 @@ import { FloatingToolbarFrame } from './FloatingToolbarFrame';
 import { GenericOverlayFrame } from './GenericOverlayFrame';
 import { PopupFrame } from './PopupFrame';
 import { HelpPanelFrame } from './HelpPanelFrame';
+import { useFullscreenOverlayActive } from '@slot/frame-bindings/InteractionOverlayBindings';
 
 interface OverlayFramesProps {
   /** 当前活跃 view ID(传给 OverlayBinding 用于过滤 view-specific overlay)*/
@@ -18,6 +19,17 @@ interface OverlayFramesProps {
 }
 
 export function OverlayFrames({ viewId }: OverlayFramesProps) {
+  // 全屏覆盖层打开时,交互浮层组改由全屏层挂(本层此时 display:none,挂了也看不见);
+  // 这里同时不挂,保证任何时刻只有一套(见 InteractionOverlayBindings 注释)
+  const fullscreenActive = useFullscreenOverlayActive();
+  if (fullscreenActive) {
+    return (
+      <>
+        <HelpPanelFrame />
+        <GenericOverlayFrame viewId={viewId} />
+      </>
+    );
+  }
   return (
     <>
       <ContextMenuFrame />

@@ -5,10 +5,12 @@
  *
  * - 编辑器 = text-editing.Host(与 note / 画板文字节点同一个),不复用 canvas-text-node 的
  *   EditOverlay:那是全局单例浮层,画板视图也挂着,同窗口开着画板会弹出两个编辑框。
- * - 菜单用自己的 viewId 注册(菜单内容按 viewId 注册,不注册 → 敲 / 弹空菜单);
- *   斜杠项过「编辑能插 ⊆ 渲染能渲」闸(与画板共用 lib/atom-serializers/svg/slash-render-gate)。
- * - 斜杠菜单 / 浮动工具条的层级(1000~2000)低于全屏面板(9999),编辑期间给 body 加
- *   mv-card-editing 类把它们抬上来(样式在 pm-host.css),退出即撤。
+ * - 菜单用自己的 viewId 注册完整一套(照 diglot 语义面 mind-semantic-menus.ts):斜杠 / ⋮⋮ 手柄 /
+ *   浮动工具条。菜单内容按 viewId 注册,不注册 → 敲 / 弹空菜单、点手柄弹空菜单。
+ *   斜杠项与手柄「转换为…」都过「编辑能插 ⊆ 渲染能渲」闸(与画板共用 lib/atom-serializers/svg/
+ *   slash-render-gate):卡片是 atomsToSvg 画出来的,插了画不出的块会变灰字 / 丢内容。
+ * - 全屏期间斜杠菜单等浮层由 FullscreenOverlayBinding 挂(shell 层,2026-11-06 修:原先挂在
+ *   workspace 里,全屏时整层 display:none,菜单根本出不来)。
  * - doc 只在打开时给一次(useState 初值):Host 内 useEffect[doc] 引用一变就重建,
  *   每次渲染现造 doc = 光标跳回开头(记忆:嵌 note 编辑器三坑)。
  *
@@ -19,20 +21,28 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import { slashRegistry } from '@slot/interaction-registries/slash-registry/slash-registry';
 import { floatingToolbarRegistry } from '@slot/interaction-registries/floating-toolbar-registry/floating-toolbar-registry';
+import { handleRegistry } from '@slot/interaction-registries/handle-registry/handle-registry';
 import type { TextEditingApi, DriverSerialized } from '@capabilities/text-editing/types';
-import { filterSlashItemsToRenderable } from '../../../../../lib/atom-serializers/svg/slash-render-gate';
+import {
+  filterSlashItemsToRenderable,
+  filterHandleItemsToRenderable,
+} from '../../../../../lib/atom-serializers/svg/slash-render-gate';
 import type { TextEditingPluginToggles } from '../../../types';
 import type { NoteDoc } from '../types';
 
 export const MV_CARD_VIEW_ID = 'math-visual-card';
 
-/** 卡片 = 一小段内容:关掉 note 段落级能力(拖动手柄 / 词汇高亮 / 双链 / 粘贴图片 / 拖入光标) */
+/**
+ * 卡片编辑 = note 编辑(用户 2026-11-06:「没有 block、没有 slash 的格式化能力不行」)。
+ * 只关掉在卡片里落不了地的:词汇高亮(学习专属)、[[ 双链(知识图谱专属)、粘贴图片(渲染器画不了图片)、
+ * 标题折叠(卡片是静态图,点不了三角)。
+ */
 const CARD_PLUGIN_PRESET: TextEditingPluginToggles = {
-  blockHandle: false,
+  blockHandle: true,
   vocabHighlight: false,
   noteLinkCommand: false,
   pasteMedia: false,
-  dropCursor: false,
+  dropCursor: true,
   slash: true,
   headingCollapse: false,
   bottomPad: true,
@@ -54,6 +64,16 @@ function ensureCardMenus(api: TextEditingApi): void {
     filterSlashItemsToRenderable([
       ...ui.slashMenu.createTurnIntoItems(MV_CARD_VIEW_ID),
       ui.slashMenu.createMathBlockItem(MV_CARD_VIEW_ID),
+    ]),
+  );
+  // ⋮⋮ 手柄:转换 / 颜色 / 格式 / 复制·删除块(不注册标题折叠:卡片是静态图)
+  handleRegistry.register(
+    filterHandleItemsToRenderable([
+      ui.handleMenu.createTurnIntoContainer(MV_CARD_VIEW_ID),
+      ui.handleMenu.createColorContainer(MV_CARD_VIEW_ID),
+      ui.handleMenu.createFormatContainer(MV_CARD_VIEW_ID),
+      ...ui.handleMenu.createTurnIntoSubmenu(MV_CARD_VIEW_ID),
+      ...ui.handleMenu.createBlockActions(MV_CARD_VIEW_ID),
     ]),
   );
 }
@@ -89,12 +109,6 @@ export const NoteCardEditor: React.FC<NoteCardEditorProps> = ({
     exitedRef.current = true;
     onExit(commit ? latestRef.current : null);
   }, [onExit]);
-
-  // 编辑期间把斜杠菜单 / 浮动工具条抬到全屏面板之上
-  useEffect(() => {
-    document.body.classList.add('mv-card-editing');
-    return () => document.body.classList.remove('mv-card-editing');
-  }, []);
 
   // Esc / ⌘↩(capture 阶段,先于 PM keymap)
   useEffect(() => {
@@ -142,9 +156,10 @@ export const NoteCardEditor: React.FC<NoteCardEditorProps> = ({
     >
       <div
         ref={popupRef}
+        className="mv-card-editor-popup"
         style={{
-          position: 'fixed', left, top, width: Math.max(width, 160), minHeight,
-          boxSizing: 'border-box', padding: '6px 10px',
+          position: 'fixed', left: left - 24, top, width: Math.max(width, 160) + 24, minHeight,
+          boxSizing: 'border-box', padding: '6px 10px 6px 0',
           background: 'rgba(36, 36, 36, 0.98)', color: '#e0e0e0',
           border: '1px solid #4a90e2', borderRadius: 8,
           boxShadow: '0 6px 20px rgba(0, 0, 0, 0.55)',

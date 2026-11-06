@@ -7,7 +7,7 @@
 
 import React from 'react';
 import type { ShapeEntry, ShapeKind, ToolMode } from '../../types';
-import { SHAPE_KINDS, shapeKindMeta } from '../../shapes';
+import { SHAPE_KINDS, shapeKindMeta, shapeSummary } from '../../shapes';
 
 interface ShapeSectionProps {
   shapes: ShapeEntry[];
@@ -20,19 +20,6 @@ interface ShapeSectionProps {
   onSelectShape: (id: string, additive: boolean) => void;
   onRemoveShape: (id: string) => void;
   onContextMenu: (id: string, x: number, y: number) => void;
-}
-
-/** 列表里一行的摘要(左栏列表 / 右栏多选列表共用) */
-export function shapeSummary(s: ShapeEntry): string {
-  const p = (c?: [string, string]) => (c ? `(${c[0]}, ${c[1]})` : '(?)');
-  switch (s.kind) {
-    case 'point': return `${s.text ? s.text + ' ' : ''}${p(s.at)}`;
-    case 'text': return `「${s.text ?? ''}」${p(s.at)}`;
-    case 'segment':
-    case 'arrow': return `${s.text ? s.text + ' ' : ''}${p(s.from)} → ${p(s.to)}`;
-    case 'circle': return `${s.text ? s.text + ' ' : ''}圆心 ${p(s.center)} r=${s.radius ?? '?'}`;
-    case 'polygon': return `${s.text ? s.text + ' ' : ''}${s.points?.length ?? 0} 个顶点`;
-  }
 }
 
 export const ShapeSection: React.FC<ShapeSectionProps> = ({

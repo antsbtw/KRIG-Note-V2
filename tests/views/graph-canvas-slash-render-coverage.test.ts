@@ -92,3 +92,25 @@ describe('共用渲染态闸:deny 参数', () => {
     expect(gate.isSlashItemRenderable(toggle, new Set())).toBe(true);
   });
 });
+
+// 2026-11-06:math-visual 说明卡片开了 ⋮⋮ 手柄,手柄「转换为…」走同一张映射表
+describe('共用渲染态闸:手柄菜单', () => {
+  it('每个手柄 turn-into 命令都能在 slash 映射表里找到对应(否则会被拦下)', async () => {
+    const gate = await import('../../src/lib/atom-serializers/svg/slash-render-gate');
+    const { createTurnIntoSubmenu } = await import('../../src/capabilities/text-editing/ui/handle-menu/items');
+    const items = createTurnIntoSubmenu('t');
+    expect(items.length).toBeGreaterThan(5);
+    for (const it of items) {
+      const slashCmd = it.command.replace('text-editing.handle-turn-', 'text-editing.slash-turn-');
+      expect(gate.SLASH_TURN_COMMAND_TO_ATOM_TYPE[slashCmd], `${it.command} 没有对应 slash 映射`).toBeDefined();
+    }
+  });
+
+  it('画得出的放行、折叠列表被屏蔽、非 turn-into 放行、未登记的 turn-into 拦下', async () => {
+    const gate = await import('../../src/lib/atom-serializers/svg/slash-render-gate');
+    expect(gate.isHandleItemRenderable({ command: 'text-editing.handle-turn-bullet' })).toBe(true);
+    expect(gate.isHandleItemRenderable({ command: 'text-editing.handle-turn-toggle' })).toBe(false);
+    expect(gate.isHandleItemRenderable({ command: 'text-editing.handle-copy-block' })).toBe(true);
+    expect(gate.isHandleItemRenderable({ command: 'text-editing.handle-turn-nonexistent' })).toBe(false);
+  });
+});

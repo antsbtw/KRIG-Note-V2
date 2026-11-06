@@ -4578,17 +4578,26 @@
   display: none !important;
 }
 
-/* math-visual 说明卡片编辑中(2026-11-06):全屏面板 z-index 9999,而斜杠菜单 / 浮动工具条 /
- * 右键 / 手柄菜单 / 工具条下拉 / popup 都在 1000~2000,会被挡在后面看不见。
- * 只在卡片编辑期间(NoteCardEditor 给 body 加 mv-card-editing)抬到编辑浮层(10000)之上。 */
-body.mv-card-editing .krig-slash-menu,
-body.mv-card-editing .krig-floating-toolbar,
-body.mv-card-editing .krig-context-menu,
-body.mv-card-editing .krig-handle-menu,
-body.mv-card-editing .krig-handle-submenu,
-body.mv-card-editing .krig-context-submenu,
-body.mv-card-editing .krig-overlay-backdrop,
-body.mv-card-editing .krig-toolbar-dropdown-menu,
-body.mv-card-editing .krig-popup {
-  z-index: 10010 !important;
+
+/* math-visual 说明卡片编辑浮层(2026-11-06):.krig-pm-host 是给整页 note 设计的
+ * (左 48px 手柄槽 / min-height 200 / H1 38px),塞进小卡片会撑成一大块。
+ * 收紧成卡片尺寸,左边留 24px 给 ⋮⋮ 块手柄;字号与卡片显示(atomsToSvg 基准 16)接近。 */
+.mv-card-editor-popup .krig-pm-host {
+  height: auto;
+  min-height: 0;
+  background: transparent;
+  overflow: visible;
 }
+.mv-card-editor-popup .krig-pm-host .ProseMirror {
+  padding: 0 0 0 24px !important;
+  min-height: 0 !important;
+  font-size: 15px !important;
+  line-height: 1.55 !important;
+}
+.mv-card-editor-popup .krig-pm-host .ProseMirror > * {
+  margin-top: 0 !important;
+  margin-bottom: 2px !important;
+}
+.mv-card-editor-popup .krig-pm-host .ProseMirror h1 { font-size: 22px !important; }
+.mv-card-editor-popup .krig-pm-host .ProseMirror h2 { font-size: 18px !important; }
+.mv-card-editor-popup .krig-pm-host .ProseMirror h3 { font-size: 16px !important; }
