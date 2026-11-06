@@ -1,11 +1,11 @@
 /**
  * math-visual 说明卡片(2026-11-06)
+
+ * 纯文字 ↔ doc 的互转已搬到 note-card 公共组件,测试见 tests/capabilities/note-card.test.ts。
  * 用户:「标签应该允许多行,最好能表达 note 中的各种 block 格式……文字、公式、列表、图形,它们是互相转换的。」
  */
 import { describe, it, expect } from 'vitest';
-import {
-  noteContent, noteDocFromText, plainTextOfNote, compileShapes,
-} from '@drivers/text-editing-driver/blocks/math-visual/shapes';
+import { compileShapes } from '@drivers/text-editing-driver/blocks/math-visual/shapes';
 import type { NoteDoc, ShapeEntry } from '@drivers/text-editing-driver/blocks/math-visual/types';
 import { evalScalar } from '@capabilities/math-rendering/compute/evaluator';
 import {
@@ -35,25 +35,7 @@ const DOC: NoteDoc = {
   },
 };
 
-describe('纯文字 ↔ 卡片内容', () => {
-  it('纯文字 → doc:一行一段,带 version,首段不是标题', () => {
-    const d = noteDocFromText('甲\n乙');
-    expect(d.version).toBe('0.1'); // 缺 version 编辑器静默空白(记忆:嵌 note 编辑器三坑)
-    expect(d.payload.content).toHaveLength(2);
-    expect(d.payload.content[0].attrs).toEqual({ isTitle: false });
-    expect(plainTextOfNote(d)).toBe('甲\n乙');
-  });
-
-  it('doc → 纯文字:列表逐行、行内公式取 LaTeX', () => {
-    expect(plainTextOfNote(DOC)).toBe('Andy 已知\n1:30 出发,向北\n路程 d=8t');
-  });
-
-  it('只有一个空段落 = 没有卡片(退回单行显示)', () => {
-    expect(noteContent(noteDocFromText(''))).toBeNull();
-    expect(noteContent(undefined)).toBeNull();
-    expect(noteContent(DOC)).toHaveLength(2);
-  });
-
+describe('math-visual 用卡片内容', () => {
   it('编译时把卡片内容交给渲染;文字对象有卡片就不算「内容是空的」', () => {
     const shapes: ShapeEntry[] = [
       { ...base, id: 'a', kind: 'arrow', from: ['0', '0'], to: ['0', '24'], note: DOC, noteWidth: 260 },

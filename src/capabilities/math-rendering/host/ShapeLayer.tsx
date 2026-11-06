@@ -14,7 +14,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Point, Line, Vector, Circle, Text, Polygon, useTransformContext, vec } from 'mafs';
-import { atomsToSvg } from '../../../lib/atom-serializers/svg';
+import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
+import type { NoteCardApi, NoteNode } from '@capabilities/note-card/types';
 import type { ShapeSpec, LineShapeSpec } from '../types';
 import {
   cardinalOf, tickPositions, leftNormal, formatTickValue,
@@ -59,7 +60,7 @@ function PlacedText({
 }
 
 /**
- * 说明卡片:note 块 → atomsToSvg(文字转路径的独立 SVG)→ 嵌进 Mafs 这张 SVG。
+ * 说明卡片:note 块 → note-card 公共组件 renderSvg(文字转路径的独立 SVG)→ 嵌进 Mafs 这张 SVG。
  * 同一张图里,所以退出全屏导出的缩略图自带卡片。
  * 画好后登记实际尺寸(setCardSize),命中测试按它算。
  */
@@ -72,12 +73,10 @@ function NoteCard({ s, layout, selected }: { s: ShapeSpec; layout: LabelLayout; 
   useEffect(() => {
     if (!note || note.length === 0) { setCard(null); return; }
     let cancelled = false;
-    atomsToSvg(note, { width, defaultTextColor: s.color })
-      .then((svg) => {
+    requireCapabilityApi<NoteCardApi>('note-card')
+      .renderSvg(note as NoteNode[], { width, color: s.color })
+      .then(({ svg, width: w, height: h }) => {
         if (cancelled) return;
-        const m = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg);
-        const w = m ? Number(m[1]) : width;
-        const h = m ? Number(m[2]) : 24;
         setCardSize(s.id, w, h);
         setCard({ svg, w, h });
       })

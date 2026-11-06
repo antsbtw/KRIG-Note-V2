@@ -60,6 +60,7 @@ import '@capabilities/code-editing';        // Phase 1A 新增(CM6 单点屏障,
 import '@capabilities/graph-layout';        // Phase 1B 新增(ELK 单点屏障,封装 elkjs + @mermaid-js/layout-elk;mermaid + 未来画板/BPMN/Mind/知识图谱共用)
 import '@capabilities/diglot-model';        // diglot mind v0(语义⇄图形双向同步内核;纯逻辑层,零 UI/渲染/IPC)
 import '@capabilities/math-rendering';      // math-visual Phase 1A 新增(Mafs + mathjs + @cortex-js/compute-engine 单点屏障)
+import '@capabilities/note-card';           // 2026-11-06:note 卡片公共组件(编辑 = 画板编辑浮层;math-visual 说明卡片先用)
 import '@capabilities/note';                // L7-sub2 新增(note CRUD via IPC bridge,decision 012)
 import '@capabilities/folder';              // L7-sub2 新增(folder CRUD via IPC bridge,decision 012)
 import '@capabilities/thought';             // 横切思考层(thought-view-port.md v0.5)

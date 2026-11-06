@@ -40,13 +40,13 @@ import { LegendOverlay } from './LegendOverlay';
 import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
 import { ShapeContextMenu, type ContextMenuEntry } from './ShapeContextMenu';
 import { EditHistory } from '../edit-history';
-import { NoteCardEditor } from './NoteCardEditor';
+import { ensureMathVisualCardMenus, MV_CARD_VIEW_ID } from './card-menus';
+import type { NoteCardApi } from '@capabilities/note-card/types';
 import {
   compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
   zoomView, panView, boundsOfShapes, MAFS_VIEWBOX_PADDING,
   hitTest, shapeHandles, translateShape, setHandle, duplicateShape, dataToPx, POLYGON_MIN_POINTS,
   shapesInRect, reorderShapes, type LayerOp,
-  noteContent, noteDocFromText, plainTextOfNote,
   type Vec2, type View, type PxFrame, type HandlePart,
 } from '../shapes';
 import type { ShapeSpec } from '@capabilities/math-rendering/types';
@@ -670,7 +670,10 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   // ── 说明卡片原地编辑(2026-11-06 用户选 A:画布上双击卡片原地编辑)──
   const [cardEdit, setCardEdit] = useState<{
     shapeId: string; initialDoc: NoteDoc; left: number; top: number; width: number; minHeight: number;
+    sessionKey: string;
   } | null>(null);
+  // 卡片的内容格式 / 编辑器 / 菜单项都来自 note-card 公共组件(编辑 = 画板编辑浮层)
+  const noteCard = useMemo(() => requireCapabilityApi<NoteCardApi>('note-card'), []);
 
   const openCardEditor = useCallback((id: string) => {
     const entry = shapes.find((sh) => sh.id === id);
@@ -686,23 +689,24 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const top = frame.rect.top + (box ? box.y0 : frame.height / 2);
     setCardEdit({
       shapeId: id,
-      initialDoc: entry.note ?? noteDocFromText(entry.text),
+      initialDoc: entry.note ?? noteCard.fromPlainText(entry.text),
+      sessionKey: `${id}::${Date.now()}`,
       left: Math.min(Math.max(left, 8), window.innerWidth - width - 8),
       top: Math.min(Math.max(top, 30), window.innerHeight - 80),
       width,
       minHeight: box ? Math.max(box.y1 - box.y0, 32) : 32,
     });
-  }, [shapes, getFrame, compiledShapes, math]);
+  }, [shapes, getFrame, compiledShapes, math, noteCard]);
 
   const finishCardEdit = useCallback((doc: NoteDoc | null) => {
     const ed = cardEdit;
     setCardEdit(null);
     if (!ed || !doc) return;
     // 空内容 → 去掉卡片;否则存 note,text 同步纯文字(列表摘要 / 旧路径用)
-    updateShape(ed.shapeId, noteContent(doc)
-      ? { note: doc, text: plainTextOfNote(doc) }
+    updateShape(ed.shapeId, noteCard.contentOf(doc)
+      ? { note: doc, text: noteCard.toPlainText(doc) }
       : { note: undefined, text: '' });
-  }, [cardEdit, updateShape]);
+  }, [cardEdit, updateShape, noteCard]);
 
   // ── 右键菜单(2026-11-06 用户:「复制删除用右键菜单好了」)──
   const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
@@ -1035,7 +1039,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       if (tag === 'INPUT' || tag === 'TEXTAREA') return; // 输入框里的 ⌘Z 归输入框自己
       // 卡片编辑器里打字:按键全归编辑器(否则 Backspace 会删掉选中的图形)
       const tgt = e.target as HTMLElement | null;
-      if (tgt?.isContentEditable || tgt?.closest?.('[data-mv-card-editor]')) return;
+      if (tgt?.isContentEditable || tgt?.closest?.('[data-note-card-editor]')) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         e.stopPropagation();
@@ -1308,18 +1312,20 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
         />
       </div>
 
-      {cardEdit && (
-        <NoteCardEditor
-          key={cardEdit.shapeId}
-          shapeId={cardEdit.shapeId}
-          initialDoc={cardEdit.initialDoc}
-          left={cardEdit.left}
-          top={cardEdit.top}
-          width={cardEdit.width}
-          minHeight={cardEdit.minHeight}
-          onExit={finishCardEdit}
-        />
-      )}
+      {cardEdit && (() => {
+        ensureMathVisualCardMenus();
+        const CardEditor = noteCard.Editor;
+        return (
+          <CardEditor
+            key={cardEdit.sessionKey}
+            doc={cardEdit.initialDoc}
+            rect={{ left: cardEdit.left, top: cardEdit.top, width: cardEdit.width, minHeight: cardEdit.minHeight }}
+            viewId={MV_CARD_VIEW_ID}
+            sessionKey={cardEdit.sessionKey}
+            onExit={finishCardEdit}
+          />
+        );
+      })()}
 
       {shapeMenu && selectedShapeIds.length > 0 && (
         <ShapeContextMenu

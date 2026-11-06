@@ -8,6 +8,8 @@
  * 渲染类型 (Curve / MathHostProps 等) 来自 capability `@capabilities/math-rendering`。
  */
 
+import type { NoteDoc } from '@capabilities/note-card/types';
+
 /** 函数绘图类型 */
 export type PlotType = 'y-of-x' | 'vertical-line' | 'parametric' | 'polar' | 'implicit';
 
@@ -156,21 +158,8 @@ export type ToolMode = 'move' | 'select' | 'annotate' | 'tangent' | 'normal' | '
 
 // ─── 几何对象(题意图 P1,2026-11-06) ───────────────────────
 
-/** note doc 信封(与 text-editing Host 的 DriverSerialized 同形;version 必填,缺了编辑器静默空白) */
-export interface NoteDoc {
-  format: 'pm-doc-json';
-  version: '0.1';
-  payload: { type: 'doc'; content: NoteNode[] };
-}
-
-/** PM JSON 节点(只声明用到的最小结构) */
-export interface NoteNode {
-  type: string;
-  attrs?: Record<string, unknown>;
-  content?: NoteNode[];
-  text?: string;
-  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
-}
+/** 说明卡片的内容格式 = note-card 公共组件的(2026-11-06 抽出,见 docs/10-business-design/note/note-card-公共组件设计.md) */
+export type { NoteDoc, NoteNode } from '@capabilities/note-card/types';
 // 设计稿:docs/10-business-design/math/题意图-几何对象与分帧设计.md §3.1
 
 export type ShapeKind = 'point' | 'segment' | 'arrow' | 'circle' | 'text' | 'polygon';
