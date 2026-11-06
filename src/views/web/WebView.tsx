@@ -45,6 +45,8 @@ import {
 import { recordVisit } from './web-history';
 import { getWebSettings, initWebSettings } from './web-settings-cache';
 import { WebToolbar } from './WebToolbar';
+import { popupController } from '@slot/triggers/popup-controller';
+import { SLOT_PICKER_POPUP_ID, slotPickerContext } from '@shell/slot-picker';
 import { WebSettingsPanel } from './WebSettingsPanel';
 import { WebTabBar } from './WebTabBar';
 import { WebFindBar } from './WebFindBar';
@@ -547,6 +549,10 @@ export function WebView({ workspaceId, slot = 'left' }: WebViewProps) {
         urlInputRef={urlInputRef}
         onClose={handleClose}
         onOpenSettings={() => setSettingsOpen((v) => !v)}
+        onOpenSlotPicker={(anchor) => {
+          slotPickerContext.setCommandId('web-view.open-right-slot');
+          popupController.toggle(SLOT_PICKER_POPUP_ID, anchor);
+        }}
       />
       <WebSettingsPanel
         workspaceId={workspaceId}

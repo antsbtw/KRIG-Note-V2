@@ -631,6 +631,8 @@ declare global {
       // ── 网页剪藏(Defuddle → Note)──
       /** 订阅 main 推送的整页提取结果(FullPageResult | null);content-extraction 门面消费 */
       onWebClipResult(callback: (payload: unknown) => void): () => void;
+      /** 订阅网页正文截图结果(右键「📸 截图正文到笔记」)*/
+      onWebShotResult(callback: (payload: unknown) => void): () => void;
 
       // ── Phase 4 Commit 2:web view 快捷键整层 + 弹窗导流 ──
       /** 订阅 main 推送的 web 快捷键(webview 焦点下 before-input-event 拦截后回推)*/
