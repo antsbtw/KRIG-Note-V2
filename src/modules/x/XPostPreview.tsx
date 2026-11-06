@@ -73,7 +73,17 @@ const btnMain = { ...btn, background: '#1d9bf0', borderColor: 'transparent', col
 function MediaCell({ m }: { m: PostMedia }) {
   const cell = { background: 'var(--bg-card)', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 0 } as const;
   if (m.kind === 'image') return <div style={cell}><img src={m.src} alt={m.alt} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /></div>;
-  if (m.kind === 'video') return <div style={cell}>🎬 视频</div>;
+  if (m.kind === 'video') {
+    /** 媒体库里的视频显示第一帧;下载下来的(绝对路径)渲染进程读不到,只写名字 */
+    return (
+      <div style={{ ...cell, position: 'relative' }}>
+        {m.src.startsWith('media://')
+          ? <video src={m.src} preload="metadata" muted style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          : <span style={{ fontSize: 11, padding: 6 }}>{m.src.split('/').pop()}</span>}
+        <span style={{ position: 'absolute', left: 6, bottom: 6, fontSize: 11, background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 4, padding: '1px 5px' }}>🎬 视频</span>
+      </div>
+    );
+  }
   return (
     <div style={{ ...cell, flexDirection: 'column', padding: 6, fontSize: 11, color: m.error ? '#e5484d' : 'var(--text)' }} title={m.error ?? m.source}>
       <div>{RENDER_NAME[m.what] ?? m.what} {m.error ? '没转成图' : '→ 图(转换中…)'}</div>
