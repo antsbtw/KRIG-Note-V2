@@ -17,6 +17,9 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { captureFullPage } from './capture';
 import { cacheClipResult } from './clip-cache';
 import { resolveBlobVideos } from './blob-video';
+import { expandLinkedAnswers } from './linked-answers/expand';
+import type { LinkedAnswerRule } from './linked-answers/rules';
+import type { FullPageResult } from './types';
 
 /**
  * 右键菜单「📥 提取到笔记」click 回调:抓当前 guest 页面 → 推回 renderer。
@@ -30,7 +33,33 @@ export async function clipPageToRenderer(
   mainWindow: BrowserWindow,
   guest: WebContents,
 ): Promise<void> {
+  await sendClip(mainWindow, await captureFullPage(guest));
+}
+
+/**
+ * 右键「📥 提取题目 + 解答到笔记」:先照常提取题目页,再逐题抓解答页(见 linked-answers/)。
+ * 题目页本身提取失败 → 和普通提取一样推 null;个别题解答抓不到 → 照样出笔记,失败写在那题的折叠块里。
+ */
+export async function clipPageWithAnswersToRenderer(
+  mainWindow: BrowserWindow,
+  guest: WebContents,
+  rule: LinkedAnswerRule,
+): Promise<void> {
   const raw = await captureFullPage(guest);
+  let result = raw;
+  if (raw) {
+    try {
+      result = await expandLinkedAnswers(guest, raw, rule);
+    } catch (err) {
+      // 编排本身不该抛(逐题都有 catch);真抛了就只出题目,并让笔记里写明解答没抓
+      console.error('[linked-answers] 展开解答出错,笔记里只有题目:', err);
+      result = { ...raw, linkedAnswers: [] };
+    }
+  }
+  await sendClip(mainWindow, result);
+}
+
+async function sendClip(mainWindow: BrowserWindow, raw: FullPageResult | null): Promise<void> {
   // 落盘缓存原始 FullPageResult(离线观察 Defuddle 真实格式 / 调优 import-pipeline);
   // fire-and-forget,失败不阻断剪藏。
   void cacheClipResult(raw);

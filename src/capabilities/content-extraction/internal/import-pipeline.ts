@@ -33,6 +33,7 @@ import {
   type TmpIdAllocator,
 } from './draft-builders';
 import type { WebClipPayload } from '../types';
+import { buildBodyWithAnswers, answersSummaryNotice } from './linked-answer-drafts';
 
 function ingestCap(): ContentIngestApi {
   return requireCapabilityApi<ContentIngestApi>('content-ingest');
@@ -191,30 +192,59 @@ export function stripRedundantImageAlt(markdown: string): string {
 
 /**
  * 正文内嵌图本地化:扫描 markdown 所有 `![]()`,逐个 mediaDownload('image'),
- * 把 url 改写为 media://(失败降级远程)。返回改写后的 markdown。
+ * 把 url 改写为 media://(失败降级远程)。返回改写后的 markdown + { 本地地址: 原远程地址 }
+ * (后者给 applyImageSizes 用原地址查网页上的显示尺寸)。
  * 跳过 data: / media:(data: 留给 md-to-pm 自己 putBase64;media: 已本地)。
  */
-async function localizeInlineImages(markdown: string): Promise<string> {
+async function localizeInlineImages(markdown: string): Promise<{ markdown: string; localToRemote: Map<string, string> }> {
+  const localToRemote = new Map<string, string>();
   const urls = new Set<string>();
   for (const m of markdown.matchAll(MD_IMAGE_RE)) {
     const url = m[2];
     if (!url || url.startsWith('data:') || url.startsWith('media:')) continue;
     urls.add(url);
   }
-  if (urls.size === 0) return markdown;
+  if (urls.size === 0) return { markdown, localToRemote };
 
   const map = new Map<string, string>();
   await Promise.all(
     [...urls].map(async (url) => {
-      map.set(url, await localizeImage(url));
+      const local = await localizeImage(url);
+      map.set(url, local);
+      localToRemote.set(local, url);
     }),
   );
 
-  return markdown.replace(MD_IMAGE_RE, (full, alt: string, url: string) => {
-    const local = map.get(url);
-    if (!local || local === url) return full;
-    return `![${alt}](${local})`;
-  });
+  return {
+    markdown: markdown.replace(MD_IMAGE_RE, (full, alt: string, url: string) => {
+      const local = map.get(url);
+      if (!local || local === url) return full;
+      return `![${alt}](${local})`;
+    }),
+    localToRemote,
+  };
+}
+
+/**
+ * 按网页上的显示尺寸给 image 块写 width/height(只补没有宽度的块)。
+ * AoPS 的公式图 / 绘图文件是 2 倍图(570×530 按 285×265 显示),markdown 不带尺寸 →
+ * 不补就按文件像素显示成两倍大(用户 2026-11-05 截图)。
+ */
+export function applyImageSizes(
+  atoms: PmAtomDraft[],
+  sizes: Record<string, [number, number]> | undefined,
+  localToRemote: Map<string, string>,
+): void {
+  if (!sizes) return;
+  for (const a of atoms) {
+    const node = a.payload.payload;
+    if (node.type !== 'image') continue;
+    const attrs = (node.attrs ?? {}) as Record<string, unknown>;
+    if (attrs.width || typeof attrs.src !== 'string') continue;
+    const size = sizes[localToRemote.get(attrs.src) ?? attrs.src];
+    if (!size) continue;
+    node.attrs = { ...attrs, width: size[0], ...(size[1] > 0 ? { height: size[1] } : {}) };
+  }
 }
 
 /**
@@ -271,24 +301,36 @@ async function runImportPipelineInner(payload: WebClipPayload | null): Promise<v
 
   // ① 规整 markdown:合并被拆多行的链接图片 → 去相邻重复行(折叠控件双份)
   //    → 内联图拆行 → 去图片 alt 冗余回显 → 内嵌图本地化
-  const joined = joinSplitLinkedImages(rawContent);
-  const deduped = dedupeConsecutiveLines(joined);
-  const isolated = isolateInlineImages(deduped);
-  const normalized = stripRedundantImageAlt(isolated);
-  const localizedMarkdown = await localizeInlineImages(normalized);
-
   // ② markdownToAtoms 正文 drafts。**不传 titleHint** —— 否则它会把正文首段(可能是
   //    图片/噪音行)误标为 title。标题改由下方用 Defuddle 的 payload.title 显式前置。
-  const { atoms: bodyAtoms, warnings } = await ingestCap().markdownToAtoms(localizedMarkdown, {
-    from,
-  });
-  if (warnings.length) {
-    console.warn('[content-extraction] markdownToAtoms warnings:', warnings);
-  }
+  const markdownToDrafts = async (md: string): Promise<PmAtomDraft[]> => {
+    const normalized = stripRedundantImageAlt(isolateInlineImages(dedupeConsecutiveLines(joinSplitLinkedImages(md))));
+    const localized = await localizeInlineImages(normalized);
+    const { atoms, warnings } = await ingestCap().markdownToAtoms(localized.markdown, { from });
+    if (warnings.length) {
+      console.warn('[content-extraction] markdownToAtoms warnings:', warnings);
+    }
+    applyImageSizes(atoms, payload.imageSizes, localized.localToRemote);
+    return atoms;
+  };
 
-  // tmpId 分配器:从正文 atoms 数量续号,保证整数组内唯一(对齐 markdown-to-atoms 命名)
-  let counter = bodyAtoms.length;
+  // tmpId 分配器:整数组内唯一(对齐 markdown-to-atoms 命名)
+  let counter = 0;
   const alloc: TmpIdAllocator = () => `tmp-${counter++}`;
+
+  // 「提取题目 + 解答」:按占位行切段,解答进折叠块(各段 drafts 由 alloc 统一重新编号)
+  const linkedAnswers = Array.isArray(payload.linkedAnswers) ? payload.linkedAnswers : null;
+  let bodyAtoms: PmAtomDraft[];
+  if (linkedAnswers) {
+    bodyAtoms = await buildBodyWithAnswers(rawContent, linkedAnswers, {
+      toAtoms: markdownToDrafts,
+      allocTmpId: alloc,
+      from,
+    });
+  } else {
+    bodyAtoms = await markdownToDrafts(rawContent);
+    counter = bodyAtoms.length; // 正文已占 tmp-0 … tmp-(n-1),后续从这里续号
+  }
 
   // 显式标题段落(isTitle):用 Defuddle 的 result.title,前置到正文最前。
   // 顶层 paragraph + isTitle 是 V2 note 标题约定(对齐 markdown-to-atoms titleHint 分支产物)。
@@ -355,7 +397,22 @@ async function runImportPipelineInner(payload: WebClipPayload | null): Promise<v
       ]
     : [];
 
-  const atoms: PmAtomDraft[] = [titleDraft, ...lead, ...notice, ...bodyAtoms];
+  // 解答汇总:有题没抓到 / 整页没找到解答链接 → 标题下一行写明(折叠着也一眼看见)
+  const answersNoticeText = linkedAnswers ? answersSummaryNotice(linkedAnswers) : null;
+  const answersNotice: PmAtomDraft[] = answersNoticeText
+    ? [
+        {
+          tmpId: alloc(),
+          payload: {
+            domain: 'pm',
+            payload: { type: 'paragraph', attrs: {}, content: [{ type: 'text', text: answersNoticeText }] },
+          },
+          from,
+        },
+      ]
+    : [];
+
+  const atoms: PmAtomDraft[] = [titleDraft, ...lead, ...notice, ...answersNotice, ...bodyAtoms];
 
   // ③a contentImages(Defuddle 遗漏的正文图)→ image block draft(本地化)
   // 防护:IPC payload 可能字段缺失/被改成非数组/含 null 元素 — 一律收敛,不崩。

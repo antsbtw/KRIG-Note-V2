@@ -6,6 +6,8 @@
  * renderer 侧 import-pipeline 消费(纯类型,跨进程经 IPC payload 传递)。
  */
 
+import type { LinkedAnswer } from '@shared/types/linked-answers';
+
 /** Defuddle 整页提取结果 */
 export interface FullPageResult {
   content: string;       // Markdown 正文
@@ -29,6 +31,11 @@ export interface FullPageResult {
   schemaOrgData?: Record<string, unknown>;  // Schema.org 结构化数据
   extractorType?: string;     // Defuddle 使用的 extractor 类型 (e.g. "youtube", "wikipedia")
   language?: string;          // 页面语言 (e.g. "en", "zh")
+  // 「提取题目 + 解答」:content 里的占位行 ↔ 这里的解答(见 linked-answers/)。
+  // undefined = 普通提取;[] = 走了解答展开但这页没找到解答链接。
+  linkedAnswers?: LinkedAnswer[];
+  // 公式图 / 绘图在网页上的显示尺寸 { 绝对地址: [宽, 高] }(见 latex-images.ts collectLatexFigureSizes)
+  imageSizes?: Record<string, [number, number]>;
 }
 
 export interface ContentImage {

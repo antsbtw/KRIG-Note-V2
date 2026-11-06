@@ -557,6 +557,9 @@
   max-width: 100%;
   height: auto;
   border-radius: 4px;
+  /* 透明底图片垫白底(用户 2026-11-05 选定):AoPS 几何图这类「黑线 + 透明底」在深色笔记里看不见;
+     不透明图片会盖住白底,无变化;代价是「白线 + 透明底」的图标在白底上看不见 */
+  background: #fff;
 }
 
 .krig-pm-host .ProseMirror .krig-image-block__svg-canvas {
