@@ -39,6 +39,20 @@ export interface MediaPutResult {
 }
 
 /**
+ * 本机文件的绝对路径 → localfile:// 地址(只记链接、不拷进媒体库;2026-11-05 本地视频)。
+ * main 侧解码在 platform/main/media/local-file-protocol.ts 的 fromLocalFileUrl,两边写法要一致
+ * (tests/platform/local-file-protocol.test.ts 钉往返)。只放行视频 / 音频。
+ */
+export function localFileUrl(absPath: string): string {
+  return `localfile://media/${encodeURIComponent(absPath)}`;
+}
+
+/** 选中的 File → 本机绝对路径(Electron 32+ 要走 webUtils);不是磁盘上的文件 → '' */
+export function filePathOf(file: File): string {
+  return window.electronAPI?.getFilePath?.(file) || '';
+}
+
+/**
  * 把 base64(完整 data URL 或 raw)写进 media store,返回 media:// URL
  *
  * - 接受 `data:<mime>;base64,<b64>` 完整 data URL,或 raw base64 + explicitMime

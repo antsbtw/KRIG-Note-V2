@@ -15,7 +15,7 @@
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { mediaPutBase64 } from '@capabilities/media-storage';
+import { filePathOf, localFileUrl, mediaPutBase64 } from '@capabilities/media-storage';
 import { detectEmbedType, type EmbedType } from './helpers/embed-detection';
 import {
   parseSubtitleCuesFromText,
@@ -163,27 +163,28 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       input.addEventListener('change', () => {
         const file = input.files?.[0];
         if (!file) return;
+        const title = file.name.replace(/\.[^.]+$/, '');
+        /**
+         * 本机视频只记链接,不拷进媒体库(用户 2026-11-05:「本地视频增加链接就可以了吧？不用添加到数据库。」)。
+         * src = localfile:// 播放;localFilePath = 原路径(发到 X 时从这里喂文件、翻译字幕写在旁边)。
+         * 文件挪走 / 改名后链接会断 —— 播放器 404,main 终端打一行 [localfile] 文件不在了。
+         */
+        const localPath = filePathOf(file);
+        if (localPath) {
+          updateAttrs({ src: localFileUrl(localPath), localFilePath: localPath, embedType: 'direct' as EmbedType, title, mimeType: file.type || null });
+          return;
+        }
+        /** 拿不到磁盘路径(极少:不是从磁盘选的)才存进媒体库;存不进去就报错,不把整段视频塞进 note */
         const reader = new FileReader();
         reader.onload = async () => {
           if (view.isDestroyed) return;
-          const dataUrl = reader.result as string;
-          const r = await mediaPutBase64(dataUrl, file.type, file.name);
+          const r = await mediaPutBase64(reader.result as string, file.type, file.name);
           if (view.isDestroyed) return;
           if (r.success && r.mediaUrl) {
-            updateAttrs({
-              src: r.mediaUrl,
-              embedType: 'direct' as EmbedType,
-              title: file.name.replace(/\.[^.]+$/, ''),
-              mimeType: file.type || null,
-            });
+            updateAttrs({ src: r.mediaUrl, embedType: 'direct' as EmbedType, title, mimeType: file.type || null });
           } else {
-            console.warn('[videoBlock] mediaPutBase64 failed:', r.error);
-            updateAttrs({
-              src: dataUrl,
-              embedType: 'direct' as EmbedType,
-              title: file.name.replace(/\.[^.]+$/, ''),
-              mimeType: file.type || null,
-            });
+            console.warn('[videoBlock] 视频没存进媒体库,没放进 note:', r.error);
+            window.alert(`视频没放进来:${r.error ?? '未知原因'}`);
           }
         };
         reader.readAsDataURL(file);

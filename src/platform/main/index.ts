@@ -18,6 +18,7 @@
  * 不是 app.setName()。dev 必须 patch Info.plist 才能改首项。
  */
 
+import { registerLocalFileProtocol } from './media/local-file-protocol';
 import { startHealthMonitor, stopHealthMonitor } from './diagnostics/health/health-monitor';
 import { app, BrowserWindow, protocol } from 'electron';
 
@@ -123,6 +124,11 @@ protocol.registerSchemesAsPrivileged([
       corsEnabled: true,
       stream: true,
     },
+  },
+  // 2026-11-05:localfile:// —— note 里本机视频 / 音频只记链接(见 media/local-file-protocol.ts)
+  {
+    scheme: 'localfile',
+    privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true },
   },
   // L5-G7b:font:// 嵌入协议已废(改记名方案,字体经 IPC fontReadByName 按名读 buffer,
   // 不再走 fetch 协议),此处无需注册任何 font scheme。
@@ -283,6 +289,8 @@ app.whenReady().then(async () => {
   // L0/L5-B4.3.1 — 注册 media:// 协议
   // 必须早于 createMainWindow,否则 webview 加载 media:// 会 ERR_FILE_NOT_FOUND
   mediaStore.registerProtocol();
+  /** 只注册在 default session(主窗口);webview 的 partition 不注册 → 网页读不到本机文件 */
+  registerLocalFileProtocol();
 
   // L5-G7b — 字体改记名方案(sysname:<family>),不再嵌入 → 无 font:// 协议要注册。
   // 本机渲染 / 导出经 IPC FONT_READ_BY_NAME 按名读 buffer(registerFontHandlers 接)。
