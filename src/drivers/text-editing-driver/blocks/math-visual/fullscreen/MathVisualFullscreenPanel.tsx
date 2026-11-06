@@ -41,7 +41,8 @@ import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
 import {
   compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
   zoomView, panView, boundsOfShapes, MAFS_VIEWBOX_PADDING,
-  type Vec2, type View,
+  hitTest, shapeHandles, translateShape, setHandle, duplicateShape, dataToPx, POLYGON_MIN_POINTS,
+  type Vec2, type View, type PxFrame, type HandlePart,
 } from '../shapes';
 import type { ShapeSpec } from '@capabilities/math-rendering/types';
 
@@ -372,7 +373,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }, [commitView]);
 
   // 移动模式下拖动画布平移
-  const startPan = useCallback((e: React.MouseEvent) => {
+  const startPan = useCallback((e: React.MouseEvent, onClickNoMove?: () => void) => {
     const svg = canvasRef.current?.querySelector('svg');
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
@@ -395,6 +396,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       if (moved) commitView(viewRef.current);
+      else onClickNoMove?.();
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -406,7 +408,9 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }, [commitView]);
 
   // ── 几何对象(题意图 P1) ──
-  const shapes = useMemo(() => data.shapes ?? [], [data.shapes]);
+  // 拖动过程中只改 liveShapes(不写 PM),松手一次性写回
+  const [liveShapes, setLiveShapes] = useState<ShapeEntry[] | null>(null);
+  const shapes = useMemo(() => liveShapes ?? data.shapes ?? [], [liveShapes, data.shapes]);
   const [shapeKind, setShapeKind] = useState<ShapeKind>('point');
   const [pendingPoints, setPendingPoints] = useState<Vec2[]>([]);
   const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
@@ -420,13 +424,31 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }, [compiledShapes, commitView]);
 
   const shapeSpecs: ShapeSpec[] = useMemo(() => {
-    if (pendingPoints.length === 0) return compiledShapes.specs;
-    // 两点图形已点了第一点:画一个灰点提示
-    const pending: ShapeSpec[] = pendingPoints.map((p, i) => ({
-      kind: 'point', id: `__pending-${i}`, at: p, color: '#9ca3af', size: 5,
-    }));
-    return [...compiledShapes.specs, ...pending];
-  }, [compiledShapes, pendingPoints]);
+    const extra: ShapeSpec[] = [];
+    // 没点完的图形:灰点 + 灰线(面的顶点之间连起来)
+    pendingPoints.forEach((p, i) => {
+      extra.push({ kind: 'point', id: `__pending-${i}`, at: p, color: '#9ca3af', size: 5 });
+      if (i > 0) {
+        extra.push({ kind: 'segment', id: `__pending-seg-${i}`, from: pendingPoints[i - 1], to: p, color: '#9ca3af', style: 'dashed', lineWidth: 1.5 });
+      }
+    });
+    // 选中对象的手柄:白点
+    const sel = compiledShapes.specs.find((sp) => sp.id === selectedShapeId);
+    if (sel) {
+      for (const h of shapeHandles(sel)) {
+        extra.push({ kind: 'point', id: `__handle-${h.part}`, at: h.at, color: '#ffffff', size: 5 });
+      }
+    }
+    return extra.length > 0 ? [...compiledShapes.specs, ...extra] : compiledShapes.specs;
+  }, [compiledShapes, pendingPoints, selectedShapeId]);
+
+  /** 当前画布的像素框(命中测试 / 像素距离用) */
+  const getFrame = useCallback((): (PxFrame & { rect: DOMRect }) | null => {
+    const svg = canvasRef.current?.querySelector('svg');
+    if (!svg) return null;
+    const rect = svg.getBoundingClientRect();
+    return { view: viewRef.current, width: rect.width, height: rect.height, rect };
+  }, []);
 
   const addShape = useCallback((shape: ShapeEntry) => {
     onChange({ ...data, shapes: [...shapes, shape] });
@@ -458,21 +480,119 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       snap(p[0], snapStep(view.x[1] - view.x[0])),
       snap(p[1], snapStep(view.y[1] - view.y[0])),
     ];
-    const need = shapeKindMeta(shapeKind).clicks;
+    const clicks = shapeKindMeta(shapeKind).clicks;
+    if (clicks === 'many') {
+      // 面:点回第一个点(10px 内)且够 3 个顶点 → 完成
+      const frame = getFrame();
+      if (frame && pendingPoints.length >= POLYGON_MIN_POINTS) {
+        const a = dataToPx(pendingPoints[0], frame);
+        const b = dataToPx(p, frame);
+        if (Math.hypot(a[0] - b[0], a[1] - b[1]) <= 10) {
+          setPendingPoints([]);
+          addShape(createShape('polygon', pendingPoints, shapes.length));
+          return;
+        }
+      }
+      setPendingPoints([...pendingPoints, sp]);
+      return;
+    }
     const pts = [...pendingPoints, sp];
-    if (pts.length < need) {
+    if (pts.length < clicks) {
       setPendingPoints(pts);
       return;
     }
     setPendingPoints([]);
     addShape(createShape(shapeKind, pts, shapes.length));
-  }, [view, shapeKind, pendingPoints, shapes.length, addShape]);
+  }, [view, shapeKind, pendingPoints, shapes.length, addShape, getFrame]);
 
-  const shapeHint = toolMode === 'shape'
-    ? (pendingPoints.length > 0
-        ? `${shapeKindMeta(shapeKind).label}:已点第一点,再点一下完成(Esc 取消)`
-        : `${shapeKindMeta(shapeKind).label}:${shapeKindMeta(shapeKind).hint}`)
-    : null;
+  const finishPolygon = useCallback(() => {
+    if (shapeKind !== 'polygon' || pendingPoints.length < POLYGON_MIN_POINTS) return false;
+    setPendingPoints([]);
+    addShape(createShape('polygon', pendingPoints, shapes.length));
+    return true;
+  }, [shapeKind, pendingPoints, shapes.length, addShape]);
+
+  const shapeHint = (() => {
+    if (toolMode !== 'shape') {
+      return selectedShapeId ? '拖动图形移动;拖白点改位置;方向键微调,⌘D 复制,Backspace 删除' : null;
+    }
+    const label = shapeKindMeta(shapeKind).label;
+    if (pendingPoints.length === 0) return `${label}:${shapeKindMeta(shapeKind).hint}`;
+    if (shapeKind === 'polygon') {
+      return pendingPoints.length >= POLYGON_MIN_POINTS
+        ? `面:已点 ${pendingPoints.length} 个顶点,点回第一个点或按回车完成(Esc 取消)`
+        : `面:已点 ${pendingPoints.length} 个顶点,至少 ${POLYGON_MIN_POINTS} 个(Esc 取消)`;
+    }
+    return `${label}:已点第一点,再点一下完成(Esc 取消)`;
+  })();
+
+  // ── 画布上选中 / 拖动(2026-11-06 用户:「还有选定对象和操作的能力吧?」)──
+  // 拖完松手时浏览器还会补发一次 click;用这个标记吞掉,免得画图形模式下又加一个
+  const suppressClickRef = useRef(false);
+
+  const startShapeDrag = useCallback((e: React.MouseEvent, id: string, part: HandlePart | null) => {
+    const frame = getFrame();
+    const orig = (data.shapes ?? []).find((sh) => sh.id === id);
+    const spec = compiledShapes.specs.find((sp) => sp.id === id);
+    if (!frame || !orig || !spec) return;
+    const toData = (ev: { clientX: number; clientY: number }) =>
+      relToData((ev.clientX - frame.rect.left) / frame.width, (ev.clientY - frame.rect.top) / frame.height, frame.view);
+    const start = toData(e);
+    const stepX = snapStep(frame.view.x[1] - frame.view.x[0]);
+    const stepY = snapStep(frame.view.y[1] - frame.view.y[0]);
+    const all = data.shapes ?? [];
+    let latest: ShapeEntry[] | null = null;
+    const sx = e.clientX;
+    const sy = e.clientY;
+    const onMove = (ev: MouseEvent) => {
+      if (!latest && Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 3) return;
+      const cur = toData(ev);
+      const next = part === null
+        ? translateShape(orig, snap(cur[0] - start[0], stepX), snap(cur[1] - start[1], stepY))
+        : setHandle(orig, spec, part, [snap(cur[0], stepX), snap(cur[1], stepY)]);
+      latest = all.map((sh) => (sh.id === id ? next : sh));
+      setLiveShapes(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (latest) {
+        suppressClickRef.current = true;
+        onChange({ ...dataForViewRef.current, shapes: latest });
+      }
+      setLiveShapes(null);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }, [getFrame, data.shapes, compiledShapes, onChange]);
+
+  /** 鼠标下是哪个图形(或选中图形的哪个手柄) */
+  const hitAt = useCallback((e: { clientX: number; clientY: number }) => {
+    const frame = getFrame();
+    if (!frame) return null;
+    return hitTest(
+      compiledShapes.specs,
+      [e.clientX - frame.rect.left, e.clientY - frame.rect.top],
+      frame,
+      selectedShapeId,
+    );
+  }, [getFrame, compiledShapes, selectedShapeId]);
+
+  const [hoverShape, setHoverShape] = useState(false);
+
+  const nudgeSelected = useCallback((dx: number, dy: number) => {
+    const sh = shapes.find((x) => x.id === selectedShapeId);
+    if (!sh) return;
+    updateShape(sh.id, translateShape(sh, dx, dy));
+  }, [shapes, selectedShapeId, updateShape]);
+
+  const duplicateSelected = useCallback(() => {
+    const sh = shapes.find((x) => x.id === selectedShapeId);
+    if (!sh) return;
+    const v = viewRef.current;
+    const step: Vec2 = [snapStep(v.x[1] - v.x[0]) * 2, -snapStep(v.y[1] - v.y[0]) * 2];
+    addShape(duplicateShape(sh, step, shapes.length));
+  }, [shapes, selectedShapeId, addShape]);
 
   // ── 9 类工具数据 handler ──
 
@@ -670,23 +790,43 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }, []);
 
   const handleCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    const target = e.target as Element | null;
+    if (target?.closest('[data-label-hit-area], .mafs-movable-point, [data-view-controls]')) return;
+    if (e.button !== 0) return;
     if (toolMode === 'move') {
-      const target = e.target as Element | null;
-      // 拖曲线 label / 可拖的点 / 点缩放按钮时不平移
-      if (target?.closest('[data-label-hit-area], .mafs-movable-point, [data-view-controls]')) return;
-      if (e.button === 0) startPan(e);
+      // 点中图形 → 选中并可拖;点空白 → 平移(没拖动就取消选中)
+      const hit = hitAt(e);
+      if (hit) {
+        setSelectedShapeId(hit.id);
+        startShapeDrag(e, hit.id, hit.part);
+        return;
+      }
+      startPan(e, () => setSelectedShapeId(null));
       return;
+    }
+    if (toolMode === 'shape' && pendingPoints.length === 0) {
+      // 画图形模式下只有拖选中图形的白点才算拖动,其余点击照常添加
+      const hit = hitAt(e);
+      if (hit && hit.part !== null) {
+        startShapeDrag(e, hit.id, hit.part);
+        return;
+      }
     }
     if (toolMode !== 'select') return;
     const pos = pageToSvgPx(e);
     if (pos) { setBoxSelectStart(pos); setBoxSelectEnd(pos); }
-  }, [toolMode, pageToSvgPx, startPan]);
+  }, [toolMode, pageToSvgPx, startPan, hitAt, startShapeDrag, pendingPoints.length]);
 
   const handleCanvasMouseMove = useCallback((e: React.MouseEvent) => {
+    if (toolMode === 'move') {
+      const over = hitAt(e) !== null;
+      if (over !== hoverShape) setHoverShape(over);
+      return;
+    }
     if (toolMode !== 'select' || !boxSelectStart) return;
     const pos = pageToSvgPx(e);
     if (pos) setBoxSelectEnd(pos);
-  }, [toolMode, boxSelectStart, pageToSvgPx]);
+  }, [toolMode, boxSelectStart, pageToSvgPx, hitAt, hoverShape]);
 
   const handleCanvasMouseUp = useCallback(() => {
     if (toolMode !== 'select' || !boxSelectStart || !boxSelectEnd) {
@@ -716,6 +856,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   }, [toolMode, boxSelectStart, boxSelectEnd, annotations, evalFnMap, view]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
+    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
     if (toolMode === 'move' || toolMode === 'export' || toolMode === 'select') return;
     const coords = pageToMath(e);
     if (!coords) return;
@@ -753,9 +894,31 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
         e.preventDefault();
         e.stopPropagation();
         if (pendingPoints.length > 0) setPendingPoints([]);
+        else if (selectedShapeId) setSelectedShapeId(null);
         else if (toolMode !== 'move') setToolMode('move');
         else onClose();
         return;
+      }
+      if (e.key === 'Enter' && finishPolygon()) {
+        e.preventDefault();
+        return;
+      }
+      if (selectedShapeId && (toolMode === 'shape' || toolMode === 'move')) {
+        const v = viewRef.current;
+        const k = e.shiftKey ? 5 : 1;
+        const sx = snapStep(v.x[1] - v.x[0]) * k;
+        const sy = snapStep(v.y[1] - v.y[0]) * k;
+        const nudge: Record<string, Vec2> = { ArrowLeft: [-sx, 0], ArrowRight: [sx, 0], ArrowUp: [0, sy], ArrowDown: [0, -sy] };
+        if (nudge[e.key]) {
+          e.preventDefault();
+          nudgeSelected(nudge[e.key][0], nudge[e.key][1]);
+          return;
+        }
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'd') {
+          e.preventDefault();
+          duplicateSelected();
+          return;
+        }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
@@ -771,7 +934,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose, toolMode, setToolMode, selectedAnnotationIdx, selectedAnnotationIdxs, selectedTangentId, selectedNormalId, selectedIntegralId,
       removeAnnotation, removeSelectedAnnotations, removeTangent, removeNormal, removeIntegral,
-      pendingPoints, selectedShapeId, removeShape]);
+      pendingPoints, selectedShapeId, removeShape, finishPolygon, nudgeSelected, duplicateSelected]);
 
   // ── label 拖动:写回对应 fn 的 labelPos ──
 
@@ -852,6 +1015,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
 
         <div
           className={`mv-fullscreen-canvas ${toolMode !== 'move' ? 'mv-fullscreen-canvas--tool' : ''} ${toolMode === 'select' ? 'mv-fullscreen-canvas--select' : ''}`}
+          style={toolMode === 'move' ? { cursor: hoverShape ? 'move' : 'grab' } : undefined}
           ref={canvasRef}
           onClick={handleCanvasClick}
           onMouseDown={handleCanvasMouseDown}
@@ -951,6 +1115,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           selectedShapeError={selectedShape ? compiledShapes.errors[selectedShape.id] : undefined}
           onUpdateShape={updateShape}
           onRemoveShape={removeShape}
+          onDuplicateShape={duplicateSelected}
           shapeHint={shapeHint}
         />
       </div>

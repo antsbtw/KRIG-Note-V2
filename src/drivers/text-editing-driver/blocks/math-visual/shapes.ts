@@ -12,13 +12,18 @@ import { FUNCTION_COLORS } from './types';
 
 export type Vec2 = [number, number];
 
-export const SHAPE_KINDS: Array<{ kind: ShapeKind; icon: string; label: string; clicks: 1 | 2; hint: string }> = [
+/** clicks:'many' = 面,逐个点顶点,点回第一个点或按回车结束 */
+export const SHAPE_KINDS: Array<{ kind: ShapeKind; icon: string; label: string; clicks: 1 | 2 | 'many'; hint: string }> = [
   { kind: 'point',   icon: '•', label: '点',   clicks: 1, hint: '点一下放一个点' },
   { kind: 'segment', icon: '╱', label: '线段', clicks: 2, hint: '先点起点,再点终点' },
   { kind: 'arrow',   icon: '→', label: '箭头', clicks: 2, hint: '先点起点,再点箭头指向的位置' },
   { kind: 'circle',  icon: '○', label: '圆',   clicks: 2, hint: '先点圆心,再点圆上一点' },
   { kind: 'text',    icon: 'T', label: '文字', clicks: 1, hint: '点一下放文字,在右边改内容' },
+  { kind: 'polygon', icon: '▱', label: '面',   clicks: 'many', hint: '逐个点顶点,点回第一个点或按回车结束' },
 ];
+
+/** 面至少几个顶点 */
+export const POLYGON_MIN_POINTS = 3;
 
 export function shapeKindMeta(kind: ShapeKind) {
   const m = SHAPE_KINDS.find((k) => k.kind === kind);
@@ -51,7 +56,8 @@ export function snap(v: number, step: number): number {
  * point/text 用 points[0];segment/arrow/circle 用 points[0], points[1]。
  */
 export function createShape(kind: ShapeKind, points: Vec2[], index: number): ShapeEntry {
-  const need = shapeKindMeta(kind).clicks;
+  const clicks = shapeKindMeta(kind).clicks;
+  const need = clicks === 'many' ? POLYGON_MIN_POINTS : clicks;
   if (points.length < need) {
     throw new Error(`[math-visual] ${kind} 需要 ${need} 个点,只给了 ${points.length} 个`);
   }
@@ -75,6 +81,8 @@ export function createShape(kind: ShapeKind, points: Vec2[], index: number): Sha
       const r = Math.hypot(points[1][0] - points[0][0], points[1][1] - points[0][1]);
       return { ...base, center: c(points[0]), radius: fmtNum(r) };
     }
+    case 'polygon':
+      return { ...base, points: points.map(c) };
   }
 }
 
@@ -157,6 +165,17 @@ export function compileShapes(
         };
         break;
       }
+      case 'polygon': {
+        const pts = (s.points ?? []).map((p, i) => vec(p, `顶点${i + 1}`));
+        if (pts.length < POLYGON_MIN_POINTS) problems.push(`顶点:至少 ${POLYGON_MIN_POINTS} 个,现在 ${pts.length} 个`);
+        spec = {
+          ...common, kind: 'polygon', points: pts,
+          style: s.style, lineWidth: s.lineWidth,
+          fillOpacity: s.fill === false ? 0 : 0.15,
+          label: s.text || undefined,
+        };
+        break;
+      }
       default:
         problems.push(`未知类型:${String((s as { kind: unknown }).kind)}`);
     }
@@ -234,6 +253,9 @@ export function boundsOfShapes(specs: ShapeSpec[]): View | null {
         add([s.center[0] - s.radius, s.center[1] - s.radius]);
         add([s.center[0] + s.radius, s.center[1] + s.radius]);
         break;
+      case 'polygon':
+        s.points.forEach(add);
+        break;
     }
   }
   if (xs.length === 0) return null;
@@ -245,4 +267,170 @@ export function boundsOfShapes(specs: ShapeSpec[]): View | null {
   const my = (y1 - y0) * 0.15;
   const r = (n: number) => Math.round(n * 100) / 100;
   return { x: [r(x0 - mx), r(x1 + mx)], y: [r(y0 - my), r(y1 + my)] };
+}
+
+// ─── 画布上选中 / 拖动 / 手柄(2026-11-06 用户:「还有选定对象和操作的能力吧?」) ───────
+
+/** 手柄名:'at' | 'from' | 'to' | 'center' | 'radius' | 'v0'、'v1'… */
+export type HandlePart = string;
+
+/** 选中对象显示的手柄(数据坐标) */
+export function shapeHandles(spec: ShapeSpec): Array<{ part: HandlePart; at: Vec2 }> {
+  switch (spec.kind) {
+    case 'point':
+    case 'text': return [{ part: 'at', at: spec.at }];
+    case 'segment':
+    case 'arrow': return [{ part: 'from', at: spec.from }, { part: 'to', at: spec.to }];
+    case 'circle': return [
+      { part: 'center', at: spec.center },
+      { part: 'radius', at: [spec.center[0] + spec.radius, spec.center[1]] },
+    ];
+    case 'polygon': return spec.points.map((p, i) => ({ part: `v${i}`, at: p }));
+  }
+}
+
+/** 画布像素换算(与 relToData 互逆;原点左上) */
+export interface PxFrame { view: View; width: number; height: number; pad?: number }
+
+export function dataToPx(p: Vec2, f: PxFrame): Vec2 {
+  const pad = f.pad ?? MAFS_VIEWBOX_PADDING;
+  const x0 = f.view.x[0] - pad;
+  const x1 = f.view.x[1] + pad;
+  const y0 = f.view.y[0] - pad;
+  const y1 = f.view.y[1] + pad;
+  return [((p[0] - x0) / (x1 - x0)) * f.width, ((y1 - p[1]) / (y1 - y0)) * f.height];
+}
+
+function distToSegment(p: Vec2, a: Vec2, b: Vec2): number {
+  const dx = b[0] - a[0];
+  const dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2));
+  return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
+}
+
+function insidePolygon(p: Vec2, poly: Vec2[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if ((yi > p[1]) !== (yj > p[1]) && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** 文字的大致命中框半宽(px):中日文按一个字号宽,其他按 0.6 个字号 */
+function textHalfWidth(text: string, size: number): number {
+  let w = 0;
+  for (const ch of text) w += /[\u2E80-\u9FFF\uFF00-\uFFEF]/.test(ch) ? size : size * 0.6;
+  return w / 2;
+}
+
+const HANDLE_HIT_PX = 9;
+const LINE_HIT_PX = 6;
+
+/**
+ * 鼠标(像素,画布左上为原点)命中哪个对象。
+ * 先看选中对象的手柄(part 非 null),再按「后画的在上面」从后往前看对象本体(part = null)。
+ */
+export function hitTest(
+  specs: ShapeSpec[],
+  mousePx: Vec2,
+  frame: PxFrame,
+  selectedId: string | null,
+): { id: string; part: HandlePart | null } | null {
+  const px = (p: Vec2) => dataToPx(p, frame);
+  const d = (p: Vec2) => Math.hypot(mousePx[0] - p[0], mousePx[1] - p[1]);
+
+  const sel = selectedId ? specs.find((s) => s.id === selectedId) : undefined;
+  if (sel) {
+    for (const h of shapeHandles(sel)) {
+      if (d(px(h.at)) <= HANDLE_HIT_PX) return { id: sel.id, part: h.part };
+    }
+  }
+
+  for (let i = specs.length - 1; i >= 0; i--) {
+    const s = specs[i];
+    let hit = false;
+    switch (s.kind) {
+      case 'point':
+        hit = d(px(s.at)) <= HANDLE_HIT_PX;
+        break;
+      case 'text': {
+        const c = px(s.at);
+        const size = s.size ?? 16;
+        hit = Math.abs(mousePx[0] - c[0]) <= textHalfWidth(s.text, size) + 4
+          && Math.abs(mousePx[1] - c[1]) <= size / 2 + 4;
+        break;
+      }
+      case 'segment':
+      case 'arrow':
+        hit = distToSegment(mousePx, px(s.from), px(s.to)) <= LINE_HIT_PX;
+        break;
+      case 'circle': {
+        const c = px(s.center);
+        const e = px([s.center[0] + s.radius, s.center[1]]);
+        const rPx = Math.abs(e[0] - c[0]);
+        hit = Math.abs(d(c) - rPx) <= LINE_HIT_PX;
+        break;
+      }
+      case 'polygon': {
+        const poly = s.points.map(px);
+        hit = poly.some((p, k) => distToSegment(mousePx, p, poly[(k + 1) % poly.length]) <= LINE_HIT_PX)
+          || ((s.fillOpacity ?? 0) > 0 && insidePolygon(mousePx, poly));
+        break;
+      }
+    }
+    if (hit) return { id: s.id, part: null };
+  }
+  return null;
+}
+
+const NUMERIC_RE = /^\s*-?(\d+\.?\d*|\.\d+)\s*$/;
+
+/** 坐标是不是纯数字(纯数字才能被拖动改;算式不动) */
+export function isPlainNumber(expr: string | undefined): boolean {
+  return expr !== undefined && NUMERIC_RE.test(expr);
+}
+
+function shiftCoord(c: CoordExpr | undefined, dx: number, dy: number): CoordExpr | undefined {
+  if (!c) return c;
+  return [
+    isPlainNumber(c[0]) ? fmtNum(Number(c[0]) + dx) : c[0],
+    isPlainNumber(c[1]) ? fmtNum(Number(c[1]) + dy) : c[1],
+  ];
+}
+
+/** 整体平移;写成算式的坐标保持不动(它跟着参数走,不该被拖改) */
+export function translateShape(s: ShapeEntry, dx: number, dy: number): ShapeEntry {
+  return {
+    ...s,
+    at: shiftCoord(s.at, dx, dy),
+    from: shiftCoord(s.from, dx, dy),
+    to: shiftCoord(s.to, dx, dy),
+    center: shiftCoord(s.center, dx, dy),
+    points: s.points?.map((p) => shiftCoord(p, dx, dy) as CoordExpr),
+  };
+}
+
+/** 拖某个手柄到 p(数据坐标)。拖手柄是明确的「改这一处」,会把那里的算式换成数字。 */
+export function setHandle(s: ShapeEntry, spec: ShapeSpec, part: HandlePart, p: Vec2): ShapeEntry {
+  const c: CoordExpr = [fmtNum(p[0]), fmtNum(p[1])];
+  if (part === 'radius') {
+    if (spec.kind !== 'circle') return s;
+    const r = Math.hypot(p[0] - spec.center[0], p[1] - spec.center[1]);
+    return r > 0 ? { ...s, radius: fmtNum(r) } : s;
+  }
+  if (part.startsWith('v')) {
+    const i = Number(part.slice(1));
+    if (!s.points || !(i >= 0 && i < s.points.length)) return s;
+    return { ...s, points: s.points.map((q, k) => (k === i ? c : q)) };
+  }
+  if (part === 'at' || part === 'from' || part === 'to' || part === 'center') return { ...s, [part]: c };
+  throw new Error(`[math-visual] 未知手柄: ${part}`);
+}
+
+/** 复制一份:新 id,往右下偏一点 */
+export function duplicateShape(s: ShapeEntry, offset: Vec2, index: number): ShapeEntry {
+  return { ...translateShape(s, offset[0], offset[1]), id: `sh-${Date.now()}-${index}` };
 }

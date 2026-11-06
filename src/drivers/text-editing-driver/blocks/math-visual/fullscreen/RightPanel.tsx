@@ -56,6 +56,7 @@ interface RightPanelProps {
   selectedShapeError: string | undefined;
   onUpdateShape: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemoveShape: (id: string) => void;
+  onDuplicateShape: () => void;
   /** 画图形模式下的操作提示 */
   shapeHint: string | null;
 }
@@ -88,6 +89,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   selectedShapeError,
   onUpdateShape,
   onRemoveShape,
+  onDuplicateShape,
   shapeHint,
 }) => {
   if (selectedShape || toolMode === 'shape') {
@@ -104,6 +106,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             error={selectedShapeError}
             onUpdate={onUpdateShape}
             onRemove={onRemoveShape}
+            onDuplicate={onDuplicateShape}
           />
         ) : (
           <div className="mv-fr-section">

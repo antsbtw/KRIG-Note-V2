@@ -157,7 +157,7 @@ export type ToolMode = 'move' | 'select' | 'annotate' | 'tangent' | 'normal' | '
 // ─── 几何对象(题意图 P1,2026-11-06) ───────────────────────
 // 设计稿:docs/10-business-design/math/题意图-几何对象与分帧设计.md §3.1
 
-export type ShapeKind = 'point' | 'segment' | 'arrow' | 'circle' | 'text';
+export type ShapeKind = 'point' | 'segment' | 'arrow' | 'circle' | 'text' | 'polygon';
 
 /** 坐标 = 两个表达式字符串;可以是数字,也可以引用参数(如 "8*T") */
 export type CoordExpr = [string, string];
@@ -173,6 +173,10 @@ export interface ShapeEntry {
   /** circle 的圆心、半径 */
   center?: CoordExpr;
   radius?: string;
+  /** polygon(面)的顶点,至少 3 个 */
+  points?: CoordExpr[];
+  /** polygon 是否半透明填充;缺省 = 填充 */
+  fill?: boolean;
   /** text 的内容;point/segment/arrow/circle 的标签 */
   text?: string;
   color: string;

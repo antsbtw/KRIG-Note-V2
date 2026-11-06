@@ -304,7 +304,17 @@ export interface TextShapeSpec extends ShapeSpecBase {
   size?: number;
 }
 
-export type ShapeSpec = PointShapeSpec | LineShapeSpec | CircleShapeSpec | TextShapeSpec;
+/** 面(多边形区域);fillOpacity 0 = 只画边 */
+export interface PolygonShapeSpec extends ShapeSpecBase {
+  kind: 'polygon';
+  points: Array<[number, number]>;
+  style?: 'solid' | 'dashed' | 'dotted';
+  lineWidth?: number;
+  fillOpacity?: number;
+  label?: string;
+}
+
+export type ShapeSpec = PointShapeSpec | LineShapeSpec | CircleShapeSpec | TextShapeSpec | PolygonShapeSpec;
 
 /** evalScalar 结果:表达式 → 一个有限数;失败时 value=null 且 error 说明原因(不静默) */
 export interface ScalarResult {

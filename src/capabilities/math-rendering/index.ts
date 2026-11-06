@@ -73,6 +73,7 @@ export type {
   LineShapeSpec,
   CircleShapeSpec,
   TextShapeSpec,
+  PolygonShapeSpec,
   ShapeTicks,
   ScalarResult,
   // Phase 2 overlay 类型

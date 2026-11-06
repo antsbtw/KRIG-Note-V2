@@ -28,6 +28,7 @@ function summary(s: ShapeEntry): string {
     case 'segment':
     case 'arrow': return `${s.text ? s.text + ' ' : ''}${p(s.from)} → ${p(s.to)}`;
     case 'circle': return `${s.text ? s.text + ' ' : ''}圆心 ${p(s.center)} r=${s.radius ?? '?'}`;
+    case 'polygon': return `${s.text ? s.text + ' ' : ''}${s.points?.length ?? 0} 个顶点`;
   }
 }
 

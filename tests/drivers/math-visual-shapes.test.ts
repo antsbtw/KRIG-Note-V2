@@ -8,6 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   compileShapes, createShape, snapStep, snap, fitEqualScale, relToData, fmtNum,
   MAFS_VIEWBOX_PADDING, zoomView, panView, boundsOfShapes,
+  hitTest, dataToPx, translateShape, setHandle, duplicateShape, isPlainNumber, shapeHandles,
 } from '@drivers/text-editing-driver/blocks/math-visual/shapes';
 import type { ShapeEntry } from '@drivers/text-editing-driver/blocks/math-visual/types';
 import { evalScalar } from '@capabilities/math-rendering/compute/evaluator';
@@ -156,5 +157,90 @@ describe('缩放 / 平移 / 显示全部', () => {
     expect(b!.y[0]).toBeLessThan(-24);
     expect(b!.y[1]).toBeGreaterThan(24);
     expect(boundsOfShapes([])).toBeNull();
+  });
+});
+
+describe('面(多边形)', () => {
+  it('三个顶点画得出来;不够三个报错', () => {
+    const tri = createShape('polygon', [[0, 0], [4, 0], [0, 3]], 0);
+    expect(tri.points).toEqual([['0', '0'], ['4', '0'], ['0', '3']]);
+    const { specs } = compileShapes([tri], evalScalar, []);
+    expect(specs[0]).toMatchObject({ kind: 'polygon', points: [[0, 0], [4, 0], [0, 3]], fillOpacity: 0.15 });
+    const two: ShapeEntry = { ...base, id: 'two', kind: 'polygon', points: [['0', '0'], ['1', '1']] };
+    expect(compileShapes([two], evalScalar, []).errors.two).toMatch(/至少 3/);
+    expect(() => createShape('polygon', [[0, 0], [1, 1]], 0)).toThrow(/3 个点/);
+  });
+  it('不填充 → fillOpacity 0', () => {
+    const tri: ShapeEntry = { ...base, id: 't', kind: 'polygon', fill: false, points: [['0', '0'], ['4', '0'], ['0', '3']] };
+    expect(compileShapes([tri], evalScalar, []).specs[0]).toMatchObject({ fillOpacity: 0 });
+  });
+});
+
+describe('画布上选中 / 拖动', () => {
+  // 视口 -0.5~10.5 映射到 1100×1100 像素:1 个数据单位 = 100px
+  const frame = { view: { x: [0, 10] as [number, number], y: [0, 10] as [number, number] }, width: 1100, height: 1100 };
+  const at = (x: number, y: number) => dataToPx([x, y], frame);
+
+  it('dataToPx 与 relToData 互逆', () => {
+    const px = at(3, 7);
+    expect(relToData(px[0] / 1100, px[1] / 1100, frame.view)).toEqual([3, 7]);
+  });
+
+  it('点中线段本体、点中圆周、点空白', () => {
+    const { specs } = compileShapes([
+      { ...base, id: 'seg', kind: 'segment', from: ['1', '1'], to: ['9', '1'] },
+      { ...base, id: 'c', kind: 'circle', center: ['5', '5'], radius: '2' },
+    ], evalScalar, []);
+    expect(hitTest(specs, at(5, 1), frame, null)).toEqual({ id: 'seg', part: null });
+    expect(hitTest(specs, at(7, 5), frame, null)).toEqual({ id: 'c', part: null });
+    expect(hitTest(specs, at(5, 5), frame, null)).toBeNull(); // 圆心不算点中圆
+  });
+
+  it('选中后优先命中手柄;后画的压在上面', () => {
+    const { specs } = compileShapes([
+      { ...base, id: 'a', kind: 'segment', from: ['1', '1'], to: ['9', '1'] },
+      { ...base, id: 'b', kind: 'segment', from: ['5', '0'], to: ['5', '9'] },
+    ], evalScalar, []);
+    expect(hitTest(specs, at(5, 1), frame, null)).toEqual({ id: 'b', part: null });
+    expect(hitTest(specs, at(9, 1), frame, 'a')).toEqual({ id: 'a', part: 'to' });
+  });
+
+  it('填充的面点内部也算选中', () => {
+    const { specs } = compileShapes([
+      { ...base, id: 'p', kind: 'polygon', points: [['1', '1'], ['6', '1'], ['1', '6']] },
+    ], evalScalar, []);
+    expect(hitTest(specs, at(2, 2), frame, null)).toEqual({ id: 'p', part: null });
+  });
+
+  it('整体平移:纯数字跟着动,算式不动', () => {
+    const s: ShapeEntry = { ...base, id: 'x', kind: 'arrow', from: ['0', '0'], to: ['0', '8*T'] };
+    const m = translateShape(s, 2, 1);
+    expect(m.from).toEqual(['2', '1']);
+    expect(m.to).toEqual(['2', '8*T']);
+    expect(isPlainNumber('-3.5')).toBe(true);
+    expect(isPlainNumber('8*T')).toBe(false);
+  });
+
+  it('拖手柄:终点、半径、面的顶点', () => {
+    const arrow: ShapeEntry = { ...base, id: 'a', kind: 'arrow', from: ['0', '0'], to: ['0', '8*T'] };
+    const arrowSpec = compileShapes([{ ...arrow, to: ['0', '24'] }], evalScalar, []).specs[0];
+    expect(setHandle(arrow, arrowSpec, 'to', [0, 30]).to).toEqual(['0', '30']);
+
+    const circle: ShapeEntry = { ...base, id: 'c', kind: 'circle', center: ['0', '0'], radius: '24' };
+    const cSpec = compileShapes([circle], evalScalar, []).specs[0];
+    expect(shapeHandles(cSpec).map((h) => h.part)).toEqual(['center', 'radius']);
+    expect(setHandle(circle, cSpec, 'radius', [3, 4]).radius).toBe('5');
+
+    const tri: ShapeEntry = { ...base, id: 't', kind: 'polygon', points: [['0', '0'], ['4', '0'], ['0', '3']] };
+    const tSpec = compileShapes([tri], evalScalar, []).specs[0];
+    expect(setHandle(tri, tSpec, 'v1', [5, 1]).points).toEqual([['0', '0'], ['5', '1'], ['0', '3']]);
+    expect(() => setHandle(tri, tSpec, 'nope', [0, 0])).toThrow(/未知手柄/);
+  });
+
+  it('复制:新 id、偏移', () => {
+    const p: ShapeEntry = { ...base, id: 'p', kind: 'point', at: ['1', '1'] };
+    const d = duplicateShape(p, [2, -2], 3);
+    expect(d.id).not.toBe('p');
+    expect(d.at).toEqual(['3', '-1']);
   });
 });

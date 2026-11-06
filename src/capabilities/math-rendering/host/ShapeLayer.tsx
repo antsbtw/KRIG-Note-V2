@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import { Point, Line, Vector, Circle, Text } from 'mafs';
+import { Point, Line, Vector, Circle, Text, Polygon } from 'mafs';
 import type { ShapeSpec, LineShapeSpec } from '../types';
 import { cardinalOf, tickPositions, leftNormal, formatTickValue } from '../compute/shape-geometry';
 
@@ -74,6 +74,28 @@ export function ShapeLayer({ shapes, selectedId, viewBox }: ShapeLayerProps): Re
                 />
                 {s.label && (
                   <Text x={s.center[0] + d} y={s.center[1] + d} attach="ne" attachDistance={6} size={LABEL_SIZE} color={s.color}>
+                    {s.label}
+                  </Text>
+                )}
+              </React.Fragment>
+            );
+          }
+          case 'polygon': {
+            const n = s.points.length;
+            const cx = s.points.reduce((a, p) => a + p[0], 0) / n;
+            const cy = s.points.reduce((a, p) => a + p[1], 0) / n;
+            return (
+              <React.Fragment key={s.id}>
+                <Polygon
+                  points={s.points}
+                  color={s.color}
+                  weight={(s.lineWidth ?? 2) + (selected ? 2 : 0)}
+                  strokeStyle={strokeStyle(s.style)}
+                  strokeOpacity={s.opacity ?? 1}
+                  fillOpacity={(s.fillOpacity ?? 0.15) * (s.opacity ?? 1)}
+                />
+                {s.label && (
+                  <Text x={cx} y={cy} size={LABEL_SIZE} color={s.color}>
                     {s.label}
                   </Text>
                 )}

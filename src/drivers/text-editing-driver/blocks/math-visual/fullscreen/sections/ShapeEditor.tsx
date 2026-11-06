@@ -17,6 +17,7 @@ interface ShapeEditorProps {
   error: string | undefined;
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemove: (id: string) => void;
+  onDuplicate: () => void;
 }
 
 const stop = (e: React.KeyboardEvent) => e.stopPropagation();
@@ -34,11 +35,11 @@ function CoordRow({ label, value, onChange }: { label: string; value: CoordExpr 
   );
 }
 
-export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, onRemove }) => {
+export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, onRemove, onDuplicate }) => {
   const up = (u: Partial<ShapeEntry>) => onUpdate(s.id, u);
   const meta = shapeKindMeta(s.kind);
   const isLine = s.kind === 'segment' || s.kind === 'arrow';
-  const hasStroke = isLine || s.kind === 'circle';
+  const hasStroke = isLine || s.kind === 'circle' || s.kind === 'polygon';
 
   return (
     <div className="mv-fr-section">
@@ -64,6 +65,20 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
               <input className="mv-fr-prop-input" value={s.radius ?? ''}
                 onChange={(e) => up({ radius: e.target.value })} onKeyDown={stop} />
             </div>
+          </>
+        )}
+
+        {s.kind === 'polygon' && (
+          <>
+            {(s.points ?? []).map((pt, i) => (
+              <CoordRow key={i} label={`顶点${i + 1}`} value={pt}
+                onChange={(v) => up({ points: (s.points ?? []).map((q, k) => (k === i ? v : q)) })} />
+            ))}
+            <label className="mv-fr-prop-check">
+              <input type="checkbox" checked={s.fill !== false}
+                onChange={(e) => up({ fill: e.target.checked ? undefined : false })} />
+              填充
+            </label>
           </>
         )}
 
@@ -147,6 +162,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </>
         )}
 
+        <button className="mv-fr-remove-btn" style={{ color: '#e0e0e0' }} onClick={onDuplicate} title="⌘D">复制一份</button>
         <button className="mv-fr-remove-btn" onClick={() => onRemove(s.id)}>删除</button>
       </div>
     </div>
