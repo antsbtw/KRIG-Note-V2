@@ -12,12 +12,14 @@
  * 不用 Mafs Text 的 attachDistance:它的上下方向是反的(见 shape-geometry 注释)。
  */
 
-import React from 'react';
-import { Point, Line, Vector, Circle, Text, Polygon } from 'mafs';
+import React, { useEffect, useState } from 'react';
+import { Point, Line, Vector, Circle, Text, Polygon, useTransformContext, vec } from 'mafs';
+import { atomsToSvg } from '../../../lib/atom-serializers/svg';
 import type { ShapeSpec, LineShapeSpec } from '../types';
 import {
   cardinalOf, tickPositions, leftNormal, formatTickValue,
-  labelLayout, labelShiftPx, type Cardinal, type Vec2,
+  labelLayout, labelShiftPx, labelOriginPx, setCardSize, DEFAULT_NOTE_WIDTH,
+  type Cardinal, type Vec2, type LabelLayout,
 } from '../compute/shape-geometry';
 
 /** Mafs 的 style 仅 solid/dashed;dotted 降级为 dashed(与曲线一致) */
@@ -56,10 +58,55 @@ function PlacedText({
   );
 }
 
-/** 对象的标签(点 / 线 / 箭头 / 圆 / 面);位置 = 默认布局 + 用户拖动偏移 */
-function ShapeLabel({ s }: { s: ShapeSpec }) {
+/**
+ * 说明卡片:note 块 → atomsToSvg(文字转路径的独立 SVG)→ 嵌进 Mafs 这张 SVG。
+ * 同一张图里,所以退出全屏导出的缩略图自带卡片。
+ * 画好后登记实际尺寸(setCardSize),命中测试按它算。
+ */
+function NoteCard({ s, layout, selected }: { s: ShapeSpec; layout: LabelLayout; selected: boolean }) {
+  const { viewTransform, userTransform } = useTransformContext();
+  const [card, setCard] = useState<{ svg: string; w: number; h: number } | null>(null);
+  const width = s.noteWidth ?? DEFAULT_NOTE_WIDTH;
+  const note = s.note;
+
+  useEffect(() => {
+    if (!note || note.length === 0) { setCard(null); return; }
+    let cancelled = false;
+    atomsToSvg(note, { width, defaultTextColor: s.color })
+      .then((svg) => {
+        if (cancelled) return;
+        const m = /viewBox="0 0 ([\d.]+) ([\d.]+)"/.exec(svg);
+        const w = m ? Number(m[1]) : width;
+        const h = m ? Number(m[2]) : 24;
+        setCardSize(s.id, w, h);
+        setCard({ svg, w, h });
+      })
+      .catch((e: unknown) => {
+        // 不吞:画不出来就在控制台说清楚是哪张卡片
+        console.error(`[math-rendering] 说明卡片 ${s.id} 渲染失败`, e);
+      });
+    return () => { cancelled = true; };
+  }, [note, width, s.color, s.id]);
+
+  if (!card) return null;
+  const anchor = vec.transform(layout.at, vec.matrixMult(viewTransform, userTransform)) as Vec2;
+  const [x0, y0] = labelOriginPx(anchor, layout, card.w, card.h, s.labelOffset);
+  return (
+    <g transform={`translate(${x0} ${y0})`} opacity={s.opacity}>
+      {selected && (
+        <rect x={-4} y={-4} width={card.w + 8} height={card.h + 8} rx={4}
+          fill="none" stroke={s.color} strokeDasharray="4 3" strokeWidth={1} />
+      )}
+      <g dangerouslySetInnerHTML={{ __html: card.svg }} />
+    </g>
+  );
+}
+
+/** 对象的标签(点 / 线 / 箭头 / 圆 / 面);位置 = 默认布局 + 用户拖动偏移;有 note 时画成卡片 */
+function ShapeLabel({ s, selected = false }: { s: ShapeSpec; selected?: boolean }) {
   const layout = labelLayout(s);
   if (!layout) return null;
+  if (s.note && s.note.length > 0) return <NoteCard s={s} layout={layout} selected={selected} />;
   return (
     <PlacedText
       at={layout.at}
@@ -103,7 +150,7 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   opacity={s.opacity}
                   svgCircleProps={{ r: (s.size ?? 6) + (selected ? 3 : 0) }}
                 />
-                <ShapeLabel s={s} />
+                <ShapeLabel s={s} selected={selected} />
               </React.Fragment>
             );
           case 'segment':
@@ -121,7 +168,7 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   strokeOpacity={s.opacity ?? 1}
                   fillOpacity={0}
                 />
-                <ShapeLabel s={s} />
+                <ShapeLabel s={s} selected={selected} />
               </React.Fragment>
             );
           case 'polygon':
@@ -135,10 +182,12 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   strokeOpacity={s.opacity ?? 1}
                   fillOpacity={(s.fillOpacity ?? 0.15) * (s.opacity ?? 1)}
                 />
-                <ShapeLabel s={s} />
+                <ShapeLabel s={s} selected={selected} />
               </React.Fragment>
             );
-          case 'text':
+          case 'text': {
+            const layout = labelLayout(s);
+            if (layout) return <NoteCard key={s.id} s={s} layout={layout} selected={selected} />;
             return (
               <Text
                 key={s.id}
@@ -154,6 +203,7 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                 {s.text}
               </Text>
             );
+          }
         }
       })}
     </>
@@ -205,7 +255,7 @@ function LineShape({
         );
       })}
 
-      <ShapeLabel s={s} />
+      <ShapeLabel s={s} selected={selected} />
 
       {s.struck && (
         <Text x={mid[0]} y={mid[1]} size={22} color={STRUCK_COLOR} svgTextProps={{ fontWeight: 700 }}>

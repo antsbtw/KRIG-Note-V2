@@ -62,6 +62,8 @@ interface RightPanelProps {
   selectedShapes: ShapeEntry[];
   shapeErrors: Record<string, string>;
   onUpdateSelectedShapes: (updates: Partial<ShapeEntry>) => void;
+  /** 打开说明卡片编辑(画布上原地) */
+  onEditCard: (id: string) => void;
   /** 画图形模式下的操作提示 */
   shapeHint: string | null;
 }
@@ -99,6 +101,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   shapeErrors,
   onUpdateSelectedShapes,
   shapeHint,
+  onEditCard,
 }) => {
   if (multiSelectCount > 1) {
     return (
@@ -113,6 +116,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           errors={shapeErrors}
           onUpdate={onUpdateShape}
           onRemove={onRemoveShape}
+          onEditCard={onEditCard}
         />
         <MultiShapeEditor
           count={multiSelectCount}
@@ -136,6 +140,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             shape={selectedShape}
             error={selectedShapeError}
             onUpdate={onUpdateShape}
+            onEditCard={onEditCard}
           />
         ) : (
           <div className="mv-fr-section">

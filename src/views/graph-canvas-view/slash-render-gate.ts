@@ -1,108 +1,14 @@
 /**
- * graph 编辑态 slash/turn-into 渲染态闸(L5 编辑↔渲染一致性专项 E1)
+ * graph 编辑态 slash/turn-into 渲染态闸 —— 薄包装
  *
- * 不变量:**graph 编辑态能插的块 ⊆ graph 渲染态(atomsToSvg)能渲的块**。
- * 否则用户在画板节点 slash 插了渲染态渲不出的块(divider/task/toggle/…)→ Esc 退出
- * 编辑后渲成灰字占位 / 丢内容(prompt §1「功能黑洞」)。
- *
- * 机制(发现 B):canvas slash 在 [graph-canvas-view/index.ts] 注册处用 createTurnIntoItems
- * 返回扁平 SlashItem[],本模块在注册前 `.filter()` 掉「目标块渲染态不支持」的 item。
- * 零 driver 改动、零跨 capability 影响(只动 graph view 自己的注册)。
- *
- * inputRules **不在此闸**(发现 C):它 schema 驱动、只产范围内块(heading/list/quote/hr/
- * task/code),E4 补 hr/task/toggle 渲染后即全覆盖,无需 per-instance 限制。
- *
- * 维护:E4 补 horizontalRule/taskList/toggleList 渲染器时,RENDERABLE_ATOM_TYPES
- * (svg/index.ts 单一真源)追加它们 → 本闸自动放开对应 slash item。
+ * 实现已挪到 lib/atom-serializers/svg/slash-render-gate.ts(2026-11-06,math-visual 说明卡片共用)。
+ * 这里保留原导出名,画板注册处与既有单测不用改。画板额外屏蔽 toggleList 的规则也在共用文件里
+ * (GRAPH_SLASH_DENY_ATOM_TYPES,作为缺省 deny)。
  */
-import { RENDERABLE_ATOM_TYPES } from '../../lib/atom-serializers/svg';
-import type { SlashItem } from '@slot/interaction-registries/slash-registry/slash-types';
-
-/**
- * slash-turn 命令 → 该命令落地的块 atom.type(camelCase,对齐 atomsToSvg dispatch)。
- *
- * 命令→TurnTarget 权威源:register-pm-commands.ts registerSlashTurn(...);
- * TurnTarget(kebab)→ atom.type(camel)在此显式登记,避免散落字符串。
- * paragraph/h1-h6 都落 paragraph|heading(渲染态 renderTextBlock),恒可渲。
- */
-const SLASH_TURN_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
-  'text-editing.slash-turn-paragraph': 'paragraph',
-  'text-editing.slash-turn-h1': 'heading',
-  'text-editing.slash-turn-h2': 'heading',
-  'text-editing.slash-turn-h3': 'heading',
-  'text-editing.slash-turn-h4': 'heading',
-  'text-editing.slash-turn-h5': 'heading',
-  'text-editing.slash-turn-h6': 'heading',
-  'text-editing.slash-turn-bullet': 'bulletList',
-  'text-editing.slash-turn-ordered': 'orderedList',
-  'text-editing.slash-turn-task': 'taskList',
-  'text-editing.slash-turn-quote': 'blockquote',
-  'text-editing.slash-turn-code': 'codeBlock',
-  'text-editing.slash-turn-divider': 'horizontalRule',
-  'text-editing.slash-turn-callout': 'callout',
-  'text-editing.slash-turn-toggle': 'toggleList',
-};
-
-/**
- * slash-**insert** 命令 → 落地的块 atom.type(非 turn-into 的插入项)。
- *
- * ⚠️ 上面 isSlashItemRenderable 原本对「命令不在 turn-into 表内」一律放行,
- * 并留了 fail loud 提示:「未来若注册了渲染态不支持的非 turn-into 块,需在此
- * 显式登记其 atom.type 再判」。**defBlock 就是第一个**(00 §2.5,note 的定义块)——
- * atomsToSvg 不渲它,画布节点里插了会变灰字占位 → 功能黑洞。
- *
- * ⭐ 且从语义上画布文字节点本就不该插 def:def 定义的是**导图/画板节点本身**,
- * 写在节点**内部**是套娃。它的落点是语义面(note tab,MIND_SEMANTIC_VIEW_ID),
- * 那条链路不经本闸。
- */
-const SLASH_INSERT_COMMAND_TO_ATOM_TYPE: Readonly<Record<string, string>> = {
-  'text-editing.slash-insert-def-block': 'defBlock',
-};
-
-/**
- * 画板 slash **主动屏蔽**的块(渲染态可渲,但在画板语境无意义/误导,故不让插)。
- *
- * 与「渲染不出来」不同:这些块渲染态能渲(留在 RENDERABLE_ATOM_TYPES,旧 doc 仍静态
- * 渲出不丢内容),但画板渲染态**无交互** → 某些块的核心语义不成立:
- * - toggleList:核心价值是点箭头折叠/展开;画板 mesh 静态不可点 → 退化成"假折叠"
- *   (▶/▼ 箭头点不动,误导)。用户拍板:画板撤掉 toggle(2026-06-23)。
- *
- * 维护:这是"能渲但语境无意义"主动屏蔽集,区别于 RENDERABLE_ATOM_TYPES(能否渲)。
- */
-const GRAPH_SLASH_DENY_ATOM_TYPES: ReadonlySet<string> = new Set([
-  'toggleList',
-]);
-
-/**
- * 某 slash item 在画板是否该放出。
- *
- * 两关:① 渲染态可渲(∈ RENDERABLE_ATOM_TYPES,守"编辑⊆渲染"防黑洞);
- *       ② 不在画板主动屏蔽集(GRAPH_SLASH_DENY,排"能渲但语境无意义"的块)。
- *
- * - turn-into item(在映射表内):两关都过才放。
- * - 非 turn-into item(如 math-block,命令不在表内):放行 — 这些块本身就在渲染态支持内
- *   (mathBlock ∈ RENDERABLE_ATOM_TYPES),且不属本闸过滤对象。**未来若注册了
- *   渲染态不支持的非 turn-into 块,需在此显式登记其 atom.type 再判**(fail loud:
- *   宁可未来加一行,不静默放行黑洞)。
- */
-export function isSlashItemRenderable(item: SlashItem): boolean {
-  const atomType =
-    SLASH_TURN_COMMAND_TO_ATOM_TYPE[item.command] ?? SLASH_INSERT_COMMAND_TO_ATOM_TYPE[item.command];
-  if (atomType === undefined) {
-    // 非 turn-into / 非登记的 insert item(math-block 等);当前注册的此类项目标块均可渲,放行。
-    return true;
-  }
-  return RENDERABLE_ATOM_TYPES.has(atomType) && !GRAPH_SLASH_DENY_ATOM_TYPES.has(atomType);
-}
-
-/** 过滤掉渲染态渲不出的 slash item(守「编辑 ⊆ 渲染」不变量)。 */
-export function filterSlashItemsToRenderable(items: SlashItem[]): SlashItem[] {
-  return items.filter(isSlashItemRenderable);
-}
-
-/** 单测用:导出映射表 + 画板主动屏蔽集(断言闸行为时对照)。 */
 export {
+  isSlashItemRenderable,
+  filterSlashItemsToRenderable,
   SLASH_TURN_COMMAND_TO_ATOM_TYPE,
   SLASH_INSERT_COMMAND_TO_ATOM_TYPE,
   GRAPH_SLASH_DENY_ATOM_TYPES,
-};
+} from '../../lib/atom-serializers/svg/slash-render-gate';

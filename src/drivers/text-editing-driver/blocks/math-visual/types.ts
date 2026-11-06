@@ -155,6 +155,22 @@ export const DEFAULT_CANVAS_CONFIG: CanvasConfig = {
 export type ToolMode = 'move' | 'select' | 'annotate' | 'tangent' | 'normal' | 'integral' | 'feature' | 'export' | 'shape';
 
 // ─── 几何对象(题意图 P1,2026-11-06) ───────────────────────
+
+/** note doc 信封(与 text-editing Host 的 DriverSerialized 同形;version 必填,缺了编辑器静默空白) */
+export interface NoteDoc {
+  format: 'pm-doc-json';
+  version: '0.1';
+  payload: { type: 'doc'; content: NoteNode[] };
+}
+
+/** PM JSON 节点(只声明用到的最小结构) */
+export interface NoteNode {
+  type: string;
+  attrs?: Record<string, unknown>;
+  content?: NoteNode[];
+  text?: string;
+  marks?: Array<{ type: string; attrs?: Record<string, unknown> }>;
+}
 // 设计稿:docs/10-business-design/math/题意图-几何对象与分帧设计.md §3.1
 
 export type ShapeKind = 'point' | 'segment' | 'arrow' | 'circle' | 'text' | 'polygon';
@@ -177,6 +193,13 @@ export interface ShapeEntry {
   points?: CoordExpr[];
   /** polygon 是否半透明填充;缺省 = 填充 */
   fill?: boolean;
+  /**
+   * 说明卡片(2026-11-06):标签 / 文字对象的内容是一小段 note(PM doc 信封,与 note / 画板文字节点同格式)。
+   * 有它时按卡片显示;text 字段同步存它的纯文字(列表摘要、旧路径兜底显示用)。
+   */
+  note?: NoteDoc;
+  /** 卡片宽(屏幕像素),缺省 220 */
+  noteWidth?: number;
   /** 标签被拖开的偏移(屏幕像素,相对默认位置);缺省 = 默认位置 */
   labelOffset?: [number, number];
   /** text 的内容;point/segment/arrow/circle 的标签 */

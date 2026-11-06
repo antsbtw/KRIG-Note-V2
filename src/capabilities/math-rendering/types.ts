@@ -260,9 +260,19 @@ export interface ShapeTicks {
   labels?: string[];
 }
 
+/** 说明卡片的内容:note 块(PM JSON 节点),由 lib/atom-serializers/svg 画成 SVG */
+export type NoteAtom = import('../../lib/atom-serializers/svg').Atom;
+
 interface ShapeSpecBase {
   id: string;
   color: string;
+  /**
+   * 说明卡片(2026-11-06):标签 / 文字对象升级成「一小段 note」——多行、列表、公式……
+   * 有它时按卡片画(宽 noteWidth),没有时退回单行 label / text。
+   */
+  note?: NoteAtom[];
+  /** 卡片宽(屏幕像素),缺省 220 */
+  noteWidth?: number;
   /** 0~1;虚影用低不透明度表达 */
   opacity?: number;
   /** 标签被用户拖开的偏移(屏幕像素,相对默认位置) */

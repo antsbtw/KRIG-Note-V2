@@ -61,7 +61,8 @@ describe('h1~h6 入口齐备 —— 每一层都不许只做到 h3', () => {
   });
 
   it('graph 渲染态闸:h1..h6 的 slash 命令都显式登记(不靠"表里没有=放行"兜底)', () => {
-    const code = readCode('src/views/graph-canvas-view/slash-render-gate.ts');
+    // 2026-11-06 闸实现挪到 lib(math-visual 说明卡片共用),画板原文件只剩 re-export
+    const code = readCode('src/lib/atom-serializers/svg/slash-render-gate.ts');
     const missing = LEVELS.filter((n) => !code.includes(`'text-editing.slash-turn-h${n}'`));
     expect(
       missing,

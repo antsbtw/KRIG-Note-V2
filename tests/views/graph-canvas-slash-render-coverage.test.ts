@@ -82,3 +82,13 @@ describe('E1 不变量 — graph 可插块 ⊆ 渲染态可渲块', () => {
     expect(isSlashItemRenderable(createMathBlockItem(VIEW))).toBe(true);
   });
 });
+
+// 2026-11-06:闸挪到 lib 共用(math-visual 说明卡片也用),deny 可由嵌入方传
+describe('共用渲染态闸:deny 参数', () => {
+  it('缺省 deny = 画板那套(屏蔽 toggleList);传空集则只按「能不能渲」判', async () => {
+    const gate = await import('../../src/lib/atom-serializers/svg/slash-render-gate');
+    const toggle = { command: 'text-editing.slash-turn-toggle' } as never;
+    expect(gate.isSlashItemRenderable(toggle)).toBe(false);
+    expect(gate.isSlashItemRenderable(toggle, new Set())).toBe(true);
+  });
+});

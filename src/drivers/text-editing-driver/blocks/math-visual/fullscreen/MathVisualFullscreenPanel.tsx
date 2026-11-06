@@ -27,7 +27,7 @@ import { instanceRegistry } from '../../../instance-registry';
 import type {
   MathVisualData, CanvasConfig, ToolMode,
   TangentLine, NormalLine, IntegralRegion, FeaturePoint, FeaturePointType,
-  Annotation, FunctionEntry, ShapeEntry, ShapeKind,
+  Annotation, FunctionEntry, ShapeEntry, ShapeKind, NoteDoc,
 } from '../types';
 import { DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from '../types';
 import {
@@ -40,11 +40,13 @@ import { LegendOverlay } from './LegendOverlay';
 import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
 import { ShapeContextMenu, type ContextMenuEntry } from './ShapeContextMenu';
 import { EditHistory } from '../edit-history';
+import { NoteCardEditor } from './NoteCardEditor';
 import {
   compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
   zoomView, panView, boundsOfShapes, MAFS_VIEWBOX_PADDING,
   hitTest, shapeHandles, translateShape, setHandle, duplicateShape, dataToPx, POLYGON_MIN_POINTS,
   shapesInRect, reorderShapes, type LayerOp,
+  noteContent, noteDocFromText, plainTextOfNote,
   type Vec2, type View, type PxFrame, type HandlePart,
 } from '../shapes';
 import type { ShapeSpec } from '@capabilities/math-rendering/types';
@@ -665,6 +667,43 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     onChange({ ...data, shapes: reorderShapes(shapes, selectedShapeIds, op) });
   }, [data, shapes, selectedShapeIds, onChange]);
 
+  // ── 说明卡片原地编辑(2026-11-06 用户选 A:画布上双击卡片原地编辑)──
+  const [cardEdit, setCardEdit] = useState<{
+    shapeId: string; initialDoc: NoteDoc; left: number; top: number; width: number; minHeight: number;
+  } | null>(null);
+
+  const openCardEditor = useCallback((id: string) => {
+    const entry = shapes.find((sh) => sh.id === id);
+    const frame = getFrame();
+    if (!entry || !frame) return;
+    const width = entry.noteWidth ?? 220;
+    const toPx = (p: [number, number]) => dataToPx(p, frame) as [number, number];
+    const spec = compiledShapes.specs.find((sp) => sp.id === id);
+    // 编辑框放在卡片 / 标签现在的位置;还没有标签的,按「有一张卡片」算出默认位置
+    let box = spec ? math.shapeLabelBox(spec, toPx) : null;
+    if (!box && spec) box = math.shapeLabelBox({ ...spec, note: [{ type: 'paragraph' }], noteWidth: width }, toPx);
+    const left = frame.rect.left + (box ? box.x0 : frame.width / 2 - width / 2);
+    const top = frame.rect.top + (box ? box.y0 : frame.height / 2);
+    setCardEdit({
+      shapeId: id,
+      initialDoc: entry.note ?? noteDocFromText(entry.text),
+      left: Math.min(Math.max(left, 8), window.innerWidth - width - 8),
+      top: Math.min(Math.max(top, 30), window.innerHeight - 80),
+      width,
+      minHeight: box ? Math.max(box.y1 - box.y0, 32) : 32,
+    });
+  }, [shapes, getFrame, compiledShapes, math]);
+
+  const finishCardEdit = useCallback((doc: NoteDoc | null) => {
+    const ed = cardEdit;
+    setCardEdit(null);
+    if (!ed || !doc) return;
+    // 空内容 → 去掉卡片;否则存 note,text 同步纯文字(列表摘要 / 旧路径用)
+    updateShape(ed.shapeId, noteContent(doc)
+      ? { note: doc, text: plainTextOfNote(doc) }
+      : { note: undefined, text: '' });
+  }, [cardEdit, updateShape]);
+
   // ── 右键菜单(2026-11-06 用户:「复制删除用右键菜单好了」)──
   const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
   const openShapeMenu = useCallback((id: string, x: number, y: number) => {
@@ -994,6 +1033,9 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return; // 输入框里的 ⌘Z 归输入框自己
+      // 卡片编辑器里打字:按键全归编辑器(否则 Backspace 会删掉选中的图形)
+      const tgt = e.target as HTMLElement | null;
+      if (tgt?.isContentEditable || tgt?.closest?.('[data-mv-card-editor]')) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         e.stopPropagation();
@@ -1147,6 +1189,14 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
+          onDoubleClick={(e) => {
+            // 双击图形 / 标签 / 文字 → 原地编辑说明卡片(画图形模式下双击是连点两个点,不拦)
+            if (toolMode !== 'move' && toolMode !== 'select') return;
+            const hit = hitAt(e);
+            if (!hit) return;
+            setSelectedShapeId(hit.id);
+            openCardEditor(hit.id);
+          }}
           onContextMenu={(e) => {
             e.preventDefault();
             const hit = hitAt(e);
@@ -1254,8 +1304,22 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           shapeErrors={compiledShapes.errors}
           onUpdateSelectedShapes={updateSelectedShapes}
           shapeHint={shapeHint}
+          onEditCard={openCardEditor}
         />
       </div>
+
+      {cardEdit && (
+        <NoteCardEditor
+          key={cardEdit.shapeId}
+          shapeId={cardEdit.shapeId}
+          initialDoc={cardEdit.initialDoc}
+          left={cardEdit.left}
+          top={cardEdit.top}
+          width={cardEdit.width}
+          minHeight={cardEdit.minHeight}
+          onExit={finishCardEdit}
+        />
+      )}
 
       {shapeMenu && selectedShapeIds.length > 0 && (
         <ShapeContextMenu

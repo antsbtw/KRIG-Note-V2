@@ -18,6 +18,8 @@ interface ShapeEditorProps {
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   /** 多选列表里展开时,标题已在行头,不再重复 */
   hideTitle?: boolean;
+  /** 打开说明卡片原地编辑(画布上) */
+  onEditCard?: (id: string) => void;
 }
 
 const stop = (e: React.KeyboardEvent) => e.stopPropagation();
@@ -36,7 +38,7 @@ function CoordRow({ label, value, onChange }: { label: string; value: CoordExpr 
 }
 
 // 复制 / 删除 / 图层走右键菜单与快捷键(2026-11-06 用户:「复制删除用右键菜单好了」),这里只放编辑项
-export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, hideTitle }) => {
+export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, hideTitle, onEditCard }) => {
   const up = (u: Partial<ShapeEntry>) => onUpdate(s.id, u);
   const meta = shapeKindMeta(s.kind);
   const isLine = s.kind === 'segment' || s.kind === 'arrow';
@@ -83,12 +85,55 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </>
         )}
 
-        <div className="mv-fr-prop-row">
-          <span className="mv-fr-prop-label">{s.kind === 'text' ? '内容' : '标签'}</span>
-          <input className="mv-fr-prop-input" value={s.text ?? ''}
-            placeholder={s.kind === 'text' ? '' : '可不填'}
-            onChange={(e) => up({ text: e.target.value })} onKeyDown={stop} />
-        </div>
+        {s.note ? (
+          // 说明卡片:内容是一小段 note,在画布上原地编辑;这里只预览 + 入口
+          <>
+            <div className="mv-fr-prop-row" style={{ alignItems: 'flex-start' }}>
+              <span className="mv-fr-prop-label">{s.kind === 'text' ? '内容' : '标签'}</span>
+              <div
+                title="双击画布上的卡片,或点「编辑卡片」"
+                style={{
+                  flex: 1, minWidth: 0, whiteSpace: 'pre-wrap', fontSize: 12, color: '#e0e0e0',
+                  background: '#252525', border: '1px solid #444', borderRadius: 4, padding: '3px 6px',
+                  maxHeight: 96, overflow: 'auto',
+                }}
+              >
+                {s.text || '(空)'}
+              </div>
+            </div>
+            <div className="mv-fr-prop-row">
+              <span className="mv-fr-prop-label" />
+              {onEditCard && (
+                <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onEditCard(s.id)}>编辑卡片</button>
+              )}
+              <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} title="去掉格式,只留文字(单行显示)"
+                onClick={() => up({ note: undefined, text: (s.text ?? '').split('\n')[0] })}>
+                转回纯文字
+              </button>
+            </div>
+            <div className="mv-fr-prop-row">
+              <span className="mv-fr-prop-label">卡片宽</span>
+              <input className="mv-fr-prop-input" style={{ width: 0, minWidth: 56 }} type="number" min={80} max={800} step={10}
+                value={s.noteWidth ?? 220}
+                onChange={(e) => { const n = Number(e.target.value); if (n >= 80) up({ noteWidth: n }); }}
+                onKeyDown={stop} />
+            </div>
+          </>
+        ) : (
+          <div className="mv-fr-prop-row">
+            <span className="mv-fr-prop-label">{s.kind === 'text' ? '内容' : '标签'}</span>
+            <input className="mv-fr-prop-input" value={s.text ?? ''}
+              placeholder={s.kind === 'text' ? '' : '可不填'}
+              onChange={(e) => up({ text: e.target.value })} onKeyDown={stop} />
+            {onEditCard && (
+              <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }}
+                title="多行、列表、公式……(也可以双击画布上的标签)"
+                onClick={() => onEditCard(s.id)}>
+                卡片
+              </button>
+            )}
+          </div>
+        )}
         {s.labelOffset && s.kind !== 'text' && (
           <div className="mv-fr-prop-row">
             <span className="mv-fr-prop-label">标签位置</span>
@@ -170,7 +215,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </>
         )}
 
-        <div className="mv-fr-hint">右键图形:复制 / 删除 / 调图层;画布上拖标签可挪位置</div>
+        <div className="mv-fr-hint">双击标签写多行 / 列表 / 公式;拖标签挪位置;右键:复制 / 删除 / 调图层</div>
       </div>
     </div>
   );
@@ -226,7 +271,8 @@ export const SelectedShapeList: React.FC<{
   errors: Record<string, string>;
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemove: (id: string) => void;
-}> = ({ shapes, errors, onUpdate, onRemove }) => (
+  onEditCard?: (id: string) => void;
+}> = ({ shapes, errors, onUpdate, onRemove, onEditCard }) => (
   <>
     {shapes.map((s) => (
       <div key={s.id} className="mv-fr-section" style={{ borderLeft: `3px solid ${s.color}` }}>
@@ -237,7 +283,7 @@ export const SelectedShapeList: React.FC<{
           </span>
           <button className="mv-fr-ann-del" onClick={() => onRemove(s.id)} title="删掉这一个">×</button>
         </div>
-        <ShapeEditor shape={s} error={errors[s.id]} onUpdate={onUpdate} hideTitle />
+        <ShapeEditor shape={s} error={errors[s.id]} onUpdate={onUpdate} hideTitle onEditCard={onEditCard} />
       </div>
     ))}
   </>

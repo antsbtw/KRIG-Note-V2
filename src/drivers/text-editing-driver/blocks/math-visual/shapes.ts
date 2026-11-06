@@ -7,7 +7,7 @@
  */
 
 import type { ShapeSpec, ScalarResult, MathParameter } from '@capabilities/math-rendering/types';
-import type { ShapeEntry, ShapeKind, CoordExpr } from './types';
+import type { ShapeEntry, ShapeKind, CoordExpr, NoteDoc, NoteNode } from './types';
 import { FUNCTION_COLORS } from './types';
 
 export type Vec2 = [number, number];
@@ -120,7 +120,11 @@ export function compileShapes(
     const vec = (c: CoordExpr | undefined, name: string): Vec2 =>
       [num(c?.[0], `${name} x`), num(c?.[1], `${name} y`)];
 
-    const common = { id: s.id, color: s.color, opacity: s.opacity, labelOffset: s.labelOffset };
+    const noteAtoms = noteContent(s.note);
+    const common = {
+      id: s.id, color: s.color, opacity: s.opacity, labelOffset: s.labelOffset,
+      ...(noteAtoms ? { note: noteAtoms, noteWidth: s.noteWidth } : {}),
+    };
     let spec: ShapeSpec | null = null;
 
     switch (s.kind) {
@@ -131,7 +135,7 @@ export function compileShapes(
       }
       case 'text': {
         const at = vec(s.at, '位置');
-        if (!s.text) problems.push('文字:内容是空的');
+        if (!s.text && !noteAtoms) problems.push('文字:内容是空的');
         spec = { ...common, kind: 'text', at, text: s.text ?? '' };
         break;
       }
@@ -359,7 +363,8 @@ export function hitTest(
     // 标签:part = 'label'(拖它只挪标签,不挪对象)
     const box = labelBox?.(s, px);
     if (box && mousePx[0] >= box.x0 && mousePx[0] <= box.x1 && mousePx[1] >= box.y0 && mousePx[1] <= box.y1) {
-      return { id: s.id, part: 'label' };
+      // 文字对象的卡片就是它本体:拖它 = 移动对象,不是挪标签
+      return { id: s.id, part: s.kind === 'text' ? null : 'label' };
     }
     let hit = false;
     switch (s.kind) {
@@ -511,4 +516,52 @@ export function reorderShapes<T extends { id: string }>(list: T[], ids: string[]
     }
   }
   return out;
+}
+
+// ─── 说明卡片:纯文字 ↔ note doc(2026-11-06 用户:「标签应该允许多行,最好能表达 note 中的各种 block」) ───
+
+/** 卡片内容;空 doc(只有一个空段落)视为没有卡片 → 退回单行文字显示 */
+export function noteContent(doc: NoteDoc | undefined): NoteNode[] | null {
+  const content = doc?.payload?.content;
+  if (!Array.isArray(content) || content.length === 0) return null;
+  const empty = content.length === 1 && content[0].type === 'paragraph' && !(content[0].content?.length);
+  return empty ? null : content;
+}
+
+/** 纯文字 → note doc:一行一段;首段 isTitle:false(这里不是 note,没有标题) */
+export function noteDocFromText(text: string | undefined): NoteDoc {
+  const lines = (text ?? '').split('\n');
+  return {
+    format: 'pm-doc-json',
+    version: '0.1',
+    payload: {
+      type: 'doc',
+      content: lines.map((line) => ({
+        type: 'paragraph',
+        attrs: { isTitle: false },
+        content: line ? [{ type: 'text', text: line }] : [],
+      })),
+    },
+  };
+}
+
+/** note doc → 纯文字(块之间换行;公式取 LaTeX 源码) */
+export function plainTextOfNote(doc: NoteDoc | undefined): string {
+  const lines: string[] = [];
+  const inline = (n: NoteNode): string => {
+    if (n.type === 'text') return n.text ?? '';
+    if (n.type === 'mathInline' || n.type === 'mathBlock') {
+      const latex = (n.attrs?.latex as string | undefined) ?? (n.content ?? []).map(inline).join('');
+      return latex;
+    }
+    return (n.content ?? []).map(inline).join('');
+  };
+  const walk = (n: NoteNode) => {
+    const kids = n.content ?? [];
+    const isLeafBlock = kids.length === 0 || kids.every((k) => k.type === 'text' || k.type === 'mathInline' || k.type === 'hardBreak');
+    if (isLeafBlock) lines.push(inline(n));
+    else kids.forEach(walk);
+  };
+  (doc?.payload?.content ?? []).forEach(walk);
+  return lines.join('\n').trim();
 }

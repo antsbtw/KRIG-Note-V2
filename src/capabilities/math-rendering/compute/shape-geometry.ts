@@ -77,25 +77,31 @@ export const LABEL_SIZE = 15;
 
 /** 各类对象的标签默认放哪(没有标签返回 null) */
 export function labelLayout(s: ShapeSpec): LabelLayout | null {
-  if (s.kind === 'text' || !s.label) return null;
+  const hasNote = !!s.note && s.note.length > 0;
+  if (s.kind === 'text') {
+    // 文字对象:有卡片内容时,卡片以 at 为中心;纯文字由 ShapeLayer 直接画,不走标签布局
+    return hasNote ? { at: s.at, dir: null, distance: 0, size: LABEL_SIZE, text: s.text } : null;
+  }
+  if (!s.label && !hasNote) return null;
+  const text = s.label ?? '';
   switch (s.kind) {
     case 'point':
-      return { at: s.at, dir: 'ne', distance: 12, size: LABEL_SIZE, text: s.label };
+      return { at: s.at, dir: 'ne', distance: 12, size: LABEL_SIZE, text };
     case 'arrow':
-      return { at: s.to, dir: cardinalOf(s.to[0] - s.from[0], s.to[1] - s.from[1]), distance: 16, size: LABEL_SIZE, text: s.label };
+      return { at: s.to, dir: cardinalOf(s.to[0] - s.from[0], s.to[1] - s.from[1]), distance: 16, size: LABEL_SIZE, text };
     case 'segment': {
       const [nx, ny] = leftNormal(s.from, s.to);
-      return { at: [(s.from[0] + s.to[0]) / 2, (s.from[1] + s.to[1]) / 2], dir: cardinalOf(-nx, -ny), distance: 10, size: LABEL_SIZE, text: s.label };
+      return { at: [(s.from[0] + s.to[0]) / 2, (s.from[1] + s.to[1]) / 2], dir: cardinalOf(-nx, -ny), distance: 10, size: LABEL_SIZE, text };
     }
     case 'circle': {
       const d = s.radius / Math.SQRT2;
-      return { at: [s.center[0] + d, s.center[1] + d], dir: 'ne', distance: 6, size: LABEL_SIZE, text: s.label };
+      return { at: [s.center[0] + d, s.center[1] + d], dir: 'ne', distance: 6, size: LABEL_SIZE, text };
     }
     case 'polygon': {
       const n = s.points.length;
       const cx = s.points.reduce((a, p) => a + p[0], 0) / n;
       const cy = s.points.reduce((a, p) => a + p[1], 0) / n;
-      return { at: [cx, cy], dir: null, distance: 0, size: LABEL_SIZE, text: s.label };
+      return { at: [cx, cy], dir: null, distance: 0, size: LABEL_SIZE, text };
     }
   }
 }
@@ -131,14 +137,40 @@ export interface PxBox { x0: number; y0: number; x1: number; y1: number }
 export function shapeLabelBox(s: ShapeSpec, toPx: (p: Vec2) => Vec2): PxBox | null {
   const layout = labelLayout(s);
   if (!layout) return null;
-  const a = toPx(layout.at);
-  const [sx, sy] = labelShiftPx(layout, s.labelOffset);
-  const x = a[0] + sx;
-  const y = a[1] + sy;
-  const w = estimateTextWidth(layout.text, layout.size);
-  const h = layout.size;
-  const dir = layout.dir ?? '';
-  const x0 = dir.includes('e') ? x : dir.includes('w') ? x - w : x - w / 2;
-  const y0 = dir.includes('n') ? y - h : dir.includes('s') ? y : y - h / 2;
+  const [w, h] = labelSizePx(s, layout);
+  const [x0, y0] = labelOriginPx(toPx(layout.at), layout, w, h, s.labelOffset);
   return { x0: x0 - 3, y0: y0 - 3, x1: x0 + w + 3, y1: y0 + h + 3 };
+}
+
+/**
+ * 标签左上角像素:锚点 + 方位偏移 + 用户偏移,再按方位对齐
+ * (e → 左对齐、w → 右对齐、否则居中;n → 底对齐、s → 顶对齐、否则垂直居中)。
+ * 单行文字与卡片共用 —— 渲染与命中同一套。
+ */
+export function labelOriginPx(anchorPx: Vec2, layout: LabelLayout, w: number, h: number, userOffset?: Vec2): Vec2 {
+  const [sx, sy] = labelShiftPx(layout, userOffset);
+  const x = anchorPx[0] + sx;
+  const y = anchorPx[1] + sy;
+  const dir = layout.dir ?? '';
+  return [
+    dir.includes('e') ? x : dir.includes('w') ? x - w : x - w / 2,
+    dir.includes('n') ? y - h : dir.includes('s') ? y : y - h / 2,
+  ];
+}
+
+export const DEFAULT_NOTE_WIDTH = 220;
+
+/**
+ * 卡片实际尺寸:由 ShapeLayer 渲染完(atomsToSvg 异步)后登记;命中测试读它。
+ * 渲染与命中都在同一个 renderer 进程,模块级 Map 可以共享。
+ */
+const cardSizes = new Map<string, Vec2>();
+export function setCardSize(id: string, w: number, h: number): void { cardSizes.set(id, [w, h]); }
+
+/** 标签占的像素宽高:卡片用实测尺寸(还没画好先按 宽 × 一行 估),单行文字按字数估 */
+export function labelSizePx(s: ShapeSpec, layout: LabelLayout): Vec2 {
+  if (s.note && s.note.length > 0) {
+    return cardSizes.get(s.id) ?? [s.noteWidth ?? DEFAULT_NOTE_WIDTH, 24];
+  }
+  return [estimateTextWidth(layout.text, layout.size), layout.size];
 }

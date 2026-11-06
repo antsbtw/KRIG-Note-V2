@@ -4577,3 +4577,18 @@
 .krig-pm-host .ProseMirror .heading-collapsed-hidden * {
   display: none !important;
 }
+
+/* math-visual 说明卡片编辑中(2026-11-06):全屏面板 z-index 9999,而斜杠菜单 / 浮动工具条 /
+ * 右键 / 手柄菜单 / 工具条下拉 / popup 都在 1000~2000,会被挡在后面看不见。
+ * 只在卡片编辑期间(NoteCardEditor 给 body 加 mv-card-editing)抬到编辑浮层(10000)之上。 */
+body.mv-card-editing .krig-slash-menu,
+body.mv-card-editing .krig-floating-toolbar,
+body.mv-card-editing .krig-context-menu,
+body.mv-card-editing .krig-handle-menu,
+body.mv-card-editing .krig-handle-submenu,
+body.mv-card-editing .krig-context-submenu,
+body.mv-card-editing .krig-overlay-backdrop,
+body.mv-card-editing .krig-toolbar-dropdown-menu,
+body.mv-card-editing .krig-popup {
+  z-index: 10010 !important;
+}
