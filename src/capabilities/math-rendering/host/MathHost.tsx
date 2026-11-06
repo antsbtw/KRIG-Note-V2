@@ -34,11 +34,14 @@ import {
   FeatureTool, RiemannTool, EndpointMarkers, HoverCoords,
 } from './tools';
 import type { EndpointData } from './tools';
+import { ShapeLayer } from './ShapeLayer';
 
 // ─── 主组件 ─────────────────────────────────────────────
 
 export const MathHost: React.FC<MathHostProps> = ({
   viewBox,
+  shapes,
+  selectedShapeId,
   height,
   curves,
   annotations,
@@ -134,6 +137,10 @@ export const MathHost: React.FC<MathHostProps> = ({
         {curves.map((c, i) => (
           <CurveLabel key={`${c.id}-label`} curve={c} idx={i} viewBox={viewBox} />
         ))}
+        {/* 几何对象放在曲线 label 之后:ShapeLayer 不出 .katex,不影响 label 交互层的顺序对应 */}
+        {shapes && shapes.length > 0 && (
+          <ShapeLayer shapes={shapes} selectedId={selectedShapeId} viewBox={viewBox} />
+        )}
         {endpoints?.map((ep, i) => renderEndpoint(ep, i))}
         {annotations?.map((ann) => renderAnnotation(ann, curves))}
 

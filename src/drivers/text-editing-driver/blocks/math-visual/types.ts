@@ -151,8 +151,40 @@ export const DEFAULT_CANVAS_CONFIG: CanvasConfig = {
   pan: true,
 };
 
-/** 全屏工具模式(Phase 2 接入) */
-export type ToolMode = 'move' | 'select' | 'annotate' | 'tangent' | 'normal' | 'integral' | 'feature' | 'export';
+/** 全屏工具模式(Phase 2 接入;'shape' = 题意图 P1 画几何对象,具体画哪种由面板状态 shapeKind 定) */
+export type ToolMode = 'move' | 'select' | 'annotate' | 'tangent' | 'normal' | 'integral' | 'feature' | 'export' | 'shape';
+
+// ─── 几何对象(题意图 P1,2026-11-06) ───────────────────────
+// 设计稿:docs/10-business-design/math/题意图-几何对象与分帧设计.md §3.1
+
+export type ShapeKind = 'point' | 'segment' | 'arrow' | 'circle' | 'text';
+
+/** 坐标 = 两个表达式字符串;可以是数字,也可以引用参数(如 "8*T") */
+export type CoordExpr = [string, string];
+
+export interface ShapeEntry {
+  id: string;
+  kind: ShapeKind;
+  /** point / text 的位置 */
+  at?: CoordExpr;
+  /** segment / arrow 的起点、终点 */
+  from?: CoordExpr;
+  to?: CoordExpr;
+  /** circle 的圆心、半径 */
+  center?: CoordExpr;
+  radius?: string;
+  /** text 的内容;point/segment/arrow/circle 的标签 */
+  text?: string;
+  color: string;
+  style: 'solid' | 'dashed' | 'dotted';
+  lineWidth: number;
+  /** 0~1;虚影用 */
+  opacity?: number;
+  /** 刻度(segment / arrow):每 step 一道;labels 逗号分隔后依次标注 */
+  ticks?: { step: number; labels?: string[] };
+  /** 中点画 ✗(segment / arrow) */
+  struck?: boolean;
+}
 
 /** 标注点自动命名序列 */
 export const ANNOTATION_LABELS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
@@ -174,6 +206,8 @@ export interface MathVisualData {
   parameters: Parameter[];
   annotations: Annotation[];
   canvas: CanvasConfig;
+  /** 几何对象(题意图 P1);缺省 = 无 */
+  shapes?: ShapeEntry[];
   // 全屏模式持久化(Phase 2 启用)
   tangentLines?: TangentLine[];
   normalLines?: NormalLine[];

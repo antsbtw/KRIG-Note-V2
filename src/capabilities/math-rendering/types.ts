@@ -249,9 +249,76 @@ export interface ViewportState {
   y: [number, number];
 }
 
+// ─────────────────────────────────────────────────────────
+// 几何对象(题意图 P1,2026-11-06)— 与曲线无关的独立图元
+// driver 负责把表达式求值成数字后再传进来;capability 只画。
+// ─────────────────────────────────────────────────────────
+
+/** 刻度:沿线段/箭头从起点起每 step 个数据单位打一道,labels 依次标在刻度旁(缺省标距离数值) */
+export interface ShapeTicks {
+  step: number;
+  labels?: string[];
+}
+
+interface ShapeSpecBase {
+  id: string;
+  color: string;
+  /** 0~1;虚影用低不透明度表达 */
+  opacity?: number;
+}
+
+export interface PointShapeSpec extends ShapeSpecBase {
+  kind: 'point';
+  at: [number, number];
+  label?: string;
+  /** 半径 px,默认 6 */
+  size?: number;
+}
+
+export interface LineShapeSpec extends ShapeSpecBase {
+  kind: 'segment' | 'arrow';
+  from: [number, number];
+  to: [number, number];
+  style?: 'solid' | 'dashed' | 'dotted';
+  lineWidth?: number;
+  label?: string;
+  ticks?: ShapeTicks;
+  /** 中点画 ✗ —— 「题目不是问这个」 */
+  struck?: boolean;
+}
+
+export interface CircleShapeSpec extends ShapeSpecBase {
+  kind: 'circle';
+  center: [number, number];
+  radius: number;
+  style?: 'solid' | 'dashed' | 'dotted';
+  lineWidth?: number;
+  label?: string;
+}
+
+export interface TextShapeSpec extends ShapeSpecBase {
+  kind: 'text';
+  at: [number, number];
+  text: string;
+  /** 字号 px,默认 16 */
+  size?: number;
+}
+
+export type ShapeSpec = PointShapeSpec | LineShapeSpec | CircleShapeSpec | TextShapeSpec;
+
+/** evalScalar 结果:表达式 → 一个有限数;失败时 value=null 且 error 说明原因(不静默) */
+export interface ScalarResult {
+  value: number | null;
+  error: string | null;
+}
+
 export interface MathHostProps {
   /** 初始可视范围(driver 持久化;pan/zoom 走 onViewportChange 不直接改此 prop) */
   viewBox: ViewBox;
+  /** 几何对象(点/线段/箭头/圆/文字),坐标已求值 */
+  shapes?: ShapeSpec[];
+  /** 选中的几何对象(加粗显示) */
+  selectedShapeId?: string | null;
   /** 画布高度 px;capability 自管宽度(撑满容器) */
   height: number;
   /** 曲线列表 */
@@ -343,6 +410,8 @@ export interface MathRenderingApi {
     params: MathParameter[],
     sourceLatex?: string,
   ): EvalResult;
+  /** 常量表达式求值(可引用参数,如 "8*T");几何对象坐标用 */
+  evalScalar(expression: string, params: MathParameter[]): ScalarResult;
   /** 提取表达式中的 free symbols(参数名;独立变量 x/t/theta 与内置函数排除) */
   extractParameters(expression: string): string[];
   /** 数值微分(h=1e-6 中心差) */

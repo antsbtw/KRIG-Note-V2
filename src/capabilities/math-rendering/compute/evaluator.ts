@@ -6,7 +6,7 @@
  */
 
 import * as math from 'mathjs';
-import type { EvalResult, MathParameter } from '../types';
+import type { EvalResult, MathParameter, ScalarResult } from '../types';
 import {
   latexToFunction,
   latexToFunctionWithEndpoints,
@@ -66,6 +66,26 @@ export function createEvalFn(
   }
 
   return { fn: null, error: '无法解析此表达式', endpoints: [] };
+}
+
+// ─── 常量表达式求值(几何对象坐标) ───────────────────────
+
+/**
+ * 表达式 → 一个有限数。可引用参数(如 "8*T"、"sqrt(2)*3")。
+ * 失败不兜底成 0:返回 value=null + error(调用方把错误显示在对象那一行)。
+ */
+export function evalScalar(expression: string, params: MathParameter[]): ScalarResult {
+  const src = expression.trim();
+  if (!src) return { value: null, error: '没有填' };
+  const scope: Record<string, number> = {};
+  for (const p of params) scope[p.name] = p.value;
+  try {
+    const result = math.evaluate(src, scope);
+    if (typeof result === 'number' && isFinite(result)) return { value: result, error: null };
+    return { value: null, error: `算出来不是一个数:${String(result)}` };
+  } catch (e) {
+    return { value: null, error: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 // ─── 参数提取 ─────────────────────────────────────────────

@@ -92,7 +92,8 @@ export function useFunctionManagement(
 
   const removeFunction = useCallback(
     (id: string) => {
-      if (fns.length <= 1) return;
+      // 最后一条函数只有在已有几何对象时才能删(题意图不需要函数;纯函数图删光就空了)
+      if (fns.length <= 1 && (data.shapes?.length ?? 0) === 0) return;
       const newFns = fns.filter((f) => f.id !== id);
       const newAnns = annotations.filter((a) => a.functionId !== id);
       onChange({ ...data, functions: newFns, annotations: newAnns });

@@ -23,6 +23,8 @@ interface FunctionListSectionProps {
   insertFromHelp: UseFunctionManagementResult['insertFromHelp'];
   updateFunction: UseFunctionManagementResult['updateFunction'];
   removeFunction: UseFunctionManagementResult['removeFunction'];
+  /** 有几何对象时允许删到 0 条函数(题意图不需要函数) */
+  allowRemoveLast?: boolean;
 }
 
 type DialogState =
@@ -35,6 +37,7 @@ export const FunctionListSection: React.FC<FunctionListSectionProps> = ({
   insertFromHelp,
   updateFunction,
   removeFunction,
+  allowRemoveLast = false,
 }) => {
   const [dialog, setDialog] = useState<DialogState>(null);
 
@@ -67,7 +70,7 @@ export const FunctionListSection: React.FC<FunctionListSectionProps> = ({
                   initial: fn.displayExpression ?? fn.expression,
                 })
               }
-              canRemove={fns.length > 1}
+              canRemove={fns.length > 1 || allowRemoveLast}
             />
           ))}
         </div>

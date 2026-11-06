@@ -40,6 +40,8 @@ const mathVisualNodeSpec: NodeSpec = {
     parameters: { default: [] },
     annotations: { default: [] },
     canvas: { default: DEFAULT_CANVAS_CONFIG },
+    // 题意图 P1(2026-11-06):几何对象(点/线段/箭头/圆/文字)
+    shapes: { default: [] },
     // 全屏工具(Phase 2 启用)
     tangentLines: { default: [] },
     normalLines: { default: [] },
@@ -72,6 +74,7 @@ const mathVisualNodeSpec: NodeSpec = {
         parameters: safeJson('data-parameters', []),
         annotations: safeJson('data-annotations', []),
         canvas: safeJson('data-canvas', DEFAULT_CANVAS_CONFIG),
+        shapes: safeJson('data-shapes', []),
         tangentLines: safeJson('data-tangent-lines', []),
         normalLines: safeJson('data-normal-lines', []),
         integralRegions: safeJson('data-integral-regions', []),
@@ -89,6 +92,7 @@ const mathVisualNodeSpec: NodeSpec = {
     attrs['data-parameters'] = JSON.stringify(node.attrs.parameters);
     attrs['data-annotations'] = JSON.stringify(node.attrs.annotations);
     attrs['data-canvas'] = JSON.stringify(node.attrs.canvas);
+    if ((node.attrs.shapes as unknown[])?.length) attrs['data-shapes'] = JSON.stringify(node.attrs.shapes);
     if ((node.attrs.tangentLines as unknown[])?.length) attrs['data-tangent-lines'] = JSON.stringify(node.attrs.tangentLines);
     if ((node.attrs.normalLines as unknown[])?.length) attrs['data-normal-lines'] = JSON.stringify(node.attrs.normalLines);
     if ((node.attrs.integralRegions as unknown[])?.length) attrs['data-integral-regions'] = JSON.stringify(node.attrs.integralRegions);

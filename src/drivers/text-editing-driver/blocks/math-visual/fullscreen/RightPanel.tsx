@@ -15,6 +15,8 @@ import type {
   FeaturePointType, Annotation,
 } from '../types';
 import { ANNOTATION_LABELS } from '../types';
+import type { ShapeEntry } from '../types';
+import { ShapeEditor } from './sections/ShapeEditor';
 
 /** RiemannMode 与 capability 同步(driver 内独立维护避免跨边界类型 import) */
 type RiemannMode = 'left' | 'right' | 'midpoint';
@@ -49,6 +51,13 @@ interface RightPanelProps {
   // 特征点
   featureVisibleTypes: Set<FeaturePointType>;
   onToggleFeatureType: (type: FeaturePointType) => void;
+  // 几何对象(题意图 P1)
+  selectedShape: ShapeEntry | null;
+  selectedShapeError: string | undefined;
+  onUpdateShape: (id: string, updates: Partial<ShapeEntry>) => void;
+  onRemoveShape: (id: string) => void;
+  /** 画图形模式下的操作提示 */
+  shapeHint: string | null;
 }
 
 export const RightPanel: React.FC<RightPanelProps> = ({
@@ -75,7 +84,36 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onRiemannChange,
   featureVisibleTypes,
   onToggleFeatureType,
+  selectedShape,
+  selectedShapeError,
+  onUpdateShape,
+  onRemoveShape,
+  shapeHint,
 }) => {
+  if (selectedShape || toolMode === 'shape') {
+    return (
+      <div className="mv-fullscreen-right">
+        {shapeHint && (
+          <div className="mv-fr-section">
+            <div className="mv-fr-hint">{shapeHint}</div>
+          </div>
+        )}
+        {selectedShape ? (
+          <ShapeEditor
+            shape={selectedShape}
+            error={selectedShapeError}
+            onUpdate={onUpdateShape}
+            onRemove={onRemoveShape}
+          />
+        ) : (
+          <div className="mv-fr-section">
+            <div className="mv-fr-hint">在左边列表点一个图形,这里改它的位置、标签、颜色</div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (toolMode === 'move' || toolMode === 'export') {
     return (
       <div className="mv-fullscreen-right mv-fullscreen-right--empty">

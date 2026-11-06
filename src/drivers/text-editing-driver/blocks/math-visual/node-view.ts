@@ -44,6 +44,7 @@ function getDataFromNode(n: PMNode): MathVisualData {
       ...(n.attrs.canvas || {}),
       axis: { ...DEFAULT_AXIS_CONFIG, ...((n.attrs.canvas || {}).axis || {}) },
     },
+    shapes: n.attrs.shapes || [],
     tangentLines: n.attrs.tangentLines || [],
     normalLines: n.attrs.normalLines || [],
     integralRegions: n.attrs.integralRegions || [],
@@ -83,6 +84,7 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
     tr = tr.setNodeAttribute(pos, 'parameters', newData.parameters);
     tr = tr.setNodeAttribute(pos, 'annotations', newData.annotations);
     tr = tr.setNodeAttribute(pos, 'canvas', newData.canvas);
+    if (newData.shapes !== undefined) tr = tr.setNodeAttribute(pos, 'shapes', newData.shapes);
     if (newData.tangentLines !== undefined) tr = tr.setNodeAttribute(pos, 'tangentLines', newData.tangentLines);
     if (newData.normalLines !== undefined) tr = tr.setNodeAttribute(pos, 'normalLines', newData.normalLines);
     if (newData.integralRegions !== undefined) tr = tr.setNodeAttribute(pos, 'integralRegions', newData.integralRegions);

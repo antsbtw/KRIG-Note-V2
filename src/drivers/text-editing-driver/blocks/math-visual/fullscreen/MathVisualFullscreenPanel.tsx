@@ -27,7 +27,7 @@ import { instanceRegistry } from '../../../instance-registry';
 import type {
   MathVisualData, CanvasConfig, ToolMode,
   TangentLine, NormalLine, IntegralRegion, FeaturePoint, FeaturePointType,
-  Annotation, FunctionEntry,
+  Annotation, FunctionEntry, ShapeEntry, ShapeKind,
 } from '../types';
 import { DEFAULT_CANVAS_CONFIG, DEFAULT_AXIS_CONFIG } from '../types';
 import {
@@ -38,6 +38,11 @@ import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
 import { LegendOverlay } from './LegendOverlay';
 import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
+import {
+  compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
+  type Vec2,
+} from '../shapes';
+import type { ShapeSpec } from '@capabilities/math-rendering/types';
 
 type RiemannMode = 'left' | 'right' | 'midpoint';
 
@@ -59,6 +64,7 @@ function readDataFromPM(instanceId: string, nodePos: number): MathVisualData | n
       ...(a.canvas || {}),
       axis: { ...DEFAULT_AXIS_CONFIG, ...((a.canvas || {}).axis || {}) },
     },
+    shapes: a.shapes || [],
     tangentLines: a.tangentLines || [],
     normalLines: a.normalLines || [],
     integralRegions: a.integralRegions || [],
@@ -86,6 +92,7 @@ function writeDataToPM(
   tr = tr.setNodeAttribute(nodePos, 'parameters', data.parameters);
   tr = tr.setNodeAttribute(nodePos, 'annotations', data.annotations);
   tr = tr.setNodeAttribute(nodePos, 'canvas', data.canvas);
+  tr = tr.setNodeAttribute(nodePos, 'shapes', data.shapes || []);
   tr = tr.setNodeAttribute(nodePos, 'tangentLines', data.tangentLines || []);
   tr = tr.setNodeAttribute(nodePos, 'normalLines', data.normalLines || []);
   tr = tr.setNodeAttribute(nodePos, 'integralRegions', data.integralRegions || []);
@@ -186,6 +193,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   // 画布高度(ResizeObserver 测量容器)
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasHeight, setCanvasHeight] = useState(600);
+  const [canvasWidth, setCanvasWidth] = useState(0);
   useEffect(() => {
     const el = canvasRef.current;
     if (!el) return;
@@ -193,6 +201,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       for (const entry of entries) {
         const h = entry.contentRect.height - 32;
         if (h > 100) setCanvasHeight(Math.round(h));
+        if (entry.contentRect.width > 100) setCanvasWidth(Math.round(entry.contentRect.width));
       }
     });
     obs.observe(el);
@@ -312,6 +321,77 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     xStep: axis.xStep,
     yStep: axis.yStep,
   }), [canvas, axis]);
+
+  // ── 实际视口:等比例模式下按画布宽高放宽一个方向(题意图 P1) ──
+  const view = useMemo(() => {
+    const base = { x: domain, y: range };
+    return canvas.scaleMode === '1:1' ? fitEqualScale(base, canvasWidth, canvasHeight) : base;
+  }, [domain, range, canvas.scaleMode, canvasWidth, canvasHeight]);
+
+  // ── 几何对象(题意图 P1) ──
+  const shapes = useMemo(() => data.shapes ?? [], [data.shapes]);
+  const [shapeKind, setShapeKind] = useState<ShapeKind>('point');
+  const [pendingPoints, setPendingPoints] = useState<Vec2[]>([]);
+  const [selectedShapeId, setSelectedShapeId] = useState<string | null>(null);
+
+  const compiledShapes = useMemo(
+    () => compileShapes(shapes, math.evalScalar, parameters),
+    [shapes, parameters, math],
+  );
+  const shapeSpecs: ShapeSpec[] = useMemo(() => {
+    if (pendingPoints.length === 0) return compiledShapes.specs;
+    // 两点图形已点了第一点:画一个灰点提示
+    const pending: ShapeSpec[] = pendingPoints.map((p, i) => ({
+      kind: 'point', id: `__pending-${i}`, at: p, color: '#9ca3af', size: 5,
+    }));
+    return [...compiledShapes.specs, ...pending];
+  }, [compiledShapes, pendingPoints]);
+
+  const addShape = useCallback((shape: ShapeEntry) => {
+    onChange({ ...data, shapes: [...shapes, shape] });
+    setSelectedShapeId(shape.id);
+  }, [data, shapes, onChange]);
+  const updateShape = useCallback((id: string, updates: Partial<ShapeEntry>) => {
+    onChange({ ...data, shapes: shapes.map((sh) => (sh.id === id ? { ...sh, ...updates } : sh)) });
+  }, [data, shapes, onChange]);
+  const removeShape = useCallback((id: string) => {
+    onChange({ ...data, shapes: shapes.filter((sh) => sh.id !== id) });
+    if (selectedShapeId === id) setSelectedShapeId(null);
+  }, [data, shapes, selectedShapeId, onChange]);
+  const selectedShape = shapes.find((sh) => sh.id === selectedShapeId) ?? null;
+
+  const pickShapeKind = useCallback((kind: ShapeKind) => {
+    setShapeKind(kind);
+    setPendingPoints([]);
+    if (toolMode !== 'shape') onChange({ ...data, toolMode: 'shape' });
+  }, [toolMode, data, onChange]);
+
+  // 离开画图形模式:丢掉没点完的第一点
+  useEffect(() => {
+    if (toolMode !== 'shape') setPendingPoints([]);
+    if (toolMode !== 'shape' && toolMode !== 'move') setSelectedShapeId(null);
+  }, [toolMode]);
+
+  const handleShapeClick = useCallback((p: Vec2) => {
+    const sp: Vec2 = [
+      snap(p[0], snapStep(view.x[1] - view.x[0])),
+      snap(p[1], snapStep(view.y[1] - view.y[0])),
+    ];
+    const need = shapeKindMeta(shapeKind).clicks;
+    const pts = [...pendingPoints, sp];
+    if (pts.length < need) {
+      setPendingPoints(pts);
+      return;
+    }
+    setPendingPoints([]);
+    addShape(createShape(shapeKind, pts, shapes.length));
+  }, [view, shapeKind, pendingPoints, shapes.length, addShape]);
+
+  const shapeHint = toolMode === 'shape'
+    ? (pendingPoints.length > 0
+        ? `${shapeKindMeta(shapeKind).label}:已点第一点,再点一下完成(Esc 取消)`
+        : `${shapeKindMeta(shapeKind).label}:${shapeKindMeta(shapeKind).hint}`)
+    : null;
 
   // ── 9 类工具数据 handler ──
 
@@ -482,11 +562,10 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const rect = svgEl.getBoundingClientRect();
     const relX = (e.clientX - rect.left) / rect.width;
     const relY = (e.clientY - rect.top) / rect.height;
-    return {
-      mathX: domain[0] + relX * (domain[1] - domain[0]),
-      mathY: range[1] - relY * (range[1] - range[0]),
-    };
-  }, [domain, range]);
+    // 算上 Mafs 四周 0.5 单位边距与等比例放宽(原先按 domain/range 直接线性换算,点下去会偏)
+    const [mathX, mathY] = relToData(relX, relY, view);
+    return { mathX, mathY };
+  }, [view]);
 
   const findNearbyAnnotation = useCallback((mathX: number, mathY: number): number => {
     const xT = (domain[1] - domain[0]) * 0.02;
@@ -529,8 +608,8 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const svgEl = canvasRef.current?.querySelector('svg');
     if (!svgEl) { setBoxSelectStart(null); setBoxSelectEnd(null); return; }
     const rect = svgEl.getBoundingClientRect();
-    const toMathX = (px: number) => domain[0] + (px / rect.width) * (domain[1] - domain[0]);
-    const toMathY = (px: number) => range[1] - (px / rect.height) * (range[1] - range[0]);
+    const toMathX = (px: number) => relToData(px / rect.width, 0, view)[0];
+    const toMathY = (px: number) => relToData(0, px / rect.height, view)[1];
     const x1 = Math.min(toMathX(boxSelectStart.x), toMathX(boxSelectEnd.x));
     const x2 = Math.max(toMathX(boxSelectStart.x), toMathX(boxSelectEnd.x));
     const y1 = Math.min(toMathY(boxSelectStart.y), toMathY(boxSelectEnd.y));
@@ -546,13 +625,17 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     }
     setSelectedAnnotationIdxs(selected);
     setBoxSelectStart(null); setBoxSelectEnd(null);
-  }, [toolMode, boxSelectStart, boxSelectEnd, annotations, evalFnMap, domain, range]);
+  }, [toolMode, boxSelectStart, boxSelectEnd, annotations, evalFnMap, view]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (toolMode === 'move' || toolMode === 'export' || toolMode === 'select') return;
     const coords = pageToMath(e);
     if (!coords) return;
     const { mathX, mathY } = coords;
+    if (toolMode === 'shape') {
+      handleShapeClick([mathX, mathY]);
+      return;
+    }
     const firstVisibleFn = fns.find((fn) => fn.visible && evalFnMap.has(fn.id));
     if (!firstVisibleFn) return;
     switch (toolMode) {
@@ -570,7 +653,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
         break;
       }
     }
-  }, [toolMode, fns, evalFnMap, domain, pageToMath, findNearbyAnnotation, addAnnotation, addTangent, addNormal, addIntegral]);
+  }, [toolMode, fns, evalFnMap, domain, pageToMath, findNearbyAnnotation, addAnnotation, addTangent, addNormal, addIntegral, handleShapeClick]);
 
   // ── Keymap:Esc 退出 + Delete/Backspace 删除选中 ──
 
@@ -581,13 +664,15 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
-        if (toolMode !== 'move') setToolMode('move');
+        if (pendingPoints.length > 0) setPendingPoints([]);
+        else if (toolMode !== 'move') setToolMode('move');
         else onClose();
         return;
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        if (toolMode === 'select' && selectedAnnotationIdxs.size > 0) removeSelectedAnnotations();
+        if (selectedShapeId && (toolMode === 'shape' || toolMode === 'move')) removeShape(selectedShapeId);
+        else if (toolMode === 'select' && selectedAnnotationIdxs.size > 0) removeSelectedAnnotations();
         else if (toolMode === 'annotate' && selectedAnnotationIdx !== null) removeAnnotation(selectedAnnotationIdx);
         else if (toolMode === 'tangent' && selectedTangentId) removeTangent(selectedTangentId);
         else if (toolMode === 'normal' && selectedNormalId) removeNormal(selectedNormalId);
@@ -597,7 +682,8 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose, toolMode, setToolMode, selectedAnnotationIdx, selectedAnnotationIdxs, selectedTangentId, selectedNormalId, selectedIntegralId,
-      removeAnnotation, removeSelectedAnnotations, removeTangent, removeNormal, removeIntegral]);
+      removeAnnotation, removeSelectedAnnotations, removeTangent, removeNormal, removeIntegral,
+      pendingPoints, selectedShapeId, removeShape]);
 
   // ── label 拖动:写回对应 fn 的 labelPos ──
 
@@ -668,6 +754,12 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           animating={animating}
           onStartAnimation={startAnimation}
           onStopAnimation={stopAnimation}
+          shapeKind={shapeKind}
+          onPickShapeKind={pickShapeKind}
+          shapeErrors={compiledShapes.errors}
+          selectedShapeId={selectedShapeId}
+          onSelectShape={setSelectedShapeId}
+          onRemoveShape={removeShape}
         />
 
         <div
@@ -679,7 +771,9 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onMouseUp={handleCanvasMouseUp}
         >
           <MathHost
-            viewBox={{ x: domain, y: range }}
+            viewBox={view}
+            shapes={shapeSpecs}
+            selectedShapeId={selectedShapeId}
             height={canvasHeight}
             curves={curves}
             axis={axisConfig}
@@ -707,6 +801,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           <div className="mv-fullscreen-coords">
             <span>x: [{domain[0]}, {domain[1]}]</span>
             <span>y: [{range[0]}, {range[1]}]</span>
+            {canvas.scaleMode === '1:1' && <span>等比例</span>}
             {toolMode !== 'move' && (
               <span className="mv-fullscreen-coords-tool">工具: {toolMode}</span>
             )}
@@ -739,6 +834,11 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onRiemannChange={setRiemannConfig}
           featureVisibleTypes={featureVisibleTypes}
           onToggleFeatureType={toggleFeatureType}
+          selectedShape={selectedShape}
+          selectedShapeError={selectedShape ? compiledShapes.errors[selectedShape.id] : undefined}
+          onUpdateShape={updateShape}
+          onRemoveShape={removeShape}
+          shapeHint={shapeHint}
         />
       </div>
     </div>

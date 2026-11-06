@@ -12,12 +12,14 @@
  */
 
 import React from 'react';
-import type { MathVisualData, ToolMode } from '../types';
+import type { MathVisualData, ToolMode, ShapeKind } from '../types';
 import { useFunctionManagement } from '../hooks/useFunctionManagement';
 import { FunctionListSection } from './sections/FunctionListSection';
 import { ParametersSection } from './sections/ParametersSection';
 import { ToolbarSection } from './sections/ToolbarSection';
 import { ExportSection } from './sections/ExportSection';
+import { ShapeSection } from './sections/ShapeSection';
+import { ViewSection } from './sections/ViewSection';
 
 interface LeftPanelProps {
   data: MathVisualData;
@@ -30,6 +32,13 @@ interface LeftPanelProps {
   animating: { paramName: string; speed: number } | null;
   onStartAnimation: (paramName: string, speed?: number) => void;
   onStopAnimation: () => void;
+  // 几何对象(题意图 P1)
+  shapeKind: ShapeKind;
+  onPickShapeKind: (kind: ShapeKind) => void;
+  shapeErrors: Record<string, string>;
+  selectedShapeId: string | null;
+  onSelectShape: (id: string) => void;
+  onRemoveShape: (id: string) => void;
 }
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({
@@ -43,6 +52,12 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   animating,
   onStartAnimation,
   onStopAnimation,
+  shapeKind,
+  onPickShapeKind,
+  shapeErrors,
+  selectedShapeId,
+  onSelectShape,
+  onRemoveShape,
 }) => {
   const fnMgmt = useFunctionManagement(data, onChange);
 
@@ -53,6 +68,17 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         insertFromHelp={fnMgmt.insertFromHelp}
         updateFunction={fnMgmt.updateFunction}
         removeFunction={fnMgmt.removeFunction}
+        allowRemoveLast={(data.shapes?.length ?? 0) > 0}
+      />
+      <ShapeSection
+        shapes={data.shapes ?? []}
+        errors={shapeErrors}
+        toolMode={toolMode}
+        shapeKind={shapeKind}
+        onPickKind={onPickShapeKind}
+        selectedShapeId={selectedShapeId}
+        onSelectShape={onSelectShape}
+        onRemoveShape={onRemoveShape}
       />
       <ParametersSection
         parameters={data.parameters}
@@ -66,6 +92,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         onToolChange={onToolChange}
         onRerunFeatures={onRerunFeatures}
       />
+      <ViewSection data={data} onChange={onChange} />
       <ExportSection onExport={onExport} onExportSvg={onExportSvg} />
     </div>
   );

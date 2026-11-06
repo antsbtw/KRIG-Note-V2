@@ -24,6 +24,7 @@ import type { MathRenderingApi } from './types';
 import { MathHost } from './host/MathHost';
 import {
   createEvalFn,
+  evalScalar,
   extractParameters,
   numericalDerivative,
   makeParametricFn,
@@ -66,6 +67,14 @@ export type {
   PiecewiseResult,
   ContSeg,
   PlotType,
+  // 几何对象(题意图 P1)
+  ShapeSpec,
+  PointShapeSpec,
+  LineShapeSpec,
+  CircleShapeSpec,
+  TextShapeSpec,
+  ShapeTicks,
+  ScalarResult,
   // Phase 2 overlay 类型
   OverlaysConfig,
   OverlayCallbacks,
@@ -80,7 +89,7 @@ export type {
 // 模块级 export(对齐 code-editing / canvas-rendering 双导出模式 — driver/slot
 // 内部可直 import 兜底;view 侧仍走 requireCapabilityApi)
 export { MathHost };
-export { createEvalFn, extractParameters, numericalDerivative };
+export { createEvalFn, evalScalar, extractParameters, numericalDerivative };
 export { makeParametricFn, makePolarFn, makeVerticalLineX, makeImplicitFn, exprToLatex };
 export { detectDiscontinuities, buildSegments };
 export { detectPlotType };
@@ -99,6 +108,7 @@ capabilityRegistry.register({
   api: {
     Host: MathHost,
     createEvalFn,
+    evalScalar,
     extractParameters,
     numericalDerivative,
     detectDiscontinuities,
