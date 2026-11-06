@@ -16,7 +16,7 @@ import type {
 } from '../types';
 import { ANNOTATION_LABELS } from '../types';
 import type { ShapeEntry } from '../types';
-import { ShapeEditor, MultiShapeEditor } from './sections/ShapeEditor';
+import { ShapeEditor, MultiShapeEditor, SelectedShapeList } from './sections/ShapeEditor';
 
 /** RiemannMode 与 capability 同步(driver 内独立维护避免跨边界类型 import) */
 type RiemannMode = 'left' | 'right' | 'midpoint';
@@ -59,6 +59,9 @@ interface RightPanelProps {
   onDuplicateShape: () => void;
   /** 选中了几个图形(≥2 时右栏显示多选操作) */
   multiSelectCount: number;
+  /** 选中的图形(按选中顺序)与各自的错误,多选时逐个列出 */
+  selectedShapes: ShapeEntry[];
+  shapeErrors: Record<string, string>;
   onUpdateSelectedShapes: (updates: Partial<ShapeEntry>) => void;
   onRemoveSelectedShapes: () => void;
   /** 画图形模式下的操作提示 */
@@ -95,6 +98,8 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onRemoveShape,
   onDuplicateShape,
   multiSelectCount,
+  selectedShapes,
+  shapeErrors,
   onUpdateSelectedShapes,
   onRemoveSelectedShapes,
   shapeHint,
@@ -112,6 +117,12 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           onUpdateAll={onUpdateSelectedShapes}
           onDuplicate={onDuplicateShape}
           onRemoveAll={onRemoveSelectedShapes}
+        />
+        <SelectedShapeList
+          shapes={selectedShapes}
+          errors={shapeErrors}
+          onUpdate={onUpdateShape}
+          onRemove={onRemoveShape}
         />
       </div>
     );

@@ -4,7 +4,8 @@
  * 坐标是表达式字符串(数字或引用参数),改了立刻生效;算不出来就在顶上写原因。
  */
 
-import React from 'react';
+import React, { useState } from 'react';
+import { shapeSummary } from './ShapeSection';
 import type { ShapeEntry, CoordExpr } from '../../types';
 import { FUNCTION_COLORS } from '../../types';
 import { shapeKindMeta } from '../../shapes';
@@ -17,7 +18,10 @@ interface ShapeEditorProps {
   error: string | undefined;
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemove: (id: string) => void;
-  onDuplicate: () => void;
+  /** 不传就不显示「复制一份」(多选列表里展开的单项不单独复制) */
+  onDuplicate?: () => void;
+  /** 多选列表里展开时,标题已在行头,不再重复 */
+  hideTitle?: boolean;
 }
 
 const stop = (e: React.KeyboardEvent) => e.stopPropagation();
@@ -35,7 +39,7 @@ function CoordRow({ label, value, onChange }: { label: string; value: CoordExpr 
   );
 }
 
-export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, onRemove, onDuplicate }) => {
+export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, onRemove, onDuplicate, hideTitle }) => {
   const up = (u: Partial<ShapeEntry>) => onUpdate(s.id, u);
   const meta = shapeKindMeta(s.kind);
   const isLine = s.kind === 'segment' || s.kind === 'arrow';
@@ -43,7 +47,7 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
 
   return (
     <div className="mv-fr-section">
-      <div className="mv-fr-section-title">{meta.label}</div>
+      {!hideTitle && <div className="mv-fr-section-title">{meta.label}</div>}
       {error && (
         <div className="mv-fr-hint" style={{ color: '#ef4444' }}>画不出来:{error}</div>
       )}
@@ -162,7 +166,9 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </>
         )}
 
-        <button className="mv-fr-remove-btn" style={{ color: '#e0e0e0' }} onClick={onDuplicate} title="⌘D">复制一份</button>
+        {onDuplicate && (
+          <button className="mv-fr-remove-btn" style={{ color: '#e0e0e0' }} onClick={onDuplicate} title="⌘D">复制一份</button>
+        )}
         <button className="mv-fr-remove-btn" onClick={() => onRemove(s.id)}>删除</button>
       </div>
     </div>
@@ -205,3 +211,58 @@ export const MultiShapeEditor: React.FC<{
     </div>
   </div>
 );
+
+/**
+ * 多选时右栏下半部分:逐个列出选中的元素,点一行就地展开它的完整编辑项
+ * (2026-11-06 用户:「既然选了两个图形,那就在右边的框框列表这些选定的元素…用户就可以直接编辑了」)
+ */
+export const SelectedShapeList: React.FC<{
+  shapes: ShapeEntry[];
+  errors: Record<string, string>;
+  onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
+  onRemove: (id: string) => void;
+}> = ({ shapes, errors, onUpdate, onRemove }) => {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <div className="mv-fr-section">
+      <div className="mv-fr-section-title">逐个编辑</div>
+      <div className="mv-fr-ann-list">
+        {shapes.map((s) => {
+          const open = openId === s.id;
+          const err = errors[s.id];
+          return (
+            <div key={s.id}>
+              <div
+                className={`mv-fr-ann-item ${open ? 'mv-fr-ann-item--selected' : ''}`}
+                onClick={() => setOpenId(open ? null : s.id)}
+                title={open ? '点一下收起' : '点一下展开编辑'}
+              >
+                <span className="mv-fr-ann-label" style={{ color: s.color }}>
+                  {open ? '▾' : '▸'} {shapeKindMeta(s.kind).icon}
+                </span>
+                <span
+                  className="mv-fr-ann-coord"
+                  style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: err ? '#ef4444' : undefined }}
+                >
+                  {err ? `⚠ ${shapeSummary(s)}` : shapeSummary(s)}
+                </span>
+                <button
+                  className="mv-fr-ann-del"
+                  onClick={(e) => { e.stopPropagation(); onRemove(s.id); }}
+                  title="只删这一个"
+                >
+                  ×
+                </button>
+              </div>
+              {open && (
+                <div style={{ paddingLeft: 8, borderLeft: `2px solid ${s.color}`, marginBottom: 6 }}>
+                  <ShapeEditor shape={s} error={err} onUpdate={onUpdate} onRemove={onRemove} hideTitle />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};

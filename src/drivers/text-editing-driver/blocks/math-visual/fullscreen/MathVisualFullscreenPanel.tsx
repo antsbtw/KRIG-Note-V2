@@ -1170,6 +1170,10 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onRemoveShape={removeShape}
           onDuplicateShape={duplicateSelected}
           multiSelectCount={selectedShapeIds.length}
+          selectedShapes={selectedShapeIds
+            .map((id) => shapes.find((sh) => sh.id === id))
+            .filter((sh): sh is ShapeEntry => !!sh)}
+          shapeErrors={compiledShapes.errors}
           onUpdateSelectedShapes={updateSelectedShapes}
           onRemoveSelectedShapes={removeSelectedShapes}
           shapeHint={shapeHint}

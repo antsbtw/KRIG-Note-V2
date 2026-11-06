@@ -176,7 +176,7 @@ function LineShape({
             x={s.to[0]}
             y={s.to[1]}
             attach={cardinalOf(s.to[0] - s.from[0], s.to[1] - s.from[1])}
-            attachDistance={10}
+            attachDistance={22}
             size={LABEL_SIZE}
             color={s.color}
           >

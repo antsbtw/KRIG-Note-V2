@@ -21,7 +21,8 @@ interface ShapeSectionProps {
   onRemoveShape: (id: string) => void;
 }
 
-function summary(s: ShapeEntry): string {
+/** 列表里一行的摘要(左栏列表 / 右栏多选列表共用) */
+export function shapeSummary(s: ShapeEntry): string {
   const p = (c?: [string, string]) => (c ? `(${c[0]}, ${c[1]})` : '(?)');
   switch (s.kind) {
     case 'point': return `${s.text ? s.text + ' ' : ''}${p(s.at)}`;
@@ -78,7 +79,7 @@ export const ShapeSection: React.FC<ShapeSectionProps> = ({
                   className="mv-fr-ann-coord"
                   style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: err ? '#ef4444' : undefined }}
                 >
-                  {err ? `⚠ ${summary(s)}` : summary(s)}
+                  {err ? `⚠ ${shapeSummary(s)}` : shapeSummary(s)}
                 </span>
                 <button
                   className="mv-fr-ann-del"
