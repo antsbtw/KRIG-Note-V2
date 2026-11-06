@@ -161,6 +161,17 @@ export function labelOriginPx(anchorPx: Vec2, layout: LabelLayout, w: number, h:
 export const DEFAULT_NOTE_WIDTH = 220;
 
 /**
+ * 标签相对锚点的水平对齐:0 = 左边贴锚点(e)、1 = 右边贴锚点(w)、0.5 = 居中。
+ * 改卡片宽度时,宿主据此补偿偏移,让用户拖的那一边跟手、另一边不动。没有标签返回 null。
+ */
+export function shapeLabelAlignX(s: ShapeSpec): number | null {
+  const layout = labelLayout(s);
+  if (!layout) return null;
+  const dir = layout.dir ?? '';
+  return dir.includes('e') ? 0 : dir.includes('w') ? 1 : 0.5;
+}
+
+/**
  * 卡片实际尺寸:由 ShapeLayer 渲染完(atomsToSvg 异步)后登记;命中测试读它。
  * 渲染与命中都在同一个 renderer 进程,模块级 Map 可以共享。
  */

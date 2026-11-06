@@ -85,3 +85,22 @@ describe('③ 菜单项 = 画板那套', () => {
     expect(items.handle.some((i) => i.command === 'text-editing.handle-turn-bullet')).toBe(true);
   });
 });
+
+describe('④ 框:拖边改宽(用户选 A:改宽度、文字重排、高度随内容)', () => {
+  it('拖右边:左边不动', async () => {
+    const { resizeFromEdge } = await import('@capabilities/note-card/frame-math');
+    expect(resizeFromEdge(100, 200, 50, 'right')).toEqual({ left: 100, width: 250 });
+    expect(resizeFromEdge(100, 200, -50, 'right')).toEqual({ left: 100, width: 150 });
+  });
+  it('拖左边:右边不动(左边跟着挪)', async () => {
+    const { resizeFromEdge } = await import('@capabilities/note-card/frame-math');
+    expect(resizeFromEdge(100, 200, -50, 'left')).toEqual({ left: 50, width: 250 });
+    expect(resizeFromEdge(100, 200, 50, 'left')).toEqual({ left: 150, width: 150 });
+  });
+  it('有最小 / 最大宽度,碰到后不再动(左边也不会被推走)', async () => {
+    const { resizeFromEdge } = await import('@capabilities/note-card/frame-math');
+    expect(resizeFromEdge(100, 200, -500, 'right')).toEqual({ left: 100, width: 80 });
+    expect(resizeFromEdge(100, 200, 500, 'left')).toEqual({ left: 220, width: 80 });
+    expect(resizeFromEdge(100, 200, 5000, 'right')).toEqual({ left: 100, width: 800 });
+  });
+});

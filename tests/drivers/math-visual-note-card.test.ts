@@ -76,3 +76,15 @@ describe('卡片位置与大小(渲染与命中共用)', () => {
     expect(labelOriginPx([100, 100], mk('n'), 50, 20)).toEqual([75, 80]);
   });
 });
+
+describe('改卡片宽度时的对齐(补偿「哪边不动」用)', () => {
+  it('点的标签在东北 → 左贴锚点(0);文字卡片居中(0.5);没有标签 → null', async () => {
+    const { shapeLabelAlignX } = await import('@capabilities/math-rendering/compute/shape-geometry');
+    const note = DOC.payload.content as never;
+    expect(shapeLabelAlignX({ kind: 'point', id: 'p', color: '#000', at: [0, 0], note })).toBe(0);
+    expect(shapeLabelAlignX({ kind: 'text', id: 't', color: '#000', at: [0, 0], text: '', note })).toBe(0.5);
+    expect(shapeLabelAlignX({ kind: 'point', id: 'q', color: '#000', at: [0, 0] })).toBeNull();
+    // 朝西的箭头:标签在箭头尖西边 → 右贴锚点(1)
+    expect(shapeLabelAlignX({ kind: 'arrow', id: 'a', color: '#000', from: [0, 0], to: [-5, 0], note })).toBe(1);
+  });
+});

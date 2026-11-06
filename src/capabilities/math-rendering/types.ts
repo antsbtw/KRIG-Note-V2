@@ -341,6 +341,8 @@ export interface MathHostProps {
   shapes?: ShapeSpec[];
   /** 选中的几何对象(加粗显示;可多选) */
   selectedShapeIds?: string[];
+  /** 说明卡片画好、量出实际尺寸后通知(宿主据此刷新卡片框等) */
+  onCardMeasured?: (shapeId: string) => void;
   /** 画布高度 px;capability 自管宽度(撑满容器) */
   height: number;
   /** 曲线列表 */
@@ -440,6 +442,8 @@ export interface MathRenderingApi {
     spec: ShapeSpec,
     toPx: (p: [number, number]) => [number, number],
   ): { x0: number; y0: number; x1: number; y1: number } | null;
+  /** 标签水平对齐(0 左贴锚点 / 1 右贴 / 0.5 居中);改卡片宽度时补偿偏移用 */
+  shapeLabelAlignX(spec: ShapeSpec): number | null;
   /** 常量表达式求值(可引用参数,如 "8*T");几何对象坐标用 */
   evalScalar(expression: string, params: MathParameter[]): ScalarResult;
   /** 提取表达式中的 free symbols(参数名;独立变量 x/t/theta 与内置函数排除) */

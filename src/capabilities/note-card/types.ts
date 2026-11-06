@@ -8,6 +8,7 @@
  */
 
 import type { ComponentType } from 'react';
+import type { CardFrameProps } from './CardFrame';
 import type { TextEditingUiApi } from '@capabilities/text-editing/types';
 
 /** note doc 信封(与 text-editing Host 的 DriverSerialized 同形;version 必填,缺了编辑器静默空白) */
@@ -79,4 +80,14 @@ export interface NoteCardApi {
    * 且 capability 不允许依赖 slot 菜单注册表。使用方注册一次(幂等由使用方保证)。
    */
   menuItems(viewId: string): NoteCardMenuItems;
+
+  // ④ 框(屏幕像素;拖动 / 拖左右边改宽 / 双击编辑 / 右键)
+  CardFrame: ComponentType<CardFrameProps>;
+  /** 拖边改宽的计算(宿主做「哪边不动」的补偿时可复用) */
+  resizeFromEdge(
+    startLeft: number, startWidth: number, dx: number, edge: 'left' | 'right',
+    minWidth?: number, maxWidth?: number,
+  ): { left: number; width: number };
 }
+
+export type { CardFrameProps, CardFrameRect } from './CardFrame';

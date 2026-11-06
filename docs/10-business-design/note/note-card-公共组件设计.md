@@ -85,7 +85,8 @@ interface NoteCardApi {
     minWidth?: number; maxWidth?: number;        // 缺省 80 / 800
     onSelect(additive: boolean): void;
     onMove(dx: number, dy: number, phase: 'move' | 'end'): void;
-    onResizeWidth(width: number, phase: 'move' | 'end'): void;   // 拖左边时宿主同时收到 onMove 补偿左移
+    onResizeWidth(width: number, edge: 'left' | 'right', phase: 'move' | 'end'): void;
+    // 告诉宿主拖的是哪一边;宿主按自己的对齐方式补偿位置,让拖的那边跟手、另一边不动
     onEnterEdit(): void;
     onContextMenu?(x: number, y: number): void;
   }>;
@@ -115,6 +116,13 @@ interface NoteCardApi {
 - 行为变化（对齐画板）：卡片编辑去掉块手柄；Esc 规则改为画板的（块选中态 Esc 退出不保存）；编辑框样式用画板那份。
 - ⚠️ 暂时两份：`note-card/editor.css` 照抄 `canvas-text-node/edit-overlay.css`，第 3 步合并。
 - 单测：`tests/capabilities/note-card.test.ts`（互转 + 「菜单项 = 画板注册那套」逐项对照，注入漏一项验证会变红）。
+
+### 第 2 步实施记录（2026-11-06）
+
+- `note-card/CardFrame.tsx` + `frame-math.ts`：选中框（fixed，屏幕像素）、按住拖动、左右小柄改宽（过程中只画轮廓，松手回调 `end`）、双击编辑、右键、Shift+点击。
+- 接口与草案的差别：`onResizeWidth` 带上 `edge`，由宿主补偿位置（不同宿主的对齐方式不同：math-visual 点标签左贴锚点、文字卡片居中、朝西箭头右贴锚点），比框里统一发 `onMove` 补偿更准。
+- math-visual 接入：选中一张卡片（标签卡片 / 文字卡片）在移动 / 框选模式下出框；拖动 → 标签卡片改 `labelOffset`、文字卡片改 `at`；改宽 → `noteWidth` + 按对齐（新 API `shapeLabelAlignX`）补偿；松手才写库，⌘Z 一步撤回。卡片自己画的虚线选中框去掉（统一由 CardFrame 显示）。
+- 顺手修：退出全屏存缩略图前先清掉选中 / 灰点 / 编辑中的卡片（原先选中时加粗的线会被存进 note 里的图）。
 
 ## 六、不做 / 以后
 

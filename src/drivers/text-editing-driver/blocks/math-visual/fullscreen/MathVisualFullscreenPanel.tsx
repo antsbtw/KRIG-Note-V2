@@ -17,6 +17,7 @@
  */
 
 import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { requireCapabilityApi } from '@slot/capability-registry/get-capability-api';
 import type {
   MathRenderingApi, Curve, OverlaysConfig, OverlayCallbacks,
@@ -170,8 +171,12 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   // 关闭前抓 SVG 缩略图写回 PM(inline 静态显示用)
   // PR4(2026-05-26)走 SVG 缓存方案 — onClose 前在 React 仍 mount 时
   // querySelector 拿 canvasRef 内 mafs 输出的 svg outerHTML
+  // 存缩略图前要清掉的临时状态(选中加粗 / 没点完的灰点 / 编辑中的卡片),由下方几何对象段落赋值
+  const clearTransientRef = useRef<() => void>(() => {});
   const onClose = useCallback(() => {
     const ctx = ctxRef.current;
+    // 先同步清掉选中等临时显示,否则选中时加粗的线会被一起存进 note 里的图
+    flushSync(() => clearTransientRef.current());
     const svgEl = canvasRef.current?.querySelector('svg') as SVGElement | null;
     if (ctx && svgEl) {
       // 走 capability self-contained 导出 — 内联 mafs/katex CSS,inline 独立渲染
@@ -710,6 +715,88 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       : { note: undefined, text: '' });
   }, [cardEdit, updateShape, noteCard]);
 
+  clearTransientRef.current = () => {
+    setSelectedShapeIds([]);
+    setPendingPoints([]);
+    setCardEdit(null);
+  };
+
+  // ── 卡片框(note-card ④,2026-11-06):选中一张卡片时显示;拖动 / 拖左右边改宽 / 双击编辑 ──
+  // 卡片画好、量出尺寸后 MathHost 通知一次,框跟着刷新
+  const [cardMeasureVersion, setCardMeasureVersion] = useState(0);
+  const onCardMeasured = useCallback(() => setCardMeasureVersion((v) => v + 1), []);
+  const cardDragOrigRef = useRef<ShapeEntry | null>(null);
+
+  const cardFrameTarget = (() => {
+    void cardMeasureVersion; // 依赖:尺寸变了要重算
+    if (cardEdit || !selectedShapeId || (toolMode !== 'move' && toolMode !== 'select')) return null;
+    const entry = shapes.find((sh) => sh.id === selectedShapeId);
+    const spec = compiledShapes.specs.find((sp) => sp.id === selectedShapeId);
+    if (!entry?.note || !spec) return null;
+    const frame = getFrame();
+    if (!frame) return null;
+    const box = math.shapeLabelBox(spec, (p) => dataToPx(p, frame) as [number, number]);
+    if (!box) return null;
+    return {
+      entry, spec, frame,
+      // shapeLabelBox 四周各留了 3px 命中余量,框贴卡片本身
+      rect: {
+        left: frame.rect.left + box.x0 + 3,
+        top: frame.rect.top + box.y0 + 3,
+        width: box.x1 - box.x0 - 6,
+        height: box.y1 - box.y0 - 6,
+      },
+    };
+  })();
+
+  const onCardFrameMove = useCallback((dx: number, dy: number, phase: 'move' | 'end') => {
+    const t = cardFrameTarget;
+    if (!t) return;
+    if (!cardDragOrigRef.current) cardDragOrigRef.current = t.entry;
+    const orig = cardDragOrigRef.current;
+    let next: ShapeEntry;
+    if (orig.kind === 'text') {
+      // 文字卡片就是对象本体:挪的是它在图上的位置(像素 → 数据,吸附)
+      const v = t.frame.view;
+      const perX = (v.x[1] - v.x[0] + 2 * MAFS_VIEWBOX_PADDING) / t.frame.width;
+      const perY = (v.y[1] - v.y[0] + 2 * MAFS_VIEWBOX_PADDING) / t.frame.height;
+      next = translateShape(orig, snap(dx * perX, snapStep(v.x[1] - v.x[0])), snap(-dy * perY, snapStep(v.y[1] - v.y[0])));
+    } else {
+      // 标签卡片:挪的是标签相对默认位置的像素偏移,对象不动
+      const base = orig.labelOffset ?? [0, 0];
+      next = { ...orig, labelOffset: [Math.round(base[0] + dx), Math.round(base[1] + dy)] };
+    }
+    const all = (dataForViewRef.current.shapes ?? []).map((sh) => (sh.id === orig.id ? next : sh));
+    if (phase === 'move') {
+      setLiveShapes(all);
+    } else {
+      cardDragOrigRef.current = null;
+      setLiveShapes(null);
+      onChange({ ...dataForViewRef.current, shapes: all });
+    }
+  }, [cardFrameTarget, onChange]);
+
+  const onCardFrameResize = useCallback((width: number, edge: 'left' | 'right', phase: 'move' | 'end') => {
+    if (phase !== 'end') return; // 过程中框自己画轮廓,卡片内容松手再按新宽度重排
+    const t = cardFrameTarget;
+    if (!t) return;
+    const oldW = t.rect.width;
+    // 宽度变了,卡片按对齐方式重新摆;补偿偏移让拖的那一边跟手、另一边不动
+    const ax = math.shapeLabelAlignX(t.spec) ?? 0.5;
+    const shiftPx = ax * (width - oldW) + (edge === 'left' ? oldW - width : 0);
+    const e = t.entry;
+    let updates: Partial<ShapeEntry>;
+    if (e.kind === 'text') {
+      const v = t.frame.view;
+      const perX = (v.x[1] - v.x[0] + 2 * MAFS_VIEWBOX_PADDING) / t.frame.width;
+      updates = { noteWidth: width, at: translateShape(e, shiftPx * perX, 0).at };
+    } else {
+      const base = e.labelOffset ?? [0, 0];
+      updates = { noteWidth: width, labelOffset: [Math.round(base[0] + shiftPx), base[1]] };
+    }
+    updateShape(e.id, updates);
+  }, [cardFrameTarget, math, updateShape]);
+
   // ── 右键菜单(2026-11-06 用户:「复制删除用右键菜单好了」)──
   const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
   const openShapeMenu = useCallback((id: string, x: number, y: number) => {
@@ -1217,6 +1304,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
             viewBox={view}
             shapes={shapeSpecs}
             selectedShapeIds={selectedShapeIds}
+            onCardMeasured={onCardMeasured}
             height={canvasHeight}
             curves={curves}
             axis={axisConfig}
@@ -1228,6 +1316,22 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
             onLabelMove={handleLabelMove}
             pointSize={canvas.pointSize || 6}
           />
+
+          {cardFrameTarget && (() => {
+            const Frame = noteCard.CardFrame;
+            const t = cardFrameTarget;
+            return (
+              <Frame
+                rect={t.rect}
+                color={t.entry.color}
+                onMove={onCardFrameMove}
+                onResizeWidth={onCardFrameResize}
+                onEnterEdit={() => openCardEditor(t.entry.id)}
+                onClick={({ shiftKey }) => { if (shiftKey) toggleShapeSelected(t.entry.id); }}
+                onContextMenu={(x, y) => openShapeMenu(t.entry.id, x, y)}
+              />
+            );
+          })()}
 
           <div
             data-view-controls

@@ -15,6 +15,8 @@ import { emptyDoc, fromPlainText, toPlainText, contentOf } from './doc';
 import { renderSvg } from './render';
 import { NoteCardEditor } from './Editor';
 import { menuItems } from './menu-items';
+import { CardFrame } from './CardFrame';
+import { resizeFromEdge } from './frame-math';
 
 export type {
   NoteCardApi,
@@ -23,6 +25,8 @@ export type {
   NoteCardEditorProps,
   NoteCardRect,
   NoteCardMenuItems,
+  CardFrameProps,
+  CardFrameRect,
 } from './types';
 
 const api: NoteCardApi = {
@@ -33,6 +37,8 @@ const api: NoteCardApi = {
   renderSvg,
   Editor: NoteCardEditor,
   menuItems,
+  CardFrame,
+  resizeFromEdge,
 };
 
 console.info('[note-card] alive | 编辑 = 画板编辑浮层(受控) + atomsToSvg 显示');

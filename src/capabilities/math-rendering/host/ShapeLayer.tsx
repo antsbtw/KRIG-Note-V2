@@ -64,7 +64,7 @@ function PlacedText({
  * 同一张图里,所以退出全屏导出的缩略图自带卡片。
  * 画好后登记实际尺寸(setCardSize),命中测试按它算。
  */
-function NoteCard({ s, layout, selected }: { s: ShapeSpec; layout: LabelLayout; selected: boolean }) {
+function NoteCard({ s, layout, onMeasured }: { s: ShapeSpec; layout: LabelLayout; onMeasured?: (id: string) => void }) {
   const { viewTransform, userTransform } = useTransformContext();
   const [card, setCard] = useState<{ svg: string; w: number; h: number } | null>(null);
   const width = s.noteWidth ?? DEFAULT_NOTE_WIDTH;
@@ -79,33 +79,31 @@ function NoteCard({ s, layout, selected }: { s: ShapeSpec; layout: LabelLayout; 
         if (cancelled) return;
         setCardSize(s.id, w, h);
         setCard({ svg, w, h });
+        onMeasured?.(s.id);
       })
       .catch((e: unknown) => {
         // 不吞:画不出来就在控制台说清楚是哪张卡片
         console.error(`[math-rendering] 说明卡片 ${s.id} 渲染失败`, e);
       });
     return () => { cancelled = true; };
-  }, [note, width, s.color, s.id]);
+  }, [note, width, s.color, s.id, onMeasured]);
 
   if (!card) return null;
   const anchor = vec.transform(layout.at, vec.matrixMult(viewTransform, userTransform)) as Vec2;
   const [x0, y0] = labelOriginPx(anchor, layout, card.w, card.h, s.labelOffset);
   return (
+    // 选中框不画在这里:由 note-card 的 CardFrame(HTML 浮层)显示,也就不会被存进缩略图
     <g transform={`translate(${x0} ${y0})`} opacity={s.opacity}>
-      {selected && (
-        <rect x={-4} y={-4} width={card.w + 8} height={card.h + 8} rx={4}
-          fill="none" stroke={s.color} strokeDasharray="4 3" strokeWidth={1} />
-      )}
       <g dangerouslySetInnerHTML={{ __html: card.svg }} />
     </g>
   );
 }
 
 /** 对象的标签(点 / 线 / 箭头 / 圆 / 面);位置 = 默认布局 + 用户拖动偏移;有 note 时画成卡片 */
-function ShapeLabel({ s, selected = false }: { s: ShapeSpec; selected?: boolean }) {
+function ShapeLabel({ s, onMeasured }: { s: ShapeSpec; onMeasured?: (id: string) => void }) {
   const layout = labelLayout(s);
   if (!layout) return null;
-  if (s.note && s.note.length > 0) return <NoteCard s={s} layout={layout} selected={selected} />;
+  if (s.note && s.note.length > 0) return <NoteCard s={s} layout={layout} onMeasured={onMeasured} />;
   return (
     <PlacedText
       at={layout.at}
@@ -125,9 +123,10 @@ interface ShapeLayerProps {
   shapes: ShapeSpec[];
   selectedIds?: string[];
   viewBox: { x: [number, number]; y: [number, number] };
+  onCardMeasured?: (id: string) => void;
 }
 
-export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): React.ReactElement {
+export function ShapeLayer({ shapes, selectedIds, viewBox, onCardMeasured }: ShapeLayerProps): React.ReactElement {
   const selectedSet = new Set(selectedIds ?? []);
   // 刻度短线的半长(数据单位):取可视范围的 1.2%,两个方向各算各的
   const tickHalf: [number, number] = [
@@ -149,12 +148,12 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   opacity={s.opacity}
                   svgCircleProps={{ r: (s.size ?? 6) + (selected ? 3 : 0) }}
                 />
-                <ShapeLabel s={s} selected={selected} />
+                <ShapeLabel s={s} onMeasured={onCardMeasured} />
               </React.Fragment>
             );
           case 'segment':
           case 'arrow':
-            return <LineShape key={s.id} s={s} selected={selected} tickHalf={tickHalf} />;
+            return <LineShape key={s.id} s={s} selected={selected} tickHalf={tickHalf} onCardMeasured={onCardMeasured} />;
           case 'circle':
             return (
               <React.Fragment key={s.id}>
@@ -167,7 +166,7 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   strokeOpacity={s.opacity ?? 1}
                   fillOpacity={0}
                 />
-                <ShapeLabel s={s} selected={selected} />
+                <ShapeLabel s={s} onMeasured={onCardMeasured} />
               </React.Fragment>
             );
           case 'polygon':
@@ -181,12 +180,12 @@ export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): R
                   strokeOpacity={s.opacity ?? 1}
                   fillOpacity={(s.fillOpacity ?? 0.15) * (s.opacity ?? 1)}
                 />
-                <ShapeLabel s={s} selected={selected} />
+                <ShapeLabel s={s} onMeasured={onCardMeasured} />
               </React.Fragment>
             );
           case 'text': {
             const layout = labelLayout(s);
-            if (layout) return <NoteCard key={s.id} s={s} layout={layout} selected={selected} />;
+            if (layout) return <NoteCard key={s.id} s={s} layout={layout} onMeasured={onCardMeasured} />;
             return (
               <Text
                 key={s.id}
@@ -213,10 +212,12 @@ function LineShape({
   s,
   selected,
   tickHalf,
+  onCardMeasured,
 }: {
   s: LineShapeSpec;
   selected: boolean;
   tickHalf: [number, number];
+  onCardMeasured?: (id: string) => void;
 }): React.ReactElement {
   const weight = (s.lineWidth ?? 2) + (selected ? 2 : 0);
   const style = strokeStyle(s.style);
@@ -254,7 +255,7 @@ function LineShape({
         );
       })}
 
-      <ShapeLabel s={s} selected={selected} />
+      <ShapeLabel s={s} onMeasured={onCardMeasured} />
 
       {s.struck && (
         <Text x={mid[0]} y={mid[1]} size={22} color={STRUCK_COLOR} svgTextProps={{ fontWeight: 700 }}>
