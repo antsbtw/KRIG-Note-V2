@@ -107,6 +107,15 @@ export async function translate(
   return window.electronAPI.learningTranslate(text, targetLang);
 }
 
+/** 字幕逐行 AI 翻译(本机 Gemma,按上下文;慢,几十秒)。失败如实回 error,不换 Google 顶替 */
+export async function aiTranslateLines(
+  lines: string[],
+  targetLang?: string,
+): Promise<{ lines: string[] | null; error: string | null }> {
+  if (!window.electronAPI?.learningAiTranslateLines) return { lines: null, error: 'AI 翻译接口不可用' };
+  return window.electronAPI.learningAiTranslateLines(lines, targetLang);
+}
+
 export async function tts(text: string, lang: string): Promise<ArrayBuffer | null> {
   if (!window.electronAPI?.learningTts) return null;
   return window.electronAPI.learningTts(text, lang);

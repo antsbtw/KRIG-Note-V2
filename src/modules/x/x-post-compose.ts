@@ -311,15 +311,22 @@ function mediaProblem(ms: readonly PostMedia[]): string | null {
 
 /** X 收的图片格式(SVG 不收,要先转成图) */
 const X_IMAGE_EXT = /\.(jpe?g|png|gif|webp)$/i;
+/** X 收的视频格式(webm 不收) */
+const X_VIDEO_EXT = /\.(mp4|mov)$/i;
 
 /**
  * 这条推的附件现在能不能填进 X —— 不能的话为什么(预览窗的按钮和 x.post.fill 用同一句,不各写一份)。
- * 第④a期只做 note 里存在本机图片库(media://)的图;转图 / 视频是第④期剩下的,还没做。
+ * 图:note 里存在本机图片库(media://)的;视频:本机的 mp4 / mov(11-04)。
  */
 export function fillProblem(ms: readonly PostMedia[]): string | null {
   for (const m of ms) {
     if (m.kind === 'render') return m.error ? `${RENDER_LABEL[m.what]}没转成图:${m.error}` : `${RENDER_LABEL[m.what]}还没转成图(预览窗打开时会自动转,转好再发)`;
-    if (m.kind === 'video') return '视频还不能填进 X(还没做)—— 现在先把它去掉再发';
+    if (m.kind === 'video') {
+      /** 本机视频:媒体库里的(media://)或下载下来的(localFilePath,绝对路径)—— 11-04 视频 */
+      if (!m.src.startsWith('media://') && !m.src.startsWith('/')) return `视频不在本机(${m.src.slice(0, 40)})—— 现在只能发存在本机的视频`;
+      if (!X_VIDEO_EXT.test(m.src)) return `X 不收这种视频(${m.src.split('/').pop()})—— 只收 mp4 / mov`;
+      continue;
+    }
     if (!m.src.startsWith('media://')) return `有张图不在本机图片库里(${m.src.slice(0, 40)})—— 现在只能发存在本机的图`;
     if (!X_IMAGE_EXT.test(m.src)) return `X 不收这种图(${m.src.split('/').pop()})—— 只收 jpg / png / gif / webp`;
   }

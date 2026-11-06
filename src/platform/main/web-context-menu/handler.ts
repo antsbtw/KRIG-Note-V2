@@ -45,6 +45,7 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { shouldHandle } from '../web-shared/should-handle';
 // 网页剪藏(Defuddle → Note):右键「📥 提取到笔记」click 调用,抓页 → 推回 renderer。
 import { clipPageToRenderer } from '../content-extraction/handlers';
+import { shotArticleToRenderer } from '../web-screenshot/handlers';
 
 /**
  * ⭐ 扩展口(2026-10-16)—— 模块往网页右键菜单里加自己的项,**平台不认识任何站点**。
@@ -124,6 +125,13 @@ export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
         label: '📥 提取到笔记',
         click: () => {
           void clipPageToRenderer(mainWindow, guest);
+        },
+      });
+      // 正文截成一张长图进笔记:先框选调整再确认(用户 11-05:否则有可能会漏掉部分正文)
+      template.push({
+        label: '📸 截图正文到笔记',
+        click: () => {
+          void shotArticleToRenderer(mainWindow, guest);
         },
       });
 

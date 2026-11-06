@@ -18,7 +18,7 @@ export function detectEmbedType(url: string): EmbedType {
   if (/(?:youtube\.com\/(?:watch|embed|shorts)|youtu\.be\/)/i.test(url)) return 'youtube';
   if (/vimeo\.com\//i.test(url)) return 'vimeo';
   if (/\.(mp4|webm|ogg|m3u8|mpd)(\?|$)/i.test(url)) return 'direct';
-  if (/^(blob:|media:)/i.test(url)) return 'direct';
+  if (/^(blob:|media:|localfile:)/i.test(url)) return 'direct';
   return 'generic';
 }
 

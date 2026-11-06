@@ -8,6 +8,11 @@
 export interface OllamaMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /**
+   * base64 媒体(仅 /api/chat 原生接口)。Ollama 的图片和**音频**都从这里进
+   * (2026-11-05 实测 gemma4:12b:wav 放这里能听写)。
+   */
+  images?: string[];
 }
 
 export interface OllamaCallOptions {
@@ -89,6 +94,8 @@ export async function callOllamaChat(opts: {
   endpoint?: string;
   timeoutMs?: number;
   temperature?: number;
+  /** 'json' = 让 Ollama 强制只吐 JSON(结构化回复用) */
+  format?: 'json';
 }): Promise<OllamaResponse & { readonly evalCount?: number; readonly totalMs?: number }> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 30_000);
@@ -99,6 +106,7 @@ export async function callOllamaChat(opts: {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: opts.model, messages: opts.messages, stream: false, think: opts.think,
+        ...(opts.format ? { format: opts.format } : {}),
         options: { temperature: opts.temperature ?? 0.2 },
       }),
       signal: controller.signal,

@@ -313,6 +313,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   learningDictionaryLookup(word: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_LOOKUP, word);
   },
+  learningAiTranslateLines(lines: string[], targetLang?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_AI_TRANSLATE_LINES, lines, targetLang);
+  },
   learningTranslate(text: string, targetLang?: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_TRANSLATE, text, targetLang);
   },
@@ -492,6 +495,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_event: unknown, payload: unknown): void => callback(payload);
     ipcRenderer.on(IPC_CHANNELS.WEB_CLIP_RESULT, handler);
     return () => ipcRenderer.off(IPC_CHANNELS.WEB_CLIP_RESULT, handler);
+  },
+
+  /** 订阅 main 推送 — 网页正文截图结果(右键「📸 截图正文到笔记」)*/
+  onWebShotResult(callback: (payload: unknown) => void): () => void {
+    const handler = (_event: unknown, payload: unknown): void => callback(payload);
+    ipcRenderer.on(IPC_CHANNELS.WEB_SHOT_RESULT, handler);
+    return () => ipcRenderer.off(IPC_CHANNELS.WEB_SHOT_RESULT, handler);
   },
 
   /** 订阅 main 推送 — web view 快捷键(webview 焦点下主进程 before-input-event 拦截后回推）*/

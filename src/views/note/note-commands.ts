@@ -594,4 +594,21 @@ export function registerNoteCommands(wsId: string): void {
     }
     return api.insertNodesAtEnd(instanceId, p.nodes);
   });
+
+  /**
+   * 只往**右栏**的 note 插(光标处,没光标则末尾)—— 网页正文截图用(2026-11-05)。
+   * 用户 11-05 定:「如果右边打开 note,插入光标所在位置」。append-pm-nodes 在两栏都是 note 时
+   * 跟 activeSlot 走,可能插到左边,所以单独一条。
+   *
+   *   commandRegistry.execute('note-view.insert-pm-nodes-right', { nodes })
+   *
+   * 返:true = 插进去了;false = 右栏不是 note(调用方另建新笔记)
+   */
+  registerWsCommand('note-view.insert-pm-nodes-right', () => wsId, (ctx, arg) => {
+    const p = (arg ?? {}) as { nodes?: unknown };
+    if (!Array.isArray(p.nodes) || p.nodes.length === 0) return false;
+    const ws = workspaceManager.get(ctx.wsId);
+    if (ws?.slotBinding.right !== 'note-view') return false;
+    return tea().insertNodesAtCursorOrEnd(noteInstanceId(ctx.wsId, 'right'), p.nodes);
+  });
 }

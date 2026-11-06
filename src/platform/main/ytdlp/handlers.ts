@@ -18,6 +18,7 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { checkStatus, install } from './binary-manager';
 import { downloadVideo, getVideoInfo, saveTranslationSubtitle } from './downloader';
 import { fetchYouTubeTranscript } from './fetch-transcript';
+import { fetchSubtitlesViaYtdlp } from './fetch-subtitles';
 
 const WEBVIEW_PARTITION = 'persist:webview';
 
@@ -90,7 +91,9 @@ export function registerYtdlpHandlers(): void {
         return null;
       }
       try {
-        return saveTranslationSubtitle(videoFilePath, langCode, timestampText);
+        const srtPath = saveTranslationSubtitle(videoFilePath, langCode, timestampText);
+        console.log(`[ytdlp] 字幕文件已写 ${srtPath}`);
+        return srtPath;
       } catch (err) {
         console.warn('[ytdlp] saveTranslationSubtitle failed:', err);
         return null;
@@ -98,12 +101,15 @@ export function registerYtdlpHandlers(): void {
     },
   );
 
-  // L5-B3.19.b:不下载视频抓 YouTube 字幕
+  // 不下载视频抓字幕:YouTube 走 youtube-transcript;其它站点走 yt-dlp(2026-11-05 放开,见 fetch-subtitles.ts)
   ipcMain.handle(IPC_CHANNELS.YTDLP_FETCH_TRANSCRIPT, async (_event, url: unknown) => {
     if (typeof url !== 'string' || !url) {
       return { transcriptText: null, error: 'invalid url' };
     }
-    return fetchYouTubeTranscript(url);
+    if (/(?:youtube\.com\/(?:watch|embed|shorts)|youtu\.be\/)/i.test(url)) {
+      return fetchYouTubeTranscript(url);
+    }
+    return fetchSubtitlesViaYtdlp(url);
   });
 
   // L5-B3.19.e UX:检 webview partition 是否有 YouTube 登录 cookies

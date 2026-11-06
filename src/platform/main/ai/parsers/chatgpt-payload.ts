@@ -133,6 +133,17 @@ export function widgetFieldsToMarkdown(type: string, fields: string[]): string {
     return fields.join(' ').trim();
   }
 
+  // cite 没配到 ref(数据缺失):只剩 turnXsearchN 编号,对人无意义 → 删掉
+  if (t === 'cite') return '';
+  // entity 没配到 ref:字段是 JSON 数组 ["turnXproductN","名称"] → 取名称
+  if (t === 'entity') {
+    try {
+      const arr = JSON.parse(fields[0] ?? '') as unknown;
+      if (Array.isArray(arr) && typeof arr[1] === 'string') return arr[1];
+    } catch { /* 落到下面 */ }
+    return '';
+  }
+
   // genui / image_group 等:字段是一段 JSON,按内部结构识别。
   // (实测 genui→charts_widget_v2 图表;image_group→carousel 图片组)
   for (const f of fields) {
@@ -177,10 +188,51 @@ export function isImageGroupWidget(type: string, fields: string[]): boolean {
 }
 
 /**
+ * metadata.content_references 里的一条(只列用到的字段)。
+ *
+ * 2026-11-05 真机数据实测:每个 widget 都有一条 ref,`matched_text` = **带私用区 marker 的
+ * widget 原文,一字不差**(一份对话 24/24 全中)。
+ *   - cite → type=grouped_webpages,items[{title,url,attribution(域名)}]
+ *   - entity(商品等)→ type=entity,name / category
+ *   - writing_block → type=client_defined_widget,matched_text 是**普通文字**
+ *     `:::writing{...}\n正文\n:::`,data.content = 正文
+ */
+export interface ChatGPTContentRef {
+  type?: string;
+  matched_text?: string;
+  items?: Array<{ title?: string; url?: string; attribution?: string }>;
+  name?: string;
+  category?: string;
+  data?: { content?: unknown };
+  images?: Array<{ image_result?: { content_url?: string } }>;
+}
+
+/**
+ * 一条 ref → 替换 widget 的 markdown。返 undefined = 本函数不管(走 widget 自身解析)。
+ */
+export function contentRefToMarkdown(ref: ChatGPTContentRef): string | undefined {
+  if (ref.type === 'grouped_webpages') {
+    const links = (ref.items ?? [])
+      .filter((it) => typeof it?.url === 'string' && /^https?:\/\//.test(it.url))
+      .map((it) => `[${(it.attribution || it.title || it.url) as string}](${it.url})`);
+    // 与 ChatGPT 自己的 alt 同形:([域名](url), [域名](url));没有来源就整段删掉,不留编号
+    return links.length ? `(${links.join(', ')})` : '';
+  }
+  if (ref.type === 'entity') {
+    return typeof ref.name === 'string' ? ref.name : '';
+  }
+  return undefined;
+}
+
+/**
  * 扫描文本,把 U+E200…U+E201 的 marker widget 还原成 markdown;
  * 任何游离的私用区 marker(U+E000–F8FF)兜底剥掉,绝不让乱码进 Note。
  */
-export function unwrapWidgets(text: string): string {
+export function unwrapWidgets(
+  text: string,
+  /** matched_text → ref(见 ChatGPTContentRef);命中且能转的 widget 用 ref 还原 */
+  refsByMatched?: ReadonlyMap<string, ChatGPTContentRef>,
+): string {
   if (!text) return text;
   // 文本里没有任何 marker → 快速返回
   let hasMarker = false;
@@ -207,6 +259,13 @@ export function unwrapWidgets(text: string): string {
       if (end < 0) {
         // 没配对到 END:跳过这个起始 marker,继续(不输出乱码)
         i++;
+        continue;
+      }
+      const ref = refsByMatched?.get(text.slice(i, end + 1));
+      const fromRef = ref ? contentRefToMarkdown(ref) : undefined;
+      if (fromRef !== undefined) {
+        out.push(fromRef);
+        i = end + 1;
         continue;
       }
       const inner = text.slice(i + 1, end);
@@ -278,10 +337,7 @@ export function normalizeMessage(raw: {
   metadata?: {
     attachments?: Array<{ id?: string }>;
     aggregate_result?: { messages?: Array<{ image_url?: string }> };
-    content_references?: Array<{
-      type?: string;
-      images?: Array<{ image_result?: { content_url?: string } }>;
-    }>;
+    content_references?: ChatGPTContentRef[];
     is_visually_hidden_from_conversation?: boolean;
   };
 }): NormalizedMessage {
@@ -325,18 +381,32 @@ export function normalizeMessage(raw: {
   const contentRefs = raw.metadata?.content_references;
   if (Array.isArray(contentRefs)) {
     for (const ref of contentRefs) {
-      if (ref?.type === 'image_group' && Array.isArray(ref.images)) {
+      if (ref?.type === 'image_group') {
         const urls: string[] = [];
-        for (const img of ref.images) {
+        for (const img of ref.images ?? []) {
           const url = img?.image_result?.content_url;
           if (typeof url === 'string' && url.length > 0) urls.push(url);
         }
-        if (urls.length > 0) imageGroups.push(urls);
+        // ⚠️ 没 URL 的组(如商品图 entity_refs,只有 image_ref_id)也要占位:
+        // 文本里每个 image_group widget 都会数一个 {{IMAGE_GROUP_N}},跳过会让后面的组错位
+        imageGroups.push(urls);
       }
     }
   }
 
-  const text = unwrapWidgets(textParts.join('\n\n'));
+  const refsByMatched = new Map<string, ChatGPTContentRef>();
+  let joined = textParts.join('\n\n');
+  for (const ref of Array.isArray(contentRefs) ? contentRefs : []) {
+    const mt = ref?.matched_text;
+    if (typeof mt !== 'string' || mt.length === 0) continue;
+    if (ref.type === 'client_defined_widget' && typeof ref.data?.content === 'string') {
+      // 写作块:matched_text 是普通文字 `:::writing{...}\n正文\n:::` → 只留正文
+      joined = joined.split(mt).join(ref.data.content);
+      continue;
+    }
+    refsByMatched.set(mt, ref);
+  }
+  const text = unwrapWidgets(joined, refsByMatched);
   const role: NormalizedMessage['role'] = (author === 'user' || author === 'assistant' || author === 'tool' || author === 'system') ? author : 'system';
   return {
     id: raw.id || '',

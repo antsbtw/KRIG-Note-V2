@@ -43,6 +43,8 @@ interface WebToolbarProps {
   onClose: () => void;
   /** 阶段3:点 ⚙ 打开设置面板(面板由 WebView 渲染,WebToolbar 保持纯 UI)*/
   onOpenSettings: () => void;
+  /** ⊞ 在右栏打开视图(全局 SlotPicker,与 Note / AI / Mail / X 同一套)*/
+  onOpenSlotPicker: (anchor: HTMLElement) => void;
 }
 
 export function WebToolbar({
@@ -61,6 +63,7 @@ export function WebToolbar({
   urlInputRef,
   onClose,
   onOpenSettings,
+  onOpenSlotPicker,
 }: WebToolbarProps) {
   const [editing, setEditing] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -333,6 +336,16 @@ export function WebToolbar({
           aria-label="设置"
         >
           ⚙
+        </button>
+        <button
+          type="button"
+          className="krig-web-toolbar__btn"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => onOpenSlotPicker(e.currentTarget)}
+          title="在右栏打开视图"
+          aria-label="在右栏打开视图"
+        >
+          ⊞
         </button>
         <button
           type="button"

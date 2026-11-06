@@ -17,6 +17,7 @@
 import { capabilityRegistry } from '@slot/capability-registry/capability-registry';
 import type { ContentExtractionApi, WebClipPayload } from './types';
 import { runImportPipeline } from './internal/import-pipeline';
+import { handleWebShot, type WebShotPayload } from './internal/web-shot';
 
 export type { ContentExtractionApi, WebClipPayload } from './types';
 
@@ -32,13 +33,20 @@ function init(): () => void {
     console.warn('[content-extraction] electronAPI.onWebClipResult 不可用,剪藏订阅未挂');
     return () => {};
   }
-  unsubscribe = window.electronAPI.onWebClipResult((payload) => {
+  // 网页正文截图(右键「📸 截图正文到笔记」)—— 同一处订阅,模块级一次(不在 view 里订,免得多 ws 各跑一遍)
+  const offShot = window.electronAPI.onWebShotResult?.((payload) => {
+    handleWebShot(payload as WebShotPayload | null).catch((err) => {
+      console.error('[web-shot] 处理截图结果失败:', err);
+    });
+  });
+  const offClip = window.electronAPI.onWebClipResult((payload) => {
     // fire-and-forget 但兜 .catch:runImportPipeline 自身已有 top-level try/catch,
     // 这里再兜一层,确保任何意外抛出不成未处理 promise rejection。
     runImportPipeline(payload as WebClipPayload | null).catch((err) => {
       console.error('[content-extraction] import pipeline failed:', err);
     });
   });
+  unsubscribe = () => { offClip(); offShot?.(); };
   return unsubscribe;
 }
 

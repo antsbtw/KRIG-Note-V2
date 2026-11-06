@@ -16,6 +16,7 @@ import type { BrowserWindow, WebContents } from 'electron';
 import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { captureFullPage } from './capture';
 import { cacheClipResult } from './clip-cache';
+import { resolveBlobVideos } from './blob-video';
 
 /**
  * 右键菜单「📥 提取到笔记」click 回调:抓当前 guest 页面 → 推回 renderer。
@@ -29,10 +30,12 @@ export async function clipPageToRenderer(
   mainWindow: BrowserWindow,
   guest: WebContents,
 ): Promise<void> {
-  const result = await captureFullPage(guest);
+  const raw = await captureFullPage(guest);
   // 落盘缓存原始 FullPageResult(离线观察 Defuddle 真实格式 / 调优 import-pipeline);
   // fire-and-forget,失败不阻断剪藏。
-  void cacheClipResult(result);
+  void cacheClipResult(raw);
+  // blob: 视频只在原页面里能播 → 用 yt-dlp 换成真实直链(见 blob-video.ts)
+  const result = raw ? await resolveBlobVideos(raw) : raw;
   // send 防护:win.isDestroyed() 只查 BrowserWindow,不查 webContents —— 抓取最长 10s,
   // 期间主窗口若开始拆除(关窗/退出),webContents 可能已销毁/崩溃,send 抛 "Object has
   // been destroyed";payload 含页面任意 schemaOrgData,极端情况结构化克隆也可能抛。

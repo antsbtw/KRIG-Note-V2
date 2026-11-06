@@ -12,8 +12,7 @@
  *   4. buildChatGPTMessageBody(msg, fileMap) — 单条 → markdown(嵌入图/文件)
  *   5. 配对前一条 user 提问
  *
- * selector:ai-service-types.ts chatgpt.selectors.assistantMessage
- *   '[data-message-author-role="assistant"], .agent-turn'
+ * selector:见下方 CHATGPT_ASSISTANT_SELECTOR(与 ai-service-types.ts chatgpt.selectors.assistantMessage 同步)
  */
 
 import type { WebContents } from 'electron';
@@ -25,11 +24,28 @@ import {
 } from './chatgpt-full-extraction';
 import type { ExtractedSingleTurn } from './claude-extract-turn';
 import { locateOrdinalByPoint } from './locate-ordinal';
+import { convertFenceArtifacts } from './fence-artifacts';
 
+/**
+ * 2026-11-04 真机实测:ChatGPT 改版,页面上 data-message-author-role / data-turn / article
+ * 全部为 0 → 右键恒报「不在任何 AI 回复内」。新版每条 AI 回复的容器是
+ * `div[data-content-search-unit-key="<turn>:<n>:assistant"]`(内含 markdown 正文 + 表格等)。
+ * 新标记放首位(主选择器);旧两条留作次选,兼容灰度期旧页面。
+ */
 const CHATGPT_ASSISTANT_SELECTOR =
-  '[data-message-author-role="assistant"], .agent-turn';
+  '[data-content-search-unit-key$=":assistant"], [data-message-author-role="assistant"], .agent-turn';
 
-type ResolvedTarget = { ordinal: number; preview: string };
+/**
+ * 回复块上带「消息 id」的属性(2026-11-04 真机日志看到新版带前两个;旧版在 data-message-id)。
+ * 值与对话数据(mapping tree)里 message.id 是同一个 UUID → 能精确对上,不用猜文字/序号。
+ */
+const CHATGPT_MESSAGE_ID_ATTRS = [
+  'data-chatgpt-search-message-ids',
+  'data-chatgpt-selection-message-id',
+  'data-message-id',
+];
+
+type ResolvedTarget = { ordinal: number; preview: string; ids: string[] };
 
 /**
  * 归一化用于「DOM 预览 ↔ message 源文本」匹配。
@@ -59,7 +75,7 @@ async function resolveAssistantTarget(
   x: number,
   y: number,
 ): Promise<ResolvedTarget> {
-  return locateOrdinalByPoint(wc, x, y, CHATGPT_ASSISTANT_SELECTOR);
+  return locateOrdinalByPoint(wc, x, y, CHATGPT_ASSISTANT_SELECTOR, CHATGPT_MESSAGE_ID_ATTRS);
 }
 
 /**
@@ -95,38 +111,79 @@ export async function extractChatGPTTurnAt(
     return { success: false, error: '对话内没有 AI 回复可提取' };
   }
 
-  // ── message 定位:文本预览匹配优先,ordinal 兜底 ──
-  let msg: ChatGPTNormalizedMessage | undefined;
-  const preview = normalizeForMatch(target.preview);
-  if (preview.length >= 12) {
-    let bestScore = 0;
-    let bestMsg: ChatGPTNormalizedMessage | undefined;
-    for (const m of assistantMsgs) {
-      const body = normalizeForMatch(m.text);
-      if (!body) continue;
-      const lim = Math.min(preview.length, body.length);
-      let common = 0;
-      while (common < lim && preview[common] === body[common]) common++;
-      const contains = body.startsWith(preview) || preview.startsWith(body.slice(0, preview.length));
-      const score = contains ? Math.max(common, preview.length) : common;
-      if (score > bestScore) { bestScore = score; bestMsg = m; }
+  // ── message 定位 ──
+  // ⭐ 优先按 id 精确对上(2026-11-04:ChatGPT 改版后页面块与数据条目不再一一对应,
+  //    靠文字前缀/序号会对错条);页面没带 id(旧版/灰度)才走原来的文字匹配 + 序号。
+  // 一个页面块可能含多条 assistant message(如工具调用前后各一段)→ 按数据顺序全取、拼起来,
+  // 与用户在那一块里看到的一致。
+  let picked: ChatGPTNormalizedMessage[] = [];
+  let method: string;
+  if (target.ids.length > 0) {
+    const idSet = new Set(target.ids);
+    picked = assistantMsgs.filter((m) => idSet.has(m.id));
+    method = 'id';
+    if (picked.length === 0) {
+      // 不兜底:页面明确说了是哪条,数据里没有 = 数据不是这页的/过期,猜一条只会对错
+      console.warn('[chatgpt-extract-turn] 页面块的消息 id 在对话数据里找不到', {
+        pageIds: target.ids,
+        dataAssistantIds: assistantMsgs.map((m) => m.id),
+      });
+      return { success: false, error: '页面上这条回复在对话数据里找不到(数据可能未同步),请刷新页面后再试' };
     }
-    if (bestMsg && bestScore >= 12) {
-      msg = bestMsg;
+  } else {
+    method = 'text';
+    let msg: ChatGPTNormalizedMessage | undefined;
+    const preview = normalizeForMatch(target.preview);
+    if (preview.length >= 12) {
+      let bestScore = 0;
+      let bestMsg: ChatGPTNormalizedMessage | undefined;
+      for (const m of assistantMsgs) {
+        const body = normalizeForMatch(m.text);
+        if (!body) continue;
+        const lim = Math.min(preview.length, body.length);
+        let common = 0;
+        while (common < lim && preview[common] === body[common]) common++;
+        const contains = body.startsWith(preview) || preview.startsWith(body.slice(0, preview.length));
+        const score = contains ? Math.max(common, preview.length) : common;
+        if (score > bestScore) { bestScore = score; bestMsg = m; }
+      }
+      if (bestMsg && bestScore >= 12) {
+        msg = bestMsg;
+      }
     }
-  }
-  if (!msg) {
-    // ordinal 兜底:clamp 到有效范围(只有 1 条非空时 ordinal 越界也回退到它)
-    msg = assistantMsgs[ordinal] ?? assistantMsgs[assistantMsgs.length - 1];
-  }
-  if (!msg) {
-    return {
-      success: false,
-      error: `定位到第 ${ordinal + 1} 条回复,但对话数据仅 ${assistantMsgs.length} 条(页面与数据不同步?请刷新后重试)`,
-    };
+    if (!msg) {
+      method = 'ordinal';
+      msg = assistantMsgs[ordinal] ?? assistantMsgs[assistantMsgs.length - 1];
+    }
+    if (!msg) {
+      return {
+        success: false,
+        error: `定位到第 ${ordinal + 1} 条回复,但对话数据仅 ${assistantMsgs.length} 条(页面与数据不同步?请刷新后重试)`,
+      };
+    }
+    picked = [msg];
   }
 
-  const built = buildChatGPTMessageBody(msg, fileMap);
+  const parts = picked.map((m) => buildChatGPTMessageBody(m, fileMap));
+  // ```svg / ```html 代码块 → 图 / 网页块(不转的话 note 里只是一大段源码)
+  const fence = await convertFenceArtifacts(
+    parts.map((p) => p.body.trim()).filter(Boolean).join('\n\n'),
+    'chatgpt',
+  );
+  const built = {
+    body: fence.markdown,
+    artifactCount: parts.reduce((n, p) => n + p.artifactCount, 0) + fence.count,
+  };
+  const msg = picked[0];
+  console.log('[chatgpt-extract-turn] 选中', {
+    method,
+    pageIds: target.ids,
+    pickedIds: picked.map((m) => m.id),
+    ordinal,
+    preview: target.preview.slice(0, 40),
+    fenceArtifacts: fence.count,
+    picked: built.body.replace(/\s+/g, ' ').slice(0, 40),
+  });
   if (!built.body.trim()) {
     // assistantMsgs 已过滤空 message,正常到不了这里;真到了说明仍在生成
     return { success: false, error: '该回复无可提取内容(可能仍在生成中?请等回复完成再试)' };

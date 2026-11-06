@@ -21,6 +21,8 @@ const BATCH_LIMIT = 4500;
 export interface TranslateButton {
   el: HTMLButtonElement;
   setTargetLang(lang: string): void;
+  /** 字幕原文变了(📝 抓到 / 手改 / 撤销)→ 重新判断能不能点 */
+  refresh(): void;
   destroy(): void;
 }
 
@@ -138,6 +140,11 @@ export function createTranslateButton(
     el: btn,
     setTargetLang(lang) {
       targetLang = lang;
+      applyEnabledState();
+    },
+    refresh() {
+      // 翻译进行中(⏳ / ✓ / ❌ 过渡态)不打断,过渡结束会自己 applyEnabledState
+      if (btn.textContent !== '🌐') return;
       applyEnabledState();
     },
     destroy() {

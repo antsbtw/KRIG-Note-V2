@@ -47,7 +47,9 @@ const h = vi.hoisted(() => ({
   /** 主页上那条带几张图;null = 和发的时候一样 */
   photosOnProfile: null as number | null,
   /** 磁盘上有的图(media:// → 路径) */
-  disk: new Map<string, string>([['media://images/a.png', '/m/images/a.png'], ['media://images/b.jpg', '/m/images/b.jpg']]),
+  disk: new Map<string, string>([['media://images/a.png', '/m/images/a.png'], ['media://images/b.jpg', '/m/images/b.jpg'], ['media://video/v.mp4', '/m/video/v.mp4']]),
+  /** 假路径的文件大小(字节;视频要看有没有超 512 MB) */
+  files: new Map<string, number>([['/m/video/v.mp4', 5_000_000], ['/dl/yt.mp4', 8_000_000]]),
   /** 每一步的先后(看先图后字) */
   order: [] as string[],
   sentMedia: 0,
@@ -133,6 +135,16 @@ vi.mock('@platform/main/web-capability/wiring/runtime', () => ({
   },
 }));
 vi.mock('@platform/main/media/media-store-impl', () => ({ resolveMediaPath: (src: string) => h.disk.get(src) ?? null }));
+/** 视频文件的大小 / 下载下来的视频(绝对路径)在不在:只管测试里假的路径,别的照真的 */
+vi.mock('node:fs', async (orig) => {
+  const real = await orig<typeof import('node:fs')>();
+  const fake = (p: unknown): boolean => typeof p === 'string' && (p.startsWith('/m/') || p.startsWith('/dl/'));
+  return {
+    ...real,
+    existsSync: (p: string) => (fake(p) ? h.files.has(p) : real.existsSync(p)),
+    statSync: ((p: string, o?: unknown) => (fake(p) ? { size: h.files.get(p) ?? 0 } : real.statSync(p, o as never))) as typeof real.statSync,
+  };
+});
 vi.mock('@platform/main/web-capability/wiring/web-collect-engine', () => ({ resolve: () => ({ pageId: 'p7' }) }));
 vi.mock('@modules/x/x-host-registry', () => ({ getXHostState: () => ({ wcId: 7, url: '' }), listXHostStates: () => new Map([['ws-1', { wcId: 7, url: '' }]]) }));
 vi.mock('@modules/x/x-account-repo', () => ({
@@ -304,7 +316,7 @@ describe('x.post.fill 填进 X(不发)', () => {
   it('本期不能填的发法 / 要转图的块 / 视频 / 不在本机的图 / SVG → refused,网页一下没碰', async () => {
     const cases: Array<[unknown, string]> = [
       [{ type: 'mathBlock', attrs: { latex: 'E=mc^2' } }, '公式还没转成图'],
-      [{ type: 'videoBlock', attrs: { src: 'media://videos/v.mp4' } }, '视频还不能填进 X'],
+      [{ type: 'videoBlock', attrs: { src: 'media://video/v.webm' } }, 'X 不收这种视频'],
       [{ type: 'image', attrs: { src: 'https://example.com/a.png' } }, '不在本机图片库'],
       [{ type: 'image', attrs: { src: 'media://images/c.svg' } }, 'SVG 图还没转成图'],
       [{ type: 'mathBlock', attrs: { latex: 'x', xImageError: 'MathJax 报错' } }, '公式没转成图:MathJax 报错'],
@@ -328,6 +340,44 @@ describe('x.post.fill 填进 X(不发)', () => {
 });
 
 const img = (src: string) => ({ type: 'image', attrs: { src } });
+const video = (attrs: Record<string, unknown>) => ({ type: 'videoBlock', attrs });
+
+describe('带视频(11-04)', () => {
+  it('⭐ 媒体库里的视频:和图一样先喂文件、等 X 传完,再贴字', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('看这个视频'), video({ src: 'media://video/v.mp4' })] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true, value: { text: '看这个视频', media: ['media://video/v.mp4'] } });
+    expect(h.fed).toEqual([['/m/video/v.mp4']]);
+    expect(h.order).toEqual(['feed@0', 'type@0']);
+  });
+
+  it('⭐ 下载下来的视频(localFilePath 绝对路径)也能发', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('下载的'), video({ src: 'https://youtu.be/x', localFilePath: '/dl/yt.mp4' })] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: true });
+    expect(h.fed).toEqual([['/dl/yt.mp4']]);
+  });
+
+  it('⭐ 视频文件没了 → failed 说清楚,网页没碰', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('x'), video({ src: 'https://youtu.be/x', localFilePath: '/dl/gone.mp4' })] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'failed' });
+    expect(!r.ok && r.why).toContain('视频在本机找不到了');
+    expect(h.goto).toEqual([]);
+  });
+
+  it('⭐ 超过 512 MB → refused,网页没碰', async () => {
+    h.files.set('/m/video/v.mp4', 600 * 1024 * 1024);
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('x'), video({ src: 'media://video/v.mp4' })] }, { caller: 'ui' });
+    h.files.set('/m/video/v.mp4', 5_000_000);
+    expect(r).toMatchObject({ ok: false, kind: 'refused' });
+    expect(!r.ok && r.why).toContain('512 MB');
+    expect(h.goto).toEqual([]);
+  });
+
+  it('视频和图在同一条 → refused(X 不让)', async () => {
+    const r = await execute('x.post.fill', { wsId: 'ws-1', form: 'single', content: [para('x'), img('media://images/a.png'), video({ src: 'media://video/v.mp4' })] }, { caller: 'ui' });
+    expect(r).toMatchObject({ ok: false, kind: 'refused' });
+    expect(h.goto).toEqual([]);
+  });
+});
 
 describe('带图(第④期)', () => {
   it('⭐ 先喂图(磁盘路径)、等 X 传完,再贴字;草稿和记录里带着图', async () => {

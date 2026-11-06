@@ -270,3 +270,65 @@ describe('URL / ID helpers', () => {
     expect(fileIdFromEstuaryUrl('/backend-api/estuary/content')).toBeNull();
   });
 });
+
+/**
+ * 2026-11-05:引用 / 商品 / 写作块曾原样漏进 Note(`turn878141search0`、`["turn…product1","GL.iNet…"]`、
+ * `:::writing{…}`)。形状照真机对话数据(content_references 的 matched_text = 带 marker 的 widget 原文),
+ * 内容为合成。
+ */
+describe('normalizeMessage —— content_references 还原引用/商品/写作块', () => {
+  const S = '', E = '', P = '';
+  const cite = `${S}cite${P}turn1search0${P}turn1search1${E}`;
+  const entity = `${S}entity${P}["turn1product0","某路由器 AC1200…"]${E}`;
+  const imgProduct = `${S}image_group${P}{"entity_refs":["turn1product0"],"layout":"carousel"}${E}`;
+  const imgQuery = `${S}image_group${P}{"query":["x"],"layout":"carousel"}${E}`;
+  const writing = ':::writing{variant="social_post" id="1"}\n正文一段\n:::';
+
+  const msg = () => normalizeMessage({
+    id: 'm1',
+    author: { role: 'assistant' },
+    content: { parts: [`前文。${cite}\n\n${imgProduct}\n**${entity}**\n\n${imgQuery}\n\n${writing}`] },
+    metadata: {
+      content_references: [
+        { type: 'grouped_webpages', matched_text: cite, items: [
+          { title: 'Doc A', url: 'https://a.example/x', attribution: 'a.example' },
+          { title: 'Doc B', url: 'https://b.example/y', attribution: 'b.example' },
+        ] },
+        { type: 'image_group', matched_text: imgProduct, images: [{ image_ref_id: 'turn1product0' } as never] },
+        { type: 'entity', matched_text: entity, name: '某路由器 AC1200…', category: 'product' },
+        { type: 'image_group', matched_text: imgQuery, images: [{ image_result: { content_url: 'https://img/q.png' } }] },
+        { type: 'client_defined_widget', matched_text: writing, data: { content: '正文一段' } },
+      ],
+    },
+  });
+
+  it('引用 → 来源域名链接,不留 turn 编号', () => {
+    const t = msg().text;
+    expect(t).toContain('前文。([a.example](https://a.example/x), [b.example](https://b.example/y))');
+    expect(t).not.toMatch(/turn1search/);
+  });
+
+  it('商品 → 商品名,不留 JSON', () => {
+    const t = msg().text;
+    expect(t).toContain('**某路由器 AC1200…**');
+    expect(t).not.toMatch(/turn1product/);
+  });
+
+  it('写作块 → 只留正文,去掉 :::writing 包装', () => {
+    const t = msg().text;
+    expect(t).toContain('正文一段');
+    expect(t).not.toMatch(/:::/);
+  });
+
+  it('没 URL 的图片组也占位,后面的组不错位', () => {
+    const m = msg();
+    expect(m.imageGroups).toEqual([[], ['https://img/q.png']]);
+    // 第 2 个 image_group widget 是 {{IMAGE_GROUP_1}},对应第 2 组(带 URL 的那组)
+    expect(m.text).toContain('{{IMAGE_GROUP_1}}');
+  });
+
+  it('cite 没配到 ref 时整段删掉,entity 没配到时取名称', () => {
+    expect(unwrapWidgets(`a${S}cite${P}turn9search3${E}b`)).toBe('ab');
+    expect(unwrapWidgets(`${S}entity${P}["turn9product0","名称X"]${E}`)).toBe('名称X');
+  });
+});

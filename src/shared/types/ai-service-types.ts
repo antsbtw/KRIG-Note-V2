@@ -159,8 +159,11 @@ const CHATGPT_PROFILE: AIServiceProfile = {
     inputBox: 'div.ProseMirror[contenteditable="true"], #prompt-textarea',
     sendButton: 'button[data-testid="send-button"], button[data-testid="composer-send-button"], button[aria-label*="Send" i]',
     messageList: '[class*="react-scroll-to-bottom"]',
+    // 2026-11-04 真机实测:ChatGPT 改版,data-message-author-role 全无;新版 AI 回复容器带
+    // data-content-search-unit-key="<turn>:<n>:assistant"。旧选择器留作次选。
+    // userMessage 未实测新版标记(且当前无消费方),保持原样。
     userMessage: '[data-message-author-role="user"]',
-    assistantMessage: '[data-message-author-role="assistant"], .agent-turn',
+    assistantMessage: '[data-content-search-unit-key$=":assistant"], [data-message-author-role="assistant"], .agent-turn',
     conversationTitle: 'title',
   },
   intercept: {

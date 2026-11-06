@@ -15,7 +15,7 @@
 
 import type { NodeViewConstructor } from 'prosemirror-view';
 import type { Node as PMNode } from 'prosemirror-model';
-import { mediaPutBase64 } from '@capabilities/media-storage';
+import { filePathOf, localFileUrl, mediaPutBase64 } from '@capabilities/media-storage';
 import { detectEmbedType, type EmbedType } from './helpers/embed-detection';
 import {
   parseSubtitleCuesFromText,
@@ -32,12 +32,14 @@ import { createCCButton, type CCButton, type CCState } from './actions/cc-button
 import { createFullscreenButton, type FullscreenButton } from './actions/fullscreen-button';
 import { createTranscriptButton, type TranscriptButton } from './actions/transcript-button';
 import { createTranslateButton, type TranslateButton } from './actions/translate-button';
+import { createAiTranslateButton, type AiTranslateButton } from './actions/ai-translate-button';
 import { createMemoryButton, type MemoryControl } from './actions/memory-button';
 import { createVocabButton, type VocabButton } from './actions/vocab-button';
 import { createVocabPanel, type VocabPanel } from './components/vocab-panel';
 import { createDownloadButton, type DownloadButton } from './actions/download-button';
 import { createProgressBar, type ProgressBar } from './components/progress-bar';
 import { commandRegistry } from '@slot/command-registry/command-registry';
+import { saveSubtitle } from '@capabilities/ytdlp';
 
 const TRANSCRIPT_WRITE_THROTTLE_MS = 500; // Qa-6
 
@@ -58,6 +60,7 @@ interface FrameworkRefs {
   fsBtn: FullscreenButton;
   transcriptBtn: TranscriptButton;
   translateBtn: TranslateButton;
+  aiTranslateBtn: AiTranslateButton;
   memoryBtn: MemoryControl;
   vocabBtn: VocabButton;
   vocabPanel: VocabPanel;
@@ -116,6 +119,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.tracker?.destroy();
     framework.transcriptBtn.destroy();
     framework.translateBtn.destroy();
+    framework.aiTranslateBtn.destroy();
     framework.ccBtn.destroy();
     framework.fsBtn.destroy();
     framework.overlay.destroy();
@@ -159,27 +163,28 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       input.addEventListener('change', () => {
         const file = input.files?.[0];
         if (!file) return;
+        const title = file.name.replace(/\.[^.]+$/, '');
+        /**
+         * 本机视频只记链接,不拷进媒体库(用户 2026-11-05:「本地视频增加链接就可以了吧？不用添加到数据库。」)。
+         * src = localfile:// 播放;localFilePath = 原路径(发到 X 时从这里喂文件、翻译字幕写在旁边)。
+         * 文件挪走 / 改名后链接会断 —— 播放器 404,main 终端打一行 [localfile] 文件不在了。
+         */
+        const localPath = filePathOf(file);
+        if (localPath) {
+          updateAttrs({ src: localFileUrl(localPath), localFilePath: localPath, embedType: 'direct' as EmbedType, title, mimeType: file.type || null });
+          return;
+        }
+        /** 拿不到磁盘路径(极少:不是从磁盘选的)才存进媒体库;存不进去就报错,不把整段视频塞进 note */
         const reader = new FileReader();
         reader.onload = async () => {
           if (view.isDestroyed) return;
-          const dataUrl = reader.result as string;
-          const r = await mediaPutBase64(dataUrl, file.type, file.name);
+          const r = await mediaPutBase64(reader.result as string, file.type, file.name);
           if (view.isDestroyed) return;
           if (r.success && r.mediaUrl) {
-            updateAttrs({
-              src: r.mediaUrl,
-              embedType: 'direct' as EmbedType,
-              title: file.name.replace(/\.[^.]+$/, ''),
-              mimeType: file.type || null,
-            });
+            updateAttrs({ src: r.mediaUrl, embedType: 'direct' as EmbedType, title, mimeType: file.type || null });
           } else {
-            console.warn('[videoBlock] mediaPutBase64 failed:', r.error);
-            updateAttrs({
-              src: dataUrl,
-              embedType: 'direct' as EmbedType,
-              title: file.name.replace(/\.[^.]+$/, ''),
-              mimeType: file.type || null,
-            });
+            console.warn('[videoBlock] 视频没存进媒体库,没放进 note:', r.error);
+            window.alert(`视频没放进来:${r.error ?? '未知原因'}`);
           }
         };
         reader.readAsDataURL(file);
@@ -267,14 +272,21 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         }
       },
     );
-    const translateBtn = createTranslateButton(
-      () => transcriptTab.getText(),
-      (langCode, translatedText) => {
-        // 翻译完成回调:更新 translations map + 创建/更新对应 Tab + 同步 attrs + cc dropdown
-        if (!framework) return;
-        upsertTranslation(langCode, translatedText);
-      },
-    );
+    // 翻译完成(🌐 Google / 🤖 本机 AI 共用):更新 translations map + 创建/更新对应 Tab + 同步 attrs + cc dropdown
+    const handleTranslated = (langCode: string, translatedText: string): void => {
+      if (!framework) return;
+      upsertTranslation(langCode, translatedText);
+      // 2026-11-05:视频已下载到本地 → 立刻在旁边写 <视频名>.<lang>.srt(播放器自动加载)。
+      // 原先只在点 ⬇ 那一刻写,「先下载后翻译」就永远没有中文字幕文件。
+      const localPath = node.attrs.localFilePath as string | null;
+      if (localPath) {
+        void saveSubtitle(localPath, langCode, translatedText).then((p) => {
+          if (!p) console.warn('[video-block] 翻译字幕文件没写成(main 拒收或写失败)', { localPath, langCode });
+        });
+      }
+    };
+    const translateBtn = createTranslateButton(() => transcriptTab.getText(), handleTranslated);
+    const aiTranslateBtn = createAiTranslateButton(() => transcriptTab.getText(), handleTranslated);
     const memoryBtn = createMemoryButton({
       getSegmentDuration: () => (node.attrs.segmentDuration as number) || 60,
       getTracker: () => tracker,
@@ -351,6 +363,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     tabBar.actionBarEl.appendChild(ccBtn.el);
     tabBar.actionBarEl.appendChild(memoryBtn.el);
     tabBar.actionBarEl.appendChild(translateBtn.el);
+    tabBar.actionBarEl.appendChild(aiTranslateBtn.el);
     tabBar.actionBarEl.appendChild(transcriptBtn.el);
     tabBar.actionBarEl.appendChild(downloadBtn.el);
     tabBar.actionBarEl.appendChild(vocabBtn.el);
@@ -370,6 +383,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       fsBtn,
       transcriptBtn,
       translateBtn,
+      aiTranslateBtn,
       memoryBtn,
       vocabBtn,
       vocabPanel,
@@ -580,6 +594,10 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         framework.transcriptTab.setText(text);
         framework.cues = parseSubtitleCuesFromText(text);
         framework.vocabPanel.rebuild();
+        // 2026-11-05:NodeView 原地更新不重建 → 🌐 只在创建时判过「有没有字幕」,
+        // 📝 抓到字幕后一直灰着。字幕变了就让它重判。
+        framework.translateBtn.refresh();
+        framework.aiTranslateBtn.refresh();
       }
 
       // translationTexts 变(外部驱动,撤销 / 协作)→ 重建翻译 Tab 集合

@@ -50,6 +50,22 @@ export function registerWebCommands(wsId: string): void {
    * 网页剪藏用:提取成功后让 web 留 left、note 开 right(left/right 对照阅读)。
    * 只动 slotBinding,不改 url(剪藏的是当前页,url 不变)。
    */
+  /**
+   * ⊞ SlotPicker 视图切换 —— 在 right slot 打开选中的 view(2026-11-05 补:web 是唯一没有 ⊞ 的 view,
+   * 用户 11-05:「和其他的view一样，有一个对称的打开各种view的button」)。
+   * commandArg 形状与别的 view 的 open-right-slot 完全一致(string | { viewId, subId })。
+   */
+  registerWsCommand('web-view.open-right-slot', () => wsId, (ctx, arg: unknown) => {
+    const bus = workspaceManager.getBus(ctx.wsId);
+    if (!bus) return;
+    if (typeof arg === 'string') {
+      bus.slot.openRight(arg);
+    } else if (arg && typeof arg === 'object' && 'viewId' in arg) {
+      const { viewId, subId } = arg as { viewId: string; subId?: string };
+      bus.slot.openRight(viewId, subId ? { subId } : undefined);
+    }
+  });
+
   registerWsCommand('web-view.pin-left', () => wsId, (ctx) => {
     const wsId = ctx.wsId;
     const ws = workspaceManager.get(wsId);

@@ -12,6 +12,7 @@
  * ⚠️ 往框里贴只贴一次(check none),再自己读回来核对:底座的 exact 校验对不上会换路再贴一遍,
  *   X 把表情画成图片时 textContent 里没有表情 → 对不上 → 同一段字被贴两次。
  */
+import { statSync } from 'node:fs';
 import { inputEngine } from '@platform/main/web-capability/wiring/runtime';
 import { resolve as resolvePage } from '@platform/main/web-capability/wiring/web-collect-engine';
 import { webviewPorts } from './x-collect-ports';
@@ -169,8 +170,19 @@ export type FillOutcome = { readonly ok: true } | { readonly ok: false; readonly
 
 type MediaState = {
   state?: 'ready' | 'too-many' | 'timeout' | 'no-dialog'; attached?: number; waited?: number;
-  blobs?: number; removes?: number; inGroup?: number; busy?: number; buttonEnabled?: boolean; testids?: string[];
+  blobs?: number; removes?: number; inGroup?: number; videos?: number; status?: string; busy?: number; buttonEnabled?: boolean; testids?: string[];
 } | null;
+
+const VIDEO_FILE = /\.(mp4|mov)$/i;
+/**
+ * 等 X 传完最多多久:图 60 秒;有视频按大小放宽 —— 60 秒 + 每 MB 3 秒,最多 30 分钟。
+ * (我的取值:11-05 真机 274MB 视频 60 秒远远不够;按 ~0.3 MB/s 的慢出口留余量。)
+ */
+export function mediaWaitMs(files: readonly string[]): number {
+  let mb = 0;
+  for (const f of files) if (VIDEO_FILE.test(f)) { try { mb += statSync(f).size / 1024 / 1024; } catch { /* 文件不在由前面 mediaFiles 先挡 */ } }
+  return mb === 0 ? 60_000 : Math.min(30 * 60_000, 60_000 + Math.ceil(mb) * 3_000);
+}
 
 /** 填进 X 的一条:字 + 磁盘上的图(调用方从 media:// 解出来) */
 export type FillPost = { readonly text: string; readonly files: readonly string[] };
@@ -250,17 +262,20 @@ export async function fillCompose(wcId: number, posts: readonly FillPost[]): Pro
       touched = true;
       if (fed.status === 'failed') return { ok: false, why: await undo(wcId, `${which}图没放进去:${fed.reason}`) };
       fedSoFar += post.files.length;
-      const m = (await ports.runScript(X_SCRIPTS.composeMediaReady, { want: fedSoFar })) as MediaState;
+      const maxMs = mediaWaitMs(post.files);
+      if (maxMs > 60_000) console.log(`[x.post] ${which}有视频,最多等 X 传完 ${Math.round(maxMs / 1000)} 秒`);
+      const m = (await ports.runScript(X_SCRIPTS.composeMediaReady, { want: fedSoFar, maxMs })) as MediaState;
       if (m?.state !== 'ready') {
         const what = m?.state === 'timeout'
-          ? `60 秒还没传完:挂上 ${m.attached ?? 0} / ${fedSoFar} 张、还在上传 ${m.busy ?? '?'} 张、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
-            + `(信号 blob ${m.blobs ?? '?'} / removeMedia ${m.removes ?? '?'} / attachments ${m.inGroup ?? '?'};弹窗里的 testid:${(m.testids ?? []).join(',')})`
+          ? `${Math.round(maxMs / 1000)} 秒还没传完:挂上 ${m.attached ?? 0} / ${fedSoFar} 件、还在上传 ${m.busy ?? '?'} 件、发布按钮${m.buttonEnabled ? '亮着' : '灰着'}`
+            + `${m.status ? `、X 显示「${m.status}」` : ''}`
+            + `(信号 blob ${m.blobs ?? '?'} / removeMedia ${m.removes ?? '?'} / attachments ${m.inGroup ?? '?'} / 视频 ${m.videos ?? '?'};弹窗里的 testid:${(m.testids ?? []).join(',')})`
           : m?.state === 'too-many' ? `挂上了 ${m.attached} 张,比要的 ${fedSoFar} 张多`
             : `弹窗不见了(${m?.state ?? '脚本没回话'})`;
         console.warn(`[x.post] ${which}图没传好:${what}`);
         return { ok: false, why: await undo(wcId, `${which}图没传好:${what}`) };
       }
-      console.log(`[x.post] ${which}${post.files.length} 张图已挂上发推框、传完了(等了 ${((m.waited ?? 0) / 1000).toFixed(1)} 秒)`);
+      console.log(`[x.post] ${which}${post.files.length} 件(图 / 视频)已挂上发推框、传完了(等了 ${((m.waited ?? 0) / 1000).toFixed(1)} 秒)`);
     }
     if (post.text.trim() === '') continue;
     const typed = await inputEngine.type(page.pageId, { anchor: composeBoxAnchor(k), text: post.text, check: { kind: 'none' } });

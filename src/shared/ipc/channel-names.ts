@@ -48,6 +48,7 @@ export const IPC_CHANNELS = {
   // 网页剪藏(Defuddle → Note):右键「📥 提取到笔记」→ main 跑 captureFullPage →
   // FullPageResult 推回 renderer,由 content-extraction 门面订阅后跑 import-pipeline。
   WEB_CLIP_RESULT: 'web.clip-result',                 // main → renderer 推送
+  WEB_SHOT_RESULT: 'web.shot-result',                 // main → renderer:网页正文截图结果(2026-11-05)
 
   // Phase 4 Commit 2:web view 快捷键整层 — webview 焦点下宿主 onKeyDown 失效,
   // 主进程 before-input-event 拦截这套 web 快捷键后 main → renderer 推回,由
@@ -111,6 +112,8 @@ export const IPC_CHANNELS = {
   LEARNING_VOCAB_CHANGED: 'learning.vocab-changed',     // main → renderer 推送
   LEARNING_LOOKUP: 'learning.dictionary-lookup',
   LEARNING_TRANSLATE: 'learning.translate',
+  /** 字幕逐行 AI 翻译(本机 Gemma,按上下文)—— 2026-11-05 试用 */
+  LEARNING_AI_TRANSLATE_LINES: 'learning.ai-translate-lines',
   LEARNING_TTS: 'learning.tts',
 
   // L5-C1:ebook 书架(sub-phase 022: 走 atom 体系 — ebook + reading-state + pm domain)

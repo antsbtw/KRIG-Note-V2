@@ -84,15 +84,25 @@ async function planOf(i: PrepareIn): Promise<PostPlan> {
   return composePost(doc.content ?? [], i.layout, premium);
 }
 
-/** 图的 media:// → 磁盘路径;解不出来(文件没了)就拒,不少发一张 */
+/** X 一个视频最多 512 MB(时长上限 X 自己判:免费号 2 分 20 秒,Premium 更长) */
+const X_VIDEO_MAX_BYTES = 512 * 1024 * 1024;
+
+/** 图 / 视频的 media:// → 磁盘路径;解不出来(文件没了)就拒,不少发一张 */
 async function mediaFiles(media: readonly PostMedia[]): Promise<{ srcs: string[]; files: string[] }> {
   const srcs = media.map((m) => (m.kind === 'render' ? '' : m.src));
   if (srcs.length === 0) return { srcs, files: [] };
   /** 动态 import:媒体库拖着 Electron,X 的单测不必拉进来 */
   const { resolveMediaPath } = await import('@platform/main/media/media-store-impl');
-  const files = srcs.map((src) => {
-    const f = resolveMediaPath(src);
-    if (!f) throw capFailed(`图在本机图片库里找不到了(${src})—— 在 note 里重新放一下这张图再发`);
+  const { existsSync, statSync } = await import('node:fs');
+  const files = media.map((m, k) => {
+    const src = srcs[k];
+    const video = m.kind === 'video';
+    /** 下载下来的视频记的是绝对路径(videoBlock.localFilePath),不在媒体库里 */
+    const f = video && src.startsWith('/') ? (existsSync(src) ? src : null) : resolveMediaPath(src);
+    if (!f) throw capFailed(video ? `视频在本机找不到了(${src})—— 在 note 里重新放一下这个视频再发` : `图在本机图片库里找不到了(${src})—— 在 note 里重新放一下这张图再发`);
+    if (video && statSync(f).size > X_VIDEO_MAX_BYTES) {
+      throw capRefused(`视频 ${(statSync(f).size / 1024 / 1024).toFixed(0)} MB,X 一个视频最多 512 MB`);
+    }
     return f;
   });
   return { srcs, files };

@@ -16,7 +16,7 @@ import {
   type GeminiTurn,
 } from './gemini-conversation-query';
 import { mediaStore } from '../../media/media-store-impl';
-import { prepareSvgForDom } from './claude-extract-turn';
+import { convertFenceArtifacts } from './fence-artifacts';
 
 export interface GeminiFullExtractionResult {
   success: boolean;
@@ -89,54 +89,6 @@ function unwrapBlockquotedCode(md: string): string {
 }
 
 /**
- * 把 turn markdown 里的 SVG / HTML 代码块 fence 转成 note 可渲染的形态:
- *   ```xml / ```svg(内容是 <svg>)→ prepareSvgForDom → mediaStore → ![](media://..svg)
- *     (note image NodeView 见 media://*.svg 自动 innerHTML 真渲染)
- *   ```html(含 <!DOCTYPE / <html)→ mediaStore → !html[](media://..html)
- *     (ResultParser 识别 !html[]() → htmlBlock,iframe 渲染)
- * 复用 Claude artifact 的同款 mediaStore 落盘逻辑。失败兜底:保留原 fence(至少有源码)。
- */
-async function convertFenceArtifacts(md: string): Promise<{ markdown: string; count: number }> {
-  let count = 0;
-  // 匹配 ```lang\n...\n``` 代码块
-  const fenceRe = /```([a-zA-Z0-9]*)\n([\s\S]*?)\n```/g;
-  const replacements: Array<{ match: string; replacement: string }> = [];
-  let m: RegExpExecArray | null;
-  while ((m = fenceRe.exec(md)) !== null) {
-    const lang = (m[1] || '').toLowerCase();
-    const code = m[2];
-    const isSvg = (lang === 'xml' || lang === 'svg') && /<svg[\s>]/i.test(code);
-    const isHtml = lang === 'html' && /<!doctype|<html[\s>]/i.test(code);
-    if (!isSvg && !isHtml) continue;
-    try {
-      if (isSvg) {
-        const svgCode = prepareSvgForDom(code);
-        const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svgCode, 'utf-8').toString('base64')}`;
-        const r = await mediaStore.putBase64(dataUrl, 'image/svg+xml', 'gemini-svg.svg');
-        if (r.success && r.mediaUrl) {
-          replacements.push({ match: m[0], replacement: `![](${r.mediaUrl})` });
-          count++;
-        }
-      } else {
-        const dataUrl = `data:text/html;base64,${Buffer.from(code, 'utf-8').toString('base64')}`;
-        const r = await mediaStore.putBase64(dataUrl, 'text/html', 'gemini-html.html');
-        if (r.success && r.mediaUrl) {
-          replacements.push({ match: m[0], replacement: `!html[HTML 预览](${r.mediaUrl})` });
-          count++;
-        }
-      }
-    } catch (err) {
-      console.warn('[gemini-extract] fence artifact → media failed:', err);
-    }
-  }
-  let out = md;
-  for (const { match, replacement } of replacements) {
-    out = out.replace(match, replacement);
-  }
-  return { markdown: out, count };
-}
-
-/**
  * 用 guest 页 session 下载 Gemini 图(带登录 cookie)→ mediaStore → media:// URL。
  *
  * Gemini 的 lh3.googleusercontent.com/gg/ 图需要登录态,通用 image-proxy 用
@@ -174,7 +126,7 @@ export async function geminiTurnMarkdown(wc: WebContents, turn: GeminiTurn): Pro
   let artifactCount = 0;
 
   // SVG / HTML 代码块 → note 可渲染形态
-  const converted = await convertFenceArtifacts(md);
+  const converted = await convertFenceArtifacts(md, 'gemini');
   md = converted.markdown;
   artifactCount += converted.count;
 
