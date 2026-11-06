@@ -313,6 +313,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   learningDictionaryLookup(word: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_LOOKUP, word);
   },
+  learningAiTranslateLines(lines: string[], targetLang?: string): Promise<unknown> {
+    return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_AI_TRANSLATE_LINES, lines, targetLang);
+  },
   learningTranslate(text: string, targetLang?: string): Promise<unknown> {
     return ipcRenderer.invoke(IPC_CHANNELS.LEARNING_TRANSLATE, text, targetLang);
   },

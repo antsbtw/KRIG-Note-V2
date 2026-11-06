@@ -541,6 +541,11 @@ declare global {
         text: string,
         targetLang?: string,
       ): Promise<{ text: string; sourceLang: string; targetLang: string } | null>;
+      /** 字幕逐行 AI 翻译(本机 Gemma,按上下文);失败 lines=null + error 可读原因 */
+      learningAiTranslateLines(
+        lines: string[],
+        targetLang?: string,
+      ): Promise<{ lines: string[] | null; error: string | null }>;
       /** Google TTS — 返 MP3 ArrayBuffer,view 用 Blob 创建 audio URL */
       learningTts(text: string, lang: string): Promise<ArrayBuffer | null>;
 

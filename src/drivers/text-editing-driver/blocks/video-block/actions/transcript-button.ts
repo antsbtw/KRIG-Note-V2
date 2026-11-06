@@ -66,7 +66,7 @@ export function createTranscriptButton(
           console.warn('[transcript-btn] onTranscript callback threw:', cbErr);
         }
         btn.textContent = '✓';
-        btn.title = '字幕已导入';
+        btn.title = result.note ? `字幕已导入(${result.note})` : '字幕已导入';
         window.setTimeout(() => {
           if (!btn.isConnected) return;
           btn.textContent = origText;

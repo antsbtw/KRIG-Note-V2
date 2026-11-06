@@ -111,6 +111,8 @@ export const IPC_CHANNELS = {
   LEARNING_VOCAB_CHANGED: 'learning.vocab-changed',     // main → renderer 推送
   LEARNING_LOOKUP: 'learning.dictionary-lookup',
   LEARNING_TRANSLATE: 'learning.translate',
+  /** 字幕逐行 AI 翻译(本机 Gemma,按上下文)—— 2026-11-05 试用 */
+  LEARNING_AI_TRANSLATE_LINES: 'learning.ai-translate-lines',
   LEARNING_TTS: 'learning.tts',
 
   // L5-C1:ebook 书架(sub-phase 022: 走 atom 体系 — ebook + reading-state + pm domain)

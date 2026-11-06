@@ -26,6 +26,8 @@ export interface FetchTranscriptResult {
   transcriptText: string | null;
   /** 失败原因(用户可读 — "字幕不可用" / "网络错误" 等);成功时 null */
   error: string | null;
+  /** 成功但要提醒的话(如「AI 听写,可能有误」);原字幕没有 */
+  note?: string;
 }
 
 /** L5-B3.19.e:检 webview YouTube 登录 cookies 的结果 */

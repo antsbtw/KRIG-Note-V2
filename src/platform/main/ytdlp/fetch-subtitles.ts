@@ -19,6 +19,10 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { getYtdlpPath } from './binary-manager';
 import { getFfmpegPath } from './downloader';
+import { transcribeWithGemma, ASR_MODEL } from './asr-gemma';
+
+/** AI 听写的结果要让人知道不是原字幕(人名等会听错)*/
+const AI_NOTE = `字幕由本机 AI(${ASR_MODEL})听写,可能有误`;
 
 const PROBE_TIMEOUT_MS = 60_000;
 /** 为查嵌入字幕要把视频下下来:新闻短片几 MB,长视频给足时间 */
@@ -206,7 +210,7 @@ function lastLine(s: string): string {
 
 export async function fetchSubtitlesViaYtdlp(
   url: string,
-): Promise<{ transcriptText: string | null; error: string | null }> {
+): Promise<{ transcriptText: string | null; error: string | null; note?: string }> {
   const bin = getYtdlpPath();
   if (!bin) return { transcriptText: null, error: '需要先装 yt-dlp(点一次 ⬇ 下载按钮会自动装)' };
 
@@ -230,8 +234,17 @@ export async function fetchSubtitlesViaYtdlp(
       // 没有独立字幕轨 → 看视频流里嵌着的电视字幕(CC)
       const embedded = await fetchEmbeddedCaptions(bin, url, dir);
       if (embedded) return { transcriptText: embedded, error: null };
-      console.log(`[ytdlp subs] 没有字幕轨也没有嵌入字幕 url=${url}`);
-      return { transcriptText: null, error: '这个视频没有字幕(没有字幕文件,视频里也没嵌字幕;语音识别以后加)' };
+      // 还没有 → 本机 Gemma 4 听写(视频已在 dir 里,不重复下载)
+      console.log(`[ytdlp subs] 没有字幕轨也没有嵌入字幕,改用 AI 听写 url=${url}`);
+      const video = readdirSync(dir).find((f) => f.startsWith('v.'));
+      const ffmpeg = getFfmpegPath();
+      if (!video || !ffmpeg) {
+        return { transcriptText: null, error: '这个视频没有字幕,而且视频没下下来,AI 也没法听写' };
+      }
+      const asr = await transcribeWithGemma(ffmpeg, dir, video);
+      if ('reason' in asr) return { transcriptText: null, error: `这个视频没有字幕;AI 听写也没成:${asr.reason}` };
+      // 第一行放一句不带时间的说明:字幕栏里一直看得见;cue 解析 / 写 .srt 只认 [MM:SS] 行,不会进画面
+      return { transcriptText: `⚠️ ${AI_NOTE}\n${asr.text}`, error: null, note: AI_NOTE };
     }
 
     // 2. 让 yt-dlp 下这一份(自动字幕可能是分段清单,只有它会拼)

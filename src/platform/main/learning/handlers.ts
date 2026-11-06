@@ -19,6 +19,7 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 import { vocabStore } from './vocab-store';
 import { lookupWord } from './dictionary-service';
 import { googleTranslate, googleTTS } from './providers/google-translate';
+import { aiTranslateLines, AI_TRANSLATE_MODEL } from './ai-translate-lines';
 
 /** 把全量 vocab list 广播给所有 renderer(主窗口 + 未来多窗口)*/
 function broadcastVocabChanged(): void {
@@ -82,6 +83,28 @@ export function registerLearningHandlers(): void {
       if (typeof text !== 'string' || !text) return null;
       const tl = typeof targetLang === 'string' && targetLang ? targetLang : 'zh-CN';
       return googleTranslate(text, tl);
+    },
+  );
+
+  // 字幕逐行 AI 翻译(本机 Gemma):失败把原因回给界面,不 throw 进 IPC(renderer 拿不到可读信息)
+  ipcMain.handle(
+    IPC_CHANNELS.LEARNING_AI_TRANSLATE_LINES,
+    async (_e, lines: unknown, targetLang: unknown) => {
+      if (!Array.isArray(lines) || lines.some((l) => typeof l !== 'string')) {
+        return { lines: null, error: 'invalid lines' };
+      }
+      const tl = typeof targetLang === 'string' && targetLang ? targetLang : 'zh-CN';
+      try {
+        return { lines: await aiTranslateLines(lines as string[], tl), error: null };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn('[ai-translate] 失败:', msg);
+        return {
+          lines: null,
+          error: /fetch failed|ECONNREFUSED/i.test(msg) ? 'Ollama 没在运行(本机 AI 翻译需要先打开 Ollama)'
+            : /not found/i.test(msg) ? `本机 Ollama 没有 ${AI_TRANSLATE_MODEL} 模型` : msg,
+        };
+      }
     },
   );
 

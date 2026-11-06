@@ -32,6 +32,7 @@ import { createCCButton, type CCButton, type CCState } from './actions/cc-button
 import { createFullscreenButton, type FullscreenButton } from './actions/fullscreen-button';
 import { createTranscriptButton, type TranscriptButton } from './actions/transcript-button';
 import { createTranslateButton, type TranslateButton } from './actions/translate-button';
+import { createAiTranslateButton, type AiTranslateButton } from './actions/ai-translate-button';
 import { createMemoryButton, type MemoryControl } from './actions/memory-button';
 import { createVocabButton, type VocabButton } from './actions/vocab-button';
 import { createVocabPanel, type VocabPanel } from './components/vocab-panel';
@@ -59,6 +60,7 @@ interface FrameworkRefs {
   fsBtn: FullscreenButton;
   transcriptBtn: TranscriptButton;
   translateBtn: TranslateButton;
+  aiTranslateBtn: AiTranslateButton;
   memoryBtn: MemoryControl;
   vocabBtn: VocabButton;
   vocabPanel: VocabPanel;
@@ -117,6 +119,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     framework.tracker?.destroy();
     framework.transcriptBtn.destroy();
     framework.translateBtn.destroy();
+    framework.aiTranslateBtn.destroy();
     framework.ccBtn.destroy();
     framework.fsBtn.destroy();
     framework.overlay.destroy();
@@ -268,22 +271,21 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         }
       },
     );
-    const translateBtn = createTranslateButton(
-      () => transcriptTab.getText(),
-      (langCode, translatedText) => {
-        // 翻译完成回调:更新 translations map + 创建/更新对应 Tab + 同步 attrs + cc dropdown
-        if (!framework) return;
-        upsertTranslation(langCode, translatedText);
-        // 2026-11-05:视频已下载到本地 → 立刻在旁边写 <视频名>.<lang>.srt(播放器自动加载)。
-        // 原先只在点 ⬇ 那一刻写,「先下载后翻译」就永远没有中文字幕文件。
-        const localPath = node.attrs.localFilePath as string | null;
-        if (localPath) {
-          void saveSubtitle(localPath, langCode, translatedText).then((p) => {
-            if (!p) console.warn('[video-block] 翻译字幕文件没写成(main 拒收或写失败)', { localPath, langCode });
-          });
-        }
-      },
-    );
+    // 翻译完成(🌐 Google / 🤖 本机 AI 共用):更新 translations map + 创建/更新对应 Tab + 同步 attrs + cc dropdown
+    const handleTranslated = (langCode: string, translatedText: string): void => {
+      if (!framework) return;
+      upsertTranslation(langCode, translatedText);
+      // 2026-11-05:视频已下载到本地 → 立刻在旁边写 <视频名>.<lang>.srt(播放器自动加载)。
+      // 原先只在点 ⬇ 那一刻写,「先下载后翻译」就永远没有中文字幕文件。
+      const localPath = node.attrs.localFilePath as string | null;
+      if (localPath) {
+        void saveSubtitle(localPath, langCode, translatedText).then((p) => {
+          if (!p) console.warn('[video-block] 翻译字幕文件没写成(main 拒收或写失败)', { localPath, langCode });
+        });
+      }
+    };
+    const translateBtn = createTranslateButton(() => transcriptTab.getText(), handleTranslated);
+    const aiTranslateBtn = createAiTranslateButton(() => transcriptTab.getText(), handleTranslated);
     const memoryBtn = createMemoryButton({
       getSegmentDuration: () => (node.attrs.segmentDuration as number) || 60,
       getTracker: () => tracker,
@@ -360,6 +362,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
     tabBar.actionBarEl.appendChild(ccBtn.el);
     tabBar.actionBarEl.appendChild(memoryBtn.el);
     tabBar.actionBarEl.appendChild(translateBtn.el);
+    tabBar.actionBarEl.appendChild(aiTranslateBtn.el);
     tabBar.actionBarEl.appendChild(transcriptBtn.el);
     tabBar.actionBarEl.appendChild(downloadBtn.el);
     tabBar.actionBarEl.appendChild(vocabBtn.el);
@@ -379,6 +382,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
       fsBtn,
       transcriptBtn,
       translateBtn,
+      aiTranslateBtn,
       memoryBtn,
       vocabBtn,
       vocabPanel,
@@ -592,6 +596,7 @@ export const videoBlockNodeView: NodeViewConstructor = (initialNode, view, getPo
         // 2026-11-05:NodeView 原地更新不重建 → 🌐 只在创建时判过「有没有字幕」,
         // 📝 抓到字幕后一直灰着。字幕变了就让它重判。
         framework.translateBtn.refresh();
+        framework.aiTranslateBtn.refresh();
       }
 
       // translationTexts 变(外部驱动,撤销 / 协作)→ 重建翻译 Tab 集合
