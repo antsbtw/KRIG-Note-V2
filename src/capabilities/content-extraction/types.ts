@@ -9,6 +9,8 @@
  * media-storage、note 三个下游能力的 API(单向调用,不互相 install)。
  */
 
+import type { LinkedAnswer } from '@shared/types/linked-answers';
+
 /** main → renderer 推回的整页提取结果(与 platform/main/content-extraction/types.ts 同构,
  *  此处独立声明避免 renderer 反向 import platform/main)。 */
 export interface WebClipPayload {
@@ -41,6 +43,10 @@ export interface WebClipPayload {
   schemaOrgData?: Record<string, unknown>;
   extractorType?: string;
   language?: string;
+  /** 「提取题目 + 解答」:content 里占位行对应的解答;undefined = 普通提取 */
+  linkedAnswers?: LinkedAnswer[];
+  /** 公式图 / 绘图在网页上的显示尺寸 { 绝对地址: [宽, 高] },导入时写进 image 块 */
+  imageSizes?: Record<string, [number, number]>;
 }
 
 export interface ContentExtractionApi {

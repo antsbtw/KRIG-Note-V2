@@ -1,0 +1,243 @@
+<!-- 2026-11-05 存档自 AoPS wiki「2025 AMC 12A Problems/Problem 1」的正文(= api.php?action=parse 的 parse.text 形状) -->
+<div class="mw-content-ltr mw-parser-output" lang="en" dir="ltr"><dl><dd><i>The following problem is from the <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_1" class="mw-redirect" title="2025 AMC 10A Problems/Problem 1">2025 AMC 10A #1</a> and <a class="mw-selflink selflink">2025 AMC 12A #1</a>, so those problems redirect to this page.</i></dd></dl>
+<div id="toc" class="toc" role="navigation" aria-labelledby="mw-toc-heading"><input type="checkbox" role="button" id="toctogglecheckbox" class="toctogglecheckbox" style="display:none" /><div class="toctitle" lang="en" dir="ltr"><h2 id="mw-toc-heading">Contents</h2><span class="toctogglespan"><label class="toctogglelabel" for="toctogglecheckbox"></label></span></div>
+<ul>
+<li class="toclevel-1 tocsection-1"><a href="#Problem"><span class="tocnumber">1</span> <span class="toctext">Problem</span></a></li>
+<li class="toclevel-1 tocsection-2"><a href="#Solution_1"><span class="tocnumber">2</span> <span class="toctext">Solution 1</span></a></li>
+<li class="toclevel-1 tocsection-3"><a href="#Solution_2"><span class="tocnumber">3</span> <span class="toctext">Solution 2</span></a></li>
+<li class="toclevel-1 tocsection-4"><a href="#Solution_3"><span class="tocnumber">4</span> <span class="toctext">Solution 3</span></a></li>
+<li class="toclevel-1 tocsection-5"><a href="#Solution_4"><span class="tocnumber">5</span> <span class="toctext">Solution 4</span></a></li>
+<li class="toclevel-1 tocsection-6"><a href="#Solution_5"><span class="tocnumber">6</span> <span class="toctext">Solution 5</span></a></li>
+<li class="toclevel-1 tocsection-7"><a href="#Solution_6"><span class="tocnumber">7</span> <span class="toctext">Solution 6</span></a></li>
+<li class="toclevel-1 tocsection-8"><a href="#Solution_7_(Calculus_Overkill)"><span class="tocnumber">8</span> <span class="toctext">Solution 7 (Calculus Overkill)</span></a></li>
+<li class="toclevel-1 tocsection-9"><a href="#Solution_8_(Easy_to_understand,_fast)"><span class="tocnumber">9</span> <span class="toctext">Solution 8 (Easy to understand, fast)</span></a></li>
+<li class="toclevel-1 tocsection-10"><a href="#Video_Solution_(Fast_and_Easy)"><span class="tocnumber">10</span> <span class="toctext">Video Solution (Fast and Easy)</span></a></li>
+<li class="toclevel-1 tocsection-11"><a href="#Video_Solution_by_Power_Solve"><span class="tocnumber">11</span> <span class="toctext">Video Solution by Power Solve</span></a></li>
+<li class="toclevel-1 tocsection-12"><a href="#Chinese_Video_Solution"><span class="tocnumber">12</span> <span class="toctext">Chinese Video Solution</span></a></li>
+<li class="toclevel-1 tocsection-13"><a href="#Video_Solution_(Intuitive,_Quick_Explanation!)"><span class="tocnumber">13</span> <span class="toctext">Video Solution (Intuitive, Quick Explanation!)</span></a></li>
+<li class="toclevel-1 tocsection-14"><a href="#Video_Solution_by_SpreadTheMathLove"><span class="tocnumber">14</span> <span class="toctext">Video Solution by SpreadTheMathLove</span></a></li>
+<li class="toclevel-1 tocsection-15"><a href="#Video_Solution_by_Daily_Dose_of_Math_🔥🔥🔥"><span class="tocnumber">15</span> <span class="toctext">Video Solution by Daily Dose of Math 🔥🔥🔥</span></a></li>
+<li class="toclevel-1 tocsection-16"><a href="#Video_Solution"><span class="tocnumber">16</span> <span class="toctext">Video Solution</span></a></li>
+<li class="toclevel-1 tocsection-17"><a href="#Video_solution_2"><span class="tocnumber">17</span> <span class="toctext">Video solution</span></a></li>
+<li class="toclevel-1 tocsection-18"><a href="#Easy_Solution"><span class="tocnumber">18</span> <span class="toctext">Easy Solution</span></a></li>
+<li class="toclevel-1 tocsection-19"><a href="#Video_Solution_by_Thinking_Feet"><span class="tocnumber">19</span> <span class="toctext">Video Solution by Thinking Feet</span></a></li>
+<li class="toclevel-1 tocsection-20"><a href="#See_Also"><span class="tocnumber">20</span> <span class="toctext">See Also</span></a></li>
+</ul>
+</div>
+
+<h2><span class="mw-headline" id="Problem">Problem</span></h2>
+<p>Andy and Betsy both live in Mathville. Andy leaves Mathville on his bicycle at <img src="//latex.artofproblemsolving.com/d/4/a/d4a153611677412b957f0e3eaa60f979132c9d3b.png" class="latex" alt="$1{:}30$" style="vertical-align: -1px" width="34" height="14" />, traveling due north at a steady <img src="//latex.artofproblemsolving.com/8/4/5/8455f3b5cb3b4880b8c9d782a5c1f0334db819eb.png" class="latex" alt="$8$" style="vertical-align: -1px" width="11" height="14" /> miles per hour. Betsy leaves on her bicycle from the same point at <img src="//latex.artofproblemsolving.com/7/2/2/722b1c8a811f2da6bfbd78149ea7e461a70fa79c.png" class="latex" alt="$2{:}30$" style="vertical-align: -1px" width="34" height="14" />, traveling due east at a steady <img src="//latex.artofproblemsolving.com/e/d/f/edf074831eb5bc9e61d6d6e09f525a86e3068f6a.png" class="latex" alt="$12$" style="vertical-align: -1px" width="20" height="14" /> miles per hour. At what time will they be exactly the same distance from their common starting point?
+</p><p><img src="//latex.artofproblemsolving.com/5/5/7/5579aa1d3992a9e9c5a14bfafd14c063cba987f4.png" class="latex" alt="$\textbf{(A) } 3{:}30 \qquad \textbf{(B) } 3{:}45 \qquad \textbf{(C) } 4{:}00 \qquad \textbf{(D) } 4{:}15 \qquad \textbf{(E) } 4{:}30$" style="vertical-align: -5px" width="471" height="18" />
+</p><p>== This page has some problems with rendering; thanks to everyone trying to fix it&#160;:)
+==
+</p>
+<h2><span class="mw-headline" id="Solution_1">Solution 1</span></h2>
+<p>At <img src="//latex.artofproblemsolving.com/7/2/2/722b1c8a811f2da6bfbd78149ea7e461a70fa79c.png" class="latex" alt="$2{:}30$" style="vertical-align: -1px" width="34" height="14" />, Andy is <img src="//latex.artofproblemsolving.com/8/4/5/8455f3b5cb3b4880b8c9d782a5c1f0334db819eb.png" class="latex" alt="$8$" style="vertical-align: -1px" width="11" height="14" /> miles ahead. For every hour that they both travel, Betsy gains <img src="//latex.artofproblemsolving.com/c/7/c/c7cab1a05e1e0c1d51a6a219d96577a16b7abf9d.png" class="latex" alt="$4$" style="vertical-align: -1px" width="11" height="14" /> miles on Andy. Therefore, it will take her <img src="//latex.artofproblemsolving.com/4/1/c/41c544263a265ff15498ee45f7392c5f86c6d151.png" class="latex" alt="$2$" style="vertical-align: -1px" width="11" height="14" /> more hours to be the same distance from the starting point as Andy, which occurs at <img src="//latex.artofproblemsolving.com/8/b/7/8b7e8f4033b03214a231ba47a3d6952c98260f2f.png" class="latex" alt="$\boxed{\textbf{(E) } 4{:}30}$" style="vertical-align: -11px" width="79" height="30" />.
+</p><p>~vinceS  
+~minor LaTeX edits by zoyashaikh
+~minor edits by SunSine
+</p>
+<h2><span class="mw-headline" id="Solution_2">Solution 2</span></h2>
+<p>Let <img src="//latex.artofproblemsolving.com/8/1/8/8189a5b5a0917b8c93350827be4038af1839139d.png" class="latex" alt="$h$" style="vertical-align: -1px" width="12" height="14" /> be the number of hours after Andy starts. Andy travels <img src="//latex.artofproblemsolving.com/5/f/e/5fe77ebe7798b265f41e68cd21fbd3ed31de5fc4.png" class="latex" alt="$8h$" style="vertical-align: -1px" width="21" height="14" /> miles, and Betsy has traveled <img src="//latex.artofproblemsolving.com/a/7/1/a712874d5cab8bae3af72162e7be24e117ec2c0c.png" class="latex" alt="$12(h-1)$" style="vertical-align: -5px" width="76" height="20" /> miles since she started one hour later. Setting them equal:
+</p><p><img src="//latex.artofproblemsolving.com/9/e/0/9e070d6f8e647897b62ef47fc978dc51078f725e.png" class="latex" alt="$8h = 12(h-1)$" style="vertical-align: -5px" width="120" height="20" />  
+<img src="//latex.artofproblemsolving.com/0/d/d/0dda9566439d7c18f4d912331cd75926a6236881.png" class="latex" alt="$\Rightarrow 8h = 12h - 12$" style="vertical-align: -2px" width="138" height="16" />  
+<img src="//latex.artofproblemsolving.com/7/0/0/70034b5a4fcb46271604b9ed0dfdd40809ef484a.png" class="latex" alt="$\Rightarrow 4h = 12$" style="vertical-align: -1px" width="87" height="14" />  
+<img src="//latex.artofproblemsolving.com/5/9/5/5955faa240c69dabf727597d3a4612f39dfcdf2d.png" class="latex" alt="$\Rightarrow h = 3$" style="vertical-align: -1px" width="69" height="14" />
+</p><p>Since Andy started at <img src="//latex.artofproblemsolving.com/d/4/a/d4a153611677412b957f0e3eaa60f979132c9d3b.png" class="latex" alt="$1{:}30$" style="vertical-align: -1px" width="34" height="14" />, the catch-up time is <img src="//latex.artofproblemsolving.com/f/9/6/f9686d63695dd69cbbac0e513395842977a5c438.png" class="latex" alt="$4{:}30$" style="vertical-align: -1px" width="34" height="14" />.  
+Answer: <img src="//latex.artofproblemsolving.com/7/5/e/75e41e3cd48cee2c6866cfbb4386a8e99d3482f5.png" class="latex" alt="$\textbf{(E)}$" style="vertical-align: -5px" width="29" height="18" />.
+</p><p>Alternatively, from Betsy's perspective:  
+<img src="//latex.artofproblemsolving.com/9/3/c/93ca439c06b26ef8c247e70b4eeed5a18f22f106.png" class="latex" alt="$8(h+1) = 12h$" style="vertical-align: -5px" width="120" height="20" />  
+<img src="//latex.artofproblemsolving.com/2/5/a/25a3c4b9f7c1fe34af585b1e12f753180a3b5af0.png" class="latex" alt="$\Rightarrow 8h + 8 = 12h$" style="vertical-align: -2px" width="129" height="16" />  
+<img src="//latex.artofproblemsolving.com/3/6/b/36bc4028601774c5a74cbd3527344b8afc254a06.png" class="latex" alt="$\Rightarrow h = 2$" style="vertical-align: -1px" width="69" height="14" />  
+Same result: <img src="//latex.artofproblemsolving.com/d/d/e/dde270a1246287df62b7b0d7fff16516c970e387.png" class="latex" alt="$\textbf{(E) } 4{:}30$" style="vertical-align: -5px" width="68" height="18" />.
+</p><p>~kapiltheangel (2A)  
+~mithu542 (2B)
+</p>
+<h2><span class="mw-headline" id="Solution_3">Solution 3</span></h2>
+<p>Try the answer choices:
+</p><p>At <img src="//latex.artofproblemsolving.com/a/1/1/a11653807c291faca2a444d434d641e90e3aa8c3.png" class="latex" alt="$3{:}30$" style="vertical-align: -1px" width="34" height="14" />: Andy <img src="//latex.artofproblemsolving.com/6/f/9/6f9f1411e0a30ead616b66680cfb1cd0c7da2cf4.png" class="latex" alt="$=16$" style="vertical-align: 0px" width="36" height="13" />, Betsy <img src="//latex.artofproblemsolving.com/a/9/d/a9db8e5d5e287f2a6273684b945e552f4b2f908b.png" class="latex" alt="$=12$" style="vertical-align: -1px" width="39" height="14" />  
+At <img src="//latex.artofproblemsolving.com/6/c/5/6c5d289baefe7fe13a5c02c4754052937802ef70.png" class="latex" alt="$3{:}45$" style="vertical-align: -1px" width="34" height="14" />: Andy <img src="//latex.artofproblemsolving.com/3/9/7/3977e633206d445595eeaf919054f2cf6ed70716.png" class="latex" alt="$=18$" style="vertical-align: 0px" width="36" height="13" />, Betsy <img src="//latex.artofproblemsolving.com/5/3/e/53ed5cd8320d9c0ed2b5d6b3c4034eb36ac46619.png" class="latex" alt="$=15$" style="vertical-align: -1px" width="39" height="14" />  
+At <img src="//latex.artofproblemsolving.com/3/d/0/3d01e758b040791aa9fef72ae1d5e2475aacd70c.png" class="latex" alt="$4{:}00$" style="vertical-align: 0px" width="31" height="13" />: Andy <img src="//latex.artofproblemsolving.com/0/d/c/0dcb49ff6ace1db0efbfe7c09b305bbafd4d581e.png" class="latex" alt="$=20$" width="36" height="12" />, Betsy <img src="//latex.artofproblemsolving.com/3/9/7/3977e633206d445595eeaf919054f2cf6ed70716.png" class="latex" alt="$=18$" style="vertical-align: 0px" width="36" height="13" />  
+At <img src="//latex.artofproblemsolving.com/e/7/6/e76bc66d2e4c2695805a7f16449503141ac66bb1.png" class="latex" alt="$4{:}15$" style="vertical-align: -1px" width="34" height="14" />: Andy <img src="//latex.artofproblemsolving.com/2/a/5/2a563cc56764eec7a0f7b5016d2d0386ed20927c.png" class="latex" alt="$=22$" width="36" height="12" />, Betsy <img src="//latex.artofproblemsolving.com/0/e/3/0e30f03fba9052d6355bbb09c3137bb51b5abe76.png" class="latex" alt="$=21$" style="vertical-align: 0px" width="36" height="12" />  
+At <img src="//latex.artofproblemsolving.com/f/9/6/f9686d63695dd69cbbac0e513395842977a5c438.png" class="latex" alt="$4{:}30$" style="vertical-align: -1px" width="34" height="14" />: Andy <img src="//latex.artofproblemsolving.com/8/3/4/83445362a265e9c56134f8ff4234dea28f90ec43.png" class="latex" alt="$=24$" style="vertical-align: -1px" width="39" height="14" />, Betsy <img src="//latex.artofproblemsolving.com/8/3/4/83445362a265e9c56134f8ff4234dea28f90ec43.png" class="latex" alt="$=24$" style="vertical-align: -1px" width="39" height="14" />
+You can visualize this using a table:
+\begin{array}{c|c|c}
+\textbf{Time} &amp; \textbf{Andy - 8 mph} &amp; \textbf{Betsy - 12 mph} \\ \hline
+3{:}30 &amp; 16 &amp; 12 \\
+3{:}45 &amp; 18 &amp; 15 \\
+4{:}00 &amp; 20 &amp; 18 \\
+4{:}15 &amp; 22 &amp; 21 \\
+4{:}30 &amp; 24 &amp; 24
+\end{array}
+</p><p>Thus the correct answer is <img src="//latex.artofproblemsolving.com/8/b/7/8b7e8f4033b03214a231ba47a3d6952c98260f2f.png" class="latex" alt="$\boxed{\textbf{(E) } 4{:}30}$" style="vertical-align: -11px" width="79" height="30" />.
+</p><p>~vgarg
+~SunSine
+</p>
+<h2><span class="mw-headline" id="Solution_4">Solution 4</span></h2>
+<p>Since <img src="//latex.artofproblemsolving.com/2/d/4/2d400d0b2895ab757eee90008834822f8fb3023e.png" class="latex" alt="$\text{lcm}(8,12)=24$" style="vertical-align: -5px" width="120" height="20" />, the time for Andy to reach 24 miles is  
+<img src="//latex.artofproblemsolving.com/1/4/9/149ec94b4cee238618f625eb32329a7b900fbf15.png" class="latex" alt="$24/8 = 3$" style="vertical-align: -5px" width="72" height="20" /> hours.
+</p><p><img src="//latex.artofproblemsolving.com/8/b/b/8bb13b6475727a5c9ee665a7248331f864e30b18.png" class="latex" alt="$1{:}30 + 3{:}00 = \boxed{\textbf{(E) } 4{:}30}$" style="vertical-align: -11px" width="190" height="30" />.
+</p><p>Note: Alternatively we can find that the time for Betsy to reach <img src="//latex.artofproblemsolving.com/e/2/9/e290f2cba0ba0e11c0b91630da15a408da2fcf1c.png" class="latex" alt="$24$" style="vertical-align: -1px" width="20" height="14" /> miles is <img src="//latex.artofproblemsolving.com/0/c/d/0cd7828dcc161ce370d988b71fb8576ff09c04ea.png" class="latex" alt="$\frac{24}{12} = 2$" style="vertical-align: -13px" width="57" height="38" /> hours. So we have
+</p><p><img src="//latex.artofproblemsolving.com/4/5/6/45684546d62c94ee87399ac433457fccd29d9e34.png" class="latexcenter" alt="\[2{:}30 + 2{:}00 = \boxed{\textbf{(E) } 4{:}30}.\]" width="191" height="28" />
+</p><p>~Boywithnuke  
+~minor edits by ChickensEatGrass  
+~minor edits by RISHADA
+</p><p>~Note by JerryZYang
+</p>
+<h2><span class="mw-headline" id="Solution_5">Solution 5</span></h2>
+<p>Andy goes <img src="//latex.artofproblemsolving.com/2/4/1/24117e291677dad02207afb1d4d9dd3879e75eeb.png" class="latex" alt="$8x$" style="vertical-align: -1px" width="21" height="14" /> miles, Betsy goes <img src="//latex.artofproblemsolving.com/3/0/a/30a1c27febde0860f9ffc3721253e3e35d396308.png" class="latex" alt="$12(x-1)$" style="vertical-align: -5px" width="76" height="20" /> miles.  
+Set equal:
+</p><p><img src="//latex.artofproblemsolving.com/6/1/e/61e775343dc72ae09441a1f1f4be734cab6b6d31.png" class="latex" alt="$8x = 12(x-1)$" style="vertical-align: -5px" width="120" height="20" />  
+<img src="//latex.artofproblemsolving.com/e/3/a/e3a7d2fc90ba884dd53b8f19e40efc34d2b7b06e.png" class="latex" alt="$\Rightarrow x = 3$" style="vertical-align: -1px" width="69" height="14" />
+</p><p>Thus the answer is <img src="//latex.artofproblemsolving.com/d/d/e/dde270a1246287df62b7b0d7fff16516c970e387.png" class="latex" alt="$\textbf{(E) } 4{:}30$" style="vertical-align: -5px" width="68" height="18" />.
+</p><p>~minor LaTeX edits by zoyashaikh  
+~minor <img src="//latex.artofproblemsolving.com/latex.png" class="latex" alt="$\LaTeX$" style="vertical-align: -4px" width="46" height="15" /> edits by i_am_not_suk_at_math
+</p>
+<h2><span class="mw-headline" id="Solution_6">Solution 6</span></h2>
+<p>Using constant rates:
+</p><p><img src="//latex.artofproblemsolving.com/6/6/a/66a3b8b18f4d164e7e4c1570a999a0954b88f83c.png" class="latexcenter" alt="\[\begin{array}{c|c|c} \textbf{Time} &amp; \textbf{Andy} - 8\text{ mph} &amp; \textbf{Betsy} - 12\text{ mph} \\ \hline \hline 1{:}30 - \text{Starting} &amp; 0 \text{ miles} &amp; 0 \text{ miles} \\ \hline 2{:}30 &amp; 8 \text{ miles} &amp; 0 \text{ miles} \\ \hline 3{:}30 &amp; 16 \text{ miles} &amp; 12 \text{ miles} \\ \hline  4{:}30 &amp; 24 \text{ miles} &amp; 24 \text{ miles} \end{array}\]" width="404" height="105" />
+</p><p>Thus the answer is <img src="//latex.artofproblemsolving.com/8/b/7/8b7e8f4033b03214a231ba47a3d6952c98260f2f.png" class="latex" alt="$\boxed{\textbf{(E) } 4{:}30}$" style="vertical-align: -11px" width="79" height="30" />.
+</p><p>~i_am_not_suk_at_math  
+</p><p>~minor LaTeX edits by vinceS
+</p>
+<h2><span id="Solution_7_.28Calculus_Overkill.29"></span><span class="mw-headline" id="Solution_7_(Calculus_Overkill)">Solution 7 (Calculus Overkill)</span></h2>
+<p>Let  
+<img src="//latex.artofproblemsolving.com/a/b/c/abc85af54b2be45eaa13a27e025991a6248908e5.png" class="latex" alt="$D_A(t) = 8t$" style="vertical-align: -5px" width="88" height="20" />,  
+<img src="//latex.artofproblemsolving.com/2/4/a/24a284b45f65c7efae7b0a339905ac12a0da5568.png" class="latex" alt="$D_B(t) = 12(t-1)$" style="vertical-align: -5px" width="143" height="20" /> for <img src="//latex.artofproblemsolving.com/b/9/2/b92a92c4993647198c92de827314f42820aa9a88.png" class="latex" alt="$t \ge 1$" style="vertical-align: -3px" width="42" height="16" />.
+</p><p>Difference:  
+<img src="//latex.artofproblemsolving.com/6/f/c/6fcc483f95ab522f428e2fed3f43023be63c8c24.png" class="latex" alt="$F(t) = 12(t-1) - 8t = 4t - 12$" style="vertical-align: -5px" width="249" height="20" />.
+</p><p>Set <img src="//latex.artofproblemsolving.com/6/a/c/6acf8b4fea5ae736a3fe76b2ea0f766bfd5eca77.png" class="latex" alt="$F(t)=0$" style="vertical-align: -5px" width="70" height="20" />:  
+<img src="//latex.artofproblemsolving.com/7/b/2/7b202131f2af7361296b9a7571ae00f2118b03f6.png" class="latex" alt="$4t - 12 = 0$" style="vertical-align: -2px" width="91" height="15" />  
+<img src="//latex.artofproblemsolving.com/5/a/9/5a95da72d5cf7fc737cc94b0473a4675cafe2bd2.png" class="latex" alt="$t = 3$" style="vertical-align: -1px" width="42" height="14" /> hours.
+</p><p><img src="//latex.artofproblemsolving.com/c/7/4/c743ec8504199abbd8febd2905e6e56e3ea1ff9f.png" class="latex" alt="$1{:}30 + 3 = 4{:}30$" style="vertical-align: -2px" width="122" height="15" />.
+</p><p>-apex304
+</p>
+<h2><span id="Solution_8_.28Easy_to_understand.2C_fast.29"></span><span class="mw-headline" id="Solution_8_(Easy_to_understand,_fast)">Solution 8 (Easy to understand, fast)</span></h2>
+<p>Let \( t \) denote time in hours measured from 1:30 PM:
+</p><p>\( t&#160;:= \text{hours after } 1:30 \text{ PM} \).
+</p><p>Thus \( t = 0 \) at 1:30 PM, \( t = 1 \) at 2:30 PM, and the physically relevant domain for both riders having left is \( t \geq 1 \).
+</p><p>Velocity/position (vectorized).
+Choose orthonormal basis \( \{ i, j \} \) with \( i \) east and \( j \) north. Define piecewise position vectors \( r_A(t), r_B(t) \in \mathbb{R}^2 \) (for all \( t \geq 0 \)):
+</p><p>\( r_A(t) = 8t \, j = (0, 8t) \),
+<img src="//latex.artofproblemsolving.com/2/a/8/2a82ec7be273277e75d5a37bd364742d7b256b31.png" class="latexcenter" alt="\[r_B(t) = \begin{cases} (0, 0), &amp; 0 \leq t &lt; 1, \\ 12(t - 1) \, i, &amp; t \geq 1, \end{cases} = (12 \max\{t - 1, 0\}, 0).\]" width="447" height="53" />
+</p><p>Define scalar distance functions (Euclidean norm / 2-norm):
+</p><p>\( D_A(t)&#160;:= \| r_A(t) \|_2 = \sqrt{0^2 + (8t)^2} = 8t \),
+\( D_B(t)&#160;:= \| r_B(t) \|_2 = 12 \max\{t - 1, 0\} \).
+</p><p>We seek \( t \) with \( D_A(t) = D_B(t) \) and \( t \geq 1 \). For \( t \geq 1 \) the equality reduces to the linear equation
+</p><p>\( 8t = 12(t - 1) \).
+</p><p>Bring like terms together:
+</p><p>\( 8t = 12t - 12 \implies 12 = 12t - 8t \).
+</p><p>Compute the difference \( 12t - 8t \) digit-by-digit: \( 12t - 8t = (12 - 8)t = 4t \). So
+</p><p>\( 12 = 4t \).
+</p><p>Divide \( 12 \) by \( 4 \) carefully: \( 12 \div 4 = 3 \). Hence
+</p><p>\( t = 3 \).
+</p><p>~N0lan
+</p>
+<h2><span id="Video_Solution_.28Fast_and_Easy.29"></span><span class="mw-headline" id="Video_Solution_(Fast_and_Easy)">Video Solution (Fast and Easy)</span></h2>
+<p><a rel="nofollow" class="external free" href="https://youtu.be/fjpeOuUMOyc?si=ROuzlwgz7UByUx_9">https://youtu.be/fjpeOuUMOyc?si=ROuzlwgz7UByUx_9</a> 
+</p><p>~ Pi Academy 
+</p>
+<h2><span class="mw-headline" id="Video_Solution_by_Power_Solve">Video Solution by Power Solve</span></h2>
+<p><a rel="nofollow" class="external free" href="https://www.youtube.com/watch?v=QBn439idcPo">https://www.youtube.com/watch?v=QBn439idcPo</a> 
+</p>
+<h2><span class="mw-headline" id="Chinese_Video_Solution">Chinese Video Solution</span></h2>
+<p><a rel="nofollow" class="external free" href="https://www.bilibili.com/video/BV1852uBoE8K/">https://www.bilibili.com/video/BV1852uBoE8K/</a> 
+</p><p>~metrixgo 
+</p>
+<h2><span id="Video_Solution_.28Intuitive.2C_Quick_Explanation.21.29"></span><span class="mw-headline" id="Video_Solution_(Intuitive,_Quick_Explanation!)">Video Solution (Intuitive, Quick Explanation!)</span></h2>
+<pre><a rel="nofollow" class="external free" href="https://youtu.be/c-UDo53KwFU">https://youtu.be/c-UDo53KwFU</a>
+</pre>
+<pre>~ Education, the Study of Everything 
+</pre>
+<h2><span class="mw-headline" id="Video_Solution_by_SpreadTheMathLove">Video Solution by SpreadTheMathLove</span></h2>
+<p><a rel="nofollow" class="external free" href="https://www.youtube.com/watch?v=dAeyV60Hu5c">https://www.youtube.com/watch?v=dAeyV60Hu5c</a> 
+</p>
+<h2><span id="Video_Solution_by_Daily_Dose_of_Math_.F0.9F.94.A5.F0.9F.94.A5.F0.9F.94.A5"></span><span class="mw-headline" id="Video_Solution_by_Daily_Dose_of_Math_🔥🔥🔥">Video Solution by Daily Dose of Math 🔥🔥🔥</span></h2>
+<pre><a rel="nofollow" class="external free" href="https://youtu.be/LN5ofIcs1kY">https://youtu.be/LN5ofIcs1kY</a> 
+</pre>
+<p>~Thesmartgreekmathdude 
+</p>
+<h2><span class="mw-headline" id="Video_Solution">Video Solution</span></h2>
+<p><a rel="nofollow" class="external free" href="https://youtu.be/gWSZeCKrOfU">https://youtu.be/gWSZeCKrOfU</a> 
+</p><p>~MK 
+</p>
+<h2><span class="mw-headline" id="Video_solution_2">Video solution</span></h2>
+<p><a rel="nofollow" class="external free" href="https://youtu.be/l1RY_C20Q2M">https://youtu.be/l1RY_C20Q2M</a> 
+</p>
+<h2><span class="mw-headline" id="Easy_Solution">Easy Solution</span></h2>
+<p><a rel="nofollow" class="external free" href="https://www.youtube.com/watch?v=kHwBHvvvTbY">https://www.youtube.com/watch?v=kHwBHvvvTbY</a>
+</p>
+<h2><span class="mw-headline" id="Video_Solution_by_Thinking_Feet">Video Solution by Thinking Feet</span></h2>
+<p><a rel="nofollow" class="external free" href="https://youtu.be/FWWYRN7LCmg">https://youtu.be/FWWYRN7LCmg</a>
+</p>
+<h2><span class="mw-headline" id="See_Also">See Also</span></h2>
+<table class="wikitable" style="margin:0.5em auto; font-size:95%; border:1px solid black; width:80%;">
+<tbody><tr>
+<td style="background:#ccf;text-align:center;" colspan="3"><b><a href="/wiki/index.php?title=2025_AMC_10A" title="2025 AMC 10A">2025 AMC 10A</a></b> (<b><a href="/wiki/index.php?title=2025_AMC_10A_Problems" title="2025 AMC 10A Problems">Problems</a></b> • <b><a href="/wiki/index.php?title=2025_AMC_10A_Answer_Key" title="2025 AMC 10A Answer Key">Answer Key</a></b> • <a rel="nofollow" class="external text" href="https://artofproblemsolving.com/community/c13">Resources</a>)
+</td></tr>
+<tr>
+<td width="50%" align="center" rowspan="1">Preceded&#160;by<br /><b>First Problem</b>
+</td>
+<td width="50%" align="center" rowspan="1">Followed&#160;by<br /><b><a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_2" class="mw-redirect" title="2025 AMC 10A Problems/Problem 2">Problem 2</a></b>
+</td></tr>
+<tr>
+<td colspan="3" style="text-align:center;"><a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_1" class="mw-redirect" title="2025 AMC 10A Problems/Problem 1">1</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_2" class="mw-redirect" title="2025 AMC 10A Problems/Problem 2">2</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_3" title="2025 AMC 10A Problems/Problem 3">3</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_4" class="mw-redirect" title="2025 AMC 10A Problems/Problem 4">4</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_5" title="2025 AMC 10A Problems/Problem 5">5</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_6" title="2025 AMC 10A Problems/Problem 6">6</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_7" title="2025 AMC 10A Problems/Problem 7">7</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_8" class="mw-redirect" title="2025 AMC 10A Problems/Problem 8">8</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_9" title="2025 AMC 10A Problems/Problem 9">9</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_10" title="2025 AMC 10A Problems/Problem 10">10</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_11" title="2025 AMC 10A Problems/Problem 11">11</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_12" title="2025 AMC 10A Problems/Problem 12">12</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_13" class="mw-redirect" title="2025 AMC 10A Problems/Problem 13">13</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_14" class="mw-redirect" title="2025 AMC 10A Problems/Problem 14">14</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_15" title="2025 AMC 10A Problems/Problem 15">15</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_16" title="2025 AMC 10A Problems/Problem 16">16</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_17" title="2025 AMC 10A Problems/Problem 17">17</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_18" class="mw-redirect" title="2025 AMC 10A Problems/Problem 18">18</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_19" title="2025 AMC 10A Problems/Problem 19">19</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_20" title="2025 AMC 10A Problems/Problem 20">20</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_21" class="mw-redirect" title="2025 AMC 10A Problems/Problem 21">21</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_22" title="2025 AMC 10A Problems/Problem 22">22</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_23" class="mw-redirect" title="2025 AMC 10A Problems/Problem 23">23</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_24" class="mw-redirect" title="2025 AMC 10A Problems/Problem 24">24</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_10A_Problems/Problem_25" title="2025 AMC 10A Problems/Problem 25">25</a>
+</td></tr>
+<tr>
+<td colspan="3" style="text-align:center;"><b><a href="/wiki/index.php?title=AMC_10_Problems_and_Solutions" title="AMC 10 Problems and Solutions"> All AMC 10 Problems and Solutions</a></b>
+</td></tr></tbody></table>
+<table class="wikitable" style="margin:0.5em auto; font-size:95%; border:1px solid black; width:80%;">
+<tbody><tr>
+<td style="background:#ccf;text-align:center;" colspan="2"><b><a href="/wiki/index.php?title=2025_AMC_12A" title="2025 AMC 12A">2025 AMC 12A</a></b> (<b><a href="/wiki/index.php?title=2025_AMC_12A_Problems" title="2025 AMC 12A Problems">Problems</a></b> • <b><a href="/wiki/index.php?title=2025_AMC_12A_Answer_Key" title="2025 AMC 12A Answer Key">Answer Key</a></b> • <a rel="nofollow" class="external text" href="http://www.artofproblemsolving.com/community/c13">Resources</a>)
+</td></tr>
+<tr>
+<td width="50%" align="center" rowspan="1">Preceded&#160;by<br /><b>First Problem</b>
+</td>
+<td width="50%" align="center" rowspan="1">Followed&#160;by<br /><b><a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_2" title="2025 AMC 12A Problems/Problem 2">Problem 2</a></b>
+</td></tr>
+<tr>
+<td colspan="2" style="text-align:center;"><a class="mw-selflink selflink">1</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_2" title="2025 AMC 12A Problems/Problem 2">2</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_3" title="2025 AMC 12A Problems/Problem 3">3</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_4" title="2025 AMC 12A Problems/Problem 4">4</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_5" title="2025 AMC 12A Problems/Problem 5">5</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_6" title="2025 AMC 12A Problems/Problem 6">6</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_7" title="2025 AMC 12A Problems/Problem 7">7</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_8" title="2025 AMC 12A Problems/Problem 8">8</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_9" title="2025 AMC 12A Problems/Problem 9">9</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_10" title="2025 AMC 12A Problems/Problem 10">10</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_11" title="2025 AMC 12A Problems/Problem 11">11</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_12" title="2025 AMC 12A Problems/Problem 12">12</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_13" title="2025 AMC 12A Problems/Problem 13">13</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_14" title="2025 AMC 12A Problems/Problem 14">14</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_15" title="2025 AMC 12A Problems/Problem 15">15</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_16" title="2025 AMC 12A Problems/Problem 16">16</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_17" title="2025 AMC 12A Problems/Problem 17">17</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_18" title="2025 AMC 12A Problems/Problem 18">18</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_19" title="2025 AMC 12A Problems/Problem 19">19</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_20" title="2025 AMC 12A Problems/Problem 20">20</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_21" title="2025 AMC 12A Problems/Problem 21">21</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_22" title="2025 AMC 12A Problems/Problem 22">22</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_23" title="2025 AMC 12A Problems/Problem 23">23</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_24" title="2025 AMC 12A Problems/Problem 24">24</a> <b>•</b> <a href="/wiki/index.php?title=2025_AMC_12A_Problems/Problem_25" title="2025 AMC 12A Problems/Problem 25">25</a>
+</td></tr>
+<tr>
+<td colspan="2" style="text-align:center;"><b><a href="/wiki/index.php?title=AMC_12_Problems_and_Solutions" title="AMC 12 Problems and Solutions"> All AMC 12 Problems and Solutions</a></b>
+</td></tr></tbody></table>
+<div class="print">
+<div style="display:flex;width:100%;justify-content:space-between;align-items:center">
+<div>
+<p><span class="mw-default-size" typeof="mw:File"><a href="/wiki/index.php?title=File:AMC_Logo.png" class="mw-file-description"><img src="https://artofproblemsolving.com/wiki/images/d/d1/AMC_Logo.png" decoding="async" width="97" height="84" class="mw-file-element" /></a></span>
+</p>
+</div>
+<div style="flex-grow:1;text-align:right">
+<p>These problems are copyrighted &#169; by the <a rel="nofollow" class="external text" href="https://www.maa.org">Mathematical Association of America</a>. 
+</p>
+</div>
+<div style="clear:both;"></div>
+</div></div>
+<!-- 
+NewPP limit report
+Cached time: 20260103160345
+Cache expiry: 86400
+Reduced expiry: false
+Complications: [show‐toc]
+CPU time usage: 0.081 seconds
+Real time usage: 0.136 seconds
+Preprocessor visited node count: 541/1000000
+Post‐expand include size: 4404/2097152 bytes
+Template argument size: 427/2097152 bytes
+Highest expansion depth: 3/100
+Expensive parser function count: 0/100
+Unstrip recursion depth: 0/20
+Unstrip post‐expand size: 11875/5000000 bytes
+-->
+<!--
+Transclusion expansion time report (%,ms,calls,template)
+100.00%   80.129      1 -total
+ 11.94%    9.570      1 Template:AMC10_box
+ 10.84%    8.690      1 Template:AMC12_box
+  8.12%    6.506      1 Template:Duplicate
+  6.89%    5.520      1 Template:MAA_Notice
+-->
+
+<!-- Saved in parser cache with key wiki-wiki_:pcache:32963:|#|:idhash:canonical and timestamp 20260103160345 and revision id 274231. Rendering was triggered because: page-edit
+ -->
+</div></div>

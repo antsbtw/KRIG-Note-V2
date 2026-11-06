@@ -44,7 +44,8 @@ import { IPC_CHANNELS } from '@shared/ipc/channel-names';
 // shouldHandle 抽到 web-shared 共享(右键菜单 / 快捷键 / 弹窗导流 三处复用同一过滤)
 import { shouldHandle } from '../web-shared/should-handle';
 // 网页剪藏(Defuddle → Note):右键「📥 提取到笔记」click 调用,抓页 → 推回 renderer。
-import { clipPageToRenderer } from '../content-extraction/handlers';
+import { clipPageToRenderer, clipPageWithAnswersToRenderer } from '../content-extraction/handlers';
+import { matchLinkedAnswerRule } from '../content-extraction/linked-answers/rules';
 import { shotArticleToRenderer } from '../web-screenshot/handlers';
 
 /**
@@ -127,6 +128,17 @@ export function registerWebContextMenuHook(mainWindow: BrowserWindow): void {
           void clipPageToRenderer(mainWindow, guest);
         },
       });
+      // 题库页(每题只挂一个「Solution」链接):题目 + 逐题抓来的解答,解答放折叠块。
+      // 只在命中站点规则时出现(规则是数据,见 content-extraction/linked-answers/rules.ts)。
+      const answerRule = matchLinkedAnswerRule(guest.getURL());
+      if (answerRule) {
+        template.push({
+          label: answerRule.menuLabel,
+          click: () => {
+            void clipPageWithAnswersToRenderer(mainWindow, guest, answerRule);
+          },
+        });
+      }
       // 正文截成一张长图进笔记:先框选调整再确认(用户 11-05:否则有可能会漏掉部分正文)
       template.push({
         label: '📸 截图正文到笔记',

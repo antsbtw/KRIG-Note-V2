@@ -10,6 +10,7 @@
  */
 
 import { getDefuddleBundle } from './defuddle-bundle';
+import { latexImagesToMath, collectLatexFigureSizes } from './latex-images';
 
 /**
  * 生成注入到网页的整页提取脚本
@@ -309,10 +310,19 @@ export function generateDefuddleScript(): string {
           artEl.insertBefore(audEl, artEl.firstChild);
         }
 
-        var result = new DefuddleClass(document, {
-          url: window.location.href,
-          markdown: true,
-        }).parse();
+        // 公式图(img.latex / img.latexcenter)→ data-latex,Defuddle 跑完换回原图(见 latex-images.ts)
+        var restoreLatexImages = (${latexImagesToMath.toString()})(document);
+        var result;
+        try {
+          result = new DefuddleClass(document, {
+            url: window.location.href,
+            markdown: true,
+          }).parse();
+        } finally {
+          restoreLatexImages();
+        }
+        // 公式图 / 绘图的显示尺寸(AoPS 图片文件是 2 倍图,不记尺寸进笔记会显示成两倍大)
+        var imageSizes = (${collectLatexFigureSizes.toString()})(document);
 
         // 补充提取:如果 Defuddle 输出不含图片,从正文 DOM 中独立收集
         var contentImages = [];
@@ -523,6 +533,7 @@ export function generateDefuddleScript(): string {
           schemaOrgData: schemaOrgData,
           extractorType: result.extractorType || null,
           language: document.documentElement.lang || null,
+          imageSizes: imageSizes,
         });
       } catch (err) {
         return JSON.stringify({
