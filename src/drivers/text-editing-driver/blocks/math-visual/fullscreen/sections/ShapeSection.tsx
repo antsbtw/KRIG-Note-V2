@@ -19,6 +19,7 @@ interface ShapeSectionProps {
   /** additive = Shift+点击:加选 / 去掉 */
   onSelectShape: (id: string, additive: boolean) => void;
   onRemoveShape: (id: string) => void;
+  onContextMenu: (id: string, x: number, y: number) => void;
 }
 
 /** 列表里一行的摘要(左栏列表 / 右栏多选列表共用) */
@@ -43,6 +44,7 @@ export const ShapeSection: React.FC<ShapeSectionProps> = ({
   selectedShapeIds,
   onSelectShape,
   onRemoveShape,
+  onContextMenu,
 }) => {
   return (
     <div className="mv-fl-section">
@@ -62,14 +64,16 @@ export const ShapeSection: React.FC<ShapeSectionProps> = ({
       </div>
 
       {shapes.length > 0 && (
-        <div className="mv-fr-ann-list" style={{ marginTop: 8 }}>
-          {shapes.map((s) => {
+        // 图层顺序:列表越靠上越在前面(和常见绘图软件一致);数组里越靠后越在上面,所以倒着列
+        <div className="mv-fr-ann-list" style={{ marginTop: 8 }} title="越靠上的越在前面;右键可调图层">
+          {[...shapes].reverse().map((s) => {
             const err = errors[s.id];
             return (
               <div
                 key={s.id}
                 className={`mv-fr-ann-item ${selectedShapeIds.includes(s.id) ? 'mv-fr-ann-item--selected' : ''}`}
                 onClick={(e) => onSelectShape(s.id, e.shiftKey)}
+                onContextMenu={(e) => { e.preventDefault(); onContextMenu(s.id, e.clientX, e.clientY); }}
                 title={err ? `画不出来:${err}` : undefined}
               >
                 <span className="mv-fr-ann-label" style={{ color: s.color }}>

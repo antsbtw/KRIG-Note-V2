@@ -481,3 +481,33 @@ export function shapesInRect(specs: ShapeSpec[], rect: View): string[] {
     })
     .map((s) => s.id);
 }
+
+// ─── 图层上下关系(2026-11-06 用户:「还有一个图层的上下层关系没有」) ─────────
+// 数组顺序 = 画的顺序:越靠后越在上面。
+
+export type LayerOp = 'front' | 'forward' | 'backward' | 'back';
+
+/**
+ * 把 ids 这些对象(可多选)整体置顶 / 上移一层 / 下移一层 / 置底,其他对象相对顺序不变。
+ * 上移 / 下移:选中的每个对象和它上(下)方第一个未选中的对象交换;已经到头的不动。
+ */
+export function reorderShapes<T extends { id: string }>(list: T[], ids: string[], op: LayerOp): T[] {
+  const sel = new Set(ids);
+  if (sel.size === 0) return list;
+  const picked = list.filter((s) => sel.has(s.id));
+  const rest = list.filter((s) => !sel.has(s.id));
+  if (op === 'front') return [...rest, ...picked];
+  if (op === 'back') return [...picked, ...rest];
+
+  const out = [...list];
+  if (op === 'forward') {
+    for (let i = out.length - 2; i >= 0; i--) {
+      if (sel.has(out[i].id) && !sel.has(out[i + 1].id)) [out[i], out[i + 1]] = [out[i + 1], out[i]];
+    }
+  } else {
+    for (let i = 1; i < out.length; i++) {
+      if (sel.has(out[i].id) && !sel.has(out[i - 1].id)) [out[i], out[i - 1]] = [out[i - 1], out[i]];
+    }
+  }
+  return out;
+}

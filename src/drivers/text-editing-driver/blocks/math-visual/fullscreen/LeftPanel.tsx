@@ -39,6 +39,7 @@ interface LeftPanelProps {
   selectedShapeIds: string[];
   onSelectShape: (id: string, additive: boolean) => void;
   onRemoveShape: (id: string) => void;
+  onShapeContextMenu: (id: string, x: number, y: number) => void;
 }
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({
@@ -58,6 +59,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   selectedShapeIds,
   onSelectShape,
   onRemoveShape,
+  onShapeContextMenu,
 }) => {
   const fnMgmt = useFunctionManagement(data, onChange);
 
@@ -79,6 +81,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         selectedShapeIds={selectedShapeIds}
         onSelectShape={onSelectShape}
         onRemoveShape={onRemoveShape}
+        onContextMenu={onShapeContextMenu}
       />
       <ParametersSection
         parameters={data.parameters}

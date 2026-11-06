@@ -38,11 +38,13 @@ import { LeftPanel } from './LeftPanel';
 import { RightPanel } from './RightPanel';
 import { LegendOverlay } from './LegendOverlay';
 import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
+import { ShapeContextMenu, type ContextMenuEntry } from './ShapeContextMenu';
+import { EditHistory } from '../edit-history';
 import {
   compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
   zoomView, panView, boundsOfShapes, MAFS_VIEWBOX_PADDING,
   hitTest, shapeHandles, translateShape, setHandle, duplicateShape, dataToPx, POLYGON_MIN_POINTS,
-  shapesInRect,
+  shapesInRect, reorderShapes, type LayerOp,
   type Vec2, type View, type PxFrame, type HandlePart,
 } from '../shapes';
 import type { ShapeSpec } from '@capabilities/math-rendering/types';
@@ -128,12 +130,27 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   const lastDataRef = useRef<MathVisualData>(data);
 
   // onChange 接 PM 实时写回 + 镜像更新
-  const onChange = useCallback((newData: MathVisualData) => {
+  const applyData = useCallback((newData: MathVisualData) => {
     lastDataRef.current = newData;
     setData(newData);
     const ctx = ctxRef.current;
     if (ctx) writeDataToPM(ctx.instanceId, ctx.nodePos, newData);
   }, []);
+
+  // 全屏自己的撤销 / 重做(⌘Z / ⌘⇧Z);规则见 edit-history.ts
+  const historyRef = useRef(new EditHistory());
+  const onChange = useCallback((newData: MathVisualData) => {
+    historyRef.current.record(lastDataRef.current, newData, Date.now());
+    applyData(newData);
+  }, [applyData]);
+  const undo = useCallback(() => {
+    const d = historyRef.current.undo(lastDataRef.current);
+    if (d) applyData(d);
+  }, [applyData]);
+  const redo = useCallback(() => {
+    const d = historyRef.current.redo(lastDataRef.current);
+    if (d) applyData(d);
+  }, [applyData]);
 
   // Unmount cleanup:用 lastDataRef 兜底写一次(React unmount 时 setState 已废)
   useEffect(() => {
@@ -625,6 +642,38 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     setSelectedShapeIds(copies.map((c) => c.id));
   }, [data, shapes, selectedShapeIds, onChange]);
 
+  // 撤销 / 删除后,选中里已经不存在的对象要去掉
+  useEffect(() => {
+    setSelectedShapeIds((prev) => {
+      const next = prev.filter((id) => shapes.some((sh) => sh.id === id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [shapes]);
+
+  /** 图层:置顶 / 上移 / 下移 / 置底(多选整组一起) */
+  const reorderSelected = useCallback((op: LayerOp) => {
+    if (selectedShapeIds.length === 0) return;
+    onChange({ ...data, shapes: reorderShapes(shapes, selectedShapeIds, op) });
+  }, [data, shapes, selectedShapeIds, onChange]);
+
+  // ── 右键菜单(2026-11-06 用户:「复制删除用右键菜单好了」)──
+  const [shapeMenu, setShapeMenu] = useState<{ x: number; y: number } | null>(null);
+  const openShapeMenu = useCallback((id: string, x: number, y: number) => {
+    // 右键点的不在已选里 → 只选它;在已选里 → 对整组
+    if (!selectedShapeIds.includes(id)) setSelectedShapeIds([id]);
+    setShapeMenu({ x, y });
+  }, [selectedShapeIds]);
+  const closeShapeMenu = useCallback(() => setShapeMenu(null), []);
+  const shapeMenuEntries: ContextMenuEntry[] = [
+    { label: '复制', shortcut: '⌘D', onClick: duplicateSelected },
+    { label: '删除', shortcut: '⌫', danger: true, onClick: removeSelectedShapes },
+    null,
+    { label: '置顶', shortcut: '⇧⌘]', onClick: () => reorderSelected('front') },
+    { label: '上移一层', shortcut: '⌘]', onClick: () => reorderSelected('forward') },
+    { label: '下移一层', shortcut: '⌘[', onClick: () => reorderSelected('backward') },
+    { label: '置底', shortcut: '⇧⌘[', onClick: () => reorderSelected('back') },
+  ];
+
   // ── 9 类工具数据 handler ──
 
   const addTangent = useCallback((functionId: string, x: number) => {
@@ -935,7 +984,13 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return; // 输入框里的 ⌘Z 归输入框自己
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) redo(); else undo();
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -971,6 +1026,13 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           duplicateSelected();
           return;
         }
+        // 图层:⌘] 上移 / ⌘[ 下移,加 Shift = 置顶 / 置底(用 code,Shift 时 key 会变成 { })
+        if ((e.metaKey || e.ctrlKey) && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
+          e.preventDefault();
+          const up = e.code === 'BracketRight';
+          reorderSelected(e.shiftKey ? (up ? 'front' : 'back') : (up ? 'forward' : 'backward'));
+          return;
+        }
       }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
@@ -986,7 +1048,8 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     return () => window.removeEventListener('keydown', handleKeyDown, true);
   }, [onClose, toolMode, setToolMode, selectedAnnotationIdx, selectedAnnotationIdxs, selectedTangentId, selectedNormalId, selectedIntegralId,
       removeAnnotation, removeSelectedAnnotations, removeTangent, removeNormal, removeIntegral,
-      pendingPoints, selectedShapeIds, removeSelectedShapes, finishPolygon, nudgeSelected, duplicateSelected, shapes]);
+      pendingPoints, selectedShapeIds, removeSelectedShapes, finishPolygon, nudgeSelected, duplicateSelected, shapes,
+      undo, redo, reorderSelected]);
 
   // ── label 拖动:写回对应 fn 的 labelPos ──
 
@@ -1063,6 +1126,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           selectedShapeIds={selectedShapeIds}
           onSelectShape={(id, additive) => (additive ? toggleShapeSelected(id) : setSelectedShapeId(id))}
           onRemoveShape={removeShape}
+          onShapeContextMenu={openShapeMenu}
         />
 
         <div
@@ -1074,6 +1138,12 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            const hit = hitAt(e);
+            if (hit) openShapeMenu(hit.id, e.clientX, e.clientY);
+            else if (selectedShapeIds.length > 0) setShapeMenu({ x: e.clientX, y: e.clientY });
+          }}
         >
           <MathHost
             viewBox={view}
@@ -1168,17 +1238,25 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           selectedShapeError={selectedShape ? compiledShapes.errors[selectedShape.id] : undefined}
           onUpdateShape={updateShape}
           onRemoveShape={removeShape}
-          onDuplicateShape={duplicateSelected}
           multiSelectCount={selectedShapeIds.length}
           selectedShapes={selectedShapeIds
             .map((id) => shapes.find((sh) => sh.id === id))
             .filter((sh): sh is ShapeEntry => !!sh)}
           shapeErrors={compiledShapes.errors}
           onUpdateSelectedShapes={updateSelectedShapes}
-          onRemoveSelectedShapes={removeSelectedShapes}
           shapeHint={shapeHint}
         />
       </div>
+
+      {shapeMenu && selectedShapeIds.length > 0 && (
+        <ShapeContextMenu
+          x={shapeMenu.x}
+          y={shapeMenu.y}
+          title={selectedShapeIds.length > 1 ? `已选 ${selectedShapeIds.length} 个图形` : undefined}
+          entries={shapeMenuEntries}
+          onClose={closeShapeMenu}
+        />
+      )}
     </div>
   );
 };

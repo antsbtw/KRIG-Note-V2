@@ -56,14 +56,12 @@ interface RightPanelProps {
   selectedShapeError: string | undefined;
   onUpdateShape: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemoveShape: (id: string) => void;
-  onDuplicateShape: () => void;
   /** 选中了几个图形(≥2 时右栏显示多选操作) */
   multiSelectCount: number;
   /** 选中的图形(按选中顺序)与各自的错误,多选时逐个列出 */
   selectedShapes: ShapeEntry[];
   shapeErrors: Record<string, string>;
   onUpdateSelectedShapes: (updates: Partial<ShapeEntry>) => void;
-  onRemoveSelectedShapes: () => void;
   /** 画图形模式下的操作提示 */
   shapeHint: string | null;
 }
@@ -96,12 +94,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   selectedShapeError,
   onUpdateShape,
   onRemoveShape,
-  onDuplicateShape,
   multiSelectCount,
   selectedShapes,
   shapeErrors,
   onUpdateSelectedShapes,
-  onRemoveSelectedShapes,
   shapeHint,
 }) => {
   if (multiSelectCount > 1) {
@@ -112,17 +108,15 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             <div className="mv-fr-hint">{shapeHint}</div>
           </div>
         )}
-        <MultiShapeEditor
-          count={multiSelectCount}
-          onUpdateAll={onUpdateSelectedShapes}
-          onDuplicate={onDuplicateShape}
-          onRemoveAll={onRemoveSelectedShapes}
-        />
         <SelectedShapeList
           shapes={selectedShapes}
           errors={shapeErrors}
           onUpdate={onUpdateShape}
           onRemove={onRemoveShape}
+        />
+        <MultiShapeEditor
+          count={multiSelectCount}
+          onUpdateAll={onUpdateSelectedShapes}
         />
       </div>
     );
@@ -142,8 +136,6 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             shape={selectedShape}
             error={selectedShapeError}
             onUpdate={onUpdateShape}
-            onRemove={onRemoveShape}
-            onDuplicate={onDuplicateShape}
           />
         ) : (
           <div className="mv-fr-section">

@@ -17,9 +17,6 @@ interface ShapeEditorProps {
   shape: ShapeEntry;
   error: string | undefined;
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
-  onRemove: (id: string) => void;
-  /** 不传就不显示「复制一份」(多选列表里展开的单项不单独复制) */
-  onDuplicate?: () => void;
   /** 多选列表里展开时,标题已在行头,不再重复 */
   hideTitle?: boolean;
 }
@@ -39,7 +36,8 @@ function CoordRow({ label, value, onChange }: { label: string; value: CoordExpr 
   );
 }
 
-export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, onRemove, onDuplicate, hideTitle }) => {
+// 复制 / 删除 / 图层走右键菜单与快捷键(2026-11-06 用户:「复制删除用右键菜单好了」),这里只放编辑项
+export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, hideTitle }) => {
   const up = (u: Partial<ShapeEntry>) => onUpdate(s.id, u);
   const meta = shapeKindMeta(s.kind);
   const isLine = s.kind === 'segment' || s.kind === 'arrow';
@@ -166,51 +164,51 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </>
         )}
 
-        {onDuplicate && (
-          <button className="mv-fr-remove-btn" style={{ color: '#e0e0e0' }} onClick={onDuplicate} title="⌘D">复制一份</button>
-        )}
-        <button className="mv-fr-remove-btn" onClick={() => onRemove(s.id)}>删除</button>
+        <div className="mv-fr-hint">右键图形:复制 / 删除 / 调图层</div>
       </div>
     </div>
   );
 };
 
-/** 多选时的统一操作:颜色 / 实虚线 / 虚影 / 复制 / 删除 */
+/** 多选时的统一修改:颜色 / 实虚线 / 虚影;默认收起(用户:「整体变换这些用途不大,可以先收起来」) */
 export const MultiShapeEditor: React.FC<{
   count: number;
   onUpdateAll: (updates: Partial<ShapeEntry>) => void;
-  onDuplicate: () => void;
-  onRemoveAll: () => void;
-}> = ({ count, onUpdateAll, onDuplicate, onRemoveAll }) => (
-  <div className="mv-fr-section">
-    <div className="mv-fr-section-title">已选 {count} 个图形</div>
-    <div className="mv-fr-props">
-      <div className="mv-fr-prop-row" style={{ flexWrap: 'wrap', gap: 4 }}>
-        <span className="mv-fr-prop-label">颜色</span>
-        {COLORS.map((c) => (
-          <button
-            key={c}
-            onClick={() => onUpdateAll({ color: c })}
-            title={c}
-            style={{ width: 18, height: 18, borderRadius: '50%', background: c, padding: 0, cursor: 'pointer', border: '2px solid transparent' }}
-          />
-        ))}
+}> = ({ count, onUpdateAll }) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mv-fr-section">
+      <div className="mv-fr-section-title" style={{ cursor: 'pointer' }} onClick={() => setOpen(!open)}>
+        {open ? '▾' : '▸'} 整体修改这 {count} 个
       </div>
-      <div className="mv-fr-prop-row">
-        <span className="mv-fr-prop-label">线</span>
-        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ style: 'solid' })}>实线</button>
-        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ style: 'dashed' })}>虚线</button>
-      </div>
-      <div className="mv-fr-prop-row">
-        <span className="mv-fr-prop-label">虚影</span>
-        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ opacity: GHOST_OPACITY })}>设为虚影</button>
-        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ opacity: undefined })}>取消</button>
-      </div>
-      <button className="mv-fr-remove-btn" style={{ color: '#e0e0e0' }} onClick={onDuplicate} title="⌘D">复制这 {count} 个</button>
-      <button className="mv-fr-remove-btn" onClick={onRemoveAll}>删除这 {count} 个</button>
+      {open && (
+        <div className="mv-fr-props">
+          <div className="mv-fr-prop-row" style={{ flexWrap: 'wrap', gap: 4 }}>
+            <span className="mv-fr-prop-label">颜色</span>
+            {COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => onUpdateAll({ color: c })}
+                title={c}
+                style={{ width: 18, height: 18, borderRadius: '50%', background: c, padding: 0, cursor: 'pointer', border: '2px solid transparent' }}
+              />
+            ))}
+          </div>
+          <div className="mv-fr-prop-row">
+            <span className="mv-fr-prop-label">线</span>
+            <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ style: 'solid' })}>实线</button>
+            <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ style: 'dashed' })}>虚线</button>
+          </div>
+          <div className="mv-fr-prop-row">
+            <span className="mv-fr-prop-label">虚影</span>
+            <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ opacity: GHOST_OPACITY })}>设为虚影</button>
+            <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ opacity: undefined })}>取消</button>
+          </div>
+        </div>
+      )}
     </div>
-  </div>
-);
+  );
+};
 
 /**
  * 多选时右栏下半部分:逐个列出选中的元素,点一行就地展开它的完整编辑项
@@ -222,19 +220,25 @@ export const SelectedShapeList: React.FC<{
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemove: (id: string) => void;
 }> = ({ shapes, errors, onUpdate, onRemove }) => {
-  const [openId, setOpenId] = useState<string | null>(null);
+  // 默认全部展开(用户:「应该直接弹开」);记的是收起了哪些
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggle = (id: string) => setCollapsed((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   return (
     <div className="mv-fr-section">
-      <div className="mv-fr-section-title">逐个编辑</div>
+      <div className="mv-fr-section-title">已选 {shapes.length} 个图形</div>
       <div className="mv-fr-ann-list">
         {shapes.map((s) => {
-          const open = openId === s.id;
+          const open = !collapsed.has(s.id);
           const err = errors[s.id];
           return (
             <div key={s.id}>
               <div
                 className={`mv-fr-ann-item ${open ? 'mv-fr-ann-item--selected' : ''}`}
-                onClick={() => setOpenId(open ? null : s.id)}
+                onClick={() => toggle(s.id)}
                 title={open ? '点一下收起' : '点一下展开编辑'}
               >
                 <span className="mv-fr-ann-label" style={{ color: s.color }}>
@@ -256,7 +260,7 @@ export const SelectedShapeList: React.FC<{
               </div>
               {open && (
                 <div style={{ paddingLeft: 8, borderLeft: `2px solid ${s.color}`, marginBottom: 6 }}>
-                  <ShapeEditor shape={s} error={err} onUpdate={onUpdate} onRemove={onRemove} hideTitle />
+                  <ShapeEditor shape={s} error={err} onUpdate={onUpdate} hideTitle />
                 </div>
               )}
             </div>
