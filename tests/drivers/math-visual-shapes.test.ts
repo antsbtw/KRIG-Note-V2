@@ -9,6 +9,7 @@ import {
   compileShapes, createShape, snapStep, snap, fitEqualScale, relToData, fmtNum,
   MAFS_VIEWBOX_PADDING, zoomView, panView, boundsOfShapes,
   hitTest, dataToPx, translateShape, setHandle, duplicateShape, isPlainNumber, shapeHandles,
+  shapesInRect, specExtent,
 } from '@drivers/text-editing-driver/blocks/math-visual/shapes';
 import type { ShapeEntry } from '@drivers/text-editing-driver/blocks/math-visual/types';
 import { evalScalar } from '@capabilities/math-rendering/compute/evaluator';
@@ -242,5 +243,30 @@ describe('画布上选中 / 拖动', () => {
     const d = duplicateShape(p, [2, -2], 3);
     expect(d.id).not.toBe('p');
     expect(d.at).toEqual(['3', '-1']);
+  });
+});
+
+describe('框选 / 点更好点中', () => {
+  const frame = { view: { x: [0, 10] as [number, number], y: [0, 10] as [number, number] }, width: 1100, height: 1100 };
+
+  it('完全框住才选:框住 Mathville 点不会带上从原点出发的箭头', () => {
+    const { specs } = compileShapes(FRAME3, evalScalar, []);
+    expect(shapesInRect(specs, { x: [-2, 2], y: [-2, 2] })).toEqual(['o']);
+    expect(shapesInRect(specs, { x: [-30, 30], y: [-30, 30] })).toEqual(['o', 'andy', 'betsy', 'ring', 'between', 'q']);
+    // 方框方向反着拉也一样
+    expect(shapesInRect(specs, { x: [2, -2], y: [2, -2] })).toEqual(['o']);
+  });
+
+  it('圆的范围按外接正方形', () => {
+    const { specs } = compileShapes([{ ...base, id: 'c', kind: 'circle', center: ['1', '1'], radius: '2' }], evalScalar, []);
+    expect(specExtent(specs[0])).toEqual({ x: [-1, 3], y: [-1, 3] });
+  });
+
+  it('点的标签也算点中这个点;离点 12px 内算点中', () => {
+    const { specs } = compileShapes([{ ...base, id: 'o', kind: 'point', at: ['5', '5'], text: 'Mathville' }], evalScalar, []);
+    const c = dataToPx([5, 5], frame);
+    expect(hitTest(specs, [c[0] + 11, c[1]], frame, null)).toEqual({ id: 'o', part: null });
+    expect(hitTest(specs, [c[0] + 40, c[1] - 15], frame, null)).toEqual({ id: 'o', part: null }); // 标签上
+    expect(hitTest(specs, [c[0] - 40, c[1] + 15], frame, null)).toBeNull(); // 左下空白
   });
 });

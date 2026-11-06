@@ -16,7 +16,7 @@ import type {
 } from '../types';
 import { ANNOTATION_LABELS } from '../types';
 import type { ShapeEntry } from '../types';
-import { ShapeEditor } from './sections/ShapeEditor';
+import { ShapeEditor, MultiShapeEditor } from './sections/ShapeEditor';
 
 /** RiemannMode 与 capability 同步(driver 内独立维护避免跨边界类型 import) */
 type RiemannMode = 'left' | 'right' | 'midpoint';
@@ -57,6 +57,10 @@ interface RightPanelProps {
   onUpdateShape: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemoveShape: (id: string) => void;
   onDuplicateShape: () => void;
+  /** 选中了几个图形(≥2 时右栏显示多选操作) */
+  multiSelectCount: number;
+  onUpdateSelectedShapes: (updates: Partial<ShapeEntry>) => void;
+  onRemoveSelectedShapes: () => void;
   /** 画图形模式下的操作提示 */
   shapeHint: string | null;
 }
@@ -90,9 +94,31 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onUpdateShape,
   onRemoveShape,
   onDuplicateShape,
+  multiSelectCount,
+  onUpdateSelectedShapes,
+  onRemoveSelectedShapes,
   shapeHint,
 }) => {
-  if (selectedShape || toolMode === 'shape') {
+  if (multiSelectCount > 1) {
+    return (
+      <div className="mv-fullscreen-right">
+        {shapeHint && (
+          <div className="mv-fr-section">
+            <div className="mv-fr-hint">{shapeHint}</div>
+          </div>
+        )}
+        <MultiShapeEditor
+          count={multiSelectCount}
+          onUpdateAll={onUpdateSelectedShapes}
+          onDuplicate={onDuplicateShape}
+          onRemoveAll={onRemoveSelectedShapes}
+        />
+      </div>
+    );
+  }
+
+  // 框选模式:有标注点时保留原来的标注点列表(旧功能),没有时显示图形框选的提示
+  if (selectedShape || toolMode === 'shape' || (toolMode === 'select' && annotations.length === 0)) {
     return (
       <div className="mv-fullscreen-right">
         {shapeHint && (

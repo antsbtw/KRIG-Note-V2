@@ -10,7 +10,7 @@ import type { ToolMode } from '../../types';
 
 const TOOLS: Array<{ mode: ToolMode; icon: string; label: string; title: string }> = [
   { mode: 'move',     icon: '✋', label: '移动',  title: '拖拽平移 / 滚轮缩放' },
-  { mode: 'select',   icon: '⬚',  label: '框选',  title: '框选标注点,批量操作' },
+  { mode: 'select',   icon: '⬚',  label: '框选',  title: '拖出方框选中图形(完全框住才选,Shift 追加);也能框标注点' },
   { mode: 'annotate', icon: '📍', label: '标注',  title: '点击曲线添加标注点' },
   { mode: 'tangent',  icon: '📐', label: '切线',  title: '点击曲线添加切线' },
   { mode: 'normal',   icon: '⊥',  label: '法线',  title: '点击曲线添加法线' },

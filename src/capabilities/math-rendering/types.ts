@@ -327,8 +327,8 @@ export interface MathHostProps {
   viewBox: ViewBox;
   /** 几何对象(点/线段/箭头/圆/文字),坐标已求值 */
   shapes?: ShapeSpec[];
-  /** 选中的几何对象(加粗显示) */
-  selectedShapeId?: string | null;
+  /** 选中的几何对象(加粗显示;可多选) */
+  selectedShapeIds?: string[];
   /** 画布高度 px;capability 自管宽度(撑满容器) */
   height: number;
   /** 曲线列表 */

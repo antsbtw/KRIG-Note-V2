@@ -168,3 +168,40 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
     </div>
   );
 };
+
+/** 多选时的统一操作:颜色 / 实虚线 / 虚影 / 复制 / 删除 */
+export const MultiShapeEditor: React.FC<{
+  count: number;
+  onUpdateAll: (updates: Partial<ShapeEntry>) => void;
+  onDuplicate: () => void;
+  onRemoveAll: () => void;
+}> = ({ count, onUpdateAll, onDuplicate, onRemoveAll }) => (
+  <div className="mv-fr-section">
+    <div className="mv-fr-section-title">已选 {count} 个图形</div>
+    <div className="mv-fr-props">
+      <div className="mv-fr-prop-row" style={{ flexWrap: 'wrap', gap: 4 }}>
+        <span className="mv-fr-prop-label">颜色</span>
+        {COLORS.map((c) => (
+          <button
+            key={c}
+            onClick={() => onUpdateAll({ color: c })}
+            title={c}
+            style={{ width: 18, height: 18, borderRadius: '50%', background: c, padding: 0, cursor: 'pointer', border: '2px solid transparent' }}
+          />
+        ))}
+      </div>
+      <div className="mv-fr-prop-row">
+        <span className="mv-fr-prop-label">线</span>
+        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ style: 'solid' })}>实线</button>
+        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ style: 'dashed' })}>虚线</button>
+      </div>
+      <div className="mv-fr-prop-row">
+        <span className="mv-fr-prop-label">虚影</span>
+        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ opacity: GHOST_OPACITY })}>设为虚影</button>
+        <button className="mv-style-btn" style={{ whiteSpace: 'nowrap' }} onClick={() => onUpdateAll({ opacity: undefined })}>取消</button>
+      </div>
+      <button className="mv-fr-remove-btn" style={{ color: '#e0e0e0' }} onClick={onDuplicate} title="⌘D">复制这 {count} 个</button>
+      <button className="mv-fr-remove-btn" onClick={onRemoveAll}>删除这 {count} 个</button>
+    </div>
+  </div>
+);

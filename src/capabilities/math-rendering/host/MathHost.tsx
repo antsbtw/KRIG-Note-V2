@@ -41,7 +41,7 @@ import { ShapeLayer } from './ShapeLayer';
 export const MathHost: React.FC<MathHostProps> = ({
   viewBox,
   shapes,
-  selectedShapeId,
+  selectedShapeIds,
   height,
   curves,
   annotations,
@@ -139,7 +139,7 @@ export const MathHost: React.FC<MathHostProps> = ({
         ))}
         {/* 几何对象放在曲线 label 之后:ShapeLayer 不出 .katex,不影响 label 交互层的顺序对应 */}
         {shapes && shapes.length > 0 && (
-          <ShapeLayer shapes={shapes} selectedId={selectedShapeId} viewBox={viewBox} />
+          <ShapeLayer shapes={shapes} selectedIds={selectedShapeIds} viewBox={viewBox} />
         )}
         {endpoints?.map((ep, i) => renderEndpoint(ep, i))}
         {annotations?.map((ann) => renderAnnotation(ann, curves))}

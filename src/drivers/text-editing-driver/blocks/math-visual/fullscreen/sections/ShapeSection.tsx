@@ -15,8 +15,9 @@ interface ShapeSectionProps {
   toolMode: ToolMode;
   shapeKind: ShapeKind;
   onPickKind: (kind: ShapeKind) => void;
-  selectedShapeId: string | null;
-  onSelectShape: (id: string) => void;
+  selectedShapeIds: string[];
+  /** additive = Shift+点击:加选 / 去掉 */
+  onSelectShape: (id: string, additive: boolean) => void;
   onRemoveShape: (id: string) => void;
 }
 
@@ -38,7 +39,7 @@ export const ShapeSection: React.FC<ShapeSectionProps> = ({
   toolMode,
   shapeKind,
   onPickKind,
-  selectedShapeId,
+  selectedShapeIds,
   onSelectShape,
   onRemoveShape,
 }) => {
@@ -66,8 +67,8 @@ export const ShapeSection: React.FC<ShapeSectionProps> = ({
             return (
               <div
                 key={s.id}
-                className={`mv-fr-ann-item ${selectedShapeId === s.id ? 'mv-fr-ann-item--selected' : ''}`}
-                onClick={() => onSelectShape(s.id)}
+                className={`mv-fr-ann-item ${selectedShapeIds.includes(s.id) ? 'mv-fr-ann-item--selected' : ''}`}
+                onClick={(e) => onSelectShape(s.id, e.shiftKey)}
                 title={err ? `画不出来:${err}` : undefined}
               >
                 <span className="mv-fr-ann-label" style={{ color: s.color }}>

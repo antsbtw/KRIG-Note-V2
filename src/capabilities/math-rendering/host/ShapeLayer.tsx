@@ -24,11 +24,12 @@ const STRUCK_COLOR = '#ef4444';
 
 interface ShapeLayerProps {
   shapes: ShapeSpec[];
-  selectedId?: string | null;
+  selectedIds?: string[];
   viewBox: { x: [number, number]; y: [number, number] };
 }
 
-export function ShapeLayer({ shapes, selectedId, viewBox }: ShapeLayerProps): React.ReactElement {
+export function ShapeLayer({ shapes, selectedIds, viewBox }: ShapeLayerProps): React.ReactElement {
+  const selectedSet = new Set(selectedIds ?? []);
   // 刻度短线的半长(数据单位):取可视范围的 1.2%,两个方向各算各的
   const tickHalf: [number, number] = [
     (viewBox.x[1] - viewBox.x[0]) * 0.012,
@@ -37,7 +38,7 @@ export function ShapeLayer({ shapes, selectedId, viewBox }: ShapeLayerProps): Re
   return (
     <>
       {shapes.map((s) => {
-        const selected = s.id === selectedId;
+        const selected = selectedSet.has(s.id);
         switch (s.kind) {
           case 'point':
             return (

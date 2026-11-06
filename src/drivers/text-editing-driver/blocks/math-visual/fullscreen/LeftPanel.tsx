@@ -36,8 +36,8 @@ interface LeftPanelProps {
   shapeKind: ShapeKind;
   onPickShapeKind: (kind: ShapeKind) => void;
   shapeErrors: Record<string, string>;
-  selectedShapeId: string | null;
-  onSelectShape: (id: string) => void;
+  selectedShapeIds: string[];
+  onSelectShape: (id: string, additive: boolean) => void;
   onRemoveShape: (id: string) => void;
 }
 
@@ -55,7 +55,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   shapeKind,
   onPickShapeKind,
   shapeErrors,
-  selectedShapeId,
+  selectedShapeIds,
   onSelectShape,
   onRemoveShape,
 }) => {
@@ -76,7 +76,7 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         toolMode={toolMode}
         shapeKind={shapeKind}
         onPickKind={onPickShapeKind}
-        selectedShapeId={selectedShapeId}
+        selectedShapeIds={selectedShapeIds}
         onSelectShape={onSelectShape}
         onRemoveShape={onRemoveShape}
       />

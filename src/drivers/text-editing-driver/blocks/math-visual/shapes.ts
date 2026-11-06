@@ -327,6 +327,7 @@ function textHalfWidth(text: string, size: number): number {
 }
 
 const HANDLE_HIT_PX = 9;
+const POINT_HIT_PX = 12;
 const LINE_HIT_PX = 6;
 
 /**
@@ -353,9 +354,17 @@ export function hitTest(
     const s = specs[i];
     let hit = false;
     switch (s.kind) {
-      case 'point':
-        hit = d(px(s.at)) <= HANDLE_HIT_PX;
+      case 'point': {
+        // 点本身 12px 内,或点右上方那行标签(ShapeLayer 用 attach="ne" attachDistance=12 size=15 画)
+        const c = px(s.at);
+        hit = d(c) <= POINT_HIT_PX;
+        if (!hit && s.label) {
+          const w = textHalfWidth(s.label, 15) * 2;
+          hit = mousePx[0] >= c[0] + 2 && mousePx[0] <= c[0] + 14 + w
+            && mousePx[1] >= c[1] - 30 && mousePx[1] <= c[1] - 2;
+        }
         break;
+      }
       case 'text': {
         const c = px(s.at);
         const size = s.size ?? 16;
@@ -433,4 +442,42 @@ export function setHandle(s: ShapeEntry, spec: ShapeSpec, part: HandlePart, p: V
 /** 复制一份:新 id,往右下偏一点 */
 export function duplicateShape(s: ShapeEntry, offset: Vec2, index: number): ShapeEntry {
   return { ...translateShape(s, offset[0], offset[1]), id: `sh-${Date.now()}-${index}` };
+}
+
+// ─── 框选(2026-11-06 用户:「框选应该是选定元素进行操作吧」) ─────────────
+
+/** 对象在数据坐标里占的范围(不加余量);文字只按锚点算 */
+export function specExtent(s: ShapeSpec): View {
+  const pts: Vec2[] = (() => {
+    switch (s.kind) {
+      case 'point':
+      case 'text': return [s.at];
+      case 'segment':
+      case 'arrow': return [s.from, s.to];
+      case 'circle': return [
+        [s.center[0] - s.radius, s.center[1] - s.radius],
+        [s.center[0] + s.radius, s.center[1] + s.radius],
+      ];
+      case 'polygon': return s.points;
+    }
+  })();
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return { x: [Math.min(...xs), Math.max(...xs)], y: [Math.min(...ys), Math.max(...ys)] };
+}
+
+/**
+ * 被方框**完全框住**的对象 id(按画的顺序)。
+ * 用「完全框住」而不是「碰到就算」:Mathville 点和两条箭头都从原点出发,
+ * 碰到就算的话框点会把箭头一起带上。
+ */
+export function shapesInRect(specs: ShapeSpec[], rect: View): string[] {
+  const [x0, x1] = [Math.min(...rect.x), Math.max(...rect.x)];
+  const [y0, y1] = [Math.min(...rect.y), Math.max(...rect.y)];
+  return specs
+    .filter((s) => {
+      const e = specExtent(s);
+      return e.x[0] >= x0 && e.x[1] <= x1 && e.y[0] >= y0 && e.y[1] <= y1;
+    })
+    .map((s) => s.id);
 }
