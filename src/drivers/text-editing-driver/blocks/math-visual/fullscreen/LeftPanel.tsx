@@ -20,6 +20,7 @@ import { ToolbarSection } from './sections/ToolbarSection';
 import { ExportSection } from './sections/ExportSection';
 import { ShapeSection } from './sections/ShapeSection';
 import { ViewSection } from './sections/ViewSection';
+import { FrameSection } from './sections/FrameSection';
 
 interface LeftPanelProps {
   data: MathVisualData;
@@ -40,6 +41,14 @@ interface LeftPanelProps {
   onSelectShape: (id: string, additive: boolean) => void;
   onRemoveShape: (id: string) => void;
   onShapeContextMenu: (id: string, x: number, y: number) => void;
+  // 分帧(题意图 P2)
+  framed: boolean;
+  currentFrame: number;
+  onSelectFrame: (i: number) => void;
+  onStartFraming: () => void;
+  onAddFrame: () => void;
+  onRemoveFrame: (i: number) => void;
+  onUpdateFrameText: (i: number, text: string) => void;
 }
 
 export const LeftPanel: React.FC<LeftPanelProps> = ({
@@ -60,6 +69,13 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
   onSelectShape,
   onRemoveShape,
   onShapeContextMenu,
+  framed,
+  currentFrame,
+  onSelectFrame,
+  onStartFraming,
+  onAddFrame,
+  onRemoveFrame,
+  onUpdateFrameText,
 }) => {
   const fnMgmt = useFunctionManagement(data, onChange);
 
@@ -94,6 +110,16 @@ export const LeftPanel: React.FC<LeftPanelProps> = ({
         toolMode={toolMode}
         onToolChange={onToolChange}
         onRerunFeatures={onRerunFeatures}
+      />
+      <FrameSection
+        frames={data.frames}
+        framed={framed}
+        currentFrame={currentFrame}
+        onSelectFrame={onSelectFrame}
+        onStartFraming={onStartFraming}
+        onAddFrame={onAddFrame}
+        onRemoveFrame={onRemoveFrame}
+        onUpdateText={onUpdateFrameText}
       />
       <ViewSection data={data} onChange={onChange} />
       <ExportSection onExport={onExport} onExportSvg={onExportSvg} />

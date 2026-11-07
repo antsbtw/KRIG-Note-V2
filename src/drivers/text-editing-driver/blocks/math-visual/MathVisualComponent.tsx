@@ -16,9 +16,10 @@
  * inline 不重复实现。
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
 import type { MathVisualData, CanvasConfig } from './types';
 import { DEFAULT_CANVAS_CONFIG } from './types';
+import { isFramed } from './frames';
 
 interface MathVisualComponentProps {
   data: MathVisualData;
@@ -43,6 +44,14 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
   const widthMode = canvas.widthMode ?? 'md';
   const thumbnail = data.thumbnail ?? null;
 
+  // P2 分帧(2026-11-07):有逐帧缩略图才按帧显示;翻到第几帧、是否展开 = 看的人自己的状态,不写进文档
+  const frames = isFramed(data.frames) ? data.frames : null;
+  const frameThumbs = frames && data.frameThumbnails?.length === frames.length ? data.frameThumbnails : null;
+  const [frameIdx, setFrameIdx] = useState(0);
+  const [expandedLocal, setExpandedLocal] = useState<boolean | null>(null);
+  const expanded = expandedLocal ?? canvas.frameLayout === 'expand';
+  const idx = frameThumbs ? Math.min(frameIdx, frameThumbs.length - 1) : 0;
+
   const setWidthMode = useCallback(
     (next: 'sm' | 'md' | 'lg' | 'full') => {
       onChange({ ...data, canvas: { ...canvas, widthMode: next } });
@@ -60,6 +69,22 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
     <div className="math-visual" onMouseDown={(e) => e.stopPropagation()}>
       {/* 顶部 hover 工具栏(idle 隐藏,绝对定位右上) */}
       <div className="mv-toolbar-row mv-toolbar-row--inline">
+        {frameThumbs && !expanded && (
+          <>
+            <button className="mv-fn-btn mv-toolbar-btn" disabled={idx <= 0} title="上一帧"
+              onClick={() => setFrameIdx(idx - 1)}>◀</button>
+            <span className="mv-toolbar-btn" style={{ padding: '0 4px', fontSize: 12 }}>{idx + 1}/{frameThumbs.length}</span>
+            <button className="mv-fn-btn mv-toolbar-btn" disabled={idx >= frameThumbs.length - 1} title="下一帧"
+              onClick={() => setFrameIdx(idx + 1)}>▶</button>
+          </>
+        )}
+        {frameThumbs && (
+          <button className={`mv-fn-btn mv-toolbar-btn ${expanded ? 'mv-fn-btn--active' : ''}`}
+            title={expanded ? '收起成逐帧翻页' : '展开:各帧并排(讲义)'}
+            onClick={() => setExpandedLocal(!expanded)}>
+            {expanded ? '收起' : '展开'}
+          </button>
+        )}
         {WIDTH_OPTIONS.map(({ mode, label, title }) => (
           <button
             key={mode}
@@ -86,7 +111,24 @@ export const MathVisualComponent: React.FC<MathVisualComponentProps> = ({
         className="mv-canvas mv-canvas--inline-thumbnail"
         onDoubleClick={handleCanvasDoubleClick}
       >
-        {thumbnail ? (
+        {frameThumbs && expanded ? (
+          // 展开:各帧按宽度自动排成几列,每张上面带它那句话
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+            {frameThumbs.map((svg, i) => (
+              <div key={i}>
+                <div style={{ fontSize: 13, margin: '0 0 4px', opacity: 0.85 }}>
+                  {i + 1}. {frames![i].text}
+                </div>
+                <div className="mv-thumbnail-svg" dangerouslySetInnerHTML={{ __html: svg }} />
+              </div>
+            ))}
+          </div>
+        ) : frameThumbs ? (
+          <div>
+            <div style={{ fontSize: 14, margin: '0 0 6px' }}>{frames![idx].text}</div>
+            <div className="mv-thumbnail-svg" dangerouslySetInnerHTML={{ __html: frameThumbs[idx] }} />
+          </div>
+        ) : thumbnail ? (
           <div
             className="mv-thumbnail-svg"
             dangerouslySetInnerHTML={{ __html: thumbnail }}

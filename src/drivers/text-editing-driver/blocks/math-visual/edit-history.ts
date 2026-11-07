@@ -5,7 +5,7 @@
  * data 也不会跟着回退。所以面板自己记一份编辑历史。
  *
  * 规则:
- * - 只记「编辑」:工具切换、缩略图、视图范围(缩放 / 平移)不算,撤销时视图保持当前不动。
+ * - 只记「编辑」:工具切换、缩略图(含每帧缩略图)、视图范围(缩放 / 平移)不算,撤销时视图保持当前不动。
  * - 600ms 内的连续改动合并成一步(输入框逐字打、参数动画)。
  * - 最多记 100 步。
  */
@@ -14,7 +14,9 @@ import type { MathVisualData } from './types';
 
 /** 参与比较的部分:去掉不算编辑的字段 */
 export function historyKey(d: MathVisualData): string {
-  return JSON.stringify({ ...d, toolMode: undefined, thumbnail: undefined, domain: undefined, range: undefined });
+  return JSON.stringify({
+    ...d, toolMode: undefined, thumbnail: undefined, frameThumbnails: undefined, domain: undefined, range: undefined,
+  });
 }
 
 /** 撤销 / 重做后要套用的数据:内容回到 snapshot,视图与工具保持 current 的 */
@@ -25,6 +27,7 @@ export function restoreKeepingView(snapshot: MathVisualData, current: MathVisual
     range: current.range,
     toolMode: current.toolMode,
     thumbnail: current.thumbnail,
+    frameThumbnails: current.frameThumbnails,
   };
 }
 

@@ -62,6 +62,8 @@ interface RightPanelProps {
   selectedShapes: ShapeEntry[];
   shapeErrors: Record<string, string>;
   onUpdateSelectedShapes: (updates: Partial<ShapeEntry>) => void;
+  /** 分帧的帧数(≥2 时图形属性里显示「出现:第几帧到第几帧」) */
+  frameCount: number;
   /** 打开说明卡片编辑(画布上原地) */
   onEditCard: (id: string) => void;
   /** 画图形模式下的操作提示 */
@@ -102,6 +104,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onUpdateSelectedShapes,
   shapeHint,
   onEditCard,
+  frameCount,
 }) => {
   if (multiSelectCount > 1) {
     return (
@@ -117,6 +120,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           onUpdate={onUpdateShape}
           onRemove={onRemoveShape}
           onEditCard={onEditCard}
+          frameCount={frameCount}
         />
         <MultiShapeEditor
           count={multiSelectCount}
@@ -141,6 +145,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
             error={selectedShapeError}
             onUpdate={onUpdateShape}
             onEditCard={onEditCard}
+            frameCount={frameCount}
           />
         ) : (
           <div className="mv-fr-section">

@@ -42,6 +42,9 @@ import { FullscreenErrorBoundary } from './FullscreenErrorBoundary';
 import { ShapeContextMenu, type ContextMenuEntry } from './ShapeContextMenu';
 import { EditHistory } from '../edit-history';
 import { ensureMathVisualCardMenus, MV_CARD_VIEW_ID } from './card-menus';
+import {
+  isFramed, visibleInFrame, makeFrame, rangeAfterInsertingFrame, rangeAfterRemovingFrame,
+} from '../frames';
 import type { NoteCardApi } from '@capabilities/note-card/types';
 import {
   compileShapes, createShape, shapeKindMeta, fitEqualScale, relToData, snap, snapStep,
@@ -73,6 +76,8 @@ function readDataFromPM(instanceId: string, nodePos: number): MathVisualData | n
       axis: { ...DEFAULT_AXIS_CONFIG, ...((a.canvas || {}).axis || {}) },
     },
     shapes: a.shapes || [],
+    frames: a.frames || [],
+    frameThumbnails: a.frameThumbnails || [],
     tangentLines: a.tangentLines || [],
     normalLines: a.normalLines || [],
     integralRegions: a.integralRegions || [],
@@ -101,6 +106,8 @@ function writeDataToPM(
   tr = tr.setNodeAttribute(nodePos, 'annotations', data.annotations);
   tr = tr.setNodeAttribute(nodePos, 'canvas', data.canvas);
   tr = tr.setNodeAttribute(nodePos, 'shapes', data.shapes || []);
+  tr = tr.setNodeAttribute(nodePos, 'frames', data.frames || []);
+  if (data.frameThumbnails !== undefined) tr = tr.setNodeAttribute(nodePos, 'frameThumbnails', data.frameThumbnails);
   tr = tr.setNodeAttribute(nodePos, 'tangentLines', data.tangentLines || []);
   tr = tr.setNodeAttribute(nodePos, 'normalLines', data.normalLines || []);
   tr = tr.setNodeAttribute(nodePos, 'integralRegions', data.integralRegions || []);
@@ -177,18 +184,49 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const ctx = ctxRef.current;
     // 先同步清掉选中等临时显示,否则选中时加粗的线会被一起存进 note 里的图
     flushSync(() => clearTransientRef.current());
-    const svgEl = canvasRef.current?.querySelector('svg') as SVGElement | null;
-    if (ctx && svgEl) {
+    const exportSvg = (): string | null => {
+      const el = canvasRef.current?.querySelector('svg') as SVGElement | null;
       // 走 capability self-contained 导出 — 内联 mafs/katex CSS,inline 独立渲染
-      const thumbnail = math.exportSelfContainedSvg(svgEl);
-      const nextData = { ...lastDataRef.current, thumbnail };
-      lastDataRef.current = nextData;
-      writeDataToPM(ctx.instanceId, ctx.nodePos, nextData);
+      return el ? math.exportSelfContainedSvg(el) : null;
+    };
+    if (ctx) {
+      // P2 分帧:逐帧切过去、同步渲染、各导一张;thumbnail = 最后一帧(完整图),现有消费者不变
+      const frameCount = frameCountRef.current;
+      let frameThumbnails: string[] = [];
+      let thumbnail: string | null = null;
+      if (frameCount >= 2) {
+        for (let i = 1; i <= frameCount; i++) {
+          flushSync(() => setCurrentFrameRef.current(i));
+          const svg = exportSvg();
+          if (!svg) throw new Error(`[math-visual] 导出第 ${i} 帧缩略图失败:画布里找不到 svg`);
+          frameThumbnails.push(svg);
+        }
+        thumbnail = frameThumbnails[frameThumbnails.length - 1];
+      } else {
+        thumbnail = exportSvg();
+        frameThumbnails = [];
+      }
+      if (thumbnail) {
+        const nextData = { ...lastDataRef.current, thumbnail, frameThumbnails };
+        lastDataRef.current = nextData;
+        writeDataToPM(ctx.instanceId, ctx.nodePos, nextData);
+      }
     }
     rawOnClose();
   }, [rawOnClose, math]);
 
   const { functions: fns, domain, range, parameters, annotations } = data;
+
+  // ── 分帧(题意图 P2,2026-11-07)──
+  // 2 帧及以上才算分帧;当前在编第几帧(1 起数)只是面板状态,不写库
+  const framed = isFramed(data.frames);
+  const frameCount = framed ? data.frames!.length : 1;
+  const [currentFrameRaw, setCurrentFrame] = useState(1);
+  const currentFrame = Math.min(Math.max(currentFrameRaw, 1), frameCount);
+  // onClose 逐帧导出要用(onClose 定义在上面,经 ref 拿)
+  const frameCountRef = useRef(frameCount);
+  frameCountRef.current = frameCount;
+  const setCurrentFrameRef = useRef(setCurrentFrame);
   const tangentLines = data.tangentLines || [];
   const normalLines = data.normalLines || [];
   const integralRegions = data.integralRegions || [];
@@ -298,6 +336,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     for (const c of compiledFns) {
       const { fn, evalFn, contSegs } = c;
       if (!fn.visible) continue;
+      if (framed && !visibleInFrame(fn.frames, currentFrame)) continue;
       const label = labelFor(fn);
 
       if (fn.plotType === 'vertical-line') {
@@ -450,9 +489,83 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     () => compileShapes(shapes, math.evalScalar, parameters),
     [shapes, parameters, math],
   );
+  // 分帧:不在当前帧的对象照样渲染(display:none,卡片不用重画),但点不中、框不到、不参与「显示全部」
+  const hiddenShapeIds = useMemo(
+    () => (framed ? shapes.filter((sh) => !visibleInFrame(sh.frames, currentFrame)).map((sh) => sh.id) : []),
+    [framed, shapes, currentFrame],
+  );
+  const visibleSpecs = useMemo(() => {
+    if (hiddenShapeIds.length === 0) return compiledShapes.specs;
+    const hidden = new Set(hiddenShapeIds);
+    return compiledShapes.specs.filter((sp) => !hidden.has(sp.id));
+  }, [compiledShapes, hiddenShapeIds]);
+  // 切帧后,选中里看不见的对象去掉
+  useEffect(() => {
+    if (hiddenShapeIds.length === 0) return;
+    const hidden = new Set(hiddenShapeIds);
+    setSelectedShapeIds((prev) => {
+      const next = prev.filter((id) => !hidden.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [hiddenShapeIds]);
+
   const fitAll = useCallback(() => {
-    commitView(boundsOfShapes(compiledShapes.specs) ?? { x: [-5, 5], y: [-5, 5] });
-  }, [compiledShapes, commitView]);
+    commitView(boundsOfShapes(visibleSpecs) ?? { x: [-5, 5], y: [-5, 5] });
+  }, [visibleSpecs, commitView]);
+
+  /** 在第 i 帧新画的对象,从第 i 帧开始出现(不分帧时不标) */
+  const inCurrentFrame = useCallback(
+    (sh: ShapeEntry): ShapeEntry => (framed ? { ...sh, frames: { from: currentFrame } } : sh),
+    [framed, currentFrame],
+  );
+
+  // ── 帧操作(都是一次 onChange,一步撤销)──
+  const startFraming = useCallback(() => {
+    // 已有对象不标帧 = 每帧都显示;从第 1 帧开始讲,再加第 2 帧
+    onChange({ ...data, frames: [makeFrame(1), makeFrame(2)] });
+    setCurrentFrame(1);
+  }, [data, onChange]);
+
+  const addFrameAfterCurrent = useCallback(() => {
+    const frames = data.frames ?? [];
+    const k = currentFrame;
+    const nextFrames = [...frames.slice(0, k), makeFrame(frames.length + 1), ...frames.slice(k)];
+    onChange({
+      ...data,
+      frames: nextFrames,
+      shapes: (data.shapes ?? []).map((sh) => (sh.frames ? { ...sh, frames: rangeAfterInsertingFrame(sh.frames, k) } : sh)),
+      functions: data.functions.map((f) => (f.frames ? { ...f, frames: rangeAfterInsertingFrame(f.frames, k) } : f)),
+    });
+    setCurrentFrame(k + 1);
+  }, [data, currentFrame, onChange]);
+
+  const removeFrame = useCallback((k: number) => {
+    const frames = data.frames ?? [];
+    const nextFrames = frames.filter((_, i) => i !== k - 1);
+    const n = nextFrames.length;
+    // 只在被删那一帧出现的对象不删:挪到相邻的帧(删内容要用户自己删,不在删帧时顺手吞掉)
+    const fix = <T extends { frames?: import('../types').FrameRange }>(o: T): T => {
+      if (!o.frames) return o;
+      const r = rangeAfterRemovingFrame(o.frames, k);
+      if (r === null) {
+        const at = Math.min(Math.max(k, 1), Math.max(n, 1));
+        return { ...o, frames: { from: at, to: at } };
+      }
+      return { ...o, frames: r };
+    };
+    onChange({
+      ...data,
+      frames: n >= 2 ? nextFrames : [],
+      frameThumbnails: [],
+      shapes: (data.shapes ?? []).map(fix),
+      functions: data.functions.map(fix),
+    });
+    setCurrentFrame((c) => Math.min(c > k ? c - 1 : c, Math.max(n, 1)));
+  }, [data, onChange]);
+
+  const updateFrameText = useCallback((k: number, text: string) => {
+    onChange({ ...data, frames: (data.frames ?? []).map((f, i) => (i === k - 1 ? { ...f, text } : f)) });
+  }, [data, onChange]);
 
   const shapeSpecs: ShapeSpec[] = useMemo(() => {
     const extra: ShapeSpec[] = [];
@@ -464,14 +577,14 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       }
     });
     // 选中对象的手柄:白点
-    const sel = compiledShapes.specs.find((sp) => sp.id === selectedShapeId);
+    const sel = visibleSpecs.find((sp) => sp.id === selectedShapeId);
     if (sel) {
       for (const h of shapeHandles(sel)) {
         extra.push({ kind: 'point', id: `__handle-${h.part}`, at: h.at, color: '#ffffff', size: 5 });
       }
     }
     return extra.length > 0 ? [...compiledShapes.specs, ...extra] : compiledShapes.specs;
-  }, [compiledShapes, pendingPoints, selectedShapeId]);
+  }, [compiledShapes, visibleSpecs, pendingPoints, selectedShapeId]);
 
   /** 当前画布的像素框(命中测试 / 像素距离用) */
   const getFrame = useCallback((): (PxFrame & { rect: DOMRect }) | null => {
@@ -530,7 +643,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
         const b = dataToPx(p, frame);
         if (Math.hypot(a[0] - b[0], a[1] - b[1]) <= 10) {
           setPendingPoints([]);
-          addShape(createShape('polygon', pendingPoints, shapes.length));
+          addShape(inCurrentFrame(createShape('polygon', pendingPoints, shapes.length)));
           return;
         }
       }
@@ -543,15 +656,15 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
       return;
     }
     setPendingPoints([]);
-    addShape(createShape(shapeKind, pts, shapes.length));
-  }, [view, shapeKind, pendingPoints, shapes.length, addShape, getFrame]);
+    addShape(inCurrentFrame(createShape(shapeKind, pts, shapes.length)));
+  }, [view, shapeKind, pendingPoints, shapes.length, addShape, getFrame, inCurrentFrame]);
 
   const finishPolygon = useCallback(() => {
     if (shapeKind !== 'polygon' || pendingPoints.length < POLYGON_MIN_POINTS) return false;
     setPendingPoints([]);
-    addShape(createShape('polygon', pendingPoints, shapes.length));
+    addShape(inCurrentFrame(createShape('polygon', pendingPoints, shapes.length)));
     return true;
-  }, [shapeKind, pendingPoints, shapes.length, addShape]);
+  }, [shapeKind, pendingPoints, shapes.length, addShape, inCurrentFrame]);
 
   const shapeHint = (() => {
     if (toolMode !== 'shape') {
@@ -631,13 +744,13 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const frame = getFrame();
     if (!frame) return null;
     return hitTest(
-      compiledShapes.specs,
+      visibleSpecs,
       [e.clientX - frame.rect.left, e.clientY - frame.rect.top],
       frame,
       selectedShapeId,
       math.shapeLabelBox,
     );
-  }, [getFrame, compiledShapes, selectedShapeId, math]);
+  }, [getFrame, visibleSpecs, selectedShapeId, math]);
 
   const [hoverShape, setHoverShape] = useState(false);
 
@@ -731,7 +844,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     void cardMeasureVersion; // 依赖:尺寸变了要重算
     if (cardEdit || !selectedShapeId || (toolMode !== 'move' && toolMode !== 'select')) return null;
     const entry = shapes.find((sh) => sh.id === selectedShapeId);
-    const spec = compiledShapes.specs.find((sp) => sp.id === selectedShapeId);
+    const spec = visibleSpecs.find((sp) => sp.id === selectedShapeId);
     if (!entry?.note || !spec) return null;
     const frame = getFrame();
     if (!frame) return null;
@@ -1076,7 +1189,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     const y2 = Math.max(toMathY(boxSelectStart.y), toMathY(boxSelectEnd.y));
     // 框住的几何对象(完全框住才算);框太小(就是点了一下空白)→ 取消选中
     const tiny = Math.abs(boxSelectEnd.x - boxSelectStart.x) + Math.abs(boxSelectEnd.y - boxSelectStart.y) < 4;
-    const inBox = tiny ? [] : shapesInRect(compiledShapes.specs, { x: [x1, x2], y: [y1, y2] });
+    const inBox = tiny ? [] : shapesInRect(visibleSpecs, { x: [x1, x2], y: [y1, y2] });
     setSelectedShapeIds((prev) => (boxAdditiveRef.current ? [...prev, ...inBox.filter((id) => !prev.includes(id))] : inBox));
     const selected = new Set<number>();
     for (let i = 0; i < annotations.length; i++) {
@@ -1089,7 +1202,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
     }
     setSelectedAnnotationIdxs(selected);
     setBoxSelectStart(null); setBoxSelectEnd(null);
-  }, [toolMode, boxSelectStart, boxSelectEnd, annotations, evalFnMap, view, compiledShapes]);
+  }, [toolMode, boxSelectStart, boxSelectEnd, annotations, evalFnMap, view, visibleSpecs]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (suppressClickRef.current) { suppressClickRef.current = false; return; }
@@ -1274,6 +1387,13 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onSelectShape={(id, additive) => (additive ? toggleShapeSelected(id) : setSelectedShapeId(id))}
           onRemoveShape={removeShape}
           onShapeContextMenu={openShapeMenu}
+          framed={framed}
+          currentFrame={currentFrame}
+          onSelectFrame={setCurrentFrame}
+          onStartFraming={startFraming}
+          onAddFrame={addFrameAfterCurrent}
+          onRemoveFrame={removeFrame}
+          onUpdateFrameText={updateFrameText}
         />
 
         <div
@@ -1305,6 +1425,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
             shapes={shapeSpecs}
             selectedShapeIds={selectedShapeIds}
             onCardMeasured={onCardMeasured}
+            hiddenShapeIds={hiddenShapeIds}
             height={canvasHeight}
             curves={curves}
             axis={axisConfig}
@@ -1332,6 +1453,33 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
               />
             );
           })()}
+
+          {framed && (
+            // 画布左上:切帧 + 当前帧那句话
+            <div
+              data-view-controls
+              style={{
+                position: 'absolute', top: 10, left: 10, zIndex: 2, display: 'flex', alignItems: 'center', gap: 8,
+                maxWidth: '60%', background: 'rgba(30,30,30,0.92)', border: '1px solid #4a4a4a', borderRadius: 6,
+                padding: '4px 8px', color: '#e0e0e0', fontSize: 13,
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <button
+                className="mv-style-btn" disabled={currentFrame <= 1} title="上一帧"
+                onClick={() => setCurrentFrame(currentFrame - 1)}
+              >◀</button>
+              <span style={{ whiteSpace: 'nowrap' }}>第 {currentFrame} / {frameCount} 帧</span>
+              <button
+                className="mv-style-btn" disabled={currentFrame >= frameCount} title="下一帧"
+                onClick={() => setCurrentFrame(currentFrame + 1)}
+              >▶</button>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#c8c8c8' }}>
+                {data.frames![currentFrame - 1]?.text || '(这一帧还没写配的话)'}
+              </span>
+            </div>
+          )}
 
           <div
             data-view-controls
@@ -1418,6 +1566,7 @@ const InnerPanel: React.FC<FullscreenOverlayCloseProps> = ({ onClose: rawOnClose
           onUpdateSelectedShapes={updateSelectedShapes}
           shapeHint={shapeHint}
           onEditCard={openCardEditor}
+          frameCount={frameCount}
         />
       </div>
 

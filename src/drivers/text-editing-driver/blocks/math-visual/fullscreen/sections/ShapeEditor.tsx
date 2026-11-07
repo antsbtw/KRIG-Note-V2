@@ -20,6 +20,8 @@ interface ShapeEditorProps {
   hideTitle?: boolean;
   /** 打开说明卡片原地编辑(画布上) */
   onEditCard?: (id: string) => void;
+  /** 分帧的帧数;≥2 时显示「出现:第几帧到第几帧」 */
+  frameCount?: number;
 }
 
 const stop = (e: React.KeyboardEvent) => e.stopPropagation();
@@ -38,7 +40,7 @@ function CoordRow({ label, value, onChange }: { label: string; value: CoordExpr 
 }
 
 // 复制 / 删除 / 图层走右键菜单与快捷键(2026-11-06 用户:「复制删除用右键菜单好了」),这里只放编辑项
-export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, hideTitle, onEditCard }) => {
+export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpdate, hideTitle, onEditCard, frameCount = 1 }) => {
   const up = (u: Partial<ShapeEntry>) => onUpdate(s.id, u);
   const meta = shapeKindMeta(s.kind);
   const isLine = s.kind === 'segment' || s.kind === 'arrow';
@@ -175,6 +177,43 @@ export const ShapeEditor: React.FC<ShapeEditorProps> = ({ shape: s, error, onUpd
           </div>
         )}
 
+        {frameCount >= 2 && (
+          // P2 分帧:出现在第几帧到第几帧;不标 = 每帧都显示
+          <div className="mv-fr-prop-row">
+            <span className="mv-fr-prop-label">出现</span>
+            <select
+              className="mv-fr-prop-input" style={{ width: 0, minWidth: 64 }}
+              value={s.frames?.from ?? 0}
+              onChange={(e) => {
+                const from = Number(e.target.value);
+                if (from === 0) { up({ frames: undefined }); return; }
+                const to = s.frames?.to !== undefined && s.frames.to < from ? from : s.frames?.to;
+                up({ frames: { from, ...(to !== undefined ? { to } : {}) } });
+              }}
+            >
+              <option value={0}>每帧</option>
+              {Array.from({ length: frameCount }, (_, i) => (
+                <option key={i + 1} value={i + 1}>第 {i + 1} 帧起</option>
+              ))}
+            </select>
+            {s.frames && (
+              <select
+                className="mv-fr-prop-input" style={{ width: 0, minWidth: 64 }}
+                value={s.frames.to ?? 0}
+                onChange={(e) => {
+                  const to = Number(e.target.value);
+                  up({ frames: { from: s.frames!.from, ...(to ? { to } : {}) } });
+                }}
+              >
+                <option value={0}>到最后</option>
+                {Array.from({ length: frameCount - s.frames.from + 1 }, (_, i) => s.frames!.from + i).map((n) => (
+                  <option key={n} value={n}>到第 {n} 帧</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
         <label className="mv-fr-prop-check" title="半透明,表示「此刻在这里」的虚影">
           <input type="checkbox" checked={(s.opacity ?? 1) < 1}
             onChange={(e) => up({ opacity: e.target.checked ? GHOST_OPACITY : undefined })} />
@@ -272,7 +311,8 @@ export const SelectedShapeList: React.FC<{
   onUpdate: (id: string, updates: Partial<ShapeEntry>) => void;
   onRemove: (id: string) => void;
   onEditCard?: (id: string) => void;
-}> = ({ shapes, errors, onUpdate, onRemove, onEditCard }) => (
+  frameCount?: number;
+}> = ({ shapes, errors, onUpdate, onRemove, onEditCard, frameCount }) => (
   <>
     {shapes.map((s) => (
       <div key={s.id} className="mv-fr-section" style={{ borderLeft: `3px solid ${s.color}` }}>
@@ -283,7 +323,7 @@ export const SelectedShapeList: React.FC<{
           </span>
           <button className="mv-fr-ann-del" onClick={() => onRemove(s.id)} title="删掉这一个">×</button>
         </div>
-        <ShapeEditor shape={s} error={errors[s.id]} onUpdate={onUpdate} hideTitle onEditCard={onEditCard} />
+        <ShapeEditor shape={s} error={errors[s.id]} onUpdate={onUpdate} hideTitle onEditCard={onEditCard} frameCount={frameCount} />
       </div>
     ))}
   </>

@@ -341,6 +341,8 @@ export interface MathHostProps {
   shapes?: ShapeSpec[];
   /** 选中的几何对象(加粗显示;可多选) */
   selectedShapeIds?: string[];
+  /** 不显示的几何对象(分帧:不在当前帧);照样渲染、display:none,卡片不用重画 */
+  hiddenShapeIds?: string[];
   /** 说明卡片画好、量出实际尺寸后通知(宿主据此刷新卡片框等) */
   onCardMeasured?: (shapeId: string) => void;
   /** 画布高度 px;capability 自管宽度(撑满容器) */

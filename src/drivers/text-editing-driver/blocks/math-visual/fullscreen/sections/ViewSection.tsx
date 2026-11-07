@@ -7,6 +7,7 @@
 
 import React, { useState } from 'react';
 import type { MathVisualData, CanvasConfig, AxisConfig } from '../../types';
+import { isFramed } from '../../frames';
 
 interface ViewSectionProps {
   data: MathVisualData;
@@ -89,6 +90,13 @@ export const ViewSection: React.FC<ViewSectionProps> = ({ data, onChange }) => {
           <input type="checkbox" checked={axis.showNumbers} onChange={(e) => setAxis({ showNumbers: e.target.checked })} />
           刻度数字
         </label>
+        {isFramed(data.frames) && (
+          <label className="mv-fr-prop-check" title="note 里默认把各帧并排展开(讲义);不勾 = 逐帧翻页">
+            <input type="checkbox" checked={canvas.frameLayout === 'expand'}
+              onChange={(e) => setCanvas({ frameLayout: e.target.checked ? 'expand' : 'step' })} />
+            note 里默认展开
+          </label>
+        )}
       </div>
     </div>
   );

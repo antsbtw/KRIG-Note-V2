@@ -124,10 +124,16 @@ interface ShapeLayerProps {
   selectedIds?: string[];
   viewBox: { x: [number, number]; y: [number, number] };
   onCardMeasured?: (id: string) => void;
+  /**
+   * 当前不显示的对象(分帧:不在当前帧)。照样渲染、只是 display:none ——
+   * 说明卡片是异步画的,拿掉再放回要重画;逐帧导出缩略图时等不及,会漏卡片。
+   */
+  hiddenIds?: string[];
 }
 
-export function ShapeLayer({ shapes, selectedIds, viewBox, onCardMeasured }: ShapeLayerProps): React.ReactElement {
+export function ShapeLayer({ shapes, selectedIds, viewBox, onCardMeasured, hiddenIds }: ShapeLayerProps): React.ReactElement {
   const selectedSet = new Set(selectedIds ?? []);
+  const hiddenSet = new Set(hiddenIds ?? []);
   // 刻度短线的半长(数据单位):取可视范围的 1.2%,两个方向各算各的
   const tickHalf: [number, number] = [
     (viewBox.x[1] - viewBox.x[0]) * 0.012,
@@ -136,6 +142,7 @@ export function ShapeLayer({ shapes, selectedIds, viewBox, onCardMeasured }: Sha
   return (
     <>
       {shapes.map((s) => {
+        const el = (() => {
         const selected = selectedSet.has(s.id);
         switch (s.kind) {
           case 'point':
@@ -203,6 +210,8 @@ export function ShapeLayer({ shapes, selectedIds, viewBox, onCardMeasured }: Sha
             );
           }
         }
+        })();
+        return hiddenSet.has(s.id) ? <g key={s.id} display="none">{el}</g> : el;
       })}
     </>
   );

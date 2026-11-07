@@ -26,6 +26,8 @@ export interface FunctionEntry {
   visible: boolean;
   showDerivative: boolean;
   plotType?: PlotType;      // 默认 'y-of-x'
+  /** 出现在哪几帧(P2 分帧);缺省 = 每帧都显示 */
+  frames?: FrameRange;
   paramDomain?: [number, number]; // 参数方程 t 范围 / 极坐标 θ 范围,默认 [0, 2π]
   /** 曲线 label 位置(数据坐标);用户拖动后写入,缺省由 MathHost 自动计算 */
   labelPos?: [number, number];
@@ -119,6 +121,8 @@ export interface CanvasConfig {
   height: number;
   scaleMode: ScaleMode;
   widthMode?: WidthMode;
+  /** 分帧的图在 note 里默认怎么显示:逐帧翻页(缺省)/ 展开并排 */
+  frameLayout?: 'step' | 'expand';
   showGrid: boolean;
   gridStyle: 'solid' | 'dashed' | 'dotted';
   axis: AxisConfig;
@@ -202,6 +206,23 @@ export interface ShapeEntry {
   ticks?: { step: number; labels?: string[] };
   /** 中点画 ✗(segment / arrow) */
   struck?: boolean;
+  /** 出现在哪几帧(1 起数,含两端);缺省 = 每帧都显示。见 P2 分帧 */
+  frames?: FrameRange;
+}
+
+// ─── 分帧(题意图 P2,2026-11-07) ───────────────────────────
+// 设计稿 §3.2:一张图拆成几步讲,每帧配一句话;对象标「从第几帧出现、到第几帧为止」。
+
+/** 1 起数,含两端;to 缺省 = 一直到最后一帧 */
+export interface FrameRange {
+  from: number;
+  to?: number;
+}
+
+export interface FrameEntry {
+  id: string;
+  /** 这一帧配的那句话(通常是题目原句) */
+  text: string;
 }
 
 /** 标注点自动命名序列 */
@@ -226,6 +247,10 @@ export interface MathVisualData {
   canvas: CanvasConfig;
   /** 几何对象(题意图 P1);缺省 = 无 */
   shapes?: ShapeEntry[];
+  /** 分帧(题意图 P2);缺省或只有 0~1 帧 = 不分帧,行为与原来完全一致 */
+  frames?: FrameEntry[];
+  /** 每帧一张 SVG(全屏退出时生成);thumbnail 仍 = 最后一帧(完整图),X 长文等现有消费者不变 */
+  frameThumbnails?: string[];
   // 全屏模式持久化(Phase 2 启用)
   tangentLines?: TangentLine[];
   normalLines?: NormalLine[];
