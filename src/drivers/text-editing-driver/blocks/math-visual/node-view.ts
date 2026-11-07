@@ -149,8 +149,13 @@ export const mathVisualNodeView: NodeViewConstructor = (initialNode, view, getPo
         // 父 cleanup 不通过 React handle 取数据(此刻已 unmounting)。
         // 本 NodeView 的"数据写回"路径是 onChange 实时通过 setNodeAttribute,
         // unmount 时 PM doc 已是最新,无需在此再次写。
-        root.unmount();
+        // queueMicrotask 推到当前渲染之后再卸载(对齐 callout-icon-renderer 的既有惯例):
+        // PM 常在 React 渲染 / commit 中销毁 NodeView(打开 note、整篇替换 doc),
+        // 同步 unmount 会报「Attempted to synchronously unmount a root while React was already
+        // rendering」(2026-11-06 日志里 4 次,都在打开含函数图形的 note 时)。
+        const r = root;
         root = null;
+        queueMicrotask(() => r.unmount());
       }
     },
 
